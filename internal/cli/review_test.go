@@ -1,0 +1,149 @@
+package cli
+
+import (
+	stdctx "context"
+	"bytes"
+	"encoding/json"
+	"strings"
+	"testing"
+)
+
+type fakeReviewer struct {
+	outcome ReviewOutcome
+	gate    string
+}
+
+func (f *fakeReviewer) Review(_ stdctx.Context, _ ReviewRequest) (ReviewOutcome, error) {
+	return f.outcome, nil
+}
+
+func (f *fakeReviewer) GateFailed(findings []ReviewFinding, gate string) bool {
+	if gate == "" || gate == "none" {
+		return false
+	}
+	rank := map[string]int{"info": 1, "low": 2, "medium": 3, "high": 4, "critical": 5}
+	max := 0
+	for _, fn := range findings {
+		if r := rank[fn.Severity]; r > max {
+			max = r
+		}
+	}
+	return max >= rank[gate]
+}
+
+func runReview(t *testing.T, r Reviewer, args ...string) (string, error) {
+	t.Helper()
+	prev := reviewer
+	SetReviewer(r)
+	t.Cleanup(func() { SetReviewer(prev) })
+	prettyOutput = false
+
+	opts := &options{output: "json"}
+	cmd := reviewCommand(opts)
+	var buf bytes.Buffer
+	cmd.SetOut(&buf)
+	cmd.SetErr(&buf)
+	cmd.SetArgs(args)
+	cmd.SilenceUsage = true
+	cmd.SilenceErrors = true
+	err := cmd.Execute()
+	return buf.String(), err
+}
+
+func TestReviewGateExitCode(t *testing.T) {
+	r := &fakeReviewer{outcome: ReviewOutcome{Findings: []ReviewFinding{{File: "a.go", Line: 1, Severity: "high"}}}}
+	out, err := runReview(t, r, "--staged", "--gate", "high")
+	if err == nil {
+		t.Fatal("want gated error, got nil")
+	}
+	var ce *CLIError
+	if !asCLIError(err, &ce) || ce.Code != "review.gate_failed" || ce.Exit != 2 {
+		t.Fatalf("want review.gate_failed exit 2, got %+v", err)
+	}
+	if !ce.AlreadyWritten {
+		t.Error("gate error must set AlreadyWritten")
+	}
+	if !strings.Contains(out, `"ok":true`) {
+		t.Errorf("envelope still emitted before gate error, out=%s", out)
+	}
+
+	// Below gate → exit 0.
+	out2, err2 := runReview(t, r, "--staged", "--gate", "critical")
+	if err2 != nil {
+		t.Fatalf("below-gate must not error, got %v", err2)
+	}
+	if !strings.Contains(out2, `"ok":true`) {
+		t.Errorf("want success envelope, got %s", out2)
+	}
+}
+
+func TestReviewSingleEmit(t *testing.T) {
+	r := &fakeReviewer{outcome: ReviewOutcome{Findings: []ReviewFinding{{File: "a.go", Line: 2, Severity: "critical"}}}}
+	out, _ := runReview(t, r, "--staged", "--gate", "high")
+	if n := strings.Count(out, `"api_version"`); n != 1 {
+		t.Fatalf("envelope must be emitted exactly once, got %d", n)
+	}
+}
+
+func TestReviewFlagValidation(t *testing.T) {
+	r := &fakeReviewer{}
+	cases := [][]string{
+		{"--from", "main"},                 // half-range
+		{"--staged", "--commit", "abc123"}, // two modes
+		{"--commit", "abc", "--from", "a", "--to", "b"},
+		{},                              // no mode
+		{"--staged", "--gate", "hgih"},  // typo gate
+		{"--staged", "--gate", "High"},  // wrong case
+		{"--staged", "--gate", "sev"},   // not a severity
+	}
+	for _, args := range cases {
+		if _, err := runReview(t, r, args...); err == nil {
+			t.Errorf("args %v: want validation error, got nil", args)
+		}
+	}
+}
+
+func TestReviewBadGateCode(t *testing.T) {
+	r := &fakeReviewer{}
+	_, err := runReview(t, r, "--staged", "--gate", "hgih")
+	var ce *CLIError
+	if !asCLIError(err, &ce) || ce.Code != "review.bad_gate" || ce.Exit != 2 {
+		t.Fatalf("want review.bad_gate exit 2, got %+v", err)
+	}
+}
+
+func TestReviewEmptyStaged(t *testing.T) {
+	r := &fakeReviewer{outcome: ReviewOutcome{Findings: []ReviewFinding{}, Stats: map[string]any{"findings_total": 0}}}
+	out, err := runReview(t, r, "--staged", "--gate", "high")
+	if err != nil {
+		t.Fatalf("empty staged must not error, got %v", err)
+	}
+	var env Envelope
+	if e := json.Unmarshal([]byte(out), &env); e != nil {
+		t.Fatalf("invalid envelope: %v\n%s", e, out)
+	}
+	if !env.OK {
+		t.Error("want ok=true")
+	}
+	data, _ := env.Data.(map[string]any)
+	findings, _ := data["findings"].([]any)
+	if len(findings) != 0 {
+		t.Errorf("want findings=[], got %v", findings)
+	}
+}
+
+func asCLIError(err error, target **CLIError) bool {
+	for err != nil {
+		if ce, ok := err.(*CLIError); ok {
+			*target = ce
+			return true
+		}
+		type unwrapper interface{ Unwrap() error }
+		u, ok := err.(unwrapper)
+		if !ok {
+			return false
+		}
+		err = u.Unwrap()
+	}
+	return false
+}

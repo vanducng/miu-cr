@@ -1,0 +1,37 @@
+name: go-ci
+
+# Keyless checks only — every unit test injects a fakeAgent, so no ANTHROPIC_API_KEY
+# is needed. Never run a live `miucr review` here.
+
+on:
+  pull_request:
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version: "1.25.8"
+      - run: echo "GOFLAGS=-buildvcs=false" >> "$GITHUB_ENV"
+
+      - name: Test
+        run: go test ./...
+
+      - name: Vet
+        run: go vet ./...
+
+      - name: MCP initialize handshake smoke (keyless)
+        run: go test ./tests/ -run TestMCPHandshakeSmoke -count=1
+
+      - name: Build static binary
+        run: CGO_ENABLED=0 go build -o /tmp/miucr ./cmd/miucr
+
+      - name: Assert static binary (no cgo / no dynamic libs)
+        run: |
+          file /tmp/miucr
+          if ldd /tmp/miucr 2>&1 | grep -qv "not a dynamic executable"; then
+            echo "ERROR: /tmp/miucr is dynamically linked — cgo leaked into the build" >&2
+            exit 1
+          fi

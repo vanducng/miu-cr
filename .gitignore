@@ -1,0 +1,18 @@
+# goreleaser build output
+/dist/
+
+# local review state (never commit reviewed code or findings)
+*.db
+state.db
+
+# internal planning artifacts — kept private (public repo)
+.workbench/
+
+# built binaries
+/miucr
+/miu-cr
+
+# misc
+.DS_Store
+*.test
+*.out

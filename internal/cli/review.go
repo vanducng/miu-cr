@@ -1,0 +1,182 @@
+package cli
+
+import (
+	stdctx "context"
+	"fmt"
+	"time"
+
+	"github.com/spf13/cobra"
+)
+
+// ReviewRequest is the mode-agnostic review invocation passed to the injected
+// Reviewer. It mirrors engine.Request but lives in cli so the engine (which
+// transitively imports cli for CLIError) is not imported here, avoiding a cycle.
+type ReviewRequest struct {
+	Staged       bool
+	From         string
+	To           string
+	Commit       string
+	Gate         string
+	RepoDir      string
+	IncludeGlobs []string
+	ExcludeGlobs []string
+	Extensions   []string
+	APIKey       string
+	Timeout      time.Duration
+}
+
+// ReviewOutcome is the Reviewer's result: anchored findings plus run stats.
+type ReviewOutcome struct {
+	Findings []ReviewFinding
+	Stats    map[string]any
+}
+
+// ReviewFinding is a single anchored finding rendered/serialized by cli.
+type ReviewFinding struct {
+	File           string `json:"file"`
+	Line           int    `json:"line"`
+	EndLine        int    `json:"end_line"`
+	Severity       string `json:"severity"`
+	Category       string `json:"category"`
+	Rationale      string `json:"rationale"`
+	SuggestedPatch string `json:"suggested_patch"`
+	QuotedCode     string `json:"quoted_code"`
+}
+
+// Reviewer runs the engine pipeline. The real implementation is injected at
+// startup (internal/cli/wire) so cli stays below engine/agent in the import
+// graph. GateFailed reports whether the outcome's worst severity reaches gate.
+type Reviewer interface {
+	Review(ctx stdctx.Context, req ReviewRequest) (ReviewOutcome, error)
+	GateFailed(findings []ReviewFinding, gate string) bool
+}
+
+var reviewer Reviewer
+
+// SetReviewer wires the engine-backed Reviewer. Called once from the wire
+// package's init before any command runs.
+func SetReviewer(r Reviewer) { reviewer = r }
+
+func reviewCommand(opts *options) *cobra.Command {
+	var (
+		staged   bool
+		from     string
+		to       string
+		commit   string
+		gate     string
+		repoDir  string
+		include  []string
+		exclude  []string
+		exts     []string
+		apiKey   string
+	)
+
+	cmd := &cobra.Command{
+		Use:   "review",
+		Short: "Review local git changes and emit gated findings",
+		PreRunE: func(cmd *cobra.Command, args []string) error {
+			return validateReviewFlags(staged, from, to, commit, gate)
+		},
+		RunE: func(cmd *cobra.Command, args []string) error {
+			if reviewer == nil {
+				return &CLIError{Code: "review.not_wired", Message: "review engine not wired", Exit: 1}
+			}
+			req := ReviewRequest{
+				Staged:       staged,
+				From:         from,
+				To:           to,
+				Commit:       commit,
+				Gate:         gate,
+				RepoDir:      repoDir,
+				IncludeGlobs: include,
+				ExcludeGlobs: exclude,
+				Extensions:   exts,
+				APIKey:       apiKey,
+				Timeout:      opts.timeout,
+			}
+			out, err := reviewer.Review(cmd.Context(), req)
+			if err != nil {
+				return err
+			}
+			summary := map[string]any{
+				"findings": len(out.Findings),
+				"gate":     gate,
+			}
+			data := map[string]any{
+				"findings": out.Findings,
+				"stats":    out.Stats,
+			}
+			if prettyOutput {
+				renderReviewTable(cmd.OutOrStdout(), out)
+			} else if err := writeSuccess(cmd.OutOrStdout(), "review", "review.result", data, summary); err != nil {
+				return err
+			}
+			if reviewer.GateFailed(out.Findings, gate) {
+				return &CLIError{
+					Code:           "review.gate_failed",
+					Message:        fmt.Sprintf("findings reached gate %q", gate),
+					Exit:           2,
+					AlreadyWritten: true,
+				}
+			}
+			return nil
+		},
+	}
+
+	f := cmd.Flags()
+	f.BoolVar(&staged, "staged", false, "Review staged changes against the index")
+	f.StringVar(&from, "from", "", "Range mode: base ref (use with --to)")
+	f.StringVar(&to, "to", "", "Range mode: target ref (use with --from)")
+	f.StringVar(&commit, "commit", "", "Review a single commit against its parent")
+	f.StringVar(&gate, "gate", "high", "Fail (exit 2) when a finding reaches this severity: none|info|low|medium|high|critical")
+	f.StringVar(&repoDir, "repo", ".", "Repository directory")
+	f.StringSliceVar(&include, "include", nil, "Doublestar globs a path must match")
+	f.StringSliceVar(&exclude, "exclude", nil, "Doublestar globs to drop")
+	f.StringSliceVar(&exts, "ext", nil, "Restrict review to these file extensions")
+	f.StringVar(&apiKey, "api-key", "", "Anthropic API key (overrides ANTHROPIC_API_KEY; never persisted)")
+
+	cmd.MarkFlagsRequiredTogether("from", "to")
+	return cmd
+}
+
+// validGates is the closed set accepted by --gate; anything else is rejected so
+// a typo can never silently disable gating.
+var validGates = map[string]bool{
+	"none": true, "info": true, "low": true,
+	"medium": true, "high": true, "critical": true,
+}
+
+// validateReviewFlags rejects more than one mode group and an unrecognized gate.
+// MarkFlagsRequiredTogether already pairs from/to; this catches every other
+// invalid combo (no half-range, no staged+commit, no range+commit, at least one
+// mode) and an out-of-set --gate (case-sensitive, matching engine severity).
+func validateReviewFlags(staged bool, from, to, commit, gate string) error {
+	if !validGates[gate] {
+		return &CLIError{
+			Code:    "review.bad_gate",
+			Message: fmt.Sprintf("invalid --gate %q: want one of none|info|low|medium|high|critical", gate),
+			Exit:    2,
+		}
+	}
+	hasRange := from != "" || to != ""
+	if (from == "") != (to == "") {
+		return &CLIError{Code: "review.bad_flags", Message: "--from and --to must be used together", Exit: 2}
+	}
+	modes := 0
+	if staged {
+		modes++
+	}
+	if hasRange {
+		modes++
+	}
+	if commit != "" {
+		modes++
+	}
+	if modes == 0 {
+		return &CLIError{Code: "review.no_mode", Message: "select exactly one mode: --staged, --from/--to, or --commit", Exit: 2}
+	}
+	if modes > 1 {
+		return &CLIError{Code: "review.bad_flags", Message: "modes are mutually exclusive: use only one of --staged, --from/--to, --commit", Exit: 2}
+	}
+	return nil
+}

@@ -1,0 +1,89 @@
+version: 2
+
+project_name: miucr
+
+before:
+  hooks:
+    - go mod tidy
+
+builds:
+  - id: miucr
+    main: ./cmd/miucr
+    binary: miucr
+    env:
+      - CGO_ENABLED=0
+    flags:
+      - -trimpath
+    ldflags:
+      - -s -w -X github.com/vanducng/miu-cr/internal/cli.version={{.Tag}}
+    goos:
+      - darwin
+      - linux
+      - windows
+    goarch:
+      - amd64
+      - arm64
+
+archives:
+  - id: default
+    name_template: >-
+      {{ .ProjectName }}_
+      {{- .Os }}_
+      {{- if eq .Arch "amd64" }}x86_64
+      {{- else if eq .Arch "arm64" }}arm64
+      {{- else }}{{ .Arch }}{{ end }}
+    formats:
+      - tar.gz
+    format_overrides:
+      - goos: windows
+        formats:
+          - zip
+
+checksum:
+  name_template: "checksums.txt"
+  algorithm: sha256
+
+snapshot:
+  version_template: "{{ incpatch .Version }}-snapshot-{{ .ShortCommit }}"
+
+changelog:
+  use: git
+  sort: asc
+  groups:
+    - title: Features
+      regexp: "^feat[(\\w)]*!?:"
+      order: 0
+    - title: Bug Fixes
+      regexp: "^fix[(\\w)]*!?:"
+      order: 1
+    - title: Other Changes
+      order: 999
+  filters:
+    exclude:
+      - "^chore:"
+      - "^docs:"
+
+release:
+  prerelease: auto
+  # release-please creates the GitHub release/tag first; keep its notes and just upload binaries.
+  mode: keep-existing
+
+brews:
+  - name: miucr
+    repository:
+      owner: vanducng
+      name: homebrew-tap
+      branch: main
+      token: "{{ .Env.HOMEBREW_TAP_GITHUB_TOKEN }}"
+    directory: Formula
+    homepage: "https://github.com/vanducng/miu-cr"
+    description: "Owned AI code-review CLI for humans and agents"
+    license: MIT
+    commit_author:
+      name: goreleaserbot
+      email: bot@goreleaser.com
+    install: |
+      bin.install "miucr"
+    test: |
+      output = shell_output("#{bin}/miucr version")
+      assert_match "v#{version}", output

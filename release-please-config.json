@@ -1,0 +1,14 @@
+{
+  "release-type": "go",
+  "bump-minor-pre-major": true,
+  "packages": {
+    ".": {
+      "extra-files": [
+        {
+          "type": "generic",
+          "path": "internal/cli/commands.go"
+        }
+      ]
+    }
+  }
+}
