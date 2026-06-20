@@ -19,7 +19,30 @@ Diff-only review misses cross-file bugs; bare-agent review drifts and burns toke
 
 ## Install
 
-Releases ship static binaries for macOS / Linux / Windows (amd64 + arm64) and a Homebrew tap. See [Releases](https://github.com/vanducng/miu-cr/releases) — install instructions at **https://miucr.vanducng.dev**.
+Releases ship static, pure-Go binaries for macOS (amd64 + arm64), Linux (amd64), and Windows (amd64). See [Releases](https://github.com/vanducng/miu-cr/releases) — more at **https://miucr.vanducng.dev**.
+
+**Install script (macOS / Linux):**
+
+```sh
+curl -fsSL https://raw.githubusercontent.com/vanducng/miu-cr/main/install.sh | sh
+# pin a version: ... | sh -s -- v0.2.0
+```
+
+It detects your OS/arch, verifies the release checksum, and installs `miucr` to `/usr/local/bin` (or `~/.local/bin` when that needs no sudo).
+
+**Homebrew (macOS / Linux):**
+
+```sh
+brew install vanducng/tap/miucr
+```
+
+**Windows:** download `miucr_windows_x86_64.zip` from [Releases](https://github.com/vanducng/miu-cr/releases), extract `miucr.exe`, and put it on your `PATH` (e.g. a folder you add via *System → Environment Variables*). A Scoop manifest is planned.
+
+**From source (any platform with Go 1.25+):**
+
+```sh
+go install github.com/vanducng/miu-cr/cmd/miucr@latest
+```
 
 ## Usage
 

@@ -9,15 +9,15 @@ import (
 
 // AssembleOptions controls context assembly.
 type AssembleOptions struct {
-	TokenBudget    int // approximate token budget (len(text)/4); <=0 disables budgeting
-	ExpandWindow   int // context lines added above/below each hunk in the new-content window; <=0 disables expansion
+	TokenBudget  int // approximate token budget (len(text)/4); <=0 disables budgeting
+	ExpandWindow int // context lines added above/below each hunk in the new-content window; <=0 disables expansion
 }
 
 // Truncation levels, ordered from richest to leanest. Recorded in Stats so
 // dogfooding sees truncation rather than a silent miss.
 const (
-	LevelFull         = "full"          // diff hunks + expansion windows
-	LevelHunksOnly    = "hunks_only"    // diff hunks, no expansion windows
+	LevelFull          = "full"           // diff hunks + expansion windows
+	LevelHunksOnly     = "hunks_only"     // diff hunks, no expansion windows
 	LevelFilenamesOnly = "filenames_only" // file list only
 )
 

@@ -19,10 +19,10 @@ type Diff struct {
 	NewFileContent string `json:"new_file_content"`
 	Ref            string `json:"ref"` // revision NewFileContent was read at; "" means the staged index
 
-	IsBinary       bool   `json:"is_binary"`
-	IsNew          bool   `json:"is_new"`
-	IsDeleted      bool   `json:"is_deleted"`
-	IsRenamed      bool   `json:"is_renamed"`
-	Insertions     int64  `json:"insertions"`
-	Deletions      int64  `json:"deletions"`
+	IsBinary   bool  `json:"is_binary"`
+	IsNew      bool  `json:"is_new"`
+	IsDeleted  bool  `json:"is_deleted"`
+	IsRenamed  bool  `json:"is_renamed"`
+	Insertions int64 `json:"insertions"`
+	Deletions  int64 `json:"deletions"`
 }

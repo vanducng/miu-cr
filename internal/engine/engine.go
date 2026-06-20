@@ -69,12 +69,12 @@ type Agent interface {
 // Request is one review invocation: the diff mode and its operands, the severity
 // gate, and the file-selection globs.
 type Request struct {
-	Mode    diff.Mode
-	Staged  bool
-	From     string
-	To       string
-	Commit   string
-	Gate     string
+	Mode         diff.Mode
+	Staged       bool
+	From         string
+	To           string
+	Commit       string
+	Gate         string
 	IncludeGlobs []string
 	ExcludeGlobs []string
 	RepoDir      string

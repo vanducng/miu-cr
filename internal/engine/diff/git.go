@@ -7,6 +7,7 @@ import (
 	"strings"
 
 	"github.com/vanducng/miu-cr/internal/cli"
+	"github.com/vanducng/miu-cr/internal/config"
 	"github.com/vanducng/miu-cr/internal/engine/gitcmd"
 )
 
@@ -102,7 +103,7 @@ func GetDiff(ctx context.Context, mode Mode, repoDir, from, to, commit string, r
 func gitError(code, msg string, err error) error {
 	return &cli.CLIError{
 		Code:    code,
-		Message: fmt.Sprintf("%s: %v", msg, err),
+		Message: config.RedactString(fmt.Sprintf("%s: %v", msg, err)),
 		Exit:    1,
 	}
 }

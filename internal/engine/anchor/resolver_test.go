@@ -251,11 +251,11 @@ func TestExtractSideLines_OnlyAddedOnlyDeleted(t *testing.T) {
 
 func TestMatchConsecutive(t *testing.T) {
 	tests := []struct {
-		name              string
-		lines             []indexedLine
-		target            []string
+		name               string
+		lines              []indexedLine
+		target             []string
 		wantStart, wantEnd int
-		wantOK            bool
+		wantOK             bool
 	}{
 		{"SingleLine", []indexedLine{{5, "hello"}, {6, "world"}, {7, "foo"}}, []string{"world"}, 6, 6, true},
 		{"MultiLine", []indexedLine{{1, "a"}, {2, "b"}, {3, "c"}, {4, "d"}}, []string{"b", "c"}, 2, 3, true},

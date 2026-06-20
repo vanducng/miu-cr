@@ -14,14 +14,20 @@ func registerTools(server *mcp.Server, deps Deps, opts Options, policy safetyPol
 		Name:        "review_run",
 		Description: "Review local git changes (staged, a range, or a single commit) and return gated findings. Findings are anchored to line numbers from the reviewed revision.",
 	}, func(ctx context.Context, req *mcp.CallToolRequest, in reviewRunInput) (*mcp.CallToolResult, reviewRunOutput, error) {
+		expand := 5
+		if in.Expand != nil {
+			expand = *in.Expand
+		}
 		res, err := deps.Engine.Review(ctx, engine.Request{
-			Mode:    modeFor(in),
-			Staged:  in.Staged,
-			From:    in.From,
-			To:      in.To,
-			Commit:  in.Commit,
-			Gate:    in.Gate,
-			RepoDir: ".",
+			Mode:         modeFor(in),
+			Staged:       in.Staged,
+			From:         in.From,
+			To:           in.To,
+			Commit:       in.Commit,
+			Gate:         in.Gate,
+			RepoDir:      ".",
+			ExpandWindow: expand,
+			TokenBudget:  in.TokenBudget,
 		})
 		if err != nil {
 			return nil, reviewRunOutput{}, policy.toolErr("review.run_failed", err)

@@ -48,15 +48,35 @@ type anthropicAgent struct {
 	timeout time.Duration
 }
 
-// New returns an Anthropic-backed Agent. timeout (the global --timeout) bounds
+// New returns a provider-backed Agent. timeout (the global --timeout) bounds
 // both the request context deadline and the tool-loop wall clock; <=0 disables
 // the agent-imposed cap (the caller's ctx still applies).
 func New(creds Credentials, timeout time.Duration) Agent {
+	if creds.Provider == ProviderOpenAI {
+		return newOpenAIAgent(creds, timeout)
+	}
 	return &anthropicAgent{
-		client:  anthropic.NewClient(option.WithAPIKey(creds.APIKey)),
+		client:  anthropic.NewClient(anthropicOptions(creds)...),
 		model:   creds.Model,
 		timeout: timeout,
 	}
+}
+
+// anthropicOptions builds SDK request options from resolved credentials,
+// supporting Anthropic-compatible gateways (e.g. z.ai/glm) via base URL +
+// Bearer auth token. When AuthToken is set it is sent as Authorization (and
+// x-api-key is dropped); otherwise APIKey goes via x-api-key.
+func anthropicOptions(creds Credentials) []option.RequestOption {
+	var opts []option.RequestOption
+	if creds.BaseURL != "" {
+		opts = append(opts, option.WithBaseURL(creds.BaseURL))
+	}
+	if creds.AuthToken != "" {
+		opts = append(opts, option.WithHeaderDel("X-Api-Key"), option.WithAuthToken(creds.AuthToken))
+	} else {
+		opts = append(opts, option.WithAPIKey(creds.APIKey))
+	}
+	return opts
 }
 
 func reviewTools() []anthropic.ToolUnionParam {
@@ -149,7 +169,7 @@ func (a *anthropicAgent) dispatch(ctx stdctx.Context, rc Context, msg *anthropic
 		case "text":
 			text.WriteString(block.Text)
 		case "tool_use":
-			out, isErr := a.runTool(ctx, rc, block.Name, block.Input)
+			out, isErr := runTool(ctx, rc, block.Name, block.Input)
 			results = append(results, anthropic.NewToolResultBlock(block.ID, out, isErr))
 		}
 	}
@@ -167,10 +187,9 @@ type grepArgs struct {
 	File    string `json:"file"`
 }
 
-// runTool executes one tool against the reviewed revision. Arg decoding is
-// tolerant: a missing file is injected from grep/single-file fallbacks where it
-// makes sense. Returns (content, isError).
-func (a *anthropicAgent) runTool(ctx stdctx.Context, rc Context, name string, input json.RawMessage) (string, bool) {
+// runTool executes one tool against the reviewed revision. Provider-agnostic so
+// both the Anthropic and OpenAI loops share it. Returns (content, isError).
+func runTool(ctx stdctx.Context, rc Context, name string, input json.RawMessage) (string, bool) {
 	switch name {
 	case "file_read":
 		var args fileReadArgs

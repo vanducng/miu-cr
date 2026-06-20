@@ -2,7 +2,9 @@
 package gitcmd
 
 import (
+	"bytes"
 	"context"
+	"fmt"
 	"os/exec"
 	"strings"
 )
@@ -13,11 +15,22 @@ type Runner struct{}
 // New returns a Runner.
 func New() *Runner { return &Runner{} }
 
-// Output runs `git <args...>` in repoDir and returns stdout only.
+// Output runs `git <args...>` in repoDir and returns stdout. On failure the
+// error includes git's stderr so real diagnostics (bad ref, dubious ownership,
+// ambiguous argument) survive instead of a bare "exit status N".
 func (r *Runner) Output(ctx context.Context, repoDir string, args ...string) ([]byte, error) {
 	cmd := exec.CommandContext(ctx, "git", args...)
 	cmd.Dir = repoDir
-	return cmd.Output()
+	var stderr bytes.Buffer
+	cmd.Stderr = &stderr
+	out, err := cmd.Output()
+	if err != nil {
+		if msg := strings.TrimSpace(stderr.String()); msg != "" {
+			return out, fmt.Errorf("%w: %s", err, msg)
+		}
+		return out, err
+	}
+	return out, nil
 }
 
 // HeadSHA returns the resolved commit SHA at HEAD.

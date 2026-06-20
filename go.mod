@@ -6,6 +6,7 @@ require (
 	github.com/anthropics/anthropic-sdk-go v1.47.0
 	github.com/bmatcuk/doublestar/v4 v4.10.0
 	github.com/modelcontextprotocol/go-sdk v1.6.1
+	github.com/openai/openai-go/v3 v3.41.0
 	github.com/spf13/cobra v1.10.2
 	modernc.org/sqlite v1.50.1
 )

@@ -28,7 +28,13 @@ func init() {
 type engineReviewer struct{}
 
 func (engineReviewer) Review(ctx stdctx.Context, req cli.ReviewRequest) (cli.ReviewOutcome, error) {
-	creds, err := agent.Resolve(req.APIKey)
+	creds, err := agent.Resolve(agent.ResolveInput{
+		Provider:  req.Provider,
+		APIKey:    req.APIKey,
+		BaseURL:   req.BaseURL,
+		AuthToken: req.AuthToken,
+		Model:     req.Model,
+	})
 	if err != nil {
 		return cli.ReviewOutcome{}, err
 	}
@@ -46,6 +52,8 @@ func (engineReviewer) Review(ctx stdctx.Context, req cli.ReviewRequest) (cli.Rev
 		IncludeGlobs: req.IncludeGlobs,
 		ExcludeGlobs: req.ExcludeGlobs,
 		Extensions:   req.Extensions,
+		ExpandWindow: req.ExpandWindow,
+		TokenBudget:  req.TokenBudget,
 	})
 	if err != nil {
 		return cli.ReviewOutcome{}, err
@@ -113,7 +121,7 @@ func (mcpServerImpl) Serve(ctx stdctx.Context, req cli.MCPRequest) error {
 type lazyAgent struct{ timeout time.Duration }
 
 func (l lazyAgent) Review(ctx stdctx.Context, rc engine.AgentContext) ([]engine.Finding, error) {
-	creds, err := agent.Resolve("")
+	creds, err := agent.Resolve(agent.ResolveInput{})
 	if err != nil {
 		return nil, err
 	}

@@ -1,0 +1,154 @@
+package agent
+
+import (
+	stdctx "context"
+	"encoding/json"
+	"strings"
+	"testing"
+
+	openai "github.com/openai/openai-go/v3"
+
+	"github.com/vanducng/miu-cr/internal/engine"
+)
+
+// fakeOpenAI returns scripted completions and records the params it saw, so the
+// tool loop and parse path run with zero network.
+type fakeOpenAI struct {
+	responses []string // JSON ChatCompletion bodies, served in order
+	calls     int
+	seen      []openai.ChatCompletionNewParams
+}
+
+func (f *fakeOpenAI) create(_ stdctx.Context, params openai.ChatCompletionNewParams) (*openai.ChatCompletion, error) {
+	f.seen = append(f.seen, params)
+	body := f.responses[f.calls]
+	f.calls++
+	var cc openai.ChatCompletion
+	if err := json.Unmarshal([]byte(body), &cc); err != nil {
+		return nil, err
+	}
+	return &cc, nil
+}
+
+var _ openaiClient = (*fakeOpenAI)(nil)
+
+func textCompletion(content string) string {
+	b, _ := json.Marshal(map[string]any{
+		"id":      "cmpl-1",
+		"object":  "chat.completion",
+		"created": 1,
+		"model":   "gpt-test",
+		"choices": []map[string]any{{
+			"index":         0,
+			"finish_reason": "stop",
+			"message":       map[string]any{"role": "assistant", "content": content},
+		}},
+	})
+	return string(b)
+}
+
+func toolCallCompletion(id, name, args string) string {
+	b, _ := json.Marshal(map[string]any{
+		"id":      "cmpl-2",
+		"object":  "chat.completion",
+		"created": 1,
+		"model":   "gpt-test",
+		"choices": []map[string]any{{
+			"index":         0,
+			"finish_reason": "tool_calls",
+			"message": map[string]any{
+				"role": "assistant",
+				"tool_calls": []map[string]any{{
+					"id":       id,
+					"type":     "function",
+					"function": map[string]any{"name": name, "arguments": args},
+				}},
+			},
+		}},
+	})
+	return string(b)
+}
+
+// The model returns findings JSON on the first turn: openaiAgent must parse it
+// (fence-stripped) into engine.Findings with no line numbers and no network.
+func TestOpenAIAgentParsesFindings(t *testing.T) {
+	body := "```json\n" +
+		`{"findings":[{"file":"a.go","existing_code":"x := y / 0","severity":"critical","category":"bug","rationale":"div by zero"}]}` +
+		"\n```"
+	a := &openaiAgent{
+		client: &fakeOpenAI{responses: []string{textCompletion(body)}},
+		model:  "gpt-test",
+	}
+	got, err := a.Review(stdctx.Background(), Context{Text: "ctx", RepoDir: t.TempDir()})
+	if err != nil {
+		t.Fatalf("Review: %v", err)
+	}
+	if len(got) != 1 {
+		t.Fatalf("want 1 finding, got %d", len(got))
+	}
+	f := got[0]
+	if f.File != "a.go" || f.Severity != "critical" || f.Category != "bug" {
+		t.Fatalf("bad finding: %+v", f)
+	}
+	if f.QuotedCode != "x := y / 0" {
+		t.Fatalf("existing_code not mapped: %q", f.QuotedCode)
+	}
+	if f.Line != 0 || f.EndLine != 0 {
+		t.Fatalf("agent must emit no line numbers: %+v", f)
+	}
+}
+
+// A tool_use turn followed by a findings turn: the loop must dispatch the tool
+// (grep with no matches against an empty temp repo) and parse the next turn.
+func TestOpenAIAgentToolLoopThenFindings(t *testing.T) {
+	fc := &fakeOpenAI{responses: []string{
+		toolCallCompletion("call_1", "grep", `{"pattern":"needle"}`),
+		textCompletion(`{"findings":[]}`),
+	}}
+	a := &openaiAgent{client: fc, model: "gpt-test"}
+	got, err := a.Review(stdctx.Background(), Context{Text: "ctx", RepoDir: t.TempDir()})
+	if err != nil {
+		t.Fatalf("Review: %v", err)
+	}
+	if len(got) != 0 {
+		t.Fatalf("want 0 findings, got %d", len(got))
+	}
+	if fc.calls != 2 {
+		t.Fatalf("expected 2 completions, got %d", fc.calls)
+	}
+	// Second request must carry a tool-role message answering call_1.
+	last := fc.seen[len(fc.seen)-1]
+	foundTool := false
+	for _, m := range last.Messages {
+		if m.OfTool != nil && m.OfTool.ToolCallID == "call_1" {
+			foundTool = true
+		}
+	}
+	if !foundTool {
+		t.Fatal("tool result message for call_1 not appended to follow-up request")
+	}
+}
+
+// Repeated unparseable text bails after maxEmptyRounds, never hangs.
+func TestOpenAIAgentEmptyRoundsBail(t *testing.T) {
+	resp := make([]string, maxEmptyRounds)
+	for i := range resp {
+		resp[i] = textCompletion("sorry, no JSON here")
+	}
+	a := &openaiAgent{client: &fakeOpenAI{responses: resp}, model: "gpt-test"}
+	_, err := a.Review(stdctx.Background(), Context{Text: "ctx", RepoDir: t.TempDir()})
+	if err == nil || !strings.Contains(err.Error(), "no parseable findings") {
+		t.Fatalf("expected empty-round bail, got %v", err)
+	}
+}
+
+// New(creds) with the OpenAI provider must build an openaiAgent (interface
+// satisfied) without touching the network.
+func TestNewBuildsOpenAIAgent(t *testing.T) {
+	creds := Credentials{Provider: ProviderOpenAI, APIKey: secretToken, Model: "gpt-test"}
+	a := New(creds, 0)
+	if _, ok := a.(*openaiAgent); !ok {
+		t.Fatalf("expected *openaiAgent, got %T", a)
+	}
+	_ = engine.Finding{}
+}

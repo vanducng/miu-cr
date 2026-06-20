@@ -1,8 +1,8 @@
 package cli
 
 import (
-	stdctx "context"
 	"bytes"
+	stdctx "context"
 	"encoding/json"
 	"strings"
 	"testing"
@@ -91,10 +91,10 @@ func TestReviewFlagValidation(t *testing.T) {
 		{"--from", "main"},                 // half-range
 		{"--staged", "--commit", "abc123"}, // two modes
 		{"--commit", "abc", "--from", "a", "--to", "b"},
-		{},                              // no mode
-		{"--staged", "--gate", "hgih"},  // typo gate
-		{"--staged", "--gate", "High"},  // wrong case
-		{"--staged", "--gate", "sev"},   // not a severity
+		{},                             // no mode
+		{"--staged", "--gate", "hgih"}, // typo gate
+		{"--staged", "--gate", "High"}, // wrong case
+		{"--staged", "--gate", "sev"},  // not a severity
 	}
 	for _, args := range cases {
 		if _, err := runReview(t, r, args...); err == nil {

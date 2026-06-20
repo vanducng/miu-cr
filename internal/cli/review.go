@@ -21,8 +21,14 @@ type ReviewRequest struct {
 	IncludeGlobs []string
 	ExcludeGlobs []string
 	Extensions   []string
+	Provider     string
 	APIKey       string
+	BaseURL      string
+	AuthToken    string
+	Model        string
 	Timeout      time.Duration
+	ExpandWindow int
+	TokenBudget  int
 }
 
 // ReviewOutcome is the Reviewer's result: anchored findings plus run stats.
@@ -59,16 +65,22 @@ func SetReviewer(r Reviewer) { reviewer = r }
 
 func reviewCommand(opts *options) *cobra.Command {
 	var (
-		staged   bool
-		from     string
-		to       string
-		commit   string
-		gate     string
-		repoDir  string
-		include  []string
-		exclude  []string
-		exts     []string
-		apiKey   string
+		staged      bool
+		from        string
+		to          string
+		commit      string
+		gate        string
+		repoDir     string
+		include     []string
+		exclude     []string
+		exts        []string
+		provider    string
+		apiKey      string
+		baseURL     string
+		authToken   string
+		model       string
+		expand      int
+		tokenBudget int
 	)
 
 	cmd := &cobra.Command{
@@ -91,8 +103,14 @@ func reviewCommand(opts *options) *cobra.Command {
 				IncludeGlobs: include,
 				ExcludeGlobs: exclude,
 				Extensions:   exts,
+				Provider:     provider,
 				APIKey:       apiKey,
+				BaseURL:      baseURL,
+				AuthToken:    authToken,
+				Model:        model,
 				Timeout:      opts.timeout,
+				ExpandWindow: expand,
+				TokenBudget:  tokenBudget,
 			}
 			out, err := reviewer.Review(cmd.Context(), req)
 			if err != nil {
@@ -133,7 +151,13 @@ func reviewCommand(opts *options) *cobra.Command {
 	f.StringSliceVar(&include, "include", nil, "Doublestar globs a path must match")
 	f.StringSliceVar(&exclude, "exclude", nil, "Doublestar globs to drop")
 	f.StringSliceVar(&exts, "ext", nil, "Restrict review to these file extensions")
-	f.StringVar(&apiKey, "api-key", "", "Anthropic API key (overrides ANTHROPIC_API_KEY; never persisted)")
+	f.StringVar(&provider, "provider", "auto", "LLM provider: anthropic|openai|auto (auto detects from env)")
+	f.StringVar(&apiKey, "api-key", "", "API key (overrides ANTHROPIC_API_KEY/OPENAI_API_KEY; never persisted)")
+	f.StringVar(&baseURL, "base-url", "", "Override provider base URL (e.g. an Anthropic-compatible gateway; never persisted)")
+	f.StringVar(&authToken, "auth-token", "", "Bearer auth token for Anthropic-compatible gateways (never persisted)")
+	f.StringVar(&model, "model", "", "Override the review model (else ANTHROPIC_MODEL/OPENAI_MODEL or pinned default)")
+	f.IntVar(&expand, "expand", 5, "Context lines added above/below each hunk in the new-content window (0 disables)")
+	f.IntVar(&tokenBudget, "token-budget", 0, "Approximate token budget; over budget degrades context (0 disables)")
 
 	cmd.MarkFlagsRequiredTogether("from", "to")
 	return cmd

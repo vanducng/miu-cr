@@ -18,12 +18,8 @@ func RedactString(value string) string {
 }
 
 func redactURLPasswords(value string) string {
-	fields := strings.Fields(value)
-	if len(fields) == 0 {
-		return value
-	}
-	changed := false
-	for i, field := range fields {
+	result := value
+	for _, field := range strings.Fields(value) {
 		if !strings.Contains(field, "://") {
 			continue
 		}
@@ -37,11 +33,7 @@ func redactURLPasswords(value string) string {
 		}
 		username := parsed.User.Username()
 		parsed.User = url.UserPassword(username, "[redacted]")
-		fields[i] = strings.Replace(field, trimmed, parsed.String(), 1)
-		changed = true
+		result = strings.Replace(result, trimmed, parsed.String(), 1)
 	}
-	if !changed {
-		return value
-	}
-	return strings.Join(fields, " ")
+	return result
 }

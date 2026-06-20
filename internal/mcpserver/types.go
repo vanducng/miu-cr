@@ -7,11 +7,13 @@ import (
 )
 
 type reviewRunInput struct {
-	Staged bool   `json:"staged,omitempty" jsonschema:"Review staged changes against the index."`
-	From   string `json:"from,omitempty" jsonschema:"Range mode: base ref (use with to)."`
-	To     string `json:"to,omitempty" jsonschema:"Range mode: target ref (use with from)."`
-	Commit string `json:"commit,omitempty" jsonschema:"Review a single commit against its parent."`
-	Gate   string `json:"gate,omitempty" jsonschema:"Severity gate: none|info|low|medium|high|critical. Defaults to high."`
+	Staged      bool   `json:"staged,omitempty" jsonschema:"Review staged changes against the index."`
+	From        string `json:"from,omitempty" jsonschema:"Range mode: base ref (use with to)."`
+	To          string `json:"to,omitempty" jsonschema:"Range mode: target ref (use with from)."`
+	Commit      string `json:"commit,omitempty" jsonschema:"Review a single commit against its parent."`
+	Gate        string `json:"gate,omitempty" jsonschema:"Severity gate: none|info|low|medium|high|critical. Defaults to high."`
+	Expand      *int   `json:"expand,omitempty" jsonschema:"Context lines above/below each hunk in the new-content window. Defaults to 5; 0 disables."`
+	TokenBudget int    `json:"token_budget,omitempty" jsonschema:"Approximate token budget; over budget degrades context. 0 disables."`
 }
 
 type reviewRunOutput struct {
