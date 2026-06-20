@@ -23,6 +23,11 @@ builds:
     goarch:
       - amd64
       - arm64
+    ignore: # arm64 kept for darwin only (Apple Silicon); drop linux/windows arm64 to cut release build time
+      - goos: linux
+        goarch: arm64
+      - goos: windows
+        goarch: arm64
 
 archives:
   - id: default
@@ -78,7 +83,7 @@ brews:
     directory: Formula
     homepage: "https://github.com/vanducng/miu-cr"
     description: "Owned AI code-review CLI for humans and agents"
-    license: MIT
+    license: Apache-2.0
     commit_author:
       name: goreleaserbot
       email: bot@goreleaser.com
