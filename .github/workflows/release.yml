@@ -1,0 +1,61 @@
+name: release
+
+on:
+  push:
+    branches: [main]   # release-please opens/updates the version PR
+    tags: ["v*"]        # a version tag runs goreleaser directly
+  workflow_dispatch:
+
+permissions:
+  contents: write
+  pull-requests: write
+  issues: write
+
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  # Auto-versioning from conventional commits. Uses RELEASE_TOKEN (a fine-grained PAT)
+  # when set so the cut tag re-triggers the goreleaser job; otherwise falls back to
+  # GITHUB_TOKEN (still opens the version PR — merge it / tag manually to release).
+  release-please:
+    if: github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: googleapis/release-please-action@v4
+        with:
+          token: ${{ secrets.RELEASE_TOKEN || secrets.GITHUB_TOKEN }}
+          config-file: release-please-config.json
+          manifest-file: .release-please-manifest.json
+
+  # Builds + publishes binaries/checksums on any v* tag. Homebrew tap publish is
+  # skipped automatically when HOMEBREW_TAP_GITHUB_TOKEN is not configured, so the
+  # GitHub release (and install.sh) works with zero repo secrets.
+  goreleaser:
+    if: startsWith(github.ref, 'refs/tags/v')
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-go@v5
+        with:
+          go-version: "1.25.8"
+          cache-dependency-path: go.sum
+      - uses: goreleaser/goreleaser-action@v7
+        with:
+          version: v2.15.4
+          install-only: true
+      - name: GoReleaser release
+        run: |
+          skip=""
+          if [ -z "$HOMEBREW_TAP_GITHUB_TOKEN" ]; then
+            echo "::notice::HOMEBREW_TAP_GITHUB_TOKEN absent — skipping Homebrew tap publish"
+            skip="--skip=homebrew"
+          fi
+          goreleaser release --clean $skip
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          HOMEBREW_TAP_GITHUB_TOKEN: ${{ secrets.HOMEBREW_TAP_GITHUB_TOKEN }}
+          GORELEASER_CURRENT_TAG: ${{ github.ref_name }}

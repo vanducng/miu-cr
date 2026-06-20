@@ -12,6 +12,11 @@ state.db
 /miucr
 /miu-cr
 
+# Astro / Starlight docs site
+node_modules/
+docs/dist/
+.astro/
+
 # misc
 .DS_Store
 *.test

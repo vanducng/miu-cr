@@ -1,0 +1,46 @@
+---
+title: Introduction
+description: Owned local AI code-review CLI for humans and agents.
+---
+
+import { CardGrid, LinkCard } from '@astrojs/starlight/components';
+
+**miu-cr** (MIU Code Review) is a fast, pure-Go AI code-review tool with a deterministic + agent engine. Review your own changes locally before you open a PR — from the terminal, in CI, or driven by any MCP-capable agent host (Claude Code, Codex, …).
+
+Diff-only review misses cross-file bugs; bare-agent review drifts and burns tokens. miu-cr keeps the **correctness-critical parts deterministic** — file selection, context assembly, line-anchoring, severity gating, dedupe — and uses the LLM only where judgment helps: finding bugs and proposing fixes.
+
+:::note[Status: M1 — local review loop]
+miu-cr reviews local git diffs with an owned engine, exposes an MCP server, and persists history in SQLite. Remote PR review, a serve daemon, and codebase-context retrieval land in later milestones.
+:::
+
+## Start here
+
+<CardGrid>
+  <LinkCard title="Install" href="/install/" description="install.sh, Homebrew, go install, or a Windows zip." />
+  <LinkCard title="Usage" href="/usage/" description="Review modes, flags, the severity gate, output formats, and exit codes." />
+  <LinkCard title="Providers" href="/providers/" description="Anthropic, GLM via z.ai, and OpenAI — env and flags for each." />
+  <LinkCard title="MCP integration" href="/mcp/" description="Run review_run / review_get as first-class tools in Claude Code or Codex." />
+  <LinkCard title="How it works" href="/how-it-works/" description="The deterministic engine and drift-reject line-anchoring." />
+  <LinkCard title="Credentials" href="/credentials/" description="Bring your own key — passed in memory, never persisted." />
+</CardGrid>
+
+## What you get (M1)
+
+- **`miucr review`** over local diffs — `--staged`, `--from/--to`, `--commit`; `--output json|pretty`; non-zero exit at/above `--gate` severity (CI-friendly).
+- **Line-anchoring with drift-reject** — every finding is re-anchored to the reviewed revision from its quoted code; findings whose quote no longer matches are dropped, killing position drift. Staged reviews read the **index**, not `HEAD`.
+- **Single structured LLM pass** with `file_read` / `grep` tool-use → JSON findings (`file`, `line`, `severity`, `category`, `rationale`, `suggested_patch`).
+- **MCP server** (`miucr mcp`) exposing `review_run` / `review_get` — drive reviews as a first-class tool from any MCP runtime.
+- **SQLite-persisted** review history — pure-Go (`modernc.org/sqlite`), no cgo; credentials are never stored.
+- **Providers:** Anthropic and Anthropic-compatible endpoints (e.g. GLM via z.ai), plus OpenAI and OpenAI-compatible endpoints.
+
+## A 30-second tour
+
+```sh
+export ANTHROPIC_API_KEY=...                       # bring your own key
+miucr review --staged                              # review staged changes
+miucr review --from main --to HEAD -o pretty       # review a range, human-readable
+miucr review --commit HEAD~1 --gate high           # exit 2 if a high+ finding lands
+miucr mcp                                          # serve the engine over MCP (stdio)
+```
+
+The CLI emits a stable JSON envelope by default (`-o pretty` for a human table). It is **Apache-2.0** licensed; the source of truth is the [repository](https://github.com/vanducng/miu-cr).

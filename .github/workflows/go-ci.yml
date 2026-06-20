@@ -4,6 +4,8 @@ name: go-ci
 # is needed. Never run a live `miucr review` here.
 
 on:
+  push:
+    branches: [main]
   pull_request:
 
 jobs:
