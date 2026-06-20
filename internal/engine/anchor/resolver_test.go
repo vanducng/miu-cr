@@ -451,6 +451,43 @@ func TestResolveLineNumbers_MixedStrategies(t *testing.T) {
 	}
 }
 
+// Regression: a multi-line QuotedCode spanning an interior blank line must still
+// anchor. splitAndNormalize drops the blank from the target, so both the hunk side
+// and the file-content side must drop their blanks too (preserving real line
+// numbers) — otherwise the quote never matches consecutively and is drift-rejected.
+func TestResolveLineNumbers_InteriorBlankLine(t *testing.T) {
+	hunkBlank := `diff --git a/test.go b/test.go
+--- a/test.go
++++ b/test.go
+@@ -3,4 +3,6 @@
+ func foo() {
++    a()
++
++    b()
+ }`
+	t.Run("HunkSide", func(t *testing.T) {
+		got := ResolveLineNumbers([]engine.Finding{
+			{File: "test.go", QuotedCode: "    a()\n\n    b()"},
+		}, []diff.Diff{{NewPath: "test.go", Diff: hunkBlank}})
+		if got[0].Line != 4 || got[0].EndLine != 6 {
+			t.Errorf("hunk-side interior blank: got %d..%d, want 4..6", got[0].Line, got[0].EndLine)
+		}
+	})
+
+	t.Run("FileContentSide", func(t *testing.T) {
+		got := ResolveLineNumbers([]engine.Finding{
+			{File: "test.go", QuotedCode: "a()\n\nb()"},
+		}, []diff.Diff{{
+			NewPath:        "test.go",
+			Diff:           "diff --git a/test.go b/test.go\n--- a/test.go\n+++ b/test.go\n@@ -1,1 +1,1 @@\n unrelated",
+			NewFileContent: "a()\n\nb()\n",
+		}})
+		if got[0].Line != 1 || got[0].EndLine != 3 {
+			t.Errorf("file-content interior blank: got %d..%d, want 1..3", got[0].Line, got[0].EndLine)
+		}
+	})
+}
+
 func assertIndexed(t *testing.T, label string, got, want []indexedLine) {
 	t.Helper()
 	if len(got) != len(want) {

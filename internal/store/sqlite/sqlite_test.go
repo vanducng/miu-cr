@@ -2,6 +2,7 @@ package sqlite
 
 import (
 	"context"
+	"os"
 	"path/filepath"
 	"reflect"
 	"strings"
@@ -110,7 +111,7 @@ func TestSchemaIdempotent(t *testing.T) {
 	if err != nil {
 		t.Fatalf("reopen (re-migrate): %v", err)
 	}
-	defer s2.Close()
+	defer func() { _ = s2.Close() }()
 	if _, err := s2.GetReview(context.Background(), id); err != nil {
 		t.Fatalf("GetReview after reopen: %v", err)
 	}
@@ -120,6 +121,100 @@ func TestGetMissing(t *testing.T) {
 	s := tempStore(t)
 	if _, err := s.GetReview(context.Background(), "nope"); err == nil {
 		t.Fatal("expected error for missing id")
+	}
+}
+
+// A caller-supplied ID must be preserved (the no-generate branch).
+func TestSaveReviewPreservesCallerID(t *testing.T) {
+	s := tempStore(t)
+	ctx := context.Background()
+	in := sampleRecord()
+	in.ID = "fixed-id-123"
+	id, err := s.SaveReview(ctx, in)
+	if err != nil {
+		t.Fatalf("SaveReview: %v", err)
+	}
+	if id != "fixed-id-123" {
+		t.Fatalf("caller id not preserved: got %q", id)
+	}
+}
+
+// EngineStore adapts engine.PersistRecord <-> store.ReviewRecord without loss.
+func TestEngineStoreRoundTrip(t *testing.T) {
+	s := tempStore(t)
+	es := EngineStore{S: s}
+	ctx := context.Background()
+	in := engine.PersistRecord{
+		RepoDir:  "/repo",
+		Mode:     "commit",
+		HeadSHA:  "deadbeef",
+		Findings: []engine.Finding{{File: "x.go", Line: 1, Severity: "low", Category: "style"}},
+		Stats:    map[string]any{"n": float64(1)},
+	}
+	id, err := es.SaveReview(ctx, in)
+	if err != nil {
+		t.Fatalf("EngineStore.SaveReview: %v", err)
+	}
+	got, err := es.GetReview(ctx, id)
+	if err != nil {
+		t.Fatalf("EngineStore.GetReview: %v", err)
+	}
+	if got.HeadSHA != in.HeadSHA || got.Mode != in.Mode || got.RepoDir != in.RepoDir {
+		t.Fatalf("scalar mismatch: %+v", got)
+	}
+	if !reflect.DeepEqual(got.Findings, in.Findings) {
+		t.Fatalf("findings mismatch: %+v vs %+v", got.Findings, in.Findings)
+	}
+}
+
+// GetReview on a missing id wraps sql.ErrNoRows into a not-found message.
+func TestGetReviewNotFoundMessage(t *testing.T) {
+	s := tempStore(t)
+	_, err := s.GetReview(context.Background(), "absent")
+	if err == nil || !strings.Contains(err.Error(), "not found") {
+		t.Fatalf("want not-found error, got %v", err)
+	}
+}
+
+// DefaultPath ends in miucr/state.db under the user config dir.
+func TestDefaultPath(t *testing.T) {
+	p, err := DefaultPath()
+	if err != nil {
+		t.Skipf("UserConfigDir unavailable: %v", err)
+	}
+	if filepath.Base(p) != "state.db" || filepath.Base(filepath.Dir(p)) != "miucr" {
+		t.Fatalf("DefaultPath = %q, want .../miucr/state.db", p)
+	}
+}
+
+// Open fails when the parent path can't be created (a file occupies a path segment).
+func TestOpenBadPath(t *testing.T) {
+	file := filepath.Join(t.TempDir(), "afile")
+	if err := os.WriteFile(file, []byte("x"), 0o600); err != nil {
+		t.Fatalf("seed file: %v", err)
+	}
+	if _, err := Open(filepath.Join(file, "state.db")); err == nil {
+		t.Fatal("expected Open to fail when a file blocks the parent dir")
+	}
+}
+
+// nil Findings/Stats persist as empty (not NULL) and round-trip to non-nil.
+func TestSaveReviewNilFindingsAndStats(t *testing.T) {
+	s := tempStore(t)
+	ctx := context.Background()
+	id, err := s.SaveReview(ctx, store.ReviewRecord{RepoDir: "/r", Mode: "staged"})
+	if err != nil {
+		t.Fatalf("SaveReview: %v", err)
+	}
+	got, err := s.GetReview(ctx, id)
+	if err != nil {
+		t.Fatalf("GetReview: %v", err)
+	}
+	if got.Findings == nil || len(got.Findings) != 0 {
+		t.Errorf("Findings = %v, want empty non-nil", got.Findings)
+	}
+	if got.Stats == nil || len(got.Stats) != 0 {
+		t.Errorf("Stats = %v, want empty non-nil", got.Stats)
 	}
 }
 
@@ -135,7 +230,7 @@ func TestNoCredentialColumns(t *testing.T) {
 	if err != nil {
 		t.Fatalf("table_info: %v", err)
 	}
-	defer rows.Close()
+	defer func() { _ = rows.Close() }()
 	for rows.Next() {
 		var cid int
 		var name, ctype string

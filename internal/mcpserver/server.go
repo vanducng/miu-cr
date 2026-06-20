@@ -23,10 +23,14 @@ type Deps struct {
 	Store  store.Store
 }
 
+// New builds the MCP server with review_run/review_get registered, for callers
+// that drive transport themselves; Serve wraps it for stdio.
 func New(deps Deps, opts Options) (*mcp.Server, error) {
 	return newServer(deps, opts, nil)
 }
 
+// Serve runs the MCP server over stdio until ctx is done, keeping stdout pure
+// JSON-RPC and sending all logs to stderr.
 func Serve(
 	ctx context.Context,
 	deps Deps,

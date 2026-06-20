@@ -6,14 +6,16 @@ import (
 	"encoding/json"
 	"strings"
 	"testing"
+	"time"
 )
 
 type fakeReviewer struct {
 	outcome ReviewOutcome
-	gate    string
+	gotCtx  stdctx.Context
 }
 
-func (f *fakeReviewer) Review(_ stdctx.Context, _ ReviewRequest) (ReviewOutcome, error) {
+func (f *fakeReviewer) Review(ctx stdctx.Context, _ ReviewRequest) (ReviewOutcome, error) {
+	f.gotCtx = ctx
 	return f.outcome, nil
 }
 
@@ -129,6 +131,34 @@ func TestReviewEmptyStaged(t *testing.T) {
 	findings, _ := data["findings"].([]any)
 	if len(findings) != 0 {
 		t.Errorf("want findings=[], got %v", findings)
+	}
+}
+
+// The --timeout flag must bound the whole operation, not just the agent pass:
+// the context handed to Review carries a deadline so git subprocesses share it.
+func TestReviewAppliesTimeoutToContext(t *testing.T) {
+	r := &fakeReviewer{outcome: ReviewOutcome{Findings: []ReviewFinding{}}}
+	prev := reviewer
+	SetReviewer(r)
+	t.Cleanup(func() { SetReviewer(prev) })
+	prettyOutput = false
+
+	opts := &options{output: "json", timeout: 30 * time.Second}
+	cmd := reviewCommand(opts)
+	var buf bytes.Buffer
+	cmd.SetOut(&buf)
+	cmd.SetErr(&buf)
+	cmd.SetArgs([]string{"--staged", "--gate", "high"})
+	cmd.SilenceUsage = true
+	cmd.SilenceErrors = true
+	if err := cmd.Execute(); err != nil {
+		t.Fatalf("review: %v", err)
+	}
+	if r.gotCtx == nil {
+		t.Fatal("Review received nil context")
+	}
+	if _, ok := r.gotCtx.Deadline(); !ok {
+		t.Error("context passed to Review must carry the --timeout deadline")
 	}
 }
 

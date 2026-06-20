@@ -15,7 +15,7 @@ Diff-only review misses cross-file bugs; bare-agent review drifts and burns toke
 - **Single structured LLM pass** with read/grep tool-use → JSON findings (`file, line, severity, category, rationale, suggested_patch`).
 - **MCP server** (`miucr mcp`) exposing `review_run` / `review_get` — drive reviews as a first-class tool from any MCP runtime.
 - **SQLite-persisted** review history — pure-Go (`modernc.org/sqlite`), no cgo; credentials are never stored.
-- **Providers:** Anthropic and Anthropic-compatible endpoints (e.g. GLM via z.ai); OpenAI-compatible support in progress.
+- **Providers:** Anthropic and Anthropic-compatible endpoints (e.g. GLM via z.ai), plus OpenAI and OpenAI-compatible endpoints (`OPENAI_API_KEY`).
 
 ## Install
 

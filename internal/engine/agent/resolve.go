@@ -4,7 +4,7 @@ import (
 	"os"
 	"strings"
 
-	"github.com/vanducng/miu-cr/internal/cli"
+	"github.com/vanducng/miu-cr/internal/cli/clierr"
 )
 
 // Provider selects which LLM backend the review pass uses.
@@ -49,7 +49,7 @@ type ResolveInput struct {
 
 // Resolve picks the provider (flag → auto-detect from env) and the matching
 // credentials. Flags win over env. Missing credentials return a typed
-// *cli.CLIError. Nothing here is persisted.
+// *clierr.CLIError. Nothing here is persisted.
 func Resolve(in ResolveInput) (Credentials, error) {
 	p := normalizeProvider(in.Provider)
 	if p == ProviderAuto {
@@ -107,7 +107,7 @@ func resolveAnthropic(in ResolveInput) (Credentials, error) {
 	}
 
 	if apiKey == "" && authToken == "" {
-		return Credentials{}, &cli.CLIError{
+		return Credentials{}, &clierr.CLIError{
 			Code:    "agent.no_credentials",
 			Message: "no Anthropic credentials: set ANTHROPIC_API_KEY (or ANTHROPIC_AUTH_TOKEN / ZAI_API_KEY) or pass --api-key / --auth-token",
 			Hint:    "export ANTHROPIC_API_KEY=... or run with --api-key",
@@ -128,7 +128,7 @@ func resolveAnthropic(in ResolveInput) (Credentials, error) {
 func resolveOpenAI(in ResolveInput) (Credentials, error) {
 	apiKey := firstNonEmpty(in.APIKey, os.Getenv("OPENAI_API_KEY"))
 	if apiKey == "" {
-		return Credentials{}, &cli.CLIError{
+		return Credentials{}, &clierr.CLIError{
 			Code:    "agent.no_credentials",
 			Message: "no OpenAI API key: set OPENAI_API_KEY or pass --api-key",
 			Hint:    "export OPENAI_API_KEY=... or run with --api-key",

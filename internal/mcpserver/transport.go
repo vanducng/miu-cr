@@ -14,6 +14,8 @@ import (
 // open and never reach this path.
 const eofGrace = 150 * time.Millisecond
 
+// UnsupportedTransportError reports a requested transport this server cannot
+// serve (only stdio is supported).
 type UnsupportedTransportError struct {
 	Transport string
 }

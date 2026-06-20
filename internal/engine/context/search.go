@@ -5,6 +5,7 @@ package context
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"os/exec"
 	"strconv"
@@ -55,7 +56,8 @@ func grepErr(err error, out string) error {
 	if err == nil {
 		return nil
 	}
-	if ee, ok := err.(*exec.ExitError); ok && ee.ExitCode() == 1 {
+	var ee *exec.ExitError
+	if errors.As(err, &ee) && ee.ExitCode() == 1 {
 		return nil
 	}
 	if out != "" {

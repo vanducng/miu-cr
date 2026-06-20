@@ -9,6 +9,7 @@ import (
 	"regexp"
 	"time"
 
+	"github.com/vanducng/miu-cr/internal/cli/clierr"
 	"github.com/vanducng/miu-cr/internal/config"
 )
 
@@ -17,6 +18,8 @@ const apiVersion = "miucr.cli/v1"
 // prettyOutput indents envelope JSON when --output pretty is set.
 var prettyOutput bool
 
+// Envelope is the stable v1 JSON contract every command emits on stdout; ok plus
+// either data or error lets a host agent branch without parsing prose.
 type Envelope struct {
 	OK         bool           `json:"ok"`
 	APIVersion string         `json:"api_version"`
@@ -32,6 +35,8 @@ type Envelope struct {
 	Error      *ErrorInfo     `json:"error,omitempty"`
 }
 
+// ErrorInfo is the error payload of an Envelope: a stable machine code plus a
+// redacted human message and retry hints.
 type ErrorInfo struct {
 	Code        string         `json:"code"`
 	Message     string         `json:"message"`
@@ -41,20 +46,9 @@ type ErrorInfo struct {
 	Details     map[string]any `json:"details,omitempty"`
 }
 
-type CLIError struct {
-	Code      string
-	Message   string
-	Hint      string
-	Exit      int
-	Details   map[string]any
-	Retry     bool
-	SafeRetry bool
-	// AlreadyWritten signals the command already emitted its own envelope: Execute
-	// carries the exit code but does NOT overwrite stdout with an error-only envelope.
-	AlreadyWritten bool
-}
-
-func (e *CLIError) Error() string { return e.Message }
+// CLIError is the typed command failure value, aliased from the leaf clierr
+// package so engine/agent/store can produce it without importing cli.
+type CLIError = clierr.CLIError
 
 func newRequestID() string {
 	return fmt.Sprintf("req_%d", time.Now().UnixNano())
@@ -213,6 +207,8 @@ func redactDetails(details map[string]any) map[string]any {
 	return out
 }
 
+// ExitCode maps an error to a process exit status: a CLIError's explicit Exit
+// wins, any other non-nil error is 1, nil is 0.
 func ExitCode(err error) int {
 	if err == nil {
 		return 0

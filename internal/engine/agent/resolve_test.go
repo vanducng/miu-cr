@@ -4,7 +4,7 @@ import (
 	"errors"
 	"testing"
 
-	"github.com/vanducng/miu-cr/internal/cli"
+	"github.com/vanducng/miu-cr/internal/cli/clierr"
 )
 
 // clearProviderEnv unsets every credential env var so each case starts clean.
@@ -58,9 +58,9 @@ func TestResolveMissingKeyTypedError(t *testing.T) {
 	if err == nil {
 		t.Fatal("expected error for missing credentials")
 	}
-	var cerr *cli.CLIError
+	var cerr *clierr.CLIError
 	if !errors.As(err, &cerr) {
-		t.Fatalf("expected *cli.CLIError, got %T", err)
+		t.Fatalf("expected *clierr.CLIError, got %T", err)
 	}
 	if cerr.Code != "agent.no_credentials" {
 		t.Fatalf("unexpected code %q", cerr.Code)
@@ -150,7 +150,7 @@ func TestResolveOpenAIExplicit(t *testing.T) {
 func TestResolveOpenAIMissingKey(t *testing.T) {
 	clearProviderEnv(t)
 	_, err := Resolve(ResolveInput{Provider: "openai"})
-	var cerr *cli.CLIError
+	var cerr *clierr.CLIError
 	if !errors.As(err, &cerr) || cerr.Code != "agent.no_credentials" {
 		t.Fatalf("expected no_credentials, got %v", err)
 	}

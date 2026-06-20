@@ -198,6 +198,90 @@ func TestReviewRunEnforcesByteBound(t *testing.T) {
 	}
 }
 
+// review_get on an unknown id must surface via policy.toolErr as a tool error,
+// not a transport error, with a non-empty message.
+func TestReviewGetMissingIDIsToolError(t *testing.T) {
+	dir := stagedRepo(t)
+	t.Chdir(dir)
+
+	st, err := sqlite.Open(filepath.Join(t.TempDir(), "state.db"))
+	if err != nil {
+		t.Fatalf("open store: %v", err)
+	}
+	t.Cleanup(func() { _ = st.Close() })
+
+	eng := engine.New(&fakeAgent{}, gitcmd.New())
+	eng.Store = sqlite.EngineStore{S: st}
+	cs := connect(t, mcpserver.Deps{Engine: eng, Store: st}, mcpserver.Options{})
+
+	res, err := cs.CallTool(stdctx.Background(), &mcp.CallToolParams{
+		Name:      "review_get",
+		Arguments: map[string]any{"id": "does-not-exist"},
+	})
+	if err != nil {
+		t.Fatalf("CallTool: %v", err)
+	}
+	if !res.IsError {
+		t.Fatal("review_get on missing id should be a tool error")
+	}
+}
+
+// review_run against a non-git directory must surface the engine error through
+// policy.toolErr as a tool error.
+func TestReviewRunNonGitDirIsToolError(t *testing.T) {
+	dir := t.TempDir() // not a git repo
+	t.Chdir(dir)
+
+	eng := engine.New(&fakeAgent{}, gitcmd.New())
+	cs := connect(t, mcpserver.Deps{Engine: eng}, mcpserver.Options{})
+
+	res, err := cs.CallTool(stdctx.Background(), &mcp.CallToolParams{
+		Name:      "review_run",
+		Arguments: map[string]any{"staged": true},
+	})
+	if err != nil {
+		t.Fatalf("CallTool: %v", err)
+	}
+	if !res.IsError {
+		t.Fatal("review_run in a non-git dir should be a tool error")
+	}
+}
+
+// review_run must enforce the same mode/gate contract as the CLI at the MCP
+// boundary: an invalid mode combo or out-of-set gate is rejected before the
+// engine runs, surfaced as a tool error.
+func TestReviewRunRejectsInvalidInvocation(t *testing.T) {
+	dir := stagedRepo(t)
+	t.Chdir(dir)
+
+	eng := engine.New(&fakeAgent{}, gitcmd.New())
+	cs := connect(t, mcpserver.Deps{Engine: eng}, mcpserver.Options{})
+
+	cases := []struct {
+		name string
+		args map[string]any
+	}{
+		{"staged plus commit", map[string]any{"staged": true, "commit": "HEAD"}},
+		{"bad gate", map[string]any{"staged": true, "gate": "warn"}},
+		{"no mode", map[string]any{}},
+		{"half range", map[string]any{"from": "main"}},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			res, err := cs.CallTool(stdctx.Background(), &mcp.CallToolParams{
+				Name:      "review_run",
+				Arguments: tc.args,
+			})
+			if err != nil {
+				t.Fatalf("CallTool: %v", err)
+			}
+			if !res.IsError {
+				t.Fatalf("invalid invocation %v should be a tool error", tc.args)
+			}
+		})
+	}
+}
+
 func TestListToolsExposesBoth(t *testing.T) {
 	eng := engine.New(&fakeAgent{}, gitcmd.New())
 	cs := connect(t, mcpserver.Deps{Engine: eng}, mcpserver.Options{})

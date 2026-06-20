@@ -7,26 +7,42 @@ import (
 	"strings"
 )
 
-// renderReviewTable prints findings as a per-finding table plus severity counts.
-func renderReviewTable(w io.Writer, out ReviewOutcome) {
+// renderReviewTable prints findings as a per-finding table plus severity counts,
+// returning the first write error so the caller can report a broken stdout pipe.
+func renderReviewTable(w io.Writer, out ReviewOutcome) error {
+	ew := &errWriter{w: w}
 	if len(out.Findings) == 0 {
-		fmt.Fprintln(w, "No findings.")
-		return
+		ew.printf("No findings.\n")
+		return ew.err
 	}
 	for _, f := range out.Findings {
 		loc := fmt.Sprintf("%s:%d", f.File, f.Line)
 		if f.EndLine > f.Line {
 			loc = fmt.Sprintf("%s:%d-%d", f.File, f.Line, f.EndLine)
 		}
-		fmt.Fprintf(w, "%-6s %-12s %s\n", strings.ToUpper(f.Severity), f.Category, loc)
+		ew.printf("%-6s %-12s %s\n", strings.ToUpper(f.Severity), f.Category, loc)
 		if r := strings.TrimSpace(f.Rationale); r != "" {
-			fmt.Fprintf(w, "    %s\n", firstLine(r))
+			ew.printf("    %s\n", firstLine(r))
 		}
 	}
-	fmt.Fprintln(w)
+	ew.printf("\n")
 	for _, line := range severityCounts(out.Findings) {
-		fmt.Fprintln(w, line)
+		ew.printf("%s\n", line)
 	}
+	return ew.err
+}
+
+// errWriter latches the first write error so the table loop need not check each call.
+type errWriter struct {
+	w   io.Writer
+	err error
+}
+
+func (e *errWriter) printf(format string, args ...any) {
+	if e.err != nil {
+		return
+	}
+	_, e.err = fmt.Fprintf(e.w, format, args...)
 }
 
 func firstLine(s string) string {

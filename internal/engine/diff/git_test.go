@@ -10,7 +10,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/vanducng/miu-cr/internal/cli"
+	"github.com/vanducng/miu-cr/internal/cli/clierr"
 	"github.com/vanducng/miu-cr/internal/engine/gitcmd"
 )
 
@@ -137,6 +137,58 @@ func TestGetDiff_Commit(t *testing.T) {
 	}
 }
 
+// A merge commit reviewed via ModeCommit must yield a normal two-way diff (vs
+// the first parent), not a silently-dropped combined diff. Regression guard for
+// the -m --first-parent fix.
+func TestGetDiff_MergeCommit(t *testing.T) {
+	repo := initRepo(t)
+	file := filepath.Join(repo, "f.txt")
+	if err := os.WriteFile(file, []byte("a\n"), 0o644); err != nil {
+		t.Fatalf("write: %v", err)
+	}
+	runGitTest(t, repo, "add", "f.txt")
+	runGitTest(t, repo, "commit", "-q", "-m", "base")
+
+	runGitTest(t, repo, "checkout", "-q", "-b", "feat")
+	if err := os.WriteFile(file, []byte("a\nFEATURE\n"), 0o644); err != nil {
+		t.Fatalf("write: %v", err)
+	}
+	runGitTest(t, repo, "add", "f.txt")
+	runGitTest(t, repo, "commit", "-q", "-m", "feat edit")
+
+	// Back to the base branch and merge feat with a non-trivial merge commit.
+	base := "master"
+	if err := exec.Command("git", "-C", repo, "rev-parse", "--verify", "master").Run(); err != nil {
+		base = "main"
+	}
+	runGitTest(t, repo, "checkout", "-q", base)
+	if err := os.WriteFile(file, []byte("a\nMAINLINE\n"), 0o644); err != nil {
+		t.Fatalf("write: %v", err)
+	}
+	runGitTest(t, repo, "add", "f.txt")
+	runGitTest(t, repo, "commit", "-q", "-m", "mainline edit")
+	// Merge with conflict, resolve, commit the merge.
+	cmd := exec.Command("git", "merge", "--no-ff", "feat")
+	cmd.Dir = repo
+	_ = cmd.Run() // expected conflict
+	if err := os.WriteFile(file, []byte("a\nMAINLINE\nFEATURE\n"), 0o644); err != nil {
+		t.Fatalf("write: %v", err)
+	}
+	runGitTest(t, repo, "add", "f.txt")
+	runGitTest(t, repo, "commit", "-q", "--no-edit")
+
+	diffs, err := GetDiff(context.Background(), ModeCommit, repo, "", "", "HEAD", gitcmd.New())
+	if err != nil {
+		t.Fatalf("GetDiff on merge commit: %v", err)
+	}
+	if len(diffs) == 0 {
+		t.Fatal("merge commit produced zero diffs (false clean)")
+	}
+	if !strings.Contains(diffs[0].NewFileContent, "FEATURE") {
+		t.Errorf("NewFileContent = %q, want merged content", diffs[0].NewFileContent)
+	}
+}
+
 func TestGetDiff_Range(t *testing.T) {
 	repo := initRepo(t)
 	file := filepath.Join(repo, "sample.txt")
@@ -197,9 +249,9 @@ func TestGetDiff_NonGitDir(t *testing.T) {
 	if err == nil {
 		t.Fatal("expected typed error for non-git dir")
 	}
-	var cliErr *cli.CLIError
+	var cliErr *clierr.CLIError
 	if !errors.As(err, &cliErr) {
-		t.Fatalf("expected *cli.CLIError, got %T", err)
+		t.Fatalf("expected *clierr.CLIError, got %T", err)
 	}
 	if cliErr.Code != "git.not_a_repo" {
 		t.Errorf("Code = %q, want git.not_a_repo", cliErr.Code)
@@ -231,9 +283,9 @@ func TestGetDiff_RangeUnrelatedHistories(t *testing.T) {
 	if err == nil {
 		t.Fatal("expected merge-base failure for unrelated histories")
 	}
-	var cliErr *cli.CLIError
+	var cliErr *clierr.CLIError
 	if !errors.As(err, &cliErr) {
-		t.Fatalf("expected *cli.CLIError, got %T", err)
+		t.Fatalf("expected *clierr.CLIError, got %T", err)
 	}
 	if cliErr.Code != "git.merge_base_failed" {
 		t.Errorf("Code = %q, want git.merge_base_failed", cliErr.Code)

@@ -41,9 +41,21 @@ const (
 	maxTokens      = 8192
 )
 
+// anthropicClient is the subset of the Anthropic SDK the agent needs; satisfied
+// by the real client and a fake in tests so the tool/parse loop runs offline.
+type anthropicClient interface {
+	newMessage(ctx stdctx.Context, params anthropic.MessageNewParams) (*anthropic.Message, error)
+}
+
+type sdkAnthropicClient struct{ sdk anthropic.Client }
+
+func (c sdkAnthropicClient) newMessage(ctx stdctx.Context, params anthropic.MessageNewParams) (*anthropic.Message, error) {
+	return c.sdk.Messages.New(ctx, params)
+}
+
 // anthropicAgent is the production Agent backed by the Anthropic Messages API.
 type anthropicAgent struct {
-	client  anthropic.Client
+	client  anthropicClient
 	model   string
 	timeout time.Duration
 }
@@ -56,7 +68,7 @@ func New(creds Credentials, timeout time.Duration) Agent {
 		return newOpenAIAgent(creds, timeout)
 	}
 	return &anthropicAgent{
-		client:  anthropic.NewClient(anthropicOptions(creds)...),
+		client:  sdkAnthropicClient{sdk: anthropic.NewClient(anthropicOptions(creds)...)},
 		model:   creds.Model,
 		timeout: timeout,
 	}
@@ -134,7 +146,7 @@ func (a *anthropicAgent) Review(ctx stdctx.Context, rc Context) ([]engine.Findin
 			return nil, fmt.Errorf("agent: tool loop exceeded wall-clock cap of %s", a.timeout)
 		}
 
-		msg, err := a.client.Messages.New(ctx, params)
+		msg, err := a.client.newMessage(ctx, params)
 		if err != nil {
 			return nil, fmt.Errorf("agent: messages.new: %w", err)
 		}

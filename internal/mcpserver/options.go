@@ -2,8 +2,11 @@ package mcpserver
 
 import "time"
 
+// TransportStdio is the only supported (and default) MCP transport.
 const TransportStdio = "stdio"
 
+// Options configures the MCP server: transport, implementation identity, the
+// per-tool output byte cap, and the per-call timeout.
 type Options struct {
 	Transport             string
 	ImplementationName    string

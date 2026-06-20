@@ -7,6 +7,8 @@ import (
 	"github.com/vanducng/miu-cr/internal/config"
 )
 
+// SafetyError is a tool-boundary failure (oversized output, wrapped engine
+// error) returned to the host with a stable code and a bounded, redacted message.
 type SafetyError struct {
 	Code    string `json:"code"`
 	Message string `json:"message"`

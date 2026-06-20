@@ -6,7 +6,7 @@ import (
 	"strconv"
 	"strings"
 
-	"github.com/vanducng/miu-cr/internal/cli"
+	"github.com/vanducng/miu-cr/internal/cli/clierr"
 	"github.com/vanducng/miu-cr/internal/config"
 	"github.com/vanducng/miu-cr/internal/engine/gitcmd"
 )
@@ -28,7 +28,7 @@ func GetDiff(ctx context.Context, mode Mode, repoDir, from, to, commit string, r
 		runner = gitcmd.New()
 	}
 	if _, err := runner.HeadSHA(ctx, repoDir); err != nil {
-		return nil, &cli.CLIError{
+		return nil, &clierr.CLIError{
 			Code:    "git.not_a_repo",
 			Message: fmt.Sprintf("%s is not a git repository with commits", repoDir),
 			Hint:    "run from inside a git repo that has at least one commit",
@@ -52,7 +52,10 @@ func GetDiff(ctx context.Context, mode Mode, repoDir, from, to, commit string, r
 		ref = "" // index: read via `git show :<path>`
 
 	case ModeCommit:
-		args := append([]string{"show"}, diffFlags...)
+		// -m --first-parent makes `git show` emit a normal two-way `diff --git`
+		// even for merge commits (vs the default `diff --cc` combined diff the
+		// parser cannot read, which would otherwise yield a false "clean").
+		args := append([]string{"show", "-m", "--first-parent"}, diffFlags...)
 		args = append(args, commit)
 		out, err := runner.Output(ctx, repoDir, args...)
 		if err != nil {
@@ -64,7 +67,7 @@ func GetDiff(ctx context.Context, mode Mode, repoDir, from, to, commit string, r
 	case ModeRange:
 		baseOut, err := runner.Output(ctx, repoDir, "merge-base", "--end-of-options", from, to)
 		if err != nil {
-			return nil, &cli.CLIError{
+			return nil, &clierr.CLIError{
 				Code:    "git.merge_base_failed",
 				Message: fmt.Sprintf("cannot find merge-base between %s and %s", from, to),
 				Hint:    "ensure both refs exist and share history (not a shallow or unrelated clone)",
@@ -73,7 +76,7 @@ func GetDiff(ctx context.Context, mode Mode, repoDir, from, to, commit string, r
 		}
 		base := strings.TrimSpace(string(baseOut))
 		if base == "" {
-			return nil, &cli.CLIError{
+			return nil, &clierr.CLIError{
 				Code:    "git.merge_base_failed",
 				Message: fmt.Sprintf("cannot find merge-base between %s and %s", from, to),
 				Hint:    "ensure both refs exist and share history (not a shallow or unrelated clone)",
@@ -90,7 +93,7 @@ func GetDiff(ctx context.Context, mode Mode, repoDir, from, to, commit string, r
 		ref = to
 
 	default:
-		return nil, &cli.CLIError{
+		return nil, &clierr.CLIError{
 			Code:    "git.bad_mode",
 			Message: fmt.Sprintf("unknown diff mode %d", int(mode)),
 			Exit:    1,
@@ -101,7 +104,7 @@ func GetDiff(ctx context.Context, mode Mode, repoDir, from, to, commit string, r
 }
 
 func gitError(code, msg string, err error) error {
-	return &cli.CLIError{
+	return &clierr.CLIError{
 		Code:    code,
 		Message: config.RedactString(fmt.Sprintf("%s: %v", msg, err)),
 		Exit:    1,

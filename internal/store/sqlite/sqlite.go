@@ -8,6 +8,7 @@ import (
 	"database/sql"
 	"encoding/hex"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -19,6 +20,8 @@ import (
 	"github.com/vanducng/miu-cr/internal/store"
 )
 
+// Store is the pure-Go SQLite-backed review store; it persists findings/stats but
+// never credentials.
 type Store struct {
 	db *sql.DB
 }
@@ -53,8 +56,11 @@ func Open(path string) (*Store, error) {
 	return &Store{db: db}, nil
 }
 
+// Close releases the underlying database handle.
 func (s *Store) Close() error { return s.db.Close() }
 
+// SaveReview persists rec (assigning an ID and timestamp when absent) and returns
+// the record ID.
 func (s *Store) SaveReview(ctx context.Context, rec store.ReviewRecord) (string, error) {
 	if rec.ID == "" {
 		id, err := newID()
@@ -94,6 +100,7 @@ func (s *Store) SaveReview(ctx context.Context, rec store.ReviewRecord) (string,
 	return rec.ID, nil
 }
 
+// GetReview loads a persisted review by id, returning an error when none exists.
 func (s *Store) GetReview(ctx context.Context, id string) (store.ReviewRecord, error) {
 	var (
 		rec          store.ReviewRecord
@@ -105,7 +112,7 @@ func (s *Store) GetReview(ctx context.Context, id string) (store.ReviewRecord, e
 		`SELECT id, repo_dir, mode, head_sha, created_at, findings_json, stats_json
 		 FROM reviews WHERE id = ?`, id)
 	err := row.Scan(&rec.ID, &rec.RepoDir, &rec.Mode, &rec.HeadSHA, &createdAt, &findingsJSON, &statsJSON)
-	if err == sql.ErrNoRows {
+	if errors.Is(err, sql.ErrNoRows) {
 		return store.ReviewRecord{}, fmt.Errorf("review %q not found", id)
 	}
 	if err != nil {
@@ -128,6 +135,7 @@ func (s *Store) GetReview(ctx context.Context, id string) (store.ReviewRecord, e
 // package's record type.
 type EngineStore struct{ S *Store }
 
+// SaveReview adapts an engine.PersistRecord to the store record and persists it.
 func (e EngineStore) SaveReview(ctx context.Context, rec engine.PersistRecord) (string, error) {
 	return e.S.SaveReview(ctx, store.ReviewRecord{
 		ID:        rec.ID,
@@ -140,6 +148,7 @@ func (e EngineStore) SaveReview(ctx context.Context, rec engine.PersistRecord) (
 	})
 }
 
+// GetReview loads a review by id and adapts it to an engine.PersistRecord.
 func (e EngineStore) GetReview(ctx context.Context, id string) (engine.PersistRecord, error) {
 	r, err := e.S.GetReview(ctx, id)
 	if err != nil {

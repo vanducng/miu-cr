@@ -18,13 +18,20 @@ func registerTools(server *mcp.Server, deps Deps, opts Options, policy safetyPol
 		if in.Expand != nil {
 			expand = *in.Expand
 		}
+		gate := in.Gate
+		if gate == "" {
+			gate = "high"
+		}
+		if err := engine.ValidateInvocation(in.Staged, in.From, in.To, in.Commit, gate); err != nil {
+			return nil, reviewRunOutput{}, policy.toolErr("review.invalid_request", err)
+		}
 		res, err := deps.Engine.Review(ctx, engine.Request{
 			Mode:         modeFor(in),
 			Staged:       in.Staged,
 			From:         in.From,
 			To:           in.To,
 			Commit:       in.Commit,
-			Gate:         in.Gate,
+			Gate:         gate,
 			RepoDir:      ".",
 			ExpandWindow: expand,
 			TokenBudget:  in.TokenBudget,

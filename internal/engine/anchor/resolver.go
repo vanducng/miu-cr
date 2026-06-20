@@ -99,28 +99,35 @@ func resolveFromHunk(f *engine.Finding, d *diff.Diff, target []string) bool {
 
 // extractSideLines returns one side of a hunk with absolute line numbers.
 // newSide=true → context+added (new-file numbers); false → context+deleted (old-file numbers).
+// Blank-after-normalize lines are dropped so the side matches splitAndNormalize's
+// target (which also drops blanks), keeping the surviving lines' real numbers.
 func extractSideLines(hunk *diff.Hunk, newSide bool) []indexedLine {
 	var result []indexedLine
 	oldLine := hunk.OldStart
 	newLine := hunk.NewStart
+	add := func(num int, content string) {
+		if n := normalizeLine(content); n != "" {
+			result = append(result, indexedLine{num, n})
+		}
+	}
 	for _, l := range hunk.Lines {
 		switch l.Type {
 		case diff.HunkContext:
 			if newSide {
-				result = append(result, indexedLine{newLine, normalizeLine(l.Content)})
+				add(newLine, l.Content)
 			} else {
-				result = append(result, indexedLine{oldLine, normalizeLine(l.Content)})
+				add(oldLine, l.Content)
 			}
 			oldLine++
 			newLine++
 		case diff.HunkAdded:
 			if newSide {
-				result = append(result, indexedLine{newLine, normalizeLine(l.Content)})
+				add(newLine, l.Content)
 			}
 			newLine++
 		case diff.HunkDeleted:
 			if !newSide {
-				result = append(result, indexedLine{oldLine, normalizeLine(l.Content)})
+				add(oldLine, l.Content)
 			}
 			oldLine++
 		}
@@ -150,28 +157,23 @@ func matchConsecutive(sideLines []indexedLine, target []string) (startLine, endL
 
 // resolveFromFileContent scans the mode-correct NewFileContent for a consecutive
 // match. First-match-wins; tried only after both hunk sides miss (hunk-side
-// preferred). Duplicated snippets are an accepted ambiguity for M1.
+// preferred). Blank-after-normalize lines are dropped (matching target), so quoted
+// code spanning interior blanks still anchors. Duplicated snippets are an accepted
+// ambiguity for M1.
 func resolveFromFileContent(f *engine.Finding, d *diff.Diff, target []string) bool {
 	if d.NewFileContent == "" {
 		return false
 	}
-	fileLines := strings.Split(d.NewFileContent, "\n")
-	if len(fileLines) < len(target) {
-		return false
+	rawLines := strings.Split(d.NewFileContent, "\n")
+	fileLines := make([]indexedLine, 0, len(rawLines))
+	for i, raw := range rawLines {
+		if n := normalizeLine(strings.TrimRight(raw, "\r")); n != "" {
+			fileLines = append(fileLines, indexedLine{i + 1, n})
+		}
 	}
-	for i := 0; i <= len(fileLines)-len(target); i++ {
-		matched := true
-		for j, t := range target {
-			if normalizeLine(strings.TrimRight(fileLines[i+j], "\r")) != t {
-				matched = false
-				break
-			}
-		}
-		if matched {
-			f.Line = i + 1
-			f.EndLine = i + len(target)
-			return true
-		}
+	if start, end, ok := matchConsecutive(fileLines, target); ok {
+		f.Line, f.EndLine = start, end
+		return true
 	}
 	return false
 }

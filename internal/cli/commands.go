@@ -6,8 +6,10 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"os/signal"
 	"runtime/debug"
 	"strings"
+	"syscall"
 	"time"
 
 	"github.com/spf13/cobra"
@@ -20,13 +22,17 @@ type options struct {
 
 var version = "v0.1.0" // x-release-please-version
 
+// Execute runs the miucr root command with args, returning a CLIError whose Exit
+// code the caller (cmd/miucr) maps to the process status.
 func Execute(args []string) error {
 	opts := &options{output: "json", timeout: 30 * time.Second}
 	root := rootCommand(opts)
 	root.SetArgs(args)
 	root.SilenceUsage = true
 	root.SilenceErrors = true
-	if err := root.Execute(); err != nil {
+	ctx, stop := signal.NotifyContext(stdctx.Background(), os.Interrupt, syscall.SIGTERM)
+	defer stop()
+	if err := root.ExecuteContext(ctx); err != nil {
 		var already *CLIError
 		if errors.As(err, &already) && already.AlreadyWritten {
 			return err // command emitted its own envelope; just carry the exit code

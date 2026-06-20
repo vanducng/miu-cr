@@ -6,6 +6,8 @@ import (
 	"time"
 
 	"github.com/spf13/cobra"
+
+	"github.com/vanducng/miu-cr/internal/engine"
 )
 
 // ReviewRequest is the mode-agnostic review invocation passed to the injected
@@ -112,7 +114,13 @@ func reviewCommand(opts *options) *cobra.Command {
 				ExpandWindow: expand,
 				TokenBudget:  tokenBudget,
 			}
-			out, err := reviewer.Review(cmd.Context(), req)
+			ctx := cmd.Context()
+			if opts.timeout > 0 {
+				var cancel stdctx.CancelFunc
+				ctx, cancel = stdctx.WithTimeout(ctx, opts.timeout)
+				defer cancel()
+			}
+			out, err := reviewer.Review(ctx, req)
 			if err != nil {
 				return err
 			}
@@ -125,7 +133,9 @@ func reviewCommand(opts *options) *cobra.Command {
 				"stats":    out.Stats,
 			}
 			if prettyOutput {
-				renderReviewTable(cmd.OutOrStdout(), out)
+				if err := renderReviewTable(cmd.OutOrStdout(), out); err != nil {
+					return err
+				}
 			} else if err := writeSuccess(cmd.OutOrStdout(), "review", "review.result", data, summary); err != nil {
 				return err
 			}
@@ -163,44 +173,11 @@ func reviewCommand(opts *options) *cobra.Command {
 	return cmd
 }
 
-// validGates is the closed set accepted by --gate; anything else is rejected so
-// a typo can never silently disable gating.
-var validGates = map[string]bool{
-	"none": true, "info": true, "low": true,
-	"medium": true, "high": true, "critical": true,
-}
-
-// validateReviewFlags rejects more than one mode group and an unrecognized gate.
-// MarkFlagsRequiredTogether already pairs from/to; this catches every other
-// invalid combo (no half-range, no staged+commit, no range+commit, at least one
-// mode) and an out-of-set --gate (case-sensitive, matching engine severity).
+// validateReviewFlags rejects more than one mode group and an unrecognized gate
+// by delegating to the shared engine.ValidateInvocation contract, so the CLI and
+// the MCP review_run boundary enforce identical rules. MarkFlagsRequiredTogether
+// already pairs from/to; this catches every other invalid combo (no half-range,
+// no staged+commit, no range+commit, at least one mode) and an out-of-set --gate.
 func validateReviewFlags(staged bool, from, to, commit, gate string) error {
-	if !validGates[gate] {
-		return &CLIError{
-			Code:    "review.bad_gate",
-			Message: fmt.Sprintf("invalid --gate %q: want one of none|info|low|medium|high|critical", gate),
-			Exit:    2,
-		}
-	}
-	hasRange := from != "" || to != ""
-	if (from == "") != (to == "") {
-		return &CLIError{Code: "review.bad_flags", Message: "--from and --to must be used together", Exit: 2}
-	}
-	modes := 0
-	if staged {
-		modes++
-	}
-	if hasRange {
-		modes++
-	}
-	if commit != "" {
-		modes++
-	}
-	if modes == 0 {
-		return &CLIError{Code: "review.no_mode", Message: "select exactly one mode: --staged, --from/--to, or --commit", Exit: 2}
-	}
-	if modes > 1 {
-		return &CLIError{Code: "review.bad_flags", Message: "modes are mutually exclusive: use only one of --staged, --from/--to, --commit", Exit: 2}
-	}
-	return nil
+	return engine.ValidateInvocation(staged, from, to, commit, gate)
 }

@@ -11,7 +11,7 @@ import (
 	"sort"
 	"time"
 
-	"github.com/vanducng/miu-cr/internal/cli"
+	"github.com/vanducng/miu-cr/internal/cli/clierr"
 	enginectx "github.com/vanducng/miu-cr/internal/engine/context"
 	"github.com/vanducng/miu-cr/internal/engine/diff"
 	"github.com/vanducng/miu-cr/internal/engine/gitcmd"
@@ -102,7 +102,7 @@ func New(a Agent, runner *gitcmd.Runner) *Engine {
 // GetReview re-fetches a persisted review by id; errors if no Store is wired.
 func (e *Engine) GetReview(ctx stdctx.Context, id string) (PersistRecord, error) {
 	if e.Store == nil {
-		return PersistRecord{}, &cli.CLIError{Code: "engine.no_store", Message: "persistence not configured", Exit: 1}
+		return PersistRecord{}, &clierr.CLIError{Code: "engine.no_store", Message: "persistence not configured", Exit: 1}
 	}
 	return e.Store.GetReview(ctx, id)
 }
@@ -185,7 +185,7 @@ func (e *Engine) Review(ctx stdctx.Context, req Request) (ReviewResult, error) {
 	}
 
 	if anchorLineNumbers == nil {
-		return ReviewResult{}, &cli.CLIError{Code: "engine.no_anchorer", Message: "anchoring not wired", Exit: 1}
+		return ReviewResult{}, &clierr.CLIError{Code: "engine.no_anchorer", Message: "anchoring not wired", Exit: 1}
 	}
 	anchored := anchorLineNumbers(raw, selected)
 	kept := dropDrift(anchored)
