@@ -152,5 +152,5 @@ jobs:
           fi
 
           gh release edit "$TAG_NAME" \
-            --title "$TAG_NAME — miu-cr PR Review" \
+            --title "$TAG_NAME" \
             --notes "$(cat "$NOTES_FILE")"

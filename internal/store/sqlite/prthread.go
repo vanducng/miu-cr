@@ -62,7 +62,7 @@ func (s *Store) MarkResolved(ctx context.Context, key store.PRKey, fps []string)
 	for _, fp := range fps {
 		_, err := tx.ExecContext(ctx,
 			`UPDATE pr_findings SET status='resolved', last_seen=?
-			 WHERE owner=? AND repo=? AND number=? AND fingerprint=?`,
+			 WHERE owner=? AND repo=? AND number=? AND fingerprint=? AND status='posted'`,
 			now, key.Owner, key.Repo, key.Number, fp,
 		)
 		if err != nil {
