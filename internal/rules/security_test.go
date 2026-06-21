@@ -91,8 +91,59 @@ func TestInlineContextFileRejectsSymlinkEscape(t *testing.T) {
 	if strings.Contains(text, "TOP SECRET") {
 		t.Errorf("symlinked context_file escaped the rule directory: %q", text)
 	}
-	if !strings.Contains(text, "escapes the rule directory") {
-		t.Errorf("expected escape note for symlinked context_file: %q", text)
+	// O_NOFOLLOW refuses the symlinked final component atomically at open time.
+	if !strings.Contains(text, "symlink not allowed") {
+		t.Errorf("expected symlink-skip note for symlinked context_file: %q", text)
+	}
+}
+
+func TestLoadRulesWarnsIntraRepoStemCollision(t *testing.T) {
+	dir := t.TempDir()
+	write := func(name, body string) {
+		if err := os.WriteFile(filepath.Join(dir, name), []byte("---\ndescription: "+body+"\n---\n"+body+"\n"), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	// "custom" is not a built-in default, so a collision here exercises the
+	// intra-repo path, not the trusted-override path. The two names differ only
+	// by extension case → same stem on a case-sensitive FS.
+	write("custom.md", "first")
+	write("custom.MD", "second")
+	entries, _ := os.ReadDir(dir)
+	if len(entries) < 2 {
+		t.Skip("case-insensitive filesystem coalesced the two rule files")
+	}
+
+	_, warnings := LoadRules("", dir, true)
+	var warned bool
+	for _, w := range warnings {
+		if strings.Contains(w, "duplicate stem") && strings.Contains(w, "custom") {
+			warned = true
+		}
+	}
+	if !warned {
+		t.Errorf("expected intra-repo duplicate-stem warning, got %v", warnings)
+	}
+}
+
+func TestInlineContextFileRejectsOversized(t *testing.T) {
+	dir := t.TempDir()
+	big := strings.Repeat("Z", maxContextFileBytes+1)
+	if err := os.WriteFile(filepath.Join(dir, "big.txt"), []byte(big), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	r := Rule{
+		Stem:       "withctx",
+		Path:       filepath.Join(dir, "withctx.md"),
+		Provenance: UserTrusted,
+		FM:         Frontmatter{AlwaysApply: true, ContextFiles: []string{"big.txt"}},
+	}
+	text, _, _ := BuildRulesSection([]Rule{r}, true, 0)
+	if strings.Contains(text, "ZZZZ") {
+		t.Errorf("oversized context_file must be rejected, not partially inlined: %q", text)
+	}
+	if !strings.Contains(text, "exceeds byte cap") {
+		t.Errorf("expected oversized-skip note, got: %q", text)
 	}
 }
 

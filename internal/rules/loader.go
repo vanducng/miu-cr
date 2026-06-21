@@ -3,6 +3,7 @@ package rules
 import (
 	"errors"
 	"fmt"
+	"io"
 	"os"
 	"path/filepath"
 	"sort"
@@ -15,6 +16,10 @@ import (
 // ErrNotARule signals a file with no leading frontmatter fence: it is not a
 // rule and must be skipped (callers may still report it as a body-only file).
 var ErrNotARule = errors.New("not a rule: missing frontmatter fence")
+
+// errSymlink is the platform-agnostic sentinel openNoFollow returns when the
+// target is a symlink, so callers don't depend on a platform errno.
+var errSymlink = errors.New("symlink not allowed")
 
 const fence = "---"
 
@@ -99,9 +104,15 @@ func LoadRules(userDir, repoDir string, allowRepo bool) (rules []Rule, warnings 
 		repoRules, rw := loadDir(repoDir, RepoUntrusted)
 		warnings = append(warnings, rw...)
 		for _, r := range repoRules {
-			if existing, ok := byStem[r.Stem]; ok && existing.Provenance.Trusted() {
-				warnings = append(warnings, fmt.Sprintf("rules: ignore repo rule %s (stem %q already provided by trusted layer %s)", r.Path, r.Stem, existing.Provenance))
-				continue
+			if existing, ok := byStem[r.Stem]; ok {
+				if existing.Provenance.Trusted() {
+					warnings = append(warnings, fmt.Sprintf("rules: ignore repo rule %s (stem %q already provided by trusted layer %s)", r.Path, r.Stem, existing.Provenance))
+					continue
+				}
+				// Intra-layer collision: two repo rules resolve to the same stem
+				// (e.g. security.md and security.MD on a case-insensitive FS); the
+				// later one silently shadows the earlier — warn before overwriting.
+				warnings = append(warnings, fmt.Sprintf("rules: duplicate stem %q in repo layer (%s shadows %s)", r.Stem, r.Path, existing.Path))
 			}
 			byStem[r.Stem] = r
 		}
@@ -131,23 +142,31 @@ func loadDir(dir string, prov Provenance) (rules []Rule, warnings []string) {
 			continue
 		}
 		path := filepath.Join(dir, e.Name())
-		// lstat (not stat) so a symlink is detected as a symlink rather than
-		// followed: a committed .miu/cr/rules/link.md -> /etc/passwd must never
-		// be read and injected into the prompt.
-		fi, err := os.Lstat(path)
+		// openNoFollow refuses a symlinked .miu/cr/rules/link.md -> /etc/passwd
+		// (atomically on unix), then we fstat the handle (not the path) for the
+		// size cap and read from the same handle — no lstat-then-read TOCTOU.
+		f, err := openNoFollow(path)
 		if err != nil {
+			if errors.Is(err, errSymlink) {
+				warnings = append(warnings, fmt.Sprintf("rules: skip %s (symlink not allowed)", path))
+			} else {
+				warnings = append(warnings, fmt.Sprintf("rules: skip %s: %v", path, err))
+			}
+			continue
+		}
+		fi, err := f.Stat()
+		if err != nil {
+			f.Close()
 			warnings = append(warnings, fmt.Sprintf("rules: skip %s: %v", path, err))
 			continue
 		}
-		if fi.Mode()&os.ModeSymlink != 0 {
-			warnings = append(warnings, fmt.Sprintf("rules: skip %s (symlink not allowed)", path))
-			continue
-		}
 		if fi.Size() > maxRuleFileBytes {
+			f.Close()
 			warnings = append(warnings, fmt.Sprintf("rules: skip %s (file too large: %d bytes)", path, fi.Size()))
 			continue
 		}
-		data, err := os.ReadFile(path)
+		data, err := io.ReadAll(f)
+		f.Close()
 		if err != nil {
 			warnings = append(warnings, fmt.Sprintf("rules: read %s: %v", path, err))
 			continue

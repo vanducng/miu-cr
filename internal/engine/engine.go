@@ -19,11 +19,6 @@ import (
 	"github.com/vanducng/miu-cr/internal/rules"
 )
 
-// minDiffBudget keeps the diff budget above the <=0 disabled sentinel after the
-// rules cap is subtracted, so a large rules budget can never silently disable
-// diff truncation.
-const minDiffBudget = 1024
-
 // PersistRecord is the engine's view of a persisted review. The store package
 // adapts it to its concrete ReviewRecord; defined here so engine sits below
 // store in the import graph (store imports engine.Finding).
@@ -277,7 +272,7 @@ func trustedOnly(in []rules.Rule) []rules.Rule {
 // changedPathsOf derives forward-slash relative paths from the selected diffs
 // (NewPath, plus OldPath for renames) for glob matching.
 func changedPathsOf(selected []diff.Diff) []string {
-	out := make([]string, 0, len(selected)+1)
+	out := make([]string, 0, len(selected)*2) // worst case: a rename adds OldPath + NewPath
 	seen := map[string]bool{}
 	add := func(p string) {
 		p = filepath.ToSlash(p)
@@ -296,18 +291,22 @@ func changedPathsOf(selected []diff.Diff) []string {
 	return out
 }
 
-// diffBudget subtracts the rules cap from the diff token budget with a floor so
-// the diff budget never hits the <=0 disabled sentinel. The floor only acts as a
-// safety net: it is clamped to the caller's total so a large rules cap can never
-// hand back MORE diff budget than the caller asked for. A disabled diff budget
-// (<=0) stays disabled.
+// diffBudget splits the caller's total token budget between the diff and the
+// rules section. The rules cap is bounded to at most half the total so the diff
+// always keeps a usable share even when rulesCap (default ~4096) dwarfs a small
+// total; the result is clamped to [1, total]. A disabled total (<=0) stays
+// disabled; a non-positive rulesCap means no rules section, so the diff gets the
+// whole total.
 func diffBudget(total, rulesCap int) int {
-	if total <= 0 || rulesCap <= 0 {
+	if total <= 0 {
 		return total
 	}
-	b := total - rulesCap
-	if b < minDiffBudget {
-		return min(total, minDiffBudget)
+	if rulesCap <= 0 {
+		return total
+	}
+	b := total - min(rulesCap, total/2)
+	if b < 1 {
+		return 1
 	}
 	return b
 }

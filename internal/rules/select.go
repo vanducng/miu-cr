@@ -44,7 +44,10 @@ func (r Rule) applies(changedPaths []string) bool {
 			continue
 		}
 		for _, p := range changedPaths {
-			if ok, _ := doublestar.Match(g, p); ok {
+			// validateGlobs (loader.go) rejects malformed patterns at load time, so
+			// a match error here is unexpected; treat it as a non-match rather than
+			// matching spuriously.
+			if ok, err := doublestar.Match(g, p); err == nil && ok {
 				return true
 			}
 		}

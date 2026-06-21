@@ -150,6 +150,43 @@ func TestRulesCheckReportsBodyOnlyFile(t *testing.T) {
 	}
 }
 
+func TestRulesCheckSurfacesAllWarnings(t *testing.T) {
+	repo := isolateRulesEnv(t)
+	rulesDir := filepath.Join(repo, ".miu", "cr", "rules")
+	if err := os.MkdirAll(rulesDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	// Oversized rule: loader skips it with a "too large" warning that must reach
+	// the user via the envelope, not just the live reviewer's stderr log.
+	big := "---\ndescription: huge\n---\n" + strings.Repeat("A", 64*1024+1)
+	if err := os.WriteFile(filepath.Join(rulesDir, "huge.md"), []byte(big), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	out, err := runRules(t, "check", "any/path.go")
+	if err != nil {
+		t.Fatalf("check: %v\nout=%s", err, out)
+	}
+	env := decodeEnvelope(t, []byte(out))
+	data, ok := env.Data.(map[string]any)
+	if !ok {
+		t.Fatalf("data not an object: %T", env.Data)
+	}
+	warnings, ok := data["warnings"].([]any)
+	if !ok || len(warnings) == 0 {
+		t.Fatalf("want warnings surfaced, got %v", data["warnings"])
+	}
+	var found bool
+	for _, w := range warnings {
+		if strings.Contains(toString(w), "huge.md") && strings.Contains(toString(w), "too large") {
+			found = true
+		}
+	}
+	if !found {
+		t.Errorf("expected oversized-file warning surfaced, got %v", warnings)
+	}
+}
+
 func applicableStems(t *testing.T, env Envelope) []string {
 	t.Helper()
 	data, ok := env.Data.(map[string]any)

@@ -88,17 +88,25 @@ func rulesCheckCommand(_ *options) *cobra.Command {
 			}
 
 			bodyOnly := bodyOnlyWarnings(warnings)
+			if warnings == nil {
+				warnings = []string{}
+			}
+			// Surface ALL load warnings (bad YAML, oversized, invalid glob, blocked
+			// stem-override, symlink-skip), matching what the live reviewer logs via
+			// slog.Warn — so a user debugging "why isn't my rule loading?" sees them.
 			data := map[string]any{
 				"path":         changed,
 				"applicable":   applicable,
 				"loaded_count": len(loaded),
 				"body_only":    bodyOnly,
+				"warnings":     warnings,
 			}
 			summary := map[string]any{
 				"path":            changed,
 				"applicable":      len(applicable),
 				"loaded":          len(loaded),
 				"body_only_files": len(bodyOnly),
+				"warnings":        len(warnings),
 			}
 			return writeSuccess(cmd.OutOrStdout(), "rules check", "rules.check", data, summary)
 		},

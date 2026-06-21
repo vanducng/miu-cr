@@ -1,6 +1,7 @@
 package rules
 
 import (
+	"errors"
 	"fmt"
 	"io"
 	"os"
@@ -98,12 +99,16 @@ func renderRule(r Rule, allowContextFiles bool, totalContext *int) string {
 	return sb.String()
 }
 
-// inlineContextFile resolves cf relative to the rule file, rejecting absolute,
-// `..`-escaping, and symlink-escaping paths, then inlines the file content under
-// per-file and total byte caps that are enforced BEFORE the file is read (so an
-// oversized or already-over-cap file is never pulled into memory). Missing or
-// rejected files become a one-line warning comment — never carrying an absolute
-// path — so the model knows the hint was attempted but skipped.
+// inlineContextFile resolves cf relative to the rule file, rejecting absolute and
+// `..`-escaping paths, then inlines the file content under per-file and total byte
+// caps. The file is opened via openNoFollow, which refuses a symlinked final
+// component (atomically on unix) — this replaces the EvalSymlinks-then-open dance
+// and closes its TOCTOU (an attacker can't swap a regular file for a symlink
+// between the check and the read). An oversized file is REJECTED with a warning rather
+// than silently truncated, so the model never sees a partial file that looks
+// complete. Missing or rejected files become a one-line warning comment — never
+// carrying an absolute path — so the model knows the hint was attempted but
+// skipped.
 func inlineContextFile(r Rule, cf string, totalContext *int) string {
 	if cf == "" {
 		return ""
@@ -122,47 +127,52 @@ func inlineContextFile(r Rule, cf string, totalContext *int) string {
 		return skipContext(cf, "path escapes the rule directory")
 	}
 
-	// Resolve symlinks on both base and target, then re-check containment: this
-	// defeats a symlinked path component pointing outside the rule directory and
-	// also normalizes platform symlinks (e.g. macOS /var -> /private/var) so the
-	// comparison is apples-to-apples.
-	evalBase, err := filepath.EvalSymlinks(base)
-	if err != nil {
-		return skipContext(cf, "read error")
-	}
-	evalFull, err := filepath.EvalSymlinks(full)
-	if err != nil {
-		return skipContext(cf, "not found")
-	}
-	if !withinBase(evalBase, evalFull) {
-		return skipContext(cf, "path escapes the rule directory")
-	}
-
-	fi, err := os.Stat(evalFull)
-	if err != nil {
-		return skipContext(cf, "read error")
-	}
-	if !fi.Mode().IsRegular() {
-		return skipContext(cf, "not a regular file")
-	}
 	if *totalContext >= maxContextTotalBytes {
 		return skipContext(cf, "total context byte cap reached")
 	}
 
-	// Read budget bounded by both the per-file cap and the remaining total cap,
-	// applied via LimitReader so memory stays bounded regardless of file size.
+	// openNoFollow refuses a symlinked final component (atomically on unix), so a
+	// .miu/cr/rules/ctx.txt -> /etc/passwd is rejected without following it.
+	f, err := openNoFollow(full)
+	if err != nil {
+		switch {
+		case errors.Is(err, errSymlink):
+			return skipContext(cf, "symlink not allowed")
+		case os.IsNotExist(err):
+			return skipContext(cf, "missing")
+		default:
+			return skipContext(cf, "unreadable")
+		}
+	}
+	defer f.Close()
+
+	fi, err := f.Stat()
+	if err != nil {
+		return skipContext(cf, "unreadable")
+	}
+	if !fi.Mode().IsRegular() {
+		return skipContext(cf, "not a regular file")
+	}
+
+	// Budget bounded by both the per-file cap and the remaining total cap. An
+	// oversized file is rejected (not truncated): a partial config or fixture
+	// could read as valid-but-incomplete and mislead the review.
 	budget := maxContextFileBytes
 	if rem := maxContextTotalBytes - *totalContext; rem < budget {
 		budget = rem
 	}
-	f, err := os.Open(evalFull)
-	if err != nil {
-		return skipContext(cf, "read error")
+	if fi.Size() > int64(budget) {
+		return skipContext(cf, "exceeds byte cap")
 	}
-	defer f.Close()
-	content, err := io.ReadAll(io.LimitReader(f, int64(budget)))
+
+	// LimitReader at budget+1 guards against a post-stat grow: if more than budget
+	// bytes are readable, reject rather than truncate.
+	content, err := io.ReadAll(io.LimitReader(f, int64(budget)+1))
 	if err != nil {
-		return skipContext(cf, "read error")
+		return skipContext(cf, "unreadable")
+	}
+	if len(content) > budget {
+		return skipContext(cf, "exceeds byte cap")
 	}
 	*totalContext += len(content)
 
@@ -181,9 +191,9 @@ func skipContext(cf, reason string) string {
 	return fmt.Sprintf("[context_file %q skipped: %s]\n", cf, reason)
 }
 
-// withinBase reports whether full lexically resolves inside base. Callers pass
-// symlink-evaluated paths for the security-critical check; the lexical form is
-// also used as a cheap first pass before symlink resolution.
+// withinBase reports whether full lexically resolves inside base. This rejects
+// `..` escapes; a symlinked final component is refused separately at open time
+// via openNoFollow.
 func withinBase(base, full string) bool {
 	rel, err := filepath.Rel(base, full)
 	if err != nil {
