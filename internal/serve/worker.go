@@ -93,6 +93,9 @@ func (p *Pool) worker() {
 func (p *Pool) run(j Job) {
 	var reviewErr error
 	defer func() {
+		// Order is load-bearing: clear inflight BEFORE OnDone so a future OnDone
+		// that re-Submits the same key isn't coalesced away. Today OnDone only
+		// records cursor state, so the ordering is latent but intentional.
 		p.mu.Lock()
 		delete(p.inflight, j.Key)
 		p.mu.Unlock()

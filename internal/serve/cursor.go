@@ -92,6 +92,9 @@ func loadCursor(path string, log *slog.Logger) *Cursor {
 	if c.NotifSeen == nil {
 		c.NotifSeen = map[string]string{}
 	}
+	// Deferred: touched is in-memory only, so the staleness clock resets each
+	// restart — abandoned entries can outlive pruneAge across frequent restarts.
+	// Acceptable: prune is best-effort dedup hygiene, not a correctness boundary.
 	c.touched = map[string]time.Time{}
 	now := time.Now()
 	for ref := range c.Seen {
@@ -132,5 +135,8 @@ func (c *Cursor) save(path string) error {
 		os.Remove(tmpName)
 		return err
 	}
+	// os.Rename is atomic-replace on all targets incl. Windows (Go maps it to
+	// MoveFileEx with MOVEFILE_REPLACE_EXISTING), so overwriting the prior cursor
+	// needs no pre-remove dance.
 	return os.Rename(tmpName, path)
 }

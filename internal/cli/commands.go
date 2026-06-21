@@ -185,6 +185,9 @@ func serveCommand(opts *options) *cobra.Command {
 			poller := serve.NewPoller(pollCfg(pool), serve.NewNotifGetter(token))
 			g, gctx := errgroup.WithContext(cmd.Context())
 			g.Go(func() error { return srv.Run(gctx, pool) })
+			// poller.Run only exits on ctx cancel; persistent API failures back off
+			// and retry forever (never cancel the group). Surfacing a wedged poller
+			// as fatal is a deferred nicety.
 			g.Go(func() error { poller.Run(gctx); return nil })
 			return g.Wait()
 		},

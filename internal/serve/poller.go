@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"log/slog"
 	"math/rand/v2"
+	"net/http"
 	"regexp"
 	"strconv"
 	"sync"
@@ -62,7 +63,7 @@ type ghNotifGetter struct{ c *github.Client }
 // NewNotifGetter builds the real notifGetter from a GitHub PAT (anonymous when
 // empty). It is the production adapter wired in P2.
 func NewNotifGetter(token string) notifGetter {
-	c := github.NewClient(nil)
+	c := github.NewClient(&http.Client{Timeout: 30 * time.Second})
 	if token != "" {
 		c = c.WithAuthToken(token)
 	}
@@ -171,6 +172,9 @@ func (p *Poller) Run(ctx stdctx.Context) {
 			}
 			backoff = p.handleErr(ctx, err, backoff)
 			if backoff == 0 { // slept already (rate limit) — loop immediately
+				if ctx.Err() != nil { // unless the rate-limit sleep was cancelled (shutdown)
+					return
+				}
 				continue
 			}
 			if sleepCtx(ctx, backoff) {
@@ -280,6 +284,8 @@ func (p *Poller) dispatchCandidate(ctx stdctx.Context, c candidate, token string
 			p.mu.Unlock()
 		},
 	}
+	// Submit==false leaves Seen/NotifSeen unrecorded on purpose: the head is
+	// re-enumerated and retried next tick (no cursor advance for this candidate).
 	if !p.disp.Submit(job) {
 		p.log.Warn("poll: job not enqueued (coalesced/full); retry next tick",
 			"repo", c.owner+"/"+c.repo, "number", c.number)
@@ -331,14 +337,19 @@ func (p *Poller) enumerateNotifications(ctx stdctx.Context) ([]candidate, time.D
 func (p *Poller) enumeratePulls(ctx stdctx.Context) ([]candidate, time.Duration, error) {
 	var cands []candidate
 	var lastWait time.Duration
-	for r := range p.allow {
+	for _, r := range p.allow.sorted() { // deterministic order; one repo's failure must not abort the tick
 		opts := &github.PullRequestListOptions{State: "open"}
 		prs, resp, err := p.gh.ListOpenPRs(ctx, r.Owner, r.Repo, opts)
 		if w := pollIntervalOf(resp); w > lastWait {
 			lastWait = w
 		}
 		if err != nil {
-			return nil, lastWait, err
+			if ctx.Err() != nil {
+				return nil, lastWait, err // propagate cancellation; stop the tick
+			}
+			p.log.Warn("poll: ListOpenPRs failed, skipping repo",
+				"repo", r.Owner+"/"+r.Repo, "error", config.RedactString(err.Error()))
+			continue
 		}
 		for _, pr := range prs {
 			cands = append(cands, candidate{

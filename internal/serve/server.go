@@ -9,6 +9,7 @@ import (
 	"fmt"
 	"log/slog"
 	"net/http"
+	"sort"
 	"strings"
 	"time"
 )
@@ -81,6 +82,22 @@ func newRepoAllowlist(repos []string) repoAllowlist {
 func (a repoAllowlist) allows(owner, repo string) bool {
 	_, ok := a[repoRef{Owner: owner, Repo: repo}]
 	return ok
+}
+
+// sorted returns the allowlist's repoRefs in deterministic (owner, repo) order so
+// callers that iterate (e.g. the poller's pulls source) produce reproducible logs.
+func (a repoAllowlist) sorted() []repoRef {
+	out := make([]repoRef, 0, len(a))
+	for r := range a {
+		out = append(out, r)
+	}
+	sort.Slice(out, func(i, j int) bool {
+		if out[i].Owner != out[j].Owner {
+			return out[i].Owner < out[j].Owner
+		}
+		return out[i].Repo < out[j].Repo
+	})
+	return out
 }
 
 // Server is the webhook daemon seam M8 extends. secret is the []byte HMAC key

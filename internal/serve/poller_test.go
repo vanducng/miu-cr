@@ -19,6 +19,7 @@ type fakeNotifGetter struct {
 	notifResp *github.Response
 	notifErr  error
 	prs       map[string][]*github.PullRequest // owner/repo -> open PRs
+	listErr   map[string]error                 // owner/repo -> ListOpenPRs error
 	getPR     map[string]*github.PullRequest   // owner/repo#n -> PR
 	getPRErr  error
 
@@ -38,7 +39,7 @@ func (f *fakeNotifGetter) ListOpenPRs(_ stdctx.Context, owner, repo string, _ *g
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	f.listCalls++
-	return f.prs[owner+"/"+repo], f.notifResp, nil
+	return f.prs[owner+"/"+repo], f.notifResp, f.listErr[owner+"/"+repo]
 }
 
 func (f *fakeNotifGetter) GetPR(_ stdctx.Context, owner, repo string, number int) (*github.PullRequest, *github.Response, error) {
@@ -273,6 +274,50 @@ func TestPoller_PullsSourceUsesHeadFromList(t *testing.T) {
 	}
 	if gh.listCalls != 1 {
 		t.Errorf("pulls source should ListOpenPRs once per repo, got %d", gh.listCalls)
+	}
+}
+
+// TestPoller_PullsSourceContinuesPastRepoError proves one repo's ListOpenPRs
+// failure is logged + skipped, not allowed to abort the whole tick: the healthy
+// repo's PRs are still enumerated. Sorted iteration means "octo/bad" is tried
+// (and fails) before "octo/good".
+func TestPoller_PullsSourceContinuesPastRepoError(t *testing.T) {
+	gh := &fakeNotifGetter{
+		prs:     map[string][]*github.PullRequest{"octo/good": {prWithHead(1, "sha-A")}},
+		listErr: map[string]error{"octo/bad": errors.New("boom")},
+	}
+	disp := newPollDispatcher()
+	p := newTestPoller(t, sourcePulls, []string{"octo/bad", "octo/good"}, gh, disp)
+
+	cands, _, err := p.enumeratePulls(stdctx.Background())
+	if err != nil {
+		t.Fatalf("a single repo error must not fail the tick: %v", err)
+	}
+	if len(cands) != 1 || cands[0].repo != "good" || cands[0].number != 1 {
+		t.Fatalf("healthy repo PRs must still be enumerated, got %+v", cands)
+	}
+}
+
+// TestPoller_RunStopsOnCancelDuringRateLimitSleep proves a ctx cancel during the
+// rate-limit backoff sleep (inside handleErr) actually stops Run, rather than
+// looping into one extra tick after shutdown.
+func TestPoller_RunStopsOnCancelDuringRateLimitSleep(t *testing.T) {
+	reset := time.Now().Add(time.Hour) // long sleep; cancel must cut it short
+	rlErr := &github.RateLimitError{Rate: github.Rate{Reset: github.Timestamp{Time: reset}}}
+	gh := &fakeNotifGetter{notifErr: rlErr}
+	p := newTestPoller(t, sourceNotifications, []string{"octo/hello"}, gh, newPollDispatcher())
+	p.interval = time.Hour
+
+	ctx, cancel := stdctx.WithCancel(stdctx.Background())
+	done := make(chan struct{})
+	go func() { p.Run(ctx); close(done) }()
+
+	time.Sleep(20 * time.Millisecond) // let Run enter the rate-limit sleep
+	cancel()
+	select {
+	case <-done:
+	case <-time.After(2 * time.Second):
+		t.Fatal("Run did not stop when ctx cancelled during rate-limit sleep")
 	}
 }
 

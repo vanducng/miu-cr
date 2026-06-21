@@ -2,7 +2,13 @@ package serve
 
 import (
 	stdctx "context"
+	"time"
 )
+
+// drainGrace bounds how long RunPoll waits for poller.Run to unwind after ctx
+// cancel before draining anyway, so a tick stuck in a slow GitHub call cannot
+// stall graceful shutdown indefinitely.
+const drainGrace = 10 * time.Second
 
 // RunPoll drives a poll-only daemon: it runs poller.Run(ctx) and, on ctx.Done,
 // Drains the pool exactly once. Poll-only mode has no http.Server (so no
@@ -16,7 +22,10 @@ func RunPoll(ctx stdctx.Context, pool *Pool, poller *Poller) error {
 		close(done)
 	}()
 	<-ctx.Done()
-	<-done
+	select { // bound the wait so a wedged tick can't block Drain forever
+	case <-done:
+	case <-time.After(drainGrace):
+	}
 	if pool != nil {
 		pool.Drain()
 	}
