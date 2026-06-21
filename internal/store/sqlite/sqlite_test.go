@@ -224,6 +224,34 @@ func TestSaveReviewNilFindingsAndStats(t *testing.T) {
 	}
 }
 
+// A path containing '?'/'#' must still open (the DSN is a percent-escaped file:
+// URI, not string concatenation) and WAL must apply to the connection.
+func TestOpenPathWithSpecialChars(t *testing.T) {
+	dir := filepath.Join(t.TempDir(), "od?d#ir")
+	path := filepath.Join(dir, "state.db")
+	s, err := Open(path)
+	if err != nil {
+		t.Fatalf("Open with special-char path: %v", err)
+	}
+	defer func() { _ = s.Close() }()
+
+	var mode string
+	if err := s.db.QueryRowContext(context.Background(), "PRAGMA journal_mode").Scan(&mode); err != nil {
+		t.Fatalf("PRAGMA journal_mode: %v", err)
+	}
+	if !strings.EqualFold(mode, "wal") {
+		t.Fatalf("DSN-level WAL pragma must apply, journal_mode=%q", mode)
+	}
+
+	id, err := s.SaveReview(context.Background(), sampleRecord())
+	if err != nil {
+		t.Fatalf("SaveReview at special-char path: %v", err)
+	}
+	if _, err := s.GetReview(context.Background(), id); err != nil {
+		t.Fatalf("GetReview at special-char path: %v", err)
+	}
+}
+
 func TestNoCredentialColumns(t *testing.T) {
 	s := tempStore(t)
 	ctx := context.Background()
@@ -261,6 +289,20 @@ func TestNoCredentialColumns(t *testing.T) {
 	for _, banned := range []string{"api_key", "ANTHROPIC_API_KEY", "sk-ant"} {
 		if strings.Contains(blob, banned) {
 			t.Fatalf("credential-like value persisted: %s", banned)
+		}
+	}
+}
+
+// dsn builds a valid file: URI with DSN-level pragmas, leading-slashed so it is
+// well-formed on Windows (C:\x -> file:///C:/x) as well as Unix.
+func TestDSNFileURIHasAuthorityAndPragmas(t *testing.T) {
+	got := dsn("/tmp/state.db")
+	if !strings.HasPrefix(got, "file:///") {
+		t.Fatalf("dsn = %q, want a file:/// authority prefix", got)
+	}
+	for _, want := range []string{"busy_timeout(5000)", "journal_mode(WAL)"} {
+		if !strings.Contains(got, want) {
+			t.Errorf("dsn %q missing pragma %q", got, want)
 		}
 	}
 }

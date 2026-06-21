@@ -599,13 +599,136 @@ func TestUpsertSummaryListRateLimitMapped(t *testing.T) {
 }
 
 func TestFingerprintStable(t *testing.T) {
-	f := engine.Finding{File: "p.go", Line: 2, Category: "bug", Rationale: "same"}
+	f := engine.Finding{File: "p.go", Line: 2, Category: "bug", QuotedCode: "x := y / 0"}
 	if fingerprint(f) != fingerprint(f) {
 		t.Fatal("fingerprint must be deterministic")
 	}
+}
+
+// Cross-push: the SAME QuotedCode that re-anchors to a different Line must yield
+// the SAME fingerprint so the existing marker dedupes the re-post (no DB needed).
+func TestFingerprintCrossPushSameCode(t *testing.T) {
+	f := engine.Finding{File: "p.go", Line: 2, Category: "bug", QuotedCode: "x := y / 0"}
 	g := f
-	g.Line = 3
+	g.Line = 99
+	if fingerprint(f) != fingerprint(g) {
+		t.Fatal("same QuotedCode at a different Line must yield the SAME fingerprint")
+	}
+}
+
+// Rationale is LLM free-text and must NOT fragment the key.
+func TestFingerprintIgnoresRationale(t *testing.T) {
+	f := engine.Finding{File: "p.go", Category: "bug", QuotedCode: "x := y / 0", Rationale: "divide by zero"}
+	g := f
+	g.Rationale = "totally different prose"
+	if fingerprint(f) != fingerprint(g) {
+		t.Fatal("Rationale must not change the fingerprint")
+	}
+}
+
+// No over-dedup: findings differing only by leading indentation must differ.
+func TestFingerprintIndentationDistinct(t *testing.T) {
+	f := engine.Finding{File: "p.go", Category: "bug", QuotedCode: "x := 1"}
+	g := f
+	g.QuotedCode = "    x := 1"
 	if fingerprint(f) == fingerprint(g) {
-		t.Fatal("different line must yield a different fingerprint")
+		t.Fatal("indentation-only difference must yield a DIFFERENT fingerprint (no over-dedup)")
+	}
+}
+
+// No over-dedup: findings differing only by an interior blank line must differ.
+func TestFingerprintBlankLineDistinct(t *testing.T) {
+	f := engine.Finding{File: "p.go", Category: "bug", QuotedCode: "a()\nb()"}
+	g := f
+	g.QuotedCode = "a()\n\nb()"
+	if fingerprint(f) == fingerprint(g) {
+		t.Fatal("blank-line-only difference must yield a DIFFERENT fingerprint (no over-dedup)")
+	}
+}
+
+// Same file+category but genuinely different code must differ.
+func TestFingerprintDifferentCode(t *testing.T) {
+	f := engine.Finding{File: "p.go", Category: "bug", QuotedCode: "x := y / 0"}
+	g := f
+	g.QuotedCode = "z := w / 0"
+	if fingerprint(f) == fingerprint(g) {
+		t.Fatal("different code must yield a different fingerprint")
+	}
+}
+
+// normalizeForFingerprint strips the diff column ONLY for a wholly diff-formatted
+// quote. Genuine code with a leading '-'/'+' line (mixed with non-diff lines) must
+// NOT be collapsed into its marker-less form (over-dedup).
+func TestFingerprintLeadingMarkerCodeNotStripped(t *testing.T) {
+	f := engine.Finding{File: "p.go", Category: "bug", QuotedCode: "-1\nfoo()"}
+	g := f
+	g.QuotedCode = "1\nfoo()"
+	if fingerprint(f) == fingerprint(g) {
+		t.Fatal("non-diff code with a leading '-' must not collide with its marker-less form")
+	}
+}
+
+// A wholly diff-formatted quote (every non-blank line begins +/-/space) strips the
+// diff column, so the same change quoted as a hunk maps to its marker-less form.
+func TestFingerprintWhollyDiffStripped(t *testing.T) {
+	diff := engine.Finding{File: "p.go", Category: "bug", QuotedCode: "-old()\n+new()"}
+	plain := engine.Finding{File: "p.go", Category: "bug", QuotedCode: "old()\nnew()"}
+	if fingerprint(diff) != fingerprint(plain) {
+		t.Fatal("a wholly diff-formatted quote should normalize to its marker-less form")
+	}
+}
+
+// Under-dedup (documented, best-effort): the same bug quoted with a different span
+// yields a DIFFERENT fingerprint — exact content match is the M5 ceiling, semantic
+// matching is M7. This asserts the accepted limitation rather than a desired win.
+func TestFingerprintUnderDedupDifferentSpan(t *testing.T) {
+	f := engine.Finding{File: "p.go", Category: "bug", QuotedCode: "x := y / 0"}
+	g := f
+	g.QuotedCode = "x := y / 0\nreturn x"
+	if fingerprint(f) == fingerprint(g) {
+		t.Fatal("documented under-dedup: a different quote span is expected to differ (M7 = semantic)")
+	}
+}
+
+// Guard: two findings whose QuotedCode normalizes to empty (empty or lone diff
+// marker) on the same file+category must NOT collapse to one fp (silent
+// over-dedup). The empty-quote path disambiguates by Line+Rationale.
+func TestFingerprintEmptyQuoteDistinct(t *testing.T) {
+	for _, tc := range []struct{ name, code string }{
+		{"empty", ""},
+		{"lone-plus", "+"},
+		{"lone-minus", "-"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			f := engine.Finding{File: "p.go", Line: 4, Category: "bug", QuotedCode: tc.code, Rationale: "first bug"}
+			g := engine.Finding{File: "p.go", Line: 9, Category: "bug", QuotedCode: tc.code, Rationale: "second bug"}
+			if fingerprint(f) == fingerprint(g) {
+				t.Fatalf("two empty-quote findings (same file+category) must yield DIFFERENT fps")
+			}
+		})
+	}
+}
+
+// normalizeForFingerprint strips a leading diff +/- marker and trailing whitespace
+// and normalizes CRLF, but preserves leading indentation and blank lines, so a
+// diff-quoted finding maps to the same fp as its plain-quoted twin.
+func TestFingerprintDiffMarkerAndCRLF(t *testing.T) {
+	plain := engine.Finding{File: "p.go", Category: "bug", QuotedCode: "    a()\n    b()"}
+	diffQuoted := engine.Finding{File: "p.go", Category: "bug", QuotedCode: "+    a()  \r\n+    b()  "}
+	if fingerprint(plain) != fingerprint(diffQuoted) {
+		t.Fatalf("diff marker + trailing ws + CRLF must normalize to the plain fp")
+	}
+}
+
+// The marker round-trips: fpMarker(fingerprint(f)) is exactly 16 lowercase hex.
+func TestFingerprintMarkerRoundTrip(t *testing.T) {
+	f := engine.Finding{File: "p.go", Category: "bug", QuotedCode: "x := y / 0"}
+	m := fpMarker(fingerprint(f))
+	got := fpMarkerRe.FindStringSubmatch(m)
+	if got == nil {
+		t.Fatalf("fpMarker(%q) does not match fpMarkerRe", m)
+	}
+	if len(got[1]) != 16 {
+		t.Fatalf("fingerprint width = %d, want 16 hex", len(got[1]))
 	}
 }

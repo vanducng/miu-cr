@@ -45,21 +45,48 @@ check_supported() {
 }
 
 resolve_version() {
+	archive="$1"
 	if [ "$VERSION" != "latest" ]; then
 		echo "$VERSION"
 		return
 	fi
-	tag=$(download_stdout "https://api.github.com/repos/$REPO/releases/latest" |
-		grep '"tag_name"' | head -n1 | cut -d'"' -f4)
-	[ -n "$tag" ] || err "could not resolve latest release tag"
+	# Pick the newest release that ACTUALLY carries this archive, not just
+	# releases/latest — there is a window after a tag is published where the
+	# release exists but goreleaser hasn't uploaded its binaries yet, and the
+	# asset download would 404. Walking the list (newest-first) and choosing the
+	# first release whose assets include the archive skips that asset-less window.
+	tag=$(download_stdout "https://api.github.com/repos/$REPO/releases?per_page=20" |
+		awk -v want="$archive" '
+			/"tag_name":/ { t=$0; sub(/.*"tag_name": *"/, "", t); sub(/".*/, "", t); cur=t }
+			cur != "" && index($0, "\"" want "\"") { print cur; exit }
+		')
+	[ -n "$tag" ] || err "could not resolve a latest release containing $archive"
 	echo "$tag"
 }
 
+# download_stdout fetches a URL to stdout. For api.github.com it sends a Bearer
+# token when GITHUB_TOKEN/GH_TOKEN is set so the latest-release lookup isn't
+# anonymous (unauthenticated requests hit a low rate limit → 403). The token is
+# never printed. Unauthenticated still works, just rate-limited.
 download_stdout() {
+	url="$1"
+	token="${GITHUB_TOKEN:-${GH_TOKEN:-}}"
+	authed=0
+	case "$url" in
+		https://api.github.com/*) [ -n "$token" ] && authed=1 ;;
+	esac
 	if have curl; then
-		curl -fsSL "$1"
+		if [ "$authed" = 1 ]; then
+			curl -fsSL -H "Authorization: Bearer $token" "$url"
+		else
+			curl -fsSL "$url"
+		fi
 	elif have wget; then
-		wget -qO- "$1"
+		if [ "$authed" = 1 ]; then
+			wget -qO- --header="Authorization: Bearer $token" "$url"
+		else
+			wget -qO- "$url"
+		fi
 	else
 		err "need curl or wget installed"
 	fi
@@ -104,9 +131,9 @@ main() {
 	os=$(detect_os)
 	arch=$(detect_arch)
 	check_supported "$os" "$arch"
-	tag=$(resolve_version)
 
 	archive="${BINARY}_${os}_${arch}.tar.gz"
+	tag=$(resolve_version "$archive")
 	base="https://github.com/$REPO/releases/download/$tag"
 
 	tmp=$(mktemp -d)

@@ -10,8 +10,11 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"net/url"
 	"os"
 	"path/filepath"
+	"strings"
+	"sync"
 	"time"
 
 	_ "modernc.org/sqlite"
@@ -24,7 +27,8 @@ import (
 // Store is the pure-Go SQLite-backed review store; it persists findings/stats but
 // never credentials.
 type Store struct {
-	db *sql.DB
+	db   *sql.DB
+	prMu sync.Mutex
 }
 
 // DefaultPath returns ~/.config/miu/cr/state.db, sharing config.Dir() with the
@@ -37,13 +41,39 @@ func DefaultPath() (string, error) {
 	return filepath.Join(dir, "state.db"), nil
 }
 
+// dsn builds the modernc DSN as a file: URI so a '?'/'#' or other special char in
+// path can't be mis-parsed as the query/fragment (string concatenation breaks
+// there). The path is percent-escaped via url.URL; the pragmas stay DSN-level so
+// busy_timeout + WAL apply to EVERY pooled connection.
+func dsn(path string) string {
+	if abs, err := filepath.Abs(path); err == nil {
+		path = abs
+	}
+	// Forward slashes + a leading slash so the file: URI is valid on Windows too:
+	// C:\x -> /C:/x -> file:///C:/x. Without this, url.URL emits "file:C:/x" (no
+	// authority), which modernc/SQLite rejects on Windows.
+	p := filepath.ToSlash(path)
+	if !strings.HasPrefix(p, "/") {
+		p = "/" + p
+	}
+	u := url.URL{
+		Scheme:   "file",
+		Path:     p,
+		RawQuery: "_pragma=busy_timeout(5000)&_pragma=journal_mode(WAL)",
+	}
+	return u.String()
+}
+
 // Open opens (creating parent dirs) the state DB at path and idempotently
 // migrates the schema. Driver name "sqlite" is modernc's pure-Go registration.
 func Open(path string) (*Store, error) {
 	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
 		return nil, fmt.Errorf("create state dir: %w", err)
 	}
-	db, err := sql.Open("sqlite", path)
+	// DSN-level pragmas so EVERY pooled connection inherits them (busy_timeout
+	// is per-connection — a one-shot db.Exec only sets it on one connection,
+	// leaving other/cross-process writers to fail SQLITE_BUSY immediately).
+	db, err := sql.Open("sqlite", dsn(path))
 	if err != nil {
 		return nil, err
 	}

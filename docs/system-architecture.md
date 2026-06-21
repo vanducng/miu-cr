@@ -84,6 +84,63 @@ it does no review logic.
   sentinel. `stats.rules_applied` / `rules_truncated` expose the result. Rules
   are context only — never gating.
 
+## Cross-push dedupe + resolution (M5)
+
+Re-running a review must not re-post a finding the author already saw, even
+across pushes that shift line numbers — and a finding the author **fixed** should
+go quiet without permanently suppressing it if it recurs. Two independent layers:
+
+**Layer 1 — content-stable comment fingerprint (portable, no DB).** The single
+chokepoint `github.fingerprint()` is line-free: `path | category |
+sha256(normalizeForFingerprint(QuotedCode))`. Dropping `Line` (the volatile
+re-post axis) and `Rationale` (LLM free-text) makes a re-anchored finding hash to
+the same 16-hex marker, so the existing `<!-- miucr:fp=hash -->` markers carry the
+dedupe state. This works on the **ephemeral GHA runner with no database** — the
+action path stays stateless. `normalizeForFingerprint` is a **dedicated, less-lossy**
+normalize (strip the diff `+`/`-` marker + trailing whitespace + CRLF→LF;
+**preserve leading indentation and blank lines**) — deliberately NOT the anchor's
+`splitAndNormalize` (full-trim + blank-drop), which would over-dedup and silently
+collapse indentation/blank-distinct findings. The anchor keeps its own matching
+normalize. The content key is **best-effort exact-match**: a re-quote of the same
+bug (different span) leaks a duplicate; semantic matching is M7.
+
+**Layer 2 — opt-in SQLite PR-thread store (serve/local).** Resolution tracking
+lives behind a new `store.PRThreadStore` interface (separate from `store.Store`
+so M6 can swap the backend) — `UpsertPosted` / `MarkResolved` / `ListFindings`
+over a `pr_findings` table (`owner,repo,number,fingerprint,path,status` with
+`status` ∈ {`posted`,`resolved`}) appended to the idempotent schema. WAL +
+`busy_timeout` make concurrent CLI/action processes sharing `state.db` safe; an
+in-process mutex guards only a genuine read-modify-write. The store is **opt-in
+via `MIUCR_PR_STORE`** (an explicit signal, not a dir-exists heuristic) so a
+warm-home self-hosted runner doesn't silently persist finding text; it returns
+**nil on the action/CI path**. Finding text is stored **locally only** under
+`~/.config/miu/cr`; it never reaches the envelope.
+
+**Wire glue (`publishReview`).** The skip-set is `ExistingFingerprints ∪
+store{posted}`, then **reopen via set difference**: for each current finding whose
+stored status is `resolved`, `delete(skip, fp)` — the lingering GitHub marker
+keeps it in `ExistingFingerprints`, so a plain union could *never* re-raise it; it
+must be subtracted. After the review, the store is populated from
+`PostReviewResult.PostedFindings` — the **actually-submitted** set (post-cap,
+post-empty-guard, post-APPROVE-degrade), never `res.Findings`, so a cap-omitted or
+empty-guarded finding never records `status=posted`. Resolution: a prior `posted`
+fingerprint absent from the current run whose **path is still in the PR diff** →
+`MarkResolved`. The `*sqlite.Store` is opened per review inside `ReviewPR`
+(`newPRThreadStore` → `sqlite.Open` → `defer Close`) and passed nil-able into
+`publishReview`, which never opens its own — so serve opens/closes one handle per
+PR event, not a single long-lived handle. The Open is a sub-millisecond, idempotent
+`CREATE TABLE IF NOT EXISTS` dwarfed by the clone + LLM pass, and it is opt-in
+(`MIUCR_PR_STORE`). DB-level integrity under concurrency rests on **WAL +
+`busy_timeout` + idempotent `ON CONFLICT` upsert / SQL `MarkResolved`** — NOT on
+the per-`Store` `prMu` (which only serializes a single `Store`'s write loop, and
+does not span the `ListFindings`→`UpsertPosted`/`MarkResolved` window). Note this
+is **best-effort against duplicate *comments*, not a hard guarantee**: idempotent
+upserts dedupe store *rows*, but two near-simultaneous reviews of the same PR can
+each scrape an empty `ExistingFingerprints` and both post before either's markers
+land. The stateless marker scrape (not the store) is what prevents duplicate
+inline comments, and it converges once the first review's comments exist.
+**With `prStore == nil`, publish is byte-for-byte the M2/M9 path.**
+
 ## Write-action safety model (M9)
 
 `review --pr` gains two **opt-in** write-actions, **both default OFF** and both

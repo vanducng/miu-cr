@@ -10,4 +10,15 @@ CREATE TABLE IF NOT EXISTS reviews (
 	findings_json TEXT NOT NULL,
 	stats_json    TEXT NOT NULL
 );
+CREATE TABLE IF NOT EXISTS pr_findings (
+	owner       TEXT NOT NULL,
+	repo        TEXT NOT NULL,
+	number      INTEGER NOT NULL,
+	fingerprint TEXT NOT NULL,
+	path        TEXT NOT NULL,
+	status      TEXT NOT NULL CHECK(status IN ('posted','resolved')),
+	first_seen  TEXT NOT NULL,
+	last_seen   TEXT NOT NULL,
+	PRIMARY KEY (owner, repo, number, fingerprint)
+);
 `

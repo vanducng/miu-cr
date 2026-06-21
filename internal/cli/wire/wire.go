@@ -7,6 +7,7 @@ import (
 	stdctx "context"
 	"errors"
 	"log/slog"
+	"os"
 	"path/filepath"
 	"time"
 
@@ -105,6 +106,28 @@ func (engineReviewer) GateFailed(findings []cli.ReviewFinding, gate string) bool
 // inject a fake client without live network.
 var newGitHubClient = mgithub.NewClient
 
+// newPRThreadStore is the opt-in PR-thread store seam. It returns a non-nil store
+// (and a closer) ONLY when MIUCR_PR_STORE is set — never on the action/CI path,
+// which must stay stateless and byte-for-byte M2/M9. A nil store disables all
+// resolution tracking; the caller MUST nil-check. Tests override it to inject a
+// temp store. An open failure degrades to nil (resolution off, review proceeds).
+var newPRThreadStore = func() (store.PRThreadStore, func()) {
+	if os.Getenv("MIUCR_PR_STORE") == "" {
+		return nil, nil
+	}
+	path, err := sqlite.DefaultPath()
+	if err != nil {
+		slog.Warn("pr-thread store disabled: " + err.Error())
+		return nil, nil
+	}
+	s, err := sqlite.Open(path)
+	if err != nil {
+		slog.Warn("pr-thread store disabled: " + err.Error())
+		return nil, nil
+	}
+	return s.PRThread(), func() { _ = s.Close() }
+}
+
 // prReviewer fetches a GitHub PR into a non-shallow temp clone and runs the M1
 // engine via ModeRange (zero internal/engine changes). The LLM is still required
 // for findings; the GitHub token is optional (anonymous client for public repos).
@@ -181,7 +204,11 @@ func (prReviewer) ReviewPR(ctx stdctx.Context, req cli.PRReviewRequest) (cli.Rev
 	}
 
 	if req.Post {
-		if err := publishReview(ctx, client, runner, dir, info, res, prResult, req); err != nil {
+		prStore, closeStore := newPRThreadStore()
+		if closeStore != nil {
+			defer closeStore()
+		}
+		if err := publishReview(ctx, client, runner, dir, info, res, prResult, req, prStore); err != nil {
 			return cli.ReviewOutcome{}, err
 		}
 	}
@@ -198,7 +225,7 @@ func (prReviewer) ReviewPR(ctx stdctx.Context, req cli.PRReviewRequest) (cli.Rev
 // last so a partial failure leaves the summary reflecting reality. It computes
 // gateClean via engine.GateFailed + reviewedFiles from stats, threads both opt-in
 // write-actions (default OFF) into PostReviewOptions, and fills the outcome fields.
-func publishReview(ctx stdctx.Context, client mgithub.Client, runner *gitcmd.Runner, dir string, info *mgithub.PRInfo, res engine.ReviewResult, prResult *cli.PRResult, req cli.PRReviewRequest) error {
+func publishReview(ctx stdctx.Context, client mgithub.Client, runner *gitcmd.Runner, dir string, info *mgithub.PRInfo, res engine.ReviewResult, prResult *cli.PRResult, req cli.PRReviewRequest, prStore store.PRThreadStore) error {
 	diffs, err := mgithub.DiffsForPR(ctx, runner, dir, info.BaseSHA, info.HeadSHA)
 	if err != nil {
 		return err
@@ -206,6 +233,40 @@ func publishReview(ctx stdctx.Context, client mgithub.Client, runner *gitcmd.Run
 	existing, err := mgithub.ExistingFingerprints(ctx, client, info)
 	if err != nil {
 		return err
+	}
+
+	// skip is the dedupe set passed to PostReview. With no store it is exactly the
+	// M2/M9 ExistingFingerprints; with a store we layer prior 'posted' fps on top
+	// and then SUBTRACT recurring resolved fps so a fixed-then-reappearing finding
+	// reopens (the lingering marker keeps it in `existing`, so only a set-difference
+	// can re-raise it — a union never could).
+	skip := existing
+	prKey := store.PRKey{Owner: info.Owner, Repo: info.Repo, Number: info.Number}
+	var prior []store.PRFinding
+	if prStore != nil {
+		// Best-effort store: a read failure degrades to an EMPTY prior set (no
+		// skip/resolution this run) and is logged — it must never abort the review.
+		if p, lerr := prStore.ListFindings(ctx, prKey); lerr != nil {
+			slog.Warn("pr-thread store read failed, proceeding without prior findings: " + config.RedactString(lerr.Error()))
+		} else {
+			prior = p
+			skip = make(map[string]bool, len(existing)+len(prior))
+			for fp := range existing {
+				skip[fp] = true
+			}
+			priorStatus := make(map[string]string, len(prior))
+			for _, pf := range prior {
+				priorStatus[pf.Fingerprint] = pf.Status
+				if pf.Status == "posted" {
+					skip[pf.Fingerprint] = true
+				}
+			}
+			for _, f := range res.Findings {
+				if priorStatus[mgithub.Fingerprint(f)] == "resolved" {
+					delete(skip, mgithub.Fingerprint(f))
+				}
+			}
+		}
 	}
 
 	opts := mgithub.PostReviewOptions{
@@ -216,7 +277,7 @@ func publishReview(ctx stdctx.Context, client mgithub.Client, runner *gitcmd.Run
 		ReviewedFiles: reviewedFilesFromStats(res.Stats),
 	}
 
-	pr, err := mgithub.PostReview(ctx, client, info, res.Findings, diffs, "", existing, opts)
+	pr, err := mgithub.PostReview(ctx, client, info, res.Findings, diffs, "", skip, opts)
 	if err != nil {
 		return err
 	}
@@ -226,6 +287,14 @@ func publishReview(ctx stdctx.Context, client mgithub.Client, runner *gitcmd.Run
 		return err
 	}
 
+	if prStore != nil {
+		// PostReview + the summary upsert already succeeded — the review is live. A
+		// store write failure must not discard that outcome: log (redacted), continue.
+		if terr := trackResolution(ctx, prStore, prKey, prior, res.Findings, diffs, pr.PostedFindings); terr != nil {
+			slog.Warn("pr-thread store tracking failed: " + config.RedactString(terr.Error()))
+		}
+	}
+
 	prResult.Posted = true
 	prResult.PostedInline = pr.Posted
 	prResult.SummaryAction = action
@@ -233,6 +302,38 @@ func publishReview(ctx stdctx.Context, client mgithub.Client, runner *gitcmd.Run
 	prResult.ApproveAction = approveActionFor(pr.Event)
 	prResult.ApproveReason = pr.Reason
 	return nil
+}
+
+// trackResolution records the actually-submitted findings as posted, then marks as
+// resolved any prior 'posted' fp absent from THIS run whose stored path is still in
+// the PR diff (a finding off the diff can't be re-posted, so absence isn't a fix).
+func trackResolution(ctx stdctx.Context, prStore store.PRThreadStore, key store.PRKey, prior []store.PRFinding, current []engine.Finding, diffs []diff.Diff, posted []mgithub.PostedFinding) error {
+	upserts := make([]store.PRFinding, 0, len(posted))
+	for _, pf := range posted {
+		upserts = append(upserts, store.PRFinding{Fingerprint: pf.Fingerprint, Path: pf.Path, Status: "posted"})
+	}
+	if err := prStore.UpsertPosted(ctx, key, upserts); err != nil {
+		return err
+	}
+
+	currentFPs := make(map[string]bool, len(current))
+	for _, f := range current {
+		currentFPs[mgithub.Fingerprint(f)] = true
+	}
+	pathsInDiff := make(map[string]bool, len(diffs))
+	for i := range diffs {
+		if diffs[i].NewPath != "" && diffs[i].NewPath != "/dev/null" {
+			pathsInDiff[diffs[i].NewPath] = true
+		}
+	}
+
+	var resolved []string
+	for _, pf := range prior {
+		if pf.Status == "posted" && !currentFPs[pf.Fingerprint] && pathsInDiff[pf.Path] {
+			resolved = append(resolved, pf.Fingerprint)
+		}
+	}
+	return prStore.MarkResolved(ctx, key, resolved)
 }
 
 // approveActionFor maps the resolved CreateReview Event to the PRResult action
