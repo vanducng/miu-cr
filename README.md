@@ -67,7 +67,7 @@ export OPENAI_API_KEY=...                           # OpenAI-compatible
 
 ## License
 
-Apache-2.0 — see [LICENSE](LICENSE). Line-anchoring **test fixtures** are derived from [alibaba/open-code-review](https://github.com/alibaba/open-code-review) (Apache-2.0); no source is vendored. See [NOTICE](NOTICE).
+Apache-2.0 — see [LICENSE](LICENSE).
 
 ## Docs
 

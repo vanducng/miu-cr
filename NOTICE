@@ -3,13 +3,3 @@ Copyright 2026 Duc Nguyen (https://github.com/vanducng)
 
 Licensed under the Apache License, Version 2.0 (the "License").
 You may obtain a copy of the License in the LICENSE file in this repository.
-
----
-
-This product includes line-anchoring test fixtures derived from:
-  Open Code Review (alibaba/open-code-review)
-  https://github.com/alibaba/open-code-review
-  Licensed under the Apache License, Version 2.0.
-
-The fixtures are test data used to validate miu-cr's independently-written
-diff line-anchoring resolver. No source code from Open Code Review is vendored.

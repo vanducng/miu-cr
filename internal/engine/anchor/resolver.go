@@ -1,8 +1,5 @@
 // Package anchor re-anchors model findings to line numbers by matching their
 // QuotedCode against the reviewed revision's diff hunks and file content.
-//
-// Algorithm rewritten from scratch; semantics validated against fixtures
-// derived from alibaba/open-code-review internal/diff (Apache-2.0).
 package anchor
 
 import (

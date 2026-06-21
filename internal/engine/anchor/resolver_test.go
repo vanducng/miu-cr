@@ -1,7 +1,5 @@
 package anchor
 
-// fixtures derived from alibaba/open-code-review internal/diff (Apache-2.0)
-
 import (
 	"testing"
 

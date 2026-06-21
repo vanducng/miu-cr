@@ -30,8 +30,6 @@ index 0f7bc76,422c2b7..de98044
 	}
 }
 
-// fixtures derived from alibaba/open-code-review internal/diff (Apache-2.0)
-
 func TestParseDiffText_MultiFileSplit(t *testing.T) {
 	diffText := `diff --git a/a.go b/a.go
 index 1111111..2222222 100644

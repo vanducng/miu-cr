@@ -41,13 +41,3 @@ Rule of thumb: if a change alters what a user types or sees, the skill is likely
 stale — update it in the same work session, don't defer. There is intentionally
 **no in-repo `.claude` skill**; the skill is maintained out-of-tree and synced
 manually.
-
-## Attribution
-
-The anchoring engine's test fixtures are derived from
-[alibaba/open-code-review](https://github.com/alibaba/open-code-review)
-`internal/diff` (Apache-2.0). Only test data was borrowed and attributed inline;
-the anchoring algorithm itself was rewritten from scratch and is not a derivative
-of that project's `resolver.go`. Preserve the inline provenance comments
-(`// fixtures derived from alibaba/open-code-review internal/diff (Apache-2.0)`)
-on any borrowed fixture.
