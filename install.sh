@@ -45,13 +45,22 @@ check_supported() {
 }
 
 resolve_version() {
+	archive="$1"
 	if [ "$VERSION" != "latest" ]; then
 		echo "$VERSION"
 		return
 	fi
-	tag=$(download_stdout "https://api.github.com/repos/$REPO/releases/latest" |
-		grep '"tag_name"' | head -n1 | cut -d'"' -f4)
-	[ -n "$tag" ] || err "could not resolve latest release tag"
+	# Pick the newest release that ACTUALLY carries this archive, not just
+	# releases/latest — there is a window after a tag is published where the
+	# release exists but goreleaser hasn't uploaded its binaries yet, and the
+	# asset download would 404. Walking the list (newest-first) and choosing the
+	# first release whose assets include the archive skips that asset-less window.
+	tag=$(download_stdout "https://api.github.com/repos/$REPO/releases?per_page=20" |
+		awk -v want="$archive" '
+			/"tag_name":/ { t=$0; sub(/.*"tag_name": *"/, "", t); sub(/".*/, "", t); cur=t }
+			cur != "" && index($0, "\"" want "\"") { print cur; exit }
+		')
+	[ -n "$tag" ] || err "could not resolve a latest release containing $archive"
 	echo "$tag"
 }
 
@@ -122,9 +131,9 @@ main() {
 	os=$(detect_os)
 	arch=$(detect_arch)
 	check_supported "$os" "$arch"
-	tag=$(resolve_version)
 
 	archive="${BINARY}_${os}_${arch}.tar.gz"
+	tag=$(resolve_version "$archive")
 	base="https://github.com/$REPO/releases/download/$tag"
 
 	tmp=$(mktemp -d)
