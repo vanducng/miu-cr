@@ -24,7 +24,7 @@ type options struct {
 	timeout time.Duration
 }
 
-var version = "v0.8.0" // x-release-please-version
+var version = "v0.9.0" // x-release-please-version
 
 // Execute runs the miucr root command with args, returning a CLIError whose Exit
 // code the caller (cmd/miucr) maps to the process status.
