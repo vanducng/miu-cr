@@ -73,6 +73,34 @@ idempotent: the summary is **edited** and already-posted inline comments are
 **skipped**. Fork PRs post to the base repo. See
 [GitHub PR review](https://miucr.vanducng.dev/github-pr/).
 
+### Automate PR review (serve daemon or GitHub Action)
+
+Two ways to run the same `--pr` review automatically — both reuse the in-process
+review path, no second engine, no shelling out:
+
+```sh
+# Webhook daemon you host: HMAC-verified, respond-200-fast, bounded async worker.
+WEBHOOK_SECRET=… GITHUB_TOKEN=… ANTHROPIC_API_KEY=… \
+  miucr serve --addr :8080 --repos owner/repo --gate high
+# GET /healthz → 200; POST /webhook ← GitHub pull_request events.
+```
+
+Or drop the reusable composite **GitHub Action** into a workflow (no daemon to host):
+
+```yaml
+- uses: actions/checkout@v4
+- uses: vanducng/miu-cr@v0.3.0        # pin a released tag
+  with:
+    api-key: ${{ secrets.ANTHROPIC_API_KEY }}
+    gate: high                         # set `none` to never block CI
+```
+
+Needs `permissions: pull-requests: write`. The action is same-repo only
+(fork-guarded — `pull_request_target` would leak secrets into untrusted PR code);
+fork-safe automated review is the `serve` path's job. App-installation auth lands
+in a later milestone. Full setup, security model, and the fork limitation:
+[Serve daemon & GitHub Action](https://miucr.vanducng.dev/serve-and-action/).
+
 ## Credentials & providers
 
 BYO API key via env or flag — never a subscription token, never persisted:

@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"log/slog"
 	"os"
 	"os/signal"
 	"runtime/debug"
@@ -13,6 +14,9 @@ import (
 	"time"
 
 	"github.com/spf13/cobra"
+
+	"github.com/vanducng/miu-cr/internal/config"
+	"github.com/vanducng/miu-cr/internal/serve"
 )
 
 type options struct {
@@ -68,7 +72,89 @@ func rootCommand(opts *options) *cobra.Command {
 	root.AddCommand(versionCommand())
 	root.AddCommand(reviewCommand(opts))
 	root.AddCommand(mcpCommand(opts))
+	root.AddCommand(serveCommand(opts))
 	return root
+}
+
+// serveCommand runs the webhook daemon. It fails fast on misconfiguration: an
+// empty WEBHOOK_SECRET accepts forged webhooks (serve.secret_required), no token
+// can't post or clone (serve.token_required), and an empty allowlist would deny
+// everything so --repos is required. Each job's reviewFn delegates to the
+// in-process M2 path via ReviewPRForServe (Post:true); all serve-side errors are
+// routed through config.RedactString inside the serve package.
+func serveCommand(opts *options) *cobra.Command {
+	var (
+		addr  string
+		gate  string
+		repos []string
+	)
+	cmd := &cobra.Command{
+		Use:   "serve",
+		Short: "Run the HMAC webhook daemon that reviews PRs on push",
+		RunE: func(cmd *cobra.Command, args []string) error {
+			secret := strings.TrimSpace(os.Getenv("WEBHOOK_SECRET"))
+			if secret == "" {
+				return &CLIError{
+					Code:    "serve.secret_required",
+					Message: "WEBHOOK_SECRET is required: an empty secret would accept forged webhooks",
+					Hint:    "set WEBHOOK_SECRET to the shared HMAC secret configured on the GitHub webhook",
+					Exit:    2,
+				}
+			}
+			token := resolveGitHubToken("")
+			if token == "" {
+				return &CLIError{
+					Code:    "serve.token_required",
+					Message: "a GitHub token is required: set GITHUB_TOKEN or GH_TOKEN",
+					Hint:    "create a PAT with repo scope so serve can clone and post reviews",
+					Exit:    2,
+				}
+			}
+			if len(repos) == 0 {
+				return &CLIError{
+					Code:    "serve.repos_required",
+					Message: "--repos is required: an empty allowlist reviews nothing",
+					Hint:    "pass --repos owner/repo[,owner/repo...] to allow specific repositories",
+					Exit:    2,
+				}
+			}
+
+			log := slog.New(slog.NewTextHandler(cmd.ErrOrStderr(), &slog.HandlerOptions{Level: slog.LevelInfo}))
+			reviewTO := 15 * time.Minute
+			gateVal := gate
+			reviewFn := func(j serve.Job) {
+				out, err := ReviewPRForServe(cmd.Context(), PRReviewRequest{
+					Ref:     j.Ref,
+					Token:   j.Token,
+					Post:    true,
+					Gate:    gateVal,
+					Timeout: j.Timeout,
+				})
+				if err != nil {
+					log.Error("review failed", "ref", j.Ref, "err", config.RedactString(err.Error()))
+					return
+				}
+				posted, action := 0, "none"
+				if out.PR != nil {
+					posted, action = out.PR.PostedInline, out.PR.SummaryAction
+				}
+				log.Info("review done", "ref", j.Ref, "findings", len(out.Findings), "posted_inline", posted, "summary", action)
+			}
+			srv, pool := serve.New(serve.Config{
+				Addr:          addr,
+				Secret:        []byte(secret),
+				Repos:         repos,
+				ResolveToken:  func() (string, error) { return resolveGitHubToken(""), nil },
+				Logger:        log,
+				ReviewTimeout: reviewTO,
+			}, reviewFn)
+			return srv.Run(cmd.Context(), pool)
+		},
+	}
+	cmd.Flags().StringVar(&addr, "addr", ":8080", "Listen address for the webhook server")
+	cmd.Flags().StringVar(&gate, "gate", "high", "Publish-severity gate for posted reviews (publish-only; never affects serve liveness)")
+	cmd.Flags().StringSliceVar(&repos, "repos", nil, "Required owner/repo allowlist (comma-separated); webhooks for other repos are ignored")
+	return cmd
 }
 
 // MCPRequest carries the resolved serve options to the injected MCPServer.

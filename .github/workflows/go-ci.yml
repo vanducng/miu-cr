@@ -21,6 +21,9 @@ jobs:
       - name: Test
         run: go test ./...
 
+      - name: Race-test serve daemon
+        run: go test -race -count=1 ./internal/serve/...
+
       - name: Vet
         run: go vet ./...
 

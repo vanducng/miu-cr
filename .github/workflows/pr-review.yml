@@ -1,0 +1,28 @@
+name: Self PR Review
+
+# Self-review fires on PRs (the action reads the PR number from the pull_request
+# event); workflow_dispatch stays for manual re-runs. gate: none below means a
+# missing key or any finding never blocks miu-cr's own CI.
+on:
+  pull_request:
+    types: [opened, synchronize, reopened, ready_for_review]
+  workflow_dispatch: {}
+
+permissions:
+  pull-requests: write
+  contents: read
+
+jobs:
+  review:
+    runs-on: ubuntu-latest
+    # Fork guard: never run the secrets-bearing reviewer on fork PR code.
+    if: ${{ github.event.pull_request.head.repo.fork != true }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: ./
+        with:
+          # Reuse the z.ai token already in repo secrets (Bearer via base-url).
+          api-key: ${{ secrets.OCR_LLM_AUTH_TOKEN }}
+          gate: none
+          base-url: https://api.z.ai/api/anthropic
+          model: glm-4.6
