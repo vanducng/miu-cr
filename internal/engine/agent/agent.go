@@ -37,9 +37,13 @@ type Agent interface {
 }
 
 const (
-	maxToolTurns   = 16
+	maxToolTurns   = 24
 	maxEmptyRounds = 3
 	maxTokens      = 8192
+
+	// Injected on the final tool turn (with tools withdrawn) so a budget-exhausted
+	// large diff is forced to finalize into a real review, not a hard failure.
+	forceFinalizeNudge = "Tool budget reached. Reply now with ONLY the findings JSON {\"findings\":[...]} — no tools, no prose."
 )
 
 // anthropicClient is the subset of the Anthropic SDK the agent needs; satisfied
@@ -138,6 +142,16 @@ func (a *anthropicAgent) Review(ctx stdctx.Context, rc Context) ([]engine.Findin
 			return nil, err
 		}
 
+		// Final allowed turn: withdraw the tools so the model can no longer keep
+		// exploring and must answer, and fold the finalize nudge into the trailing
+		// user turn (the loop invariant guarantees the last message is user-role,
+		// so this avoids an illegal consecutive user message).
+		if turn == maxToolTurns-1 {
+			params.Tools = nil
+			last := len(params.Messages) - 1
+			params.Messages[last].Content = append(params.Messages[last].Content, anthropic.NewTextBlock(forceFinalizeNudge))
+		}
+
 		msg, err := a.client.newMessage(ctx, params)
 		if err != nil {
 			return nil, fmt.Errorf("agent: messages.new: %w", err)
@@ -160,7 +174,7 @@ func (a *anthropicAgent) Review(ctx stdctx.Context, rc Context) ([]engine.Findin
 		emptyRounds = 0
 		params.Messages = append(params.Messages, anthropic.NewUserMessage(toolResults...))
 	}
-	return nil, fmt.Errorf("agent: exceeded maxToolTurns (%d) without final findings", maxToolTurns)
+	return nil, fmt.Errorf("agent: forced finalization produced no parseable findings after %d turns", maxToolTurns)
 }
 
 // dispatch executes every tool_use block in msg, returning the tool_result

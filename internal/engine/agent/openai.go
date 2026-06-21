@@ -114,6 +114,14 @@ func (a *openaiAgent) Review(ctx stdctx.Context, rc Context) ([]engine.Finding, 
 			return nil, err
 		}
 
+		// Final allowed turn: withdraw the tools so the model can no longer keep
+		// exploring and must answer, and append the finalize nudge so a
+		// budget-exhausted large diff yields a real review, not a hard failure.
+		if turn == maxToolTurns-1 {
+			params.Tools = nil
+			params.Messages = append(params.Messages, openai.UserMessage(forceFinalizeNudge))
+		}
+
 		resp, err := a.client.create(ctx, params)
 		if err != nil {
 			return nil, fmt.Errorf("agent: chat.completions: %w", err)
@@ -146,5 +154,5 @@ func (a *openaiAgent) Review(ctx stdctx.Context, rc Context) ([]engine.Finding, 
 			params.Messages = append(params.Messages, openai.ToolMessage(out, tc.ID))
 		}
 	}
-	return nil, fmt.Errorf("agent: exceeded maxToolTurns (%d) without final findings", maxToolTurns)
+	return nil, fmt.Errorf("agent: forced finalization produced no parseable findings after %d turns", maxToolTurns)
 }
