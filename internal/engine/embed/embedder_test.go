@@ -121,7 +121,7 @@ func (s *fakeService) New(_ stdctx.Context, body openai.EmbeddingNewParams, _ ..
 		for j := range vec {
 			vec[j] = float64(i*s.dim + j)
 		}
-		data[i] = openai.Embedding{Embedding: vec}
+		data[i] = openai.Embedding{Index: int64(i), Embedding: vec}
 	}
 	return &openai.CreateEmbeddingResponse{Data: data}, nil
 }
@@ -152,5 +152,88 @@ func TestOpenAIEmbedderEmptyInput(t *testing.T) {
 	out, err := e.Embed(stdctx.Background(), nil)
 	if err != nil || out != nil {
 		t.Fatalf("empty input: out=%v err=%v", out, err)
+	}
+}
+
+// reorderService returns resp.Data in REVERSE input order, each tagged with its
+// true .Index and a component value that encodes that index, so a position-based
+// assembler would mis-map embeddings and the test catches it.
+type reorderService struct{ dim int }
+
+func (s *reorderService) New(_ stdctx.Context, body openai.EmbeddingNewParams, _ ...openaiopt.RequestOption) (*openai.CreateEmbeddingResponse, error) {
+	in := body.Input.OfArrayOfStrings
+	data := make([]openai.Embedding, len(in))
+	for i := range in {
+		vec := make([]float64, s.dim)
+		for j := range vec {
+			vec[j] = float64(i) // every component encodes the input index
+		}
+		data[len(in)-1-i] = openai.Embedding{Index: int64(i), Embedding: vec} // reversed slot, true Index
+	}
+	return &openai.CreateEmbeddingResponse{Data: data}, nil
+}
+
+func TestOpenAIEmbedderReassemblesByIndex(t *testing.T) {
+	e := &openaiEmbedder{svc: &reorderService{dim: 3}, model: "m", dim: 3}
+	out, err := e.Embed(stdctx.Background(), []string{"a", "b", "c"})
+	if err != nil {
+		t.Fatalf("Embed: %v", err)
+	}
+	for i := range out {
+		if out[i][0] != float32(i) {
+			t.Fatalf("input %d mapped to vector tagged %v: assembly used position, not .Index", i, out[i][0])
+		}
+	}
+}
+
+// badIndexService returns an Index outside [0,len) so the embedder must error
+// rather than panic or silently drop the input.
+type badIndexService struct{ dim int }
+
+func (s *badIndexService) New(_ stdctx.Context, body openai.EmbeddingNewParams, _ ...openaiopt.RequestOption) (*openai.CreateEmbeddingResponse, error) {
+	in := body.Input.OfArrayOfStrings
+	data := make([]openai.Embedding, len(in))
+	for i := range in {
+		data[i] = openai.Embedding{Index: int64(len(in) + i), Embedding: make([]float64, s.dim)}
+	}
+	return &openai.CreateEmbeddingResponse{Data: data}, nil
+}
+
+func TestOpenAIEmbedderRejectsOutOfRangeIndex(t *testing.T) {
+	e := &openaiEmbedder{svc: &badIndexService{dim: 3}, model: "m", dim: 3}
+	if _, err := e.Embed(stdctx.Background(), []string{"a", "b"}); err == nil {
+		t.Fatal("out-of-range response index must error")
+	}
+}
+
+func TestNewRejectsInvalidDim(t *testing.T) {
+	for _, dim := range []int{-1, config.MaxEmbeddingDim + 1} {
+		if _, err := New(config.Embedding{Enabled: true, Dim: dim}, Credential{APIKey: "k"}); err == nil {
+			t.Fatalf("dim %d must be rejected", dim)
+		}
+	}
+	// dim 0 is the "inherit default" sentinel, not invalid.
+	if _, err := New(config.Embedding{Enabled: true, Dim: 0}, Credential{APIKey: "k"}); err != nil {
+		t.Fatalf("dim 0 must default, got %v", err)
+	}
+}
+
+func TestFakeEmbedderComponentsFiniteAndUnit(t *testing.T) {
+	f := NewFake("m", 64)
+	for _, text := range []string{"", "a", "func foo() {}", "x := 1 / 0"} {
+		out, err := f.Embed(stdctx.Background(), []string{text})
+		if err != nil {
+			t.Fatalf("Embed(%q): %v", text, err)
+		}
+		var sum float64
+		for i, c := range out[0] {
+			if math.IsInf(float64(c), 0) || math.IsNaN(float64(c)) {
+				t.Fatalf("text %q component %d not finite: %v", text, i, c)
+			}
+			sum += float64(c) * float64(c)
+		}
+		if math.Abs(math.Sqrt(sum)-1) > 1e-4 {
+			t.Fatalf("text %q not unit-norm: %v", text, math.Sqrt(sum))
+		}
 	}
 }

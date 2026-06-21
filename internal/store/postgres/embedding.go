@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"github.com/vanducng/miu-cr/internal/cli/clierr"
+	"github.com/vanducng/miu-cr/internal/config"
 	"github.com/vanducng/miu-cr/internal/store"
 )
 
@@ -35,6 +36,9 @@ func OpenWithEmbeddings(ctx context.Context, dsn string, dim int) (*Store, error
 // migrateEmbeddings runs EmbeddingSchemaSQL then verifies the live column dim via
 // atttypmod (after create-if-missing, so a pre-existing differing dim is caught).
 func (s *Store) migrateEmbeddings(ctx context.Context, dim int) error {
+	if dim < 1 || dim > config.MaxEmbeddingDim {
+		return invalidDim(dim)
+	}
 	if _, err := s.db.ExecContext(ctx, EmbeddingSchemaSQL(dim)); err != nil {
 		return unavailable("migrate embedding schema", err)
 	}
@@ -76,6 +80,17 @@ func dimMismatch(want, got int) error {
 	}
 }
 
+// invalidDim rejects a non-positive / over-max dim with a typed config.invalid
+// before any vector(N) DDL is rendered, so a misconfig fails clearly instead of
+// surfacing a cryptic pgvector parse error.
+func invalidDim(dim int) error {
+	return &clierr.CLIError{
+		Code:    "config.invalid",
+		Message: fmt.Sprintf("invalid embedding dim %d (must be in [1,%d])", dim, config.MaxEmbeddingDim),
+		Exit:    2,
+	}
+}
+
 // Embedding returns the store.EmbeddingStore view of this Store (mirrors PRThread).
 func (s *Store) Embedding() store.EmbeddingStore { return s }
 
@@ -83,6 +98,9 @@ func (s *Store) Embedding() store.EmbeddingStore { return s }
 // (repo, fingerprint, model). On conflict it refreshes the vector and advisory
 // columns (a re-review may sharpen the rationale). The vector is bound as a raw
 // '[…]'::vector text cast — zero new modules.
+//
+// MVP (deferred): ON CONFLICT is idempotent, so re-embedding a byte-identical
+// anchor is wasteful but correct; a content_hash-skip is a future cost opt.
 func (s *Store) UpsertFindingEmbedding(ctx context.Context, row store.EmbeddingRow) error {
 	if len(row.Vec) == 0 {
 		return fmt.Errorf("upsert embedding: empty vector")
@@ -111,11 +129,13 @@ func (s *Store) SimilarFindings(ctx context.Context, repo, model string, vec []f
 	if len(vec) == 0 || k <= 0 {
 		return nil, nil
 	}
+	// embedding IS NOT NULL + NULLS LAST keep a degenerate row (NULL, or a NaN
+	// cosine distance from an all-zero vector) from ever sorting to the top hit.
 	rows, err := s.db.QueryContext(ctx,
 		`SELECT fingerprint, category, rationale, embedding <=> $1::vector AS distance
 		 FROM finding_embeddings
-		 WHERE repo = $2 AND model = $3
-		 ORDER BY distance ASC
+		 WHERE repo = $2 AND model = $3 AND embedding IS NOT NULL
+		 ORDER BY embedding <=> $1::vector ASC NULLS LAST
 		 LIMIT $4`,
 		vectorLiteral(vec), repo, model, k,
 	)

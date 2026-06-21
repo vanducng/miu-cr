@@ -6,8 +6,25 @@ import (
 	"testing"
 
 	"github.com/vanducng/miu-cr/internal/cli/clierr"
+	"github.com/vanducng/miu-cr/internal/config"
 	"github.com/vanducng/miu-cr/internal/store"
 )
+
+// TestMigrateEmbeddingsRejectsInvalidDim needs no live PG: the dim guard returns
+// a typed config.invalid before any DDL touches the (nil) db handle.
+func TestMigrateEmbeddingsRejectsInvalidDim(t *testing.T) {
+	s := &Store{}
+	for _, dim := range []int{0, -1, config.MaxEmbeddingDim + 1} {
+		err := s.migrateEmbeddings(context.Background(), dim)
+		if err == nil {
+			t.Fatalf("dim %d must be rejected before DDL", dim)
+		}
+		ce, ok := err.(*clierr.CLIError)
+		if !ok || ce.Code != "config.invalid" {
+			t.Fatalf("dim %d: want config.invalid CLIError, got %T %v", dim, err, err)
+		}
+	}
+}
 
 const testDim = 4
 

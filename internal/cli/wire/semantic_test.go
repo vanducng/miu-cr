@@ -66,7 +66,7 @@ func TestRetrieverHitsRenderAdvisory(t *testing.T) {
 		{Fingerprint: "fp2", Category: "security", Rationale: "hardcoded key", Distance: 0.2},
 	}}
 	r := &retriever{emb: newCaptureEmbedder(), store: st, repo: "o/r"}
-	got, err := r.Related(stdctx.Background(), []string{"x := 1"})
+	got, err := r.Related(stdctx.Background(), [][]string{{"x := 1"}})
 	if err != nil {
 		t.Fatalf("Related: %v", err)
 	}
@@ -78,9 +78,30 @@ func TestRetrieverHitsRenderAdvisory(t *testing.T) {
 	}
 }
 
+// Read path embeds one chunk PER HUNK (matching the write path's per-finding
+// QuotedCode granularity), and merges hits nearest-per-fingerprint so a finding
+// near several hunks is not double-counted.
+func TestRetrieverEmbedsPerHunkAndMerges(t *testing.T) {
+	emb := newCaptureEmbedder()
+	st := &fakeEmbeddingStore{hits: []store.EmbeddingHit{
+		{Fingerprint: "fp1", Category: "bug", Rationale: "off-by-one", Distance: 0.1},
+	}}
+	r := &retriever{emb: emb, store: st, repo: "o/r"}
+	got, err := r.Related(stdctx.Background(), [][]string{{"a := 1", "b := 2"}, {"c := 3"}})
+	if err != nil {
+		t.Fatalf("Related: %v", err)
+	}
+	if len(emb.seen) != 2 {
+		t.Fatalf("want 2 per-hunk embed inputs, got %d: %v", len(emb.seen), emb.seen)
+	}
+	if c := strings.Count(got, "off-by-one"); c != 1 {
+		t.Fatalf("same fingerprint across hunks must merge to one entry, got %d in %q", c, got)
+	}
+}
+
 func TestRetrieverZeroHitsEmpty(t *testing.T) {
 	r := &retriever{emb: newCaptureEmbedder(), store: &fakeEmbeddingStore{}, repo: "o/r"}
-	got, err := r.Related(stdctx.Background(), []string{"x := 1"})
+	got, err := r.Related(stdctx.Background(), [][]string{{"x := 1"}})
 	if err != nil || got != "" {
 		t.Fatalf("zero hits must yield empty advisory, got err=%v out=%q", err, got)
 	}
@@ -90,7 +111,7 @@ func TestRetrieverEmbedErrorEmpty(t *testing.T) {
 	emb := newCaptureEmbedder()
 	emb.err = errors.New("embedder timeout")
 	r := &retriever{emb: emb, store: &fakeEmbeddingStore{}, repo: "o/r"}
-	got, err := r.Related(stdctx.Background(), []string{"x := 1"})
+	got, err := r.Related(stdctx.Background(), [][]string{{"x := 1"}})
 	if err != nil || got != "" {
 		t.Fatalf("embed error must degrade to empty (no error), got err=%v out=%q", err, got)
 	}
@@ -98,7 +119,7 @@ func TestRetrieverEmbedErrorEmpty(t *testing.T) {
 
 func TestRetrieverSimilarErrorEmpty(t *testing.T) {
 	r := &retriever{emb: newCaptureEmbedder(), store: &fakeEmbeddingStore{simErr: errors.New("pg down")}, repo: "o/r"}
-	got, err := r.Related(stdctx.Background(), []string{"x := 1"})
+	got, err := r.Related(stdctx.Background(), [][]string{{"x := 1"}})
 	if err != nil || got != "" {
 		t.Fatalf("similar-findings error must degrade to empty, got err=%v out=%q", err, got)
 	}
@@ -108,7 +129,7 @@ func TestRetrieverScrubsSecretBeforeEmbed(t *testing.T) {
 	emb := newCaptureEmbedder()
 	r := &retriever{emb: emb, store: &fakeEmbeddingStore{}, repo: "o/r"}
 	secret := "api_key=sk-supersecret1234567890"
-	if _, err := r.Related(stdctx.Background(), []string{"line one", secret}); err != nil {
+	if _, err := r.Related(stdctx.Background(), [][]string{{"line one"}, {secret}}); err != nil {
 		t.Fatalf("Related: %v", err)
 	}
 	if len(emb.seen) == 0 {

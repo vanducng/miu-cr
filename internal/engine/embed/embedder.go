@@ -67,9 +67,23 @@ func (e *openaiEmbedder) Embed(ctx stdctx.Context, texts []string) ([][]float32,
 	if len(resp.Data) != len(texts) {
 		return nil, fmt.Errorf("embed: response count %d != input count %d", len(resp.Data), len(texts))
 	}
-	out := make([][]float32, len(resp.Data))
-	for i, d := range resp.Data {
-		out[i] = toFloat32(d.Embedding)
+	// The API does not guarantee resp.Data is in input order; place each datum at
+	// its own .Index so embeddings never get mis-assigned to the wrong text.
+	out := make([][]float32, len(texts))
+	for _, d := range resp.Data {
+		idx := int(d.Index)
+		if idx < 0 || idx >= len(out) {
+			return nil, fmt.Errorf("embed: response index %d out of range [0,%d)", idx, len(out))
+		}
+		if out[idx] != nil {
+			return nil, fmt.Errorf("embed: duplicate response index %d", idx)
+		}
+		out[idx] = toFloat32(d.Embedding)
+	}
+	for i := range out {
+		if out[i] == nil {
+			return nil, fmt.Errorf("embed: missing embedding for input %d", i)
+		}
 	}
 	return out, nil
 }
@@ -98,6 +112,9 @@ func New(cfg config.Embedding, cred Credential) (Embedder, error) {
 	dim := cfg.Dim
 	if dim == 0 {
 		dim = config.DefaultEmbeddingDim
+	}
+	if dim < 1 || dim > config.MaxEmbeddingDim {
+		return nil, fmt.Errorf("embed: invalid embedding dim %d (must be in [1,%d])", dim, config.MaxEmbeddingDim)
 	}
 	provider := strings.TrimSpace(cfg.Provider)
 	if provider != "" && provider != string(config.KindOpenAI) {
@@ -153,7 +170,9 @@ func (f *fakeEmbedder) vector(text string) []float32 {
 	for i := range v {
 		seed := sha256.Sum256([]byte(fmt.Sprintf("%d:%s", i, text)))
 		u := binary.LittleEndian.Uint64(seed[:8])
-		x := float32(u)/float32(math.MaxUint64)*2 - 1
+		// Scale in float64: float32(math.MaxUint64) is +Inf, so dividing in float32
+		// yields NaN/constant and collapses every text onto the same vector.
+		x := float32(float64(u)/float64(math.MaxUint64)*2 - 1)
 		v[i] = x
 		sum += float64(x) * float64(x)
 	}

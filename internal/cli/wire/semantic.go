@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"log/slog"
 	"os"
+	"sort"
 	"strings"
 	"time"
 
@@ -74,7 +75,9 @@ func buildSemantic(ctx stdctx.Context, cfg config.Config) (embed.Embedder, store
 
 const (
 	// semanticReadTimeout bounds the pre-agent read embed so a slow/hung embedder
-	// degrades to empty + a stat rather than stalling the review.
+	// degrades to empty + a stat rather than stalling the review. MVP (deferred):
+	// the write path reuses this single bound — 8s is ample for the bounded batch
+	// (~40 inline-capped findings); a dedicated write timeout is a future tweak.
 	semanticReadTimeout = 8 * time.Second
 	// semanticTopK is the number of prior cosine-near findings retrieved per review.
 	semanticTopK = 5
@@ -97,34 +100,74 @@ type retriever struct {
 
 var _ engine.Retriever = (*retriever)(nil)
 
-// Related embeds the secret-scrubbed changed code and queries the EmbeddingStore
-// for cosine-near prior findings, rendering them as an advisory block. Short
-// timeout; empty/error => "" so the engine emits the M6 prompt.
-func (r *retriever) Related(ctx stdctx.Context, changedCode []string) (string, error) {
-	if r == nil || r.emb == nil || r.store == nil || len(changedCode) == 0 {
+// Related scrubs+embeds the changed code per hunk and queries the EmbeddingStore
+// for cosine-near prior findings, rendering them as an advisory block. Each hunk
+// is embedded as its own chunk with the SAME scrubCode the write path applies to
+// a finding's QuotedCode, so read and write share one code-anchor representation
+// and cosine search compares like with like. Short timeout; empty/error => "" so
+// the engine emits the M6 prompt.
+func (r *retriever) Related(ctx stdctx.Context, changedHunks [][]string) (string, error) {
+	if r == nil || r.emb == nil || r.store == nil || len(changedHunks) == 0 {
 		return "", nil
 	}
-	text := scrubCode(changedCode)
-	if strings.TrimSpace(text) == "" {
+	texts := make([]string, 0, len(changedHunks))
+	for _, hunk := range changedHunks {
+		t := scrubCode(hunk)
+		if strings.TrimSpace(t) == "" {
+			continue
+		}
+		texts = append(texts, t)
+	}
+	if len(texts) == 0 {
 		return "", nil
 	}
 
 	cctx, cancel := stdctx.WithTimeout(ctx, semanticReadTimeout)
 	defer cancel()
 
-	vecs, err := r.emb.Embed(cctx, []string{text})
+	vecs, err := r.emb.Embed(cctx, texts)
 	if err != nil || len(vecs) == 0 {
 		if err != nil {
 			slog.Warn("semantic read embed failed: " + config.RedactString(err.Error()))
 		}
 		return "", nil
 	}
-	hits, err := r.store.SimilarFindings(cctx, r.repo, r.emb.Model(), vecs[0], semanticTopK)
-	if err != nil {
-		slog.Warn("semantic similar-findings query failed: " + config.RedactString(err.Error()))
-		return "", nil
+
+	// One cosine query per hunk chunk; merge keeping the nearest distance per
+	// fingerprint so a finding near several hunks is not double-counted.
+	nearest := make(map[string]store.EmbeddingHit)
+	for _, v := range vecs {
+		hits, err := r.store.SimilarFindings(cctx, r.repo, r.emb.Model(), v, semanticTopK)
+		if err != nil {
+			slog.Warn("semantic similar-findings query failed: " + config.RedactString(err.Error()))
+			return "", nil
+		}
+		for _, h := range hits {
+			if cur, ok := nearest[h.Fingerprint]; !ok || h.Distance < cur.Distance {
+				nearest[h.Fingerprint] = h
+			}
+		}
 	}
-	return renderAdvisory(hits), nil
+	return renderAdvisory(topKHits(nearest, semanticTopK)), nil
+}
+
+// topKHits flattens the merged nearest-per-fingerprint map into the K nearest
+// hits, ascending by cosine distance (ties broken by fingerprint for stability).
+func topKHits(m map[string]store.EmbeddingHit, k int) []store.EmbeddingHit {
+	out := make([]store.EmbeddingHit, 0, len(m))
+	for _, h := range m {
+		out = append(out, h)
+	}
+	sort.Slice(out, func(i, j int) bool {
+		if out[i].Distance != out[j].Distance {
+			return out[i].Distance < out[j].Distance
+		}
+		return out[i].Fingerprint < out[j].Fingerprint
+	})
+	if k > 0 && len(out) > k {
+		out = out[:k]
+	}
+	return out
 }
 
 // renderAdvisory formats retrieved hits into a compact advisory list (nearest
@@ -149,8 +192,10 @@ func renderAdvisory(hits []store.EmbeddingHit) string {
 	return strings.TrimRight(sb.String(), "\n")
 }
 
-// scrubCode joins the changed-code lines (capped) and runs the existing credential
-// redaction so no secret leaves the box in the embedded text.
+// scrubCode joins one chunk's code lines (capped) and runs the existing credential
+// redaction so no secret leaves the box in the embedded text. Shared by the read
+// path (per hunk) and the write path (per finding's QuotedCode) so both embed the
+// same code-anchor representation.
 func scrubCode(lines []string) string {
 	if len(lines) > semanticMaxLines {
 		lines = lines[:semanticMaxLines]
@@ -221,6 +266,8 @@ func writeFindingEmbeddings(ctx stdctx.Context, emb embed.Embedder, st store.Emb
 		return
 	}
 
+	// MVP (deferred): one upsert per posted finding (N+1) — bounded by the ~40
+	// inline-comment cap, so a batch INSERT is a future write-path opt (YAGNI).
 	written := 0
 	for i, j := range jobs {
 		row := store.EmbeddingRow{
@@ -253,7 +300,8 @@ func setStat(stats map[string]any, key, val string) {
 }
 
 // repoKey is a stable repo identity for embedding rows: owner/repo. Kept here so
-// the read and write paths key identically.
+// the read and write paths key identically. Plain concat is unambiguous for
+// GitHub (owner/repo cannot contain '/'); deferred for any future non-GitHub host.
 func repoKey(owner, repo string) string {
 	return owner + "/" + repo
 }

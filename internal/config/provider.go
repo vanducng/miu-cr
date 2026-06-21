@@ -51,6 +51,9 @@ type Store struct {
 const (
 	DefaultEmbeddingModel = "text-embedding-3-small"
 	DefaultEmbeddingDim   = 1536
+	// MaxEmbeddingDim is pgvector's hard ceiling for a vector(N) column; a dim
+	// outside [1,MaxEmbeddingDim] is rejected before any DDL is rendered.
+	MaxEmbeddingDim = 16000
 )
 
 // Embedding configures the opt-in semantic-recall layer (M7). It is OFF unless

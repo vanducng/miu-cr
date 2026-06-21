@@ -34,6 +34,9 @@ CREATE TABLE IF NOT EXISTS pr_findings (
 // dimension is templated from config at create time; it is immutable per DB. The
 // category/rationale columns carry the advisory prose so SimilarFindings needs no
 // join. created_at stays TEXT for byte-parity with the other tables.
+//
+// MVP (deferred): no ivfflat/hnsw ANN index — a seq scan is fine at the small
+// per-repo corpus M7 targets; an index is a future scale opt (YAGNI).
 const embeddingSchemaTemplate = `
 CREATE EXTENSION IF NOT EXISTS vector;
 CREATE TABLE IF NOT EXISTS finding_embeddings (

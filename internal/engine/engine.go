@@ -72,9 +72,11 @@ type AgentContext struct {
 // implementation that scrubs+embeds the current changed code and returns prior
 // cosine-near findings. The engine does NO embedding/DB/network itself (it
 // imports neither openai-go nor pgx), exactly like the Rules injection. nil =>
-// the default M6 path (no SemanticContext).
+// the default M6 path (no SemanticContext). changedHunks is one inner slice per
+// diff hunk (its changed lines) so the read path can embed at hunk granularity,
+// matching the write path's per-finding code-anchor representation.
 type Retriever interface {
-	Related(ctx stdctx.Context, changedCode []string) (string, error)
+	Related(ctx stdctx.Context, changedHunks [][]string) (string, error)
 }
 
 // Agent runs one review pass over the assembled context and returns findings
@@ -303,7 +305,7 @@ func retrieveSemantic(ctx stdctx.Context, r Retriever, selected []diff.Diff) (ad
 	if r == nil {
 		return "", ""
 	}
-	code := changedCodeOf(selected)
+	code := changedHunksOf(selected)
 	if len(code) == 0 {
 		return "", "empty_change"
 	}
@@ -317,13 +319,16 @@ func retrieveSemantic(ctx stdctx.Context, r Retriever, selected []diff.Diff) (ad
 	return advisory, "injected"
 }
 
-// changedCodeOf collects the added+deleted code lines across the selected diffs:
-// the code-anchor representation embedded on the read path, matching the write
-// path which embeds each finding's QuotedCode (also changed code).
-func changedCodeOf(selected []diff.Diff) []string {
-	var out []string
+// changedHunksOf groups the added+deleted code lines per diff hunk: the read-path
+// code-anchor representation. Hunk granularity (a few lines per chunk) keeps the
+// read query chunks size-comparable to the write path's per-finding QuotedCode
+// anchors, so cosine search compares like with like instead of one whole-diff
+// blob against many tiny candidate vectors.
+func changedHunksOf(selected []diff.Diff) [][]string {
+	var out [][]string
 	for _, d := range selected {
 		for _, h := range diff.ParseHunks(d.Diff) {
+			var lines []string
 			for _, l := range h.Lines {
 				if l.Type == diff.HunkContext {
 					continue
@@ -331,7 +336,10 @@ func changedCodeOf(selected []diff.Diff) []string {
 				if strings.TrimSpace(l.Content) == "" {
 					continue
 				}
-				out = append(out, l.Content)
+				lines = append(lines, l.Content)
+			}
+			if len(lines) > 0 {
+				out = append(out, lines)
 			}
 		}
 	}

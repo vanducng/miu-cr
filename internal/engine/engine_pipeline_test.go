@@ -37,13 +37,13 @@ func (f *fakeAgent) Review(_ stdctx.Context, rc engine.AgentContext) ([]engine.F
 type fakeRetriever struct {
 	advisory string
 	err      error
-	gotCode  []string
+	gotCode  [][]string
 	called   bool
 }
 
-func (r *fakeRetriever) Related(_ stdctx.Context, changedCode []string) (string, error) {
+func (r *fakeRetriever) Related(_ stdctx.Context, changedHunks [][]string) (string, error) {
 	r.called = true
-	r.gotCode = changedCode
+	r.gotCode = changedHunks
 	return r.advisory, r.err
 }
 
