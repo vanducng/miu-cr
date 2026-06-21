@@ -22,6 +22,13 @@ comment with a new marker); subsequent re-runs dedupe normally. On a
 first M5 review **manually** (or off-hours) to absorb the one-time re-post before
 the next scheduled run.
 
+## [0.8.0](https://github.com/vanducng/miu-cr/compare/v0.7.0...v0.8.0) (2026-06-21)
+
+
+### Features
+
+* opt-in Postgres store backend behind the M5 store interfaces (M6) ([2ef9c1f](https://github.com/vanducng/miu-cr/commit/2ef9c1f93071e4b260c05a8bf26c22869a21b6a7))
+
 ## [0.7.0](https://github.com/vanducng/miu-cr/compare/v0.6.0...v0.7.0) (2026-06-21)
 
 
