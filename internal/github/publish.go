@@ -96,10 +96,25 @@ func normalizeForFingerprint(s string) string {
 	s = strings.ReplaceAll(s, "\r\n", "\n")
 	s = strings.ReplaceAll(s, "\r", "\n")
 	lines := strings.Split(s, "\n")
+	// Strip the leading diff marker ONLY when the whole quote is a diff hunk —
+	// every non-blank line starts with '+', '-', or ' '. Stripping unconditionally
+	// would corrupt genuine code like "-1" or "+x" into a collision (over-dedup).
+	isDiff, hasContent := true, false
+	for _, line := range lines {
+		t := strings.TrimRight(line, " \t")
+		if t == "" {
+			continue
+		}
+		hasContent = true
+		if c := t[0]; c != '+' && c != '-' && c != ' ' {
+			isDiff = false
+			break
+		}
+	}
 	for i, line := range lines {
 		line = strings.TrimRight(line, " \t")
-		if len(line) > 0 && (line[0] == '+' || line[0] == '-') {
-			line = line[1:]
+		if hasContent && isDiff && len(line) > 0 {
+			line = line[1:] // drop the +/-/space diff column
 		}
 		lines[i] = line
 	}

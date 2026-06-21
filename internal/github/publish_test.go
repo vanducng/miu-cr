@@ -656,6 +656,28 @@ func TestFingerprintDifferentCode(t *testing.T) {
 	}
 }
 
+// normalizeForFingerprint strips the diff column ONLY for a wholly diff-formatted
+// quote. Genuine code with a leading '-'/'+' line (mixed with non-diff lines) must
+// NOT be collapsed into its marker-less form (over-dedup).
+func TestFingerprintLeadingMarkerCodeNotStripped(t *testing.T) {
+	f := engine.Finding{File: "p.go", Category: "bug", QuotedCode: "-1\nfoo()"}
+	g := f
+	g.QuotedCode = "1\nfoo()"
+	if fingerprint(f) == fingerprint(g) {
+		t.Fatal("non-diff code with a leading '-' must not collide with its marker-less form")
+	}
+}
+
+// A wholly diff-formatted quote (every non-blank line begins +/-/space) strips the
+// diff column, so the same change quoted as a hunk maps to its marker-less form.
+func TestFingerprintWhollyDiffStripped(t *testing.T) {
+	diff := engine.Finding{File: "p.go", Category: "bug", QuotedCode: "-old()\n+new()"}
+	plain := engine.Finding{File: "p.go", Category: "bug", QuotedCode: "old()\nnew()"}
+	if fingerprint(diff) != fingerprint(plain) {
+		t.Fatal("a wholly diff-formatted quote should normalize to its marker-less form")
+	}
+}
+
 // Under-dedup (documented, best-effort): the same bug quoted with a different span
 // yields a DIFFERENT fingerprint — exact content match is the M5 ceiling, semantic
 // matching is M7. This asserts the accepted limitation rather than a desired win.
