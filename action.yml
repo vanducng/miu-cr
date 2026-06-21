@@ -1,4 +1,4 @@
-name: miu-cr PR Review
+name: PR Review
 description: AI code review on a pull request — installs the released miucr binary and runs `miucr review --pr --post`.
 author: vanducng
 
