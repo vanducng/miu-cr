@@ -6,9 +6,11 @@ package wire
 import (
 	stdctx "context"
 	"errors"
+	"path/filepath"
 	"time"
 
 	"github.com/vanducng/miu-cr/internal/cli"
+	"github.com/vanducng/miu-cr/internal/config"
 	"github.com/vanducng/miu-cr/internal/engine"
 	"github.com/vanducng/miu-cr/internal/engine/agent"
 	"github.com/vanducng/miu-cr/internal/engine/anchor"
@@ -16,9 +18,37 @@ import (
 	"github.com/vanducng/miu-cr/internal/engine/gitcmd"
 	mgithub "github.com/vanducng/miu-cr/internal/github"
 	"github.com/vanducng/miu-cr/internal/mcpserver"
+	"github.com/vanducng/miu-cr/internal/rules"
 	"github.com/vanducng/miu-cr/internal/store"
 	"github.com/vanducng/miu-cr/internal/store/sqlite"
 )
+
+// defaultRulesTokenBudget caps the rendered rules section. Always-on baseline so
+// even with no user/repo rules the embedded defaults flow within a bounded slice
+// of the prompt.
+const defaultRulesTokenBudget = 4096
+
+// userRulesDir returns ~/.config/miu/cr/rules, or "" when the home dir is
+// unresolvable (LoadRules treats "" as no user layer).
+func userRulesDir() string {
+	dir, err := config.Dir()
+	if err != nil {
+		return ""
+	}
+	return filepath.Join(dir, "rules")
+}
+
+// loadRules discovers + trust-tags rules for a review. repoDir is the working
+// tree (local) or the PR temp clone (--pr). allowRepo gates the Untrusted repo
+// layer: false on fork PRs (attacker-authored). Warnings are non-fatal.
+func loadRules(repoDir string, allowRepo bool) []rules.Rule {
+	repoRulesDir := ""
+	if repoDir != "" {
+		repoRulesDir = filepath.Join(repoDir, ".miucr", "rules")
+	}
+	loaded, _ := rules.LoadRules(userRulesDir(), repoRulesDir, allowRepo)
+	return loaded
+}
 
 func init() {
 	engine.SetAnchorer(anchor.ResolveLineNumbers)
@@ -60,6 +90,10 @@ func (engineReviewer) Review(ctx stdctx.Context, req cli.ReviewRequest) (cli.Rev
 		Extensions:   req.Extensions,
 		ExpandWindow: req.ExpandWindow,
 		TokenBudget:  req.TokenBudget,
+
+		Rules:            loadRules(req.RepoDir, true),
+		RulesFork:        false,
+		RulesTokenBudget: defaultRulesTokenBudget,
 	})
 	if err != nil {
 		return cli.ReviewOutcome{}, err
@@ -132,6 +166,10 @@ func (prReviewer) ReviewPR(ctx stdctx.Context, req cli.PRReviewRequest) (cli.Rev
 		Extensions:   req.Extensions,
 		ExpandWindow: req.ExpandWindow,
 		TokenBudget:  req.TokenBudget,
+
+		Rules:            loadRules(dir, !info.IsFork),
+		RulesFork:        info.IsFork,
+		RulesTokenBudget: defaultRulesTokenBudget,
 	})
 	if err != nil {
 		return cli.ReviewOutcome{}, err
@@ -197,6 +235,7 @@ type agentAdapter struct{ inner agent.Agent }
 func (a agentAdapter) Review(ctx stdctx.Context, rc engine.AgentContext) ([]engine.Finding, error) {
 	return a.inner.Review(ctx, agent.Context{
 		Text:    rc.Text,
+		Rules:   rc.Rules, // lockstep: forgetting this silently drops all rules
 		RepoDir: rc.RepoDir,
 		Rev:     rc.Rev,
 		Runner:  rc.Runner,

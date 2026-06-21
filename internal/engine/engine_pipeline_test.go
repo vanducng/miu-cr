@@ -20,10 +20,12 @@ func init() { engine.SetAnchorer(anchor.ResolveLineNumbers) }
 type fakeAgent struct {
 	findings []engine.Finding
 	gotRev   string
+	gotRules string
 }
 
 func (f *fakeAgent) Review(_ stdctx.Context, rc engine.AgentContext) ([]engine.Finding, error) {
 	f.gotRev = rc.Rev
+	f.gotRules = rc.Rules
 	out := make([]engine.Finding, len(f.findings))
 	copy(out, f.findings)
 	return out, nil

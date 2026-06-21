@@ -73,6 +73,7 @@ func rootCommand(opts *options) *cobra.Command {
 	root.AddCommand(reviewCommand(opts))
 	root.AddCommand(mcpCommand(opts))
 	root.AddCommand(serveCommand(opts))
+	root.AddCommand(rulesCommand(opts))
 	return root
 }
 

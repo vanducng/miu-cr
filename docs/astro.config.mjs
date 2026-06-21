@@ -36,7 +36,7 @@ export default defineConfig({
       lastUpdated: true,
       sidebar: [
         { label: 'Introduction', link: '/' },
-        { label: 'Getting Started', items: ['install', 'usage'] },
+        { label: 'Getting Started', items: ['install', 'usage', 'rules'] },
         { label: 'Providers', items: ['providers', 'credentials'] },
         { label: 'Integration', items: ['mcp', 'github-pr', 'serve-and-action'] },
         { label: 'Internals', items: ['how-it-works'] },

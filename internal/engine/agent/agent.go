@@ -24,6 +24,7 @@ import (
 // from (rev=="" is the staged index).
 type Context struct {
 	Text    string
+	Rules   string // fenced rules section emitted before the diff in the USER turn
 	RepoDir string
 	Rev     string
 	Runner  *gitcmd.Runner
@@ -127,7 +128,7 @@ func (a *anthropicAgent) Review(ctx stdctx.Context, rc Context) ([]engine.Findin
 		System:    []anthropic.TextBlockParam{{Text: systemPrompt}},
 		Tools:     reviewTools(),
 		Messages: []anthropic.MessageParam{
-			anthropic.NewUserMessage(anthropic.NewTextBlock(BuildUserPrompt(rc.Text))),
+			anthropic.NewUserMessage(anthropic.NewTextBlock(BuildUserPrompt(PromptParts{Rules: rc.Rules, Diff: rc.Text}))),
 		},
 	}
 

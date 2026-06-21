@@ -180,6 +180,11 @@ func reviewCommand(opts *options) *cobra.Command {
 			return validateReviewFlags(staged, from, to, commit, gate)
 		},
 		RunE: func(cmd *cobra.Command, args []string) error {
+			// A real LLM review routinely exceeds the 30s root default; bump it for
+			// review unless the user set --timeout explicitly.
+			if !cmd.Flags().Changed("timeout") {
+				opts.timeout = 300 * time.Second
+			}
 			if pr != "" {
 				return runPRReview(cmd, prRunArgs{
 					ref:         pr,

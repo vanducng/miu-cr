@@ -68,4 +68,5 @@ runs:
         fi
         if [ -n "$MODEL" ]; then export ANTHROPIC_MODEL="$MODEL"; fi
         REF="${GITHUB_REPOSITORY}#${PR_NUMBER}"
-        miucr review --pr "$REF" --post --gate "$GATE"
+        # A real LLM PR review exceeds the 30s default; give it room.
+        miucr review --pr "$REF" --post --gate "$GATE" --timeout 300s

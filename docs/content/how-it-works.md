@@ -43,6 +43,10 @@ When `--token-budget` is set and the full context exceeds it, assembly degrades 
 
 This makes truncation visible instead of a silent miss.
 
+## 3a. Project rules
+
+After file selection — where the changed paths are known in memory — the engine selects any [project rules](/rules/) that apply (built-in defaults + user + repo, by glob or `alwaysApply`) and renders them into a **fenced section in the user turn, before the diff**. Repo (`.miucr/rules/`) rules are wrapped in a context-only banner and **dropped entirely on fork PRs**; the finding-JSON contract stays in the cached system prompt, so injected rule prose can't redefine the schema. The section has its own token cap (subtracted from the diff budget with a floor); `stats.rules_applied` and `stats.rules_truncated` report the outcome. Rules are review context only — never gating.
+
 ## 4. The LLM pass
 
 A single structured pass reviews the assembled context. The model has two read-only tools to gather more context before deciding:

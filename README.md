@@ -101,6 +101,25 @@ fork-safe automated review is the `serve` path's job. App-installation auth land
 in a later milestone. Full setup, security model, and the fork limitation:
 [Serve daemon & GitHub Action](https://miucr.vanducng.dev/serve-and-action/).
 
+### Project rules
+
+Feed deterministic project context into the reviewer with markdown rule files —
+YAML frontmatter (`description`, `globs`, `alwaysApply`, `context_files`) selects
+by glob against the changed files; the prose body is injected into the prompt.
+
+```sh
+miucr rules init                       # scaffold .miucr/rules/example.md
+miucr rules check internal/foo/bar.go  # which rules apply to a path
+```
+
+Every review also gets a built-in baseline (correctness/security/reliability/
+performance/testing). Layers merge by stem: repo (`.miucr/rules/`) > user
+(`~/.config/miu/cr/rules/`) > embedded defaults. Rules are review **context
+only** — never gating. Repo rules are trust-fenced as context-only and **dropped
+on fork PRs** (attacker-authored); the finding-JSON contract stays in the cached
+system prompt. Full format, trust model, and modes:
+[Project rules](https://miucr.vanducng.dev/rules/).
+
 ## Credentials & providers
 
 BYO API key via env or flag — never a subscription token, never persisted:
