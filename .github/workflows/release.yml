@@ -16,22 +16,27 @@ concurrency:
   cancel-in-progress: false
 
 jobs:
-  # Auto-versioning from conventional commits. Uses RELEASE_TOKEN (a fine-grained PAT)
-  # when set so the cut tag re-triggers the goreleaser job; otherwise falls back to
-  # GITHUB_TOKEN (still opens the version PR — merge it / tag manually to release).
+  # Auto-versioning from conventional commits. Mints a MunMiu GitHub App token so the
+  # release commit/tag it creates re-triggers the goreleaser job below (a GITHUB_TOKEN
+  # tag would not trigger downstream workflows).
   release-please:
     if: github.ref == 'refs/heads/main'
     runs-on: ubuntu-latest
     steps:
+      - uses: actions/create-github-app-token@v2
+        id: app-token
+        with:
+          app-id: ${{ secrets.GH_APP_ID }}
+          private-key: ${{ secrets.GH_APP_MUNMIU_PRIVATE_KEY }}
       - uses: googleapis/release-please-action@v4
         with:
-          token: ${{ secrets.RELEASE_TOKEN || secrets.GITHUB_TOKEN }}
+          token: ${{ steps.app-token.outputs.token }}
           config-file: release-please-config.json
           manifest-file: .release-please-manifest.json
 
   # Builds + publishes binaries/checksums on any v* tag. Homebrew tap publish is
   # skipped automatically when HOMEBREW_TAP_GITHUB_TOKEN is not configured, so the
-  # GitHub release (and install.sh) works with zero repo secrets.
+  # GitHub release (and install.sh) works without it.
   goreleaser:
     if: startsWith(github.ref, 'refs/tags/v')
     runs-on: ubuntu-latest
