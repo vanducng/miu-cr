@@ -244,24 +244,27 @@ func publishReview(ctx stdctx.Context, client mgithub.Client, runner *gitcmd.Run
 	prKey := store.PRKey{Owner: info.Owner, Repo: info.Repo, Number: info.Number}
 	var prior []store.PRFinding
 	if prStore != nil {
-		prior, err = prStore.ListFindings(ctx, prKey)
-		if err != nil {
-			return err
-		}
-		skip = make(map[string]bool, len(existing)+len(prior))
-		for fp := range existing {
-			skip[fp] = true
-		}
-		priorStatus := make(map[string]string, len(prior))
-		for _, pf := range prior {
-			priorStatus[pf.Fingerprint] = pf.Status
-			if pf.Status == "posted" {
-				skip[pf.Fingerprint] = true
+		// Best-effort store: a read failure degrades to an EMPTY prior set (no
+		// skip/resolution this run) and is logged — it must never abort the review.
+		if p, lerr := prStore.ListFindings(ctx, prKey); lerr != nil {
+			slog.Warn("pr-thread store read failed, proceeding without prior findings: " + config.RedactString(lerr.Error()))
+		} else {
+			prior = p
+			skip = make(map[string]bool, len(existing)+len(prior))
+			for fp := range existing {
+				skip[fp] = true
 			}
-		}
-		for _, f := range res.Findings {
-			if priorStatus[mgithub.Fingerprint(f)] == "resolved" {
-				delete(skip, mgithub.Fingerprint(f))
+			priorStatus := make(map[string]string, len(prior))
+			for _, pf := range prior {
+				priorStatus[pf.Fingerprint] = pf.Status
+				if pf.Status == "posted" {
+					skip[pf.Fingerprint] = true
+				}
+			}
+			for _, f := range res.Findings {
+				if priorStatus[mgithub.Fingerprint(f)] == "resolved" {
+					delete(skip, mgithub.Fingerprint(f))
+				}
 			}
 		}
 	}
@@ -285,8 +288,10 @@ func publishReview(ctx stdctx.Context, client mgithub.Client, runner *gitcmd.Run
 	}
 
 	if prStore != nil {
-		if err := trackResolution(ctx, prStore, prKey, prior, res.Findings, diffs, pr.PostedFindings); err != nil {
-			return err
+		// PostReview + the summary upsert already succeeded — the review is live. A
+		// store write failure must not discard that outcome: log (redacted), continue.
+		if terr := trackResolution(ctx, prStore, prKey, prior, res.Findings, diffs, pr.PostedFindings); terr != nil {
+			slog.Warn("pr-thread store tracking failed: " + config.RedactString(terr.Error()))
 		}
 	}
 

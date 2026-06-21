@@ -2,6 +2,7 @@ package wire
 
 import (
 	stdctx "context"
+	"errors"
 	"path/filepath"
 	"testing"
 
@@ -12,6 +13,24 @@ import (
 	"github.com/vanducng/miu-cr/internal/store"
 	"github.com/vanducng/miu-cr/internal/store/sqlite"
 )
+
+// fakePRStore is a store.PRThreadStore whose three methods return preset errors,
+// used to prove the publish path degrades (logs + continues) instead of aborting.
+type fakePRStore struct {
+	listErr    error
+	upsertErr  error
+	resolveErr error
+}
+
+func (f *fakePRStore) ListFindings(stdctx.Context, store.PRKey) ([]store.PRFinding, error) {
+	return nil, f.listErr
+}
+func (f *fakePRStore) UpsertPosted(stdctx.Context, store.PRKey, []store.PRFinding) error {
+	return f.upsertErr
+}
+func (f *fakePRStore) MarkResolved(stdctx.Context, store.PRKey, []string) error {
+	return f.resolveErr
+}
 
 // tempStore opens a fresh on-disk sqlite PR-thread store under t.TempDir.
 func tempStore(t *testing.T) *sqlite.Store {
@@ -231,6 +250,60 @@ func TestPublishNoStoreUnchanged(t *testing.T) {
 	}
 	if fake.createReviewN != 1 || fake.createIssueN != 1 || fake.editN != 1 {
 		t.Fatalf("no-store counts: createReview=%d createIssue=%d edit=%d", fake.createReviewN, fake.createIssueN, fake.editN)
+	}
+}
+
+// TestStoreListErrorDegrades: a ListFindings failure is swallowed — the review
+// still posts (inline + summary) with an empty prior set, never aborting.
+func TestStoreListErrorDegrades(t *testing.T) {
+	runner := gitcmd.New()
+	dir, base, head := setupRepo(t, runner)
+	fake, client := wireFake(t)
+	info := &mgithub.PRInfo{Owner: "o", Repo: "r", Number: 7, HeadSHA: head, BaseSHA: base, BaseBranch: "main"}
+	res := engine.ReviewResult{Findings: []engine.Finding{findingB()}, Stats: map[string]any{"truncation_level": "full", "files_reviewed": float64(1)}}
+
+	pr := &cli.PRResult{SummaryAction: "none"}
+	st := &fakePRStore{listErr: errors.New("db locked")}
+	if err := publishReview(stdctx.Background(), client, runner, dir, info, res, pr, cli.PRReviewRequest{Gate: "high"}, st); err != nil {
+		t.Fatalf("ListFindings error must not abort the review: %v", err)
+	}
+	if !pr.Posted || pr.PostedInline != 1 {
+		t.Fatalf("review must still post on store read failure: Posted=%v inline=%d", pr.Posted, pr.PostedInline)
+	}
+	if fake.createReviewN != 1 {
+		t.Fatalf("review must be created despite store read failure, got createReviewN=%d", fake.createReviewN)
+	}
+}
+
+// TestStoreWriteErrorKeepsOutcome: after PostReview + summary upsert succeed, a
+// store write failure (Upsert/MarkResolved) is swallowed — publishReview returns
+// the successful outcome (not an error), so ReviewPR doesn't discard the review.
+func TestStoreWriteErrorKeepsOutcome(t *testing.T) {
+	for _, tc := range []struct {
+		name string
+		st   *fakePRStore
+	}{
+		{"upsert", &fakePRStore{upsertErr: errors.New("disk full")}},
+		{"resolve", &fakePRStore{resolveErr: errors.New("disk full")}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			runner := gitcmd.New()
+			dir, base, head := setupRepo(t, runner)
+			fake, client := wireFake(t)
+			info := &mgithub.PRInfo{Owner: "o", Repo: "r", Number: 7, HeadSHA: head, BaseSHA: base, BaseBranch: "main"}
+			res := engine.ReviewResult{Findings: []engine.Finding{findingB()}, Stats: map[string]any{"truncation_level": "full", "files_reviewed": float64(1)}}
+
+			pr := &cli.PRResult{SummaryAction: "none"}
+			if err := publishReview(stdctx.Background(), client, runner, dir, info, res, pr, cli.PRReviewRequest{Gate: "high"}, tc.st); err != nil {
+				t.Fatalf("store write failure must not discard the successful review: %v", err)
+			}
+			if !pr.Posted || pr.PostedInline != 1 {
+				t.Fatalf("successful review outcome must be preserved: Posted=%v inline=%d", pr.Posted, pr.PostedInline)
+			}
+			if fake.createReviewN != 1 {
+				t.Fatalf("review must be created before the store write fails, got createReviewN=%d", fake.createReviewN)
+			}
+		})
 	}
 }
 

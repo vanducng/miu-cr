@@ -668,6 +668,25 @@ func TestFingerprintUnderDedupDifferentSpan(t *testing.T) {
 	}
 }
 
+// Guard: two findings whose QuotedCode normalizes to empty (empty or lone diff
+// marker) on the same file+category must NOT collapse to one fp (silent
+// over-dedup). The empty-quote path disambiguates by Line+Rationale.
+func TestFingerprintEmptyQuoteDistinct(t *testing.T) {
+	for _, tc := range []struct{ name, code string }{
+		{"empty", ""},
+		{"lone-plus", "+"},
+		{"lone-minus", "-"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			f := engine.Finding{File: "p.go", Line: 4, Category: "bug", QuotedCode: tc.code, Rationale: "first bug"}
+			g := engine.Finding{File: "p.go", Line: 9, Category: "bug", QuotedCode: tc.code, Rationale: "second bug"}
+			if fingerprint(f) == fingerprint(g) {
+				t.Fatalf("two empty-quote findings (same file+category) must yield DIFFERENT fps")
+			}
+		})
+	}
+}
+
 // normalizeForFingerprint strips a leading diff +/- marker and trailing whitespace
 // and normalizes CRLF, but preserves leading indentation and blank lines, so a
 // diff-quoted finding maps to the same fp as its plain-quoted twin.

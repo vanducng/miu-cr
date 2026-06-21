@@ -10,6 +10,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"net/url"
 	"os"
 	"path/filepath"
 	"sync"
@@ -39,6 +40,22 @@ func DefaultPath() (string, error) {
 	return filepath.Join(dir, "state.db"), nil
 }
 
+// dsn builds the modernc DSN as a file: URI so a '?'/'#' or other special char in
+// path can't be mis-parsed as the query/fragment (string concatenation breaks
+// there). The path is percent-escaped via url.URL; the pragmas stay DSN-level so
+// busy_timeout + WAL apply to EVERY pooled connection.
+func dsn(path string) string {
+	if abs, err := filepath.Abs(path); err == nil {
+		path = abs
+	}
+	u := url.URL{
+		Scheme:   "file",
+		Path:     path,
+		RawQuery: "_pragma=busy_timeout(5000)&_pragma=journal_mode(WAL)",
+	}
+	return u.String()
+}
+
 // Open opens (creating parent dirs) the state DB at path and idempotently
 // migrates the schema. Driver name "sqlite" is modernc's pure-Go registration.
 func Open(path string) (*Store, error) {
@@ -48,7 +65,7 @@ func Open(path string) (*Store, error) {
 	// DSN-level pragmas so EVERY pooled connection inherits them (busy_timeout
 	// is per-connection — a one-shot db.Exec only sets it on one connection,
 	// leaving other/cross-process writers to fail SQLITE_BUSY immediately).
-	db, err := sql.Open("sqlite", path+"?_pragma=busy_timeout(5000)&_pragma=journal_mode(WAL)")
+	db, err := sql.Open("sqlite", dsn(path))
 	if err != nil {
 		return nil, err
 	}

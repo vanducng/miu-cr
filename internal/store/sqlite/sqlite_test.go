@@ -224,6 +224,34 @@ func TestSaveReviewNilFindingsAndStats(t *testing.T) {
 	}
 }
 
+// A path containing '?'/'#' must still open (the DSN is a percent-escaped file:
+// URI, not string concatenation) and WAL must apply to the connection.
+func TestOpenPathWithSpecialChars(t *testing.T) {
+	dir := filepath.Join(t.TempDir(), "od?d#ir")
+	path := filepath.Join(dir, "state.db")
+	s, err := Open(path)
+	if err != nil {
+		t.Fatalf("Open with special-char path: %v", err)
+	}
+	defer func() { _ = s.Close() }()
+
+	var mode string
+	if err := s.db.QueryRowContext(context.Background(), "PRAGMA journal_mode").Scan(&mode); err != nil {
+		t.Fatalf("PRAGMA journal_mode: %v", err)
+	}
+	if !strings.EqualFold(mode, "wal") {
+		t.Fatalf("DSN-level WAL pragma must apply, journal_mode=%q", mode)
+	}
+
+	id, err := s.SaveReview(context.Background(), sampleRecord())
+	if err != nil {
+		t.Fatalf("SaveReview at special-char path: %v", err)
+	}
+	if _, err := s.GetReview(context.Background(), id); err != nil {
+		t.Fatalf("GetReview at special-char path: %v", err)
+	}
+}
+
 func TestNoCredentialColumns(t *testing.T) {
 	s := tempStore(t)
 	ctx := context.Background()

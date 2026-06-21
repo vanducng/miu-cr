@@ -113,7 +113,18 @@ func normalizeForFingerprint(s string) string {
 // keeps the key from fragmenting. Best-effort: a re-quoted span for the same bug
 // yields a different fp (under-dedup); semantic matching is M7.
 func fingerprint(f engine.Finding) string {
-	code := sha256.Sum256([]byte(normalizeForFingerprint(f.QuotedCode)))
+	norm := normalizeForFingerprint(f.QuotedCode)
+	var code [32]byte
+	if norm == "" {
+		// An empty normalized quote (empty or lone-marker QuotedCode) hashes to a
+		// constant, collapsing every empty-quote finding on the same file+category
+		// to one fp (silent over-dedup). Disambiguate with Line+Rationale so distinct
+		// empty-quote findings keep distinct fingerprints; the non-empty path below is
+		// byte-identical to before.
+		code = sha256.Sum256([]byte(fmt.Sprintf("%d\x00%s", f.Line, f.Rationale)))
+	} else {
+		code = sha256.Sum256([]byte(norm))
+	}
 	key := fmt.Sprintf("%s|%s|%x", f.File, f.Category, code[:])
 	sum := sha256.Sum256([]byte(key))
 	return hex.EncodeToString(sum[:8])

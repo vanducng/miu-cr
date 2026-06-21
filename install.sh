@@ -55,11 +55,29 @@ resolve_version() {
 	echo "$tag"
 }
 
+# download_stdout fetches a URL to stdout. For api.github.com it sends a Bearer
+# token when GITHUB_TOKEN/GH_TOKEN is set so the latest-release lookup isn't
+# anonymous (unauthenticated requests hit a low rate limit → 403). The token is
+# never printed. Unauthenticated still works, just rate-limited.
 download_stdout() {
+	url="$1"
+	token="${GITHUB_TOKEN:-${GH_TOKEN:-}}"
+	authed=0
+	case "$url" in
+		https://api.github.com/*) [ -n "$token" ] && authed=1 ;;
+	esac
 	if have curl; then
-		curl -fsSL "$1"
+		if [ "$authed" = 1 ]; then
+			curl -fsSL -H "Authorization: Bearer $token" "$url"
+		else
+			curl -fsSL "$url"
+		fi
 	elif have wget; then
-		wget -qO- "$1"
+		if [ "$authed" = 1 ]; then
+			wget -qO- --header="Authorization: Bearer $token" "$url"
+		else
+			wget -qO- "$url"
+		fi
 	else
 		err "need curl or wget installed"
 	fi

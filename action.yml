@@ -38,6 +38,7 @@ runs:
       shell: bash
       env:
         MIUCR_VERSION: ${{ inputs.version }}
+        GITHUB_TOKEN: ${{ inputs.github-token }}
       run: |
         set -euo pipefail
         export MIUCR_INSTALL_DIR="$HOME/.local/bin"
