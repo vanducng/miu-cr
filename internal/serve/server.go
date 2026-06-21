@@ -9,6 +9,7 @@ import (
 	"fmt"
 	"log/slog"
 	"net/http"
+	"sort"
 	"strings"
 	"time"
 )
@@ -35,6 +36,11 @@ type Job struct {
 	Ref     string
 	Token   string
 	Timeout time.Duration
+	// OnDone, when non-nil, runs after the review returns: nil on success, the
+	// reviewFn's error (or a recovered panic) on failure. Additive — the webhook Job leaves it nil so the
+	// webhook path is byte-for-byte unchanged; the poller sets it to record its
+	// dedup cursor only on review success.
+	OnDone func(error)
 }
 
 // Dispatcher accepts review jobs. Submit returns false when the work could not
@@ -76,6 +82,22 @@ func newRepoAllowlist(repos []string) repoAllowlist {
 func (a repoAllowlist) allows(owner, repo string) bool {
 	_, ok := a[repoRef{Owner: owner, Repo: repo}]
 	return ok
+}
+
+// sorted returns the allowlist's repoRefs in deterministic (owner, repo) order so
+// callers that iterate (e.g. the poller's pulls source) produce reproducible logs.
+func (a repoAllowlist) sorted() []repoRef {
+	out := make([]repoRef, 0, len(a))
+	for r := range a {
+		out = append(out, r)
+	}
+	sort.Slice(out, func(i, j int) bool {
+		if out[i].Owner != out[j].Owner {
+			return out[i].Owner < out[j].Owner
+		}
+		return out[i].Repo < out[j].Repo
+	})
+	return out
 }
 
 // Server is the webhook daemon seam M8 extends. secret is the []byte HMAC key
@@ -127,7 +149,7 @@ func newServer(cfg Config) *Server {
 // (the real reviewFn calls cli.ReviewPRForServe); any cfg.Dispatcher is ignored
 // (tests inject a fake via the lower-level newServer). Returns the Server plus the
 // Pool so Run can Drain it.
-func New(cfg Config, reviewFn func(Job)) (*Server, *Pool, error) {
+func New(cfg Config, reviewFn func(Job) error) (*Server, *Pool, error) {
 	if len(cfg.Secret) == 0 {
 		return nil, nil, errors.New("serve: webhook secret must be non-empty")
 	}

@@ -243,6 +243,51 @@ default `GITHUB_TOKEN` APPROVE is a self-approve / supply-chain risk — so no
 > from the PR author (GitHub Apps are self-approval-safe by construction). When in
 > doubt, leave `--approve-clean` OFF.
 
+## Poll-mode trigger (M4)
+
+For environments that can't receive a webhook, `miucr serve --poll` adds a
+poll-mode **trigger** beside the webhook receiver. It is trigger-only: it builds
+the **identical** `serve.Job` `handleWebhook` builds and calls the same
+`Pool.Submit`; the review/publish engine and fork handling are inherited
+unchanged via `ReviewPRForServe`. Webhook stays the default; poll is opt-in.
+
+- **Two candidate sources.** `notifications` (default) reads the user
+  notifications API with a `Since` cursor and maps PR notifications to a PR;
+  `pulls` lists open PRs per allowlisted repo (full coverage / cold-start). The
+  `pulls` source carries `pr.Head.SHA` directly (no extra `GetPR`); the
+  notifications source resolves the head with one `GetPR` after a cheap pre-`GetPR`
+  dedup on the notification `updated_at`.
+- **Cost model: each new head SHA = one full LLM review.** The per-head dedup is
+  the spend guard; the `--repos` allowlist is the blast-radius guard. A re-pushed
+  head is a new SHA → one fresh review. There is no budget cap by design.
+- **Narrow GitHub seam — not the shared `github.Client`.** Widening the shared
+  client would break its three fakes, so poll defines a serve-local `notifGetter`
+  interface (`ListNotifications` / `ListOpenPRs` / `GetPR`) with a `ghNotifGetter`
+  adapter wrapping `*github.Client` directly; unit tests fake `notifGetter`.
+- **`Job.OnDone(err)` Pool seam (additive).** `Pool.run` invokes `OnDone` after
+  the review (nil on success, the recovered error on panic). The webhook Job
+  leaves it nil so the webhook path is **byte-for-byte unchanged**; the poller
+  sets it to record `seen[ref]=headSHA` **only on success** — a failed/dropped
+  review stays retryable next tick.
+- **Restart-safe poller-local cursor** (`~/.config/miu/cr/poll-cursor.json`,
+  `{since, seen, notif_seen}`) — NOT the M5/M6 store, which can't answer "reviewed
+  at head SHA X". Atomic write (`MkdirAll(0700)` + temp + rename, `0600`); the
+  **token is never a field**; a corrupt file → empty+warn (never fatal). Pruned by
+  staleness (~14d untouched), not absence-from-tick, so an open PR dropping out of
+  a tick keeps its reviewed-head. `Since` is captured at tick start and advanced
+  only after all that tick's candidates are handled.
+- **Interval floor + backoff.** Effective interval = `max(--poll-interval,
+  X-Poll-Interval)` (read off the `*github.Response`). `*RateLimitError` sleeps
+  until `Rate.Reset`; `*AbuseRateLimitError` honors `RetryAfter`; other transients
+  exp-backoff + jitter (cap ~15m). On any error the cursor is never advanced and a
+  review is never re-run — no tight loop.
+- **Wiring + drain.** `serve --poll` reuses `serveCommand`'s
+  token/allowlist/reviewFn/Drain. Webhook+poll run under one `errgroup`/ctx with
+  `Server.Run` as the **sole** drainer (the poller never drains); poll-only builds
+  `NewPool` + `Poller` + `serve.RunPoll`, which bypasses the webhook secret
+  requirement and drains **exactly once** on ctx cancel. Either way: ticker stops
+  → drain once → no double-drain, no goroutine leak.
+
 ## Token seam (M3 → M8)
 
 serve resolves the GitHub token through a `func() (string, error)` resolver and

@@ -21,14 +21,16 @@ type Pool struct {
 	inflight map[prKey]bool
 	closed   bool // guarded by mu; once true, Submit refuses and jobs is closed
 	wg       sync.WaitGroup
-	reviewFn func(Job)
+	reviewFn func(Job) error
 	log      *slog.Logger
 	drops    atomic.Int64
 }
 
 // NewPool starts workers=max(2,NumCPU) goroutines draining a buffered channel of
-// size 4*workers. reviewFn runs each job (the real one calls cli.ReviewPRForServe).
-func NewPool(reviewFn func(Job), log *slog.Logger) *Pool {
+// size 4*workers. reviewFn runs each job (the real one calls cli.ReviewPRForServe);
+// its returned error (and any recovered panic) is passed to Job.OnDone so callers
+// record per-head dedup state only on a genuine success.
+func NewPool(reviewFn func(Job) error, log *slog.Logger) *Pool {
 	if log == nil {
 		log = slog.Default()
 	}
@@ -89,18 +91,26 @@ func (p *Pool) worker() {
 }
 
 func (p *Pool) run(j Job) {
+	var reviewErr error
 	defer func() {
+		// Order is load-bearing: clear inflight BEFORE OnDone so a future OnDone
+		// that re-Submits the same key isn't coalesced away. Today OnDone only
+		// records cursor state, so the ordering is latent but intentional.
 		p.mu.Lock()
 		delete(p.inflight, j.Key)
 		p.mu.Unlock()
 		if r := recover(); r != nil {
+			reviewErr = fmt.Errorf("review panicked: %v", r)
 			p.log.Error("review panicked",
 				"repo", j.Key.Owner+"/"+j.Key.Repo, "number", j.Key.Number,
 				"error", config.RedactString(fmt.Sprintf("%v", r)),
 				"stack", config.RedactString(string(debug.Stack())))
 		}
+		if j.OnDone != nil {
+			j.OnDone(reviewErr)
+		}
 	}()
-	p.reviewFn(j)
+	reviewErr = p.reviewFn(j)
 }
 
 // Drain stops accepting work and blocks until in-flight jobs finish. It sets

@@ -64,11 +64,40 @@ func Open(ctx context.Context, dsn string) (*Store, error) {
 		_ = db.Close()
 		return nil, unavailable("connect postgres", err)
 	}
-	if _, err := db.ExecContext(ctx, SchemaSQL); err != nil {
+	if err := migrate(ctx, db, SchemaSQL, "migrate postgres schema"); err != nil {
 		_ = db.Close()
-		return nil, unavailable("migrate postgres schema", err)
+		return nil, err
 	}
 	return &Store{db: db}, nil
+}
+
+// migrationLockKey is the fixed advisory-lock key serializing schema migrations.
+// CREATE {EXTENSION,TABLE} IF NOT EXISTS is NOT concurrency-safe: two sessions
+// both pass the existence check, then both insert the object into pg_catalog →
+// "duplicate key value violates unique constraint pg_type_typname_nsp_index"
+// (SQLSTATE 23505). The CI conformance + embedding suites share one DB opened
+// from parallel test binaries, hitting exactly this race.
+const migrationLockKey int64 = 0x6d697563725f3031 // "miucr_01"
+
+// migrate runs ddl under migrationLockKey inside a transaction so concurrent
+// Open/OpenWithEmbeddings calls serialize their CREATE … IF NOT EXISTS DDL. The
+// xact-scoped advisory lock auto-releases at COMMIT.
+func migrate(ctx context.Context, db *sql.DB, ddl, op string) error {
+	tx, err := db.BeginTx(ctx, nil)
+	if err != nil {
+		return unavailable(op, err)
+	}
+	defer func() { _ = tx.Rollback() }()
+	if _, err := tx.ExecContext(ctx, `SELECT pg_advisory_xact_lock($1)`, migrationLockKey); err != nil {
+		return unavailable(op, err)
+	}
+	if _, err := tx.ExecContext(ctx, ddl); err != nil {
+		return unavailable(op, err)
+	}
+	if err := tx.Commit(); err != nil {
+		return unavailable(op, err)
+	}
+	return nil
 }
 
 // unavailable wraps a backend failure as a typed, redacted store.unavailable
