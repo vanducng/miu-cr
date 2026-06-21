@@ -16,7 +16,8 @@ jobs:
   review:
     runs-on: ubuntu-latest
     # Fork guard: never run the secrets-bearing reviewer on fork PR code.
-    if: ${{ github.event.pull_request.head.repo.fork != true }}
+    # Skip release-please PRs (chore release/version bumps — nothing to review).
+    if: ${{ github.event.pull_request.head.repo.fork != true && !startsWith(github.head_ref, 'release-please--') }}
     steps:
       - uses: actions/checkout@v4
       - uses: ./
