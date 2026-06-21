@@ -3,6 +3,8 @@ package cli
 import (
 	stdctx "context"
 	"fmt"
+	"os"
+	"strings"
 	"time"
 
 	"github.com/spf13/cobra"
@@ -33,10 +35,28 @@ type ReviewRequest struct {
 	TokenBudget  int
 }
 
-// ReviewOutcome is the Reviewer's result: anchored findings plus run stats.
+// ReviewOutcome is the Reviewer's result: anchored findings plus run stats. PR
+// is non-nil only on the --pr path and drives the data.pr envelope block.
 type ReviewOutcome struct {
 	Findings []ReviewFinding
 	Stats    map[string]any
+	PR       *PRResult
+}
+
+// PRResult is the typed PR summary for the data.pr envelope block on the --pr
+// path. The token is never carried here (or anywhere in the envelope).
+// PostedInline is the count of inline comments posted THIS run (0 on --no-post
+// and on re-runs where everything was already posted); SummaryAction is
+// created|edited on --post, "none" on --no-post.
+type PRResult struct {
+	Owner         string `json:"owner"`
+	Repo          string `json:"repo"`
+	Number        int    `json:"number"`
+	HeadSHA       string `json:"head_sha"`
+	IsFork        bool   `json:"is_fork"`
+	Posted        bool   `json:"posted"`
+	PostedInline  int    `json:"posted_inline"`
+	SummaryAction string `json:"summary_action"`
 }
 
 // ReviewFinding is a single anchored finding rendered/serialized by cli.
@@ -65,6 +85,53 @@ var reviewer Reviewer
 // package's init before any command runs.
 func SetReviewer(r Reviewer) { reviewer = r }
 
+// PRReviewRequest is the --pr invocation: the PR ref plus the resolved-but-
+// in-memory-only GitHub token (PAT) and whether to post. The LLM-credential
+// fields mirror ReviewRequest (findings still require the LLM).
+type PRReviewRequest struct {
+	Ref       string
+	Token     string
+	Post      bool
+	Gate      string
+	Provider  string
+	APIKey    string
+	BaseURL   string
+	AuthToken string
+	Model     string
+	Timeout   time.Duration
+
+	IncludeGlobs []string
+	ExcludeGlobs []string
+	Extensions   []string
+	ExpandWindow int
+	TokenBudget  int
+}
+
+// PRReviewer fetches a GitHub PR, runs the engine on a temp clone via ModeRange,
+// and (in P2) publishes. Injected from wire so cli stays below github/engine in
+// the import graph.
+type PRReviewer interface {
+	ReviewPR(ctx stdctx.Context, req PRReviewRequest) (ReviewOutcome, error)
+}
+
+var prReviewer PRReviewer
+
+// SetPRReviewer wires the github-backed PR reviewer. Called once from wire.init.
+func SetPRReviewer(r PRReviewer) { prReviewer = r }
+
+// resolveGitHubToken applies the M2 token precedence: --token > GITHUB_TOKEN >
+// GH_TOKEN. Empty is allowed (anonymous client for public-repo reads); the
+// caller enforces "token required" only for --post. Kept local because the agent
+// package's firstNonEmpty is unexported.
+func resolveGitHubToken(flag string) string {
+	for _, v := range []string{flag, os.Getenv("GITHUB_TOKEN"), os.Getenv("GH_TOKEN")} {
+		if s := strings.TrimSpace(v); s != "" {
+			return s
+		}
+	}
+	return ""
+}
+
 func reviewCommand(opts *options) *cobra.Command {
 	var (
 		staged      bool
@@ -83,15 +150,41 @@ func reviewCommand(opts *options) *cobra.Command {
 		model       string
 		expand      int
 		tokenBudget int
+		pr          string
+		token       string
+		post        bool
+		noPost      bool
 	)
 
 	cmd := &cobra.Command{
 		Use:   "review",
 		Short: "Review local git changes and emit gated findings",
 		PreRunE: func(cmd *cobra.Command, args []string) error {
+			if pr != "" {
+				return validatePRFlags(post, noPost, token)
+			}
 			return validateReviewFlags(staged, from, to, commit, gate)
 		},
 		RunE: func(cmd *cobra.Command, args []string) error {
+			if pr != "" {
+				return runPRReview(cmd, prRunArgs{
+					ref:         pr,
+					token:       token,
+					post:        post && !noPost,
+					gate:        gate,
+					provider:    provider,
+					apiKey:      apiKey,
+					baseURL:     baseURL,
+					authToken:   authToken,
+					model:       model,
+					timeout:     opts.timeout,
+					include:     include,
+					exclude:     exclude,
+					exts:        exts,
+					expand:      expand,
+					tokenBudget: tokenBudget,
+				})
+			}
 			if reviewer == nil {
 				return &CLIError{Code: "review.not_wired", Message: "review engine not wired", Exit: 1}
 			}
@@ -168,9 +261,116 @@ func reviewCommand(opts *options) *cobra.Command {
 	f.StringVar(&model, "model", "", "Override the review model (else ANTHROPIC_MODEL/OPENAI_MODEL or pinned default)")
 	f.IntVar(&expand, "expand", 5, "Context lines added above/below each hunk in the new-content window (0 disables)")
 	f.IntVar(&tokenBudget, "token-budget", 0, "Approximate token budget; over budget degrades context (0 disables)")
+	f.StringVar(&pr, "pr", "", "Review a GitHub PR: https://github.com/owner/repo/pull/N or owner/repo#N (no GitHub PAT needed for public repos in dry-run)")
+	f.StringVar(&token, "token", "", "GitHub PAT (overrides GITHUB_TOKEN/GH_TOKEN; required only for --post; never persisted)")
+	f.BoolVar(&post, "post", false, "Publish inline comments + a summary to the PR (requires a token)")
+	f.BoolVar(&noPost, "no-post", false, "Dry-run the PR review without posting (default for --pr)")
 
 	cmd.MarkFlagsRequiredTogether("from", "to")
 	return cmd
+}
+
+// prRunArgs bundles the --pr invocation values RunE forwards to runPRReview.
+type prRunArgs struct {
+	ref       string
+	token     string
+	post      bool
+	gate      string
+	provider  string
+	apiKey    string
+	baseURL   string
+	authToken string
+	model     string
+	timeout   time.Duration
+
+	include     []string
+	exclude     []string
+	exts        []string
+	expand      int
+	tokenBudget int
+}
+
+// runPRReview drives the --pr path: resolve the GitHub token (empty-tolerant for
+// public dry-runs), invoke the injected PRReviewer, emit a miucr.cli/v1 envelope
+// with a data.pr block. The token never enters the envelope.
+func runPRReview(cmd *cobra.Command, a prRunArgs) error {
+	if prReviewer == nil {
+		return &CLIError{Code: "review.not_wired", Message: "PR review engine not wired", Exit: 1}
+	}
+	ghToken := resolveGitHubToken(a.token)
+	if a.post && ghToken == "" {
+		return &CLIError{
+			Code:    "github.post_requires_token",
+			Message: "--post needs a GitHub token: pass --token or set GITHUB_TOKEN/GH_TOKEN",
+			Hint:    "create a PAT with repo scope; dry-run (--no-post) needs no token for public repos",
+			Exit:    2,
+		}
+	}
+
+	ctx := cmd.Context()
+	if a.timeout > 0 {
+		var cancel stdctx.CancelFunc
+		ctx, cancel = stdctx.WithTimeout(ctx, a.timeout)
+		defer cancel()
+	}
+
+	out, err := prReviewer.ReviewPR(ctx, PRReviewRequest{
+		Ref:          a.ref,
+		Token:        ghToken,
+		Post:         a.post,
+		Gate:         a.gate,
+		Provider:     a.provider,
+		APIKey:       a.apiKey,
+		BaseURL:      a.baseURL,
+		AuthToken:    a.authToken,
+		Model:        a.model,
+		Timeout:      a.timeout,
+		IncludeGlobs: a.include,
+		ExcludeGlobs: a.exclude,
+		Extensions:   a.exts,
+		ExpandWindow: a.expand,
+		TokenBudget:  a.tokenBudget,
+	})
+	if err != nil {
+		return err
+	}
+
+	summary := map[string]any{"findings": len(out.Findings), "gate": a.gate}
+	data := map[string]any{"findings": out.Findings, "stats": out.Stats}
+	if out.PR != nil {
+		data["pr"] = out.PR
+	}
+	if prettyOutput {
+		if err := renderReviewTable(cmd.OutOrStdout(), out); err != nil {
+			return err
+		}
+	} else if err := writeSuccess(cmd.OutOrStdout(), "review", "review.result", data, summary); err != nil {
+		return err
+	}
+	if reviewer != nil && reviewer.GateFailed(out.Findings, a.gate) {
+		return &CLIError{
+			Code:           "review.gate_failed",
+			Message:        fmt.Sprintf("findings reached gate %q", a.gate),
+			Exit:           2,
+			AlreadyWritten: true,
+		}
+	}
+	return nil
+}
+
+// validatePRFlags rejects --post together with --no-post and (defense-in-depth)
+// surfaces the post-without-token failure early; full token resolution happens in
+// runPRReview where env vars are read.
+func validatePRFlags(post, noPost bool, _ string) error {
+	if post && noPost {
+		return &CLIError{
+			Code:    "flags.conflict",
+			Message: "--post and --no-post are mutually exclusive",
+			Hint:    "pass one or neither (default is dry-run)",
+			Exit:    2,
+		}
+	}
+	return nil
 }
 
 // validateReviewFlags rejects more than one mode group and an unrecognized gate

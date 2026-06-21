@@ -38,7 +38,7 @@ export default defineConfig({
         { label: 'Introduction', link: '/' },
         { label: 'Getting Started', items: ['install', 'usage'] },
         { label: 'Providers', items: ['providers', 'credentials'] },
-        { label: 'Integration', items: ['mcp'] },
+        { label: 'Integration', items: ['mcp', 'github-pr'] },
         { label: 'Internals', items: ['how-it-works'] },
         {
           label: 'Related docs',

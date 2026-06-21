@@ -14,6 +14,7 @@ import (
 	"github.com/vanducng/miu-cr/internal/engine/anchor"
 	"github.com/vanducng/miu-cr/internal/engine/diff"
 	"github.com/vanducng/miu-cr/internal/engine/gitcmd"
+	mgithub "github.com/vanducng/miu-cr/internal/github"
 	"github.com/vanducng/miu-cr/internal/mcpserver"
 	"github.com/vanducng/miu-cr/internal/store"
 	"github.com/vanducng/miu-cr/internal/store/sqlite"
@@ -22,6 +23,7 @@ import (
 func init() {
 	engine.SetAnchorer(anchor.ResolveLineNumbers)
 	cli.SetReviewer(engineReviewer{})
+	cli.SetPRReviewer(prReviewer{})
 	cli.SetMCPServer(mcpServerImpl{})
 }
 
@@ -67,6 +69,118 @@ func (engineReviewer) Review(ctx stdctx.Context, req cli.ReviewRequest) (cli.Rev
 
 func (engineReviewer) GateFailed(findings []cli.ReviewFinding, gate string) bool {
 	return engine.GateFailed(toEngineFindings(findings), gate)
+}
+
+// newGitHubClient is the GitHub client constructor seam; tests override it to
+// inject a fake client without live network.
+var newGitHubClient = mgithub.NewClient
+
+// prReviewer fetches a GitHub PR into a non-shallow temp clone and runs the M1
+// engine via ModeRange (zero internal/engine changes). The LLM is still required
+// for findings; the GitHub token is optional (anonymous client for public repos).
+type prReviewer struct{}
+
+func (prReviewer) ReviewPR(ctx stdctx.Context, req cli.PRReviewRequest) (cli.ReviewOutcome, error) {
+	ref, err := mgithub.ParseRef(req.Ref)
+	if err != nil {
+		return cli.ReviewOutcome{}, err
+	}
+
+	creds, err := agent.Resolve(agent.ResolveInput{
+		Provider:  req.Provider,
+		APIKey:    req.APIKey,
+		BaseURL:   req.BaseURL,
+		AuthToken: req.AuthToken,
+		Model:     req.Model,
+	})
+	if err != nil {
+		return cli.ReviewOutcome{}, err
+	}
+	llm, err := agent.New(creds, req.Timeout)
+	if err != nil {
+		return cli.ReviewOutcome{}, err
+	}
+
+	client := newGitHubClient(req.Token)
+	info, err := mgithub.FetchPR(ctx, client, ref)
+	if err != nil {
+		return cli.ReviewOutcome{}, err
+	}
+
+	runner := gitcmd.New()
+	dir, cleanup, err := mgithub.FetchIntoTempClone(ctx, runner, info, req.Token)
+	if err != nil {
+		return cli.ReviewOutcome{}, err
+	}
+	defer cleanup()
+
+	eng := engine.New(agentAdapter{inner: llm}, runner)
+	res, err := eng.Review(ctx, engine.Request{
+		Mode:         diff.ModeRange,
+		From:         info.BaseSHA,
+		To:           info.HeadSHA,
+		Gate:         req.Gate,
+		RepoDir:      dir,
+		IncludeGlobs: req.IncludeGlobs,
+		ExcludeGlobs: req.ExcludeGlobs,
+		Extensions:   req.Extensions,
+		ExpandWindow: req.ExpandWindow,
+		TokenBudget:  req.TokenBudget,
+	})
+	if err != nil {
+		return cli.ReviewOutcome{}, err
+	}
+
+	prResult := &cli.PRResult{
+		Owner:         info.Owner,
+		Repo:          info.Repo,
+		Number:        info.Number,
+		HeadSHA:       info.HeadSHA,
+		IsFork:        info.IsFork,
+		SummaryAction: "none",
+	}
+
+	if req.Post {
+		if err := publishReview(ctx, client, runner, dir, info, res, prResult); err != nil {
+			return cli.ReviewOutcome{}, err
+		}
+	}
+
+	return cli.ReviewOutcome{
+		Findings: toCLIFindings(res.Findings),
+		Stats:    res.Stats,
+		PR:       prResult,
+	}, nil
+}
+
+// publishReview posts the review THIS run: inline comments first (skipping any
+// already-posted via the per-comment fingerprint), then the sentinel summary
+// last so a partial failure leaves the summary reflecting reality. It fills
+// prResult.PostedInline + SummaryAction.
+func publishReview(ctx stdctx.Context, client mgithub.Client, runner *gitcmd.Runner, dir string, info *mgithub.PRInfo, res engine.ReviewResult, prResult *cli.PRResult) error {
+	diffs, err := mgithub.DiffsForPR(ctx, runner, dir, info.BaseSHA, info.HeadSHA)
+	if err != nil {
+		return err
+	}
+	existing, err := mgithub.ExistingFingerprints(ctx, client, info)
+	if err != nil {
+		return err
+	}
+	summary := mgithub.RenderSummary(info, res.Findings, res.Stats)
+
+	posted, err := mgithub.PostReview(ctx, client, info, res.Findings, diffs, "", existing)
+	if err != nil {
+		return err
+	}
+	action, err := mgithub.UpsertSummaryComment(ctx, client, info, summary)
+	if err != nil {
+		return err
+	}
+
+	prResult.Posted = true
+	prResult.PostedInline = posted
+	prResult.SummaryAction = action
+	return nil
 }
 
 // agentAdapter bridges the concrete Anthropic agent (agent.Context) to the

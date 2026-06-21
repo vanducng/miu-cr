@@ -50,9 +50,28 @@ go install github.com/vanducng/miu-cr/cmd/miucr@latest
 miucr review --staged                              # review staged changes
 miucr review --from main --to HEAD -o json --gate high
 miucr review --commit HEAD~1
+miucr review --pr owner/repo#123 --no-post -o json # review a GitHub PR (dry-run)
 miucr mcp                                          # MCP stdio server
 miucr version -o json
 ```
+
+### Review a GitHub PR
+
+```sh
+# Dry-run a public PR — no GitHub PAT needed (LLM key still required):
+env -u GITHUB_TOKEN -u GH_TOKEN miucr review --pr owner/repo#123 --no-post -o json
+
+# Publish inline comments + one summary (needs a token):
+miucr review --pr https://github.com/owner/repo/pull/123 --post
+```
+
+Token precedence: `--token` > `GITHUB_TOKEN` > `GH_TOKEN` (PAT with `repo` scope;
+held in memory only, never persisted or echoed in the envelope). `--post` posts
+inline comments **only on lines inside the PR diff hunks**, anchored to the head
+SHA (`Event: COMMENT` — never approves), plus a sentinel summary. Re-runs are
+idempotent: the summary is **edited** and already-posted inline comments are
+**skipped**. Fork PRs post to the base repo. See
+[GitHub PR review](https://miucr.vanducng.dev/github-pr/).
 
 ## Credentials & providers
 

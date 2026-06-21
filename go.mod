@@ -5,6 +5,7 @@ go 1.25.8
 require (
 	github.com/anthropics/anthropic-sdk-go v1.47.0
 	github.com/bmatcuk/doublestar/v4 v4.10.0
+	github.com/google/go-github/v84 v84.0.0
 	github.com/modelcontextprotocol/go-sdk v1.6.1
 	github.com/openai/openai-go/v3 v3.41.0
 	github.com/pelletier/go-toml/v2 v2.3.1
@@ -16,6 +17,7 @@ require (
 	github.com/bahlo/generic-list-go v0.2.0 // indirect
 	github.com/buger/jsonparser v1.1.2 // indirect
 	github.com/dustin/go-humanize v1.0.1 // indirect
+	github.com/google/go-querystring v1.2.0 // indirect
 	github.com/google/jsonschema-go v0.4.3 // indirect
 	github.com/google/uuid v1.6.0 // indirect
 	github.com/inconshreveable/mousetrap v1.1.0 // indirect
