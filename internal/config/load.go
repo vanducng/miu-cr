@@ -96,6 +96,21 @@ func Merge(base, file Config) Config {
 	for name, fp := range file.Providers {
 		out.Providers[name] = mergeProvider(out.Providers[name], fp)
 	}
+	out.Store = mergeStore(base.Store, file.Store)
+	return out
+}
+
+// mergeStore overlays non-empty file [store] fields onto base. An empty file
+// Backend inherits base (default "sqlite"), so a config.toml without [store]
+// resolves to the SQLite default.
+func mergeStore(base, file Store) Store {
+	out := base
+	if file.Backend != "" {
+		out.Backend = file.Backend
+	}
+	if file.DSN != "" {
+		out.DSN = file.DSN
+	}
 	return out
 }
 

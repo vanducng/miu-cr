@@ -142,3 +142,30 @@ func TestLoadMalformedReturnsDefaultsAndError(t *testing.T) {
 		t.Fatalf("malformed file must still yield a usable default baseline, got %+v", cfg)
 	}
 }
+
+// A config.toml without a [store] section must resolve Backend to the sqlite
+// default after Merge (the overlay inherits base, never clears it to empty).
+func TestMergeStoreDefaultsToSqlite(t *testing.T) {
+	base := Defaults()
+	if base.Store.Backend != "sqlite" {
+		t.Fatalf("default store backend: want sqlite, got %q", base.Store.Backend)
+	}
+	out := Merge(base, Config{}) // file with no [store]
+	if out.Store.Backend != "sqlite" {
+		t.Fatalf("merge without [store] must keep sqlite, got %q", out.Store.Backend)
+	}
+	if out.Store.DSN != "" {
+		t.Fatalf("default DSN must be empty, got %q", out.Store.DSN)
+	}
+}
+
+// A [store] section overlays backend + DSN onto the base.
+func TestMergeStoreOverlay(t *testing.T) {
+	out := Merge(Defaults(), Config{Store: Store{Backend: "postgres", DSN: "postgres://h/db"}})
+	if out.Store.Backend != "postgres" {
+		t.Fatalf("backend overlay: want postgres, got %q", out.Store.Backend)
+	}
+	if out.Store.DSN != "postgres://h/db" {
+		t.Fatalf("dsn overlay: got %q", out.Store.DSN)
+	}
+}

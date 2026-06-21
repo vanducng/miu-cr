@@ -37,11 +37,20 @@ type Provider struct {
 	AuthEnv   string `toml:"auth_env,omitempty"`   // NAME of an env var holding the credential (preferred)
 }
 
+// Store selects the persistence backend. DSN is never persisted to disk by
+// miucr itself and is always redacted in errors/logs; prefer the MIUCR_PG_DSN
+// env var so the password need not sit in plaintext config.
+type Store struct {
+	Backend string `toml:"backend,omitempty"` // "sqlite" (default) | "postgres"
+	DSN     string `toml:"dsn,omitempty"`     // postgres DSN; env MIUCR_PG_DSN wins
+}
+
 // Config is the layered configuration: a set of named provider profiles plus
 // the profile to use when none is selected on the command line.
 type Config struct {
 	DefaultProvider string              `toml:"default_provider"`
 	Providers       map[string]Provider `toml:"providers"`
+	Store           Store               `toml:"store"`
 }
 
 // Defaults returns the built-in configuration: the two first-class kinds as
@@ -54,5 +63,6 @@ func Defaults() Config {
 			string(KindAnthropic): {Kind: KindAnthropic, Model: DefaultAnthropicModel},
 			string(KindOpenAI):    {Kind: KindOpenAI, BaseURL: DefaultOpenAIBaseURL, Model: DefaultOpenAIModel},
 		},
+		Store: Store{Backend: "sqlite"},
 	}
 }

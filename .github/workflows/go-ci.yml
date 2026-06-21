@@ -40,3 +40,35 @@ jobs:
             echo "ERROR: /tmp/miucr is dynamically linked — cgo leaked into the build" >&2
             exit 1
           fi
+
+  # Additive (non-required) job: runs the shared backend-conformance suite against
+  # REAL Postgres via a service container, so the Postgres path is exercised every
+  # PR (an env-gated-only test that nothing sets in CI would rot). Still keyless —
+  # no ANTHROPIC_API_KEY, no live review. The required gate stays the `test` job.
+  postgres-conformance:
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_USER: miucr
+          POSTGRES_PASSWORD: miucr
+          POSTGRES_DB: miucr_test
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U miucr"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+    env:
+      MIUCR_TEST_PG_DSN: postgres://miucr:miucr@localhost:5432/miucr_test?sslmode=disable
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version: "1.25.8"
+      - run: echo "GOFLAGS=-buildvcs=false" >> "$GITHUB_ENV"
+
+      - name: Backend conformance (SQLite + real Postgres)
+        run: go test -count=1 ./internal/store/...

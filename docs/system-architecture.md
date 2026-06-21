@@ -141,6 +141,45 @@ land. The stateless marker scrape (not the store) is what prevents duplicate
 inline comments, and it converges once the first review's comments exist.
 **With `prStore == nil`, publish is byte-for-byte the M2/M9 path.**
 
+## Store backend selection (M6)
+
+The M5 `store.Store` / `store.PRThreadStore` interfaces are the **swap seam**: M6
+slots a second, **opt-in Postgres backend** behind them **unchanged** — the
+engine/cli/publish/mcpserver layers consume only interfaces and don't change. A
+new `[store]` config section selects the backend (`backend = sqlite` [default] `|
+postgres`); resolution is `MIUCR_STORE_BACKEND` (env) > `[store] backend` (config)
+> `sqlite`, with an empty config value falling through to `sqlite`. The Postgres
+DSN prefers `MIUCR_PG_DSN` (env) over `[store] dsn` so the password need not live
+in plaintext config; it is **never persisted, never in the envelope, and always
+redacted** (`config.RedactString`) in every error/log.
+
+The **backend factory lives in the wire layer** (`internal/cli/wire/storefactory.go`),
+not `package store` — both `sqlite` and `postgres` import `store`, so a factory in
+`store` would cycle. `openStore` / `openPRThreadStore` return `(store, closer,
+error)`; the two existing sqlite open sites (`newPRThreadStore`, the MCP `Serve`
+path) route through it. The SQLite PR-store path keeps its silent nil-degrade
+(it's an implicit opt-in), but an **explicit `backend=postgres` open failure is
+fatal** — a typed `store.unavailable` `CLIError` (Exit 1, SafeRetry) on **both**
+the CLI and the MCP-`Serve` paths (the latter previously swallowed store-open
+errors); never a panic, never a silent nil-degrade. A bounded `connect_timeout`
+fast-fails a bad host.
+
+The Postgres backend uses **pgx/v5 via its `database/sql` stdlib adapter**
+(`sql.Open("pgx", dsn)`), reusing the SQLite package's `*sql.DB`/`Tx` shape so the
+round-trip code and tests stay backend-symmetric. pgx is **pure-Go**, so the
+`CGO_ENABLED=0` static-binary invariant holds alongside `modernc.org/sqlite`. The
+SQL mirrors sqlite 1:1 (`?`→`$N`, `ON CONFLICT … excluded`→`EXCLUDED`); time stays
+`RFC3339Nano` TEXT for byte-parity. The per-process `prMu` mutex is **dropped**
+(Postgres serializes via MVCC + the unique-PK upsert; a per-process lock would
+defeat multi-instance serve) but the multi-row `BeginTx`/`Commit` transaction in
+`UpsertPosted`/`MarkResolved` is **retained** for atomicity. A schema-parity test
+asserts both backends define the same tables/columns (types modulo dialect). A
+shared backend-conformance suite (`package store_test`) runs SQLite always and
+**real Postgres in CI via a `postgres:16` service container**; a gated
+`//go:build pg_integration` smoke is the manual end-to-end. **pgvector +
+embeddings are deferred to M7** — M6 stores reviews + `pr_findings` only, with no
+vector column and no `CREATE EXTENSION`.
+
 ## Write-action safety model (M9)
 
 `review --pr` gains two **opt-in** write-actions, **both default OFF** and both
