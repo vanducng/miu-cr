@@ -38,8 +38,12 @@ func (engineReviewer) Review(ctx stdctx.Context, req cli.ReviewRequest) (cli.Rev
 	if err != nil {
 		return cli.ReviewOutcome{}, err
 	}
+	llm, err := agent.New(creds, req.Timeout)
+	if err != nil {
+		return cli.ReviewOutcome{}, err
+	}
 	runner := gitcmd.New()
-	eng := engine.New(agentAdapter{inner: agent.New(creds, req.Timeout)}, runner)
+	eng := engine.New(agentAdapter{inner: llm}, runner)
 
 	res, err := eng.Review(ctx, engine.Request{
 		Mode:         modeFor(req),
@@ -125,7 +129,11 @@ func (l lazyAgent) Review(ctx stdctx.Context, rc engine.AgentContext) ([]engine.
 	if err != nil {
 		return nil, err
 	}
-	return agentAdapter{inner: agent.New(creds, l.timeout)}.Review(ctx, rc)
+	llm, err := agent.New(creds, l.timeout)
+	if err != nil {
+		return nil, err
+	}
+	return agentAdapter{inner: llm}.Review(ctx, rc)
 }
 
 func modeFor(req cli.ReviewRequest) diff.Mode {

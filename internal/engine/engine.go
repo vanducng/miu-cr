@@ -162,7 +162,7 @@ func (e *Engine) Review(ctx stdctx.Context, req Request) (ReviewResult, error) {
 				"files_changed":  float64(len(diffs)),
 				"files_reviewed": float64(0),
 				"findings_total": float64(0),
-				"max_severity":   "",
+				"max_severity":   maxSeverity(nil),
 				"gate":           req.Gate,
 			},
 		}, nil
@@ -191,21 +191,12 @@ func (e *Engine) Review(ctx stdctx.Context, req Request) (ReviewResult, error) {
 	kept := dropDrift(anchored)
 	kept = dedupe(kept)
 
-	maxRank := 0
-	maxSev := ""
-	for _, f := range kept {
-		if r := rankOf(f.Severity); r > maxRank {
-			maxRank = r
-			maxSev = normSeverity(f.Severity)
-		}
-	}
-
 	stats := map[string]any{
 		"files_changed":    float64(len(diffs)),
 		"files_reviewed":   float64(len(selected)),
 		"findings_total":   float64(len(kept)),
 		"findings_dropped": float64(len(anchored) - len(kept)),
-		"max_severity":     maxSev,
+		"max_severity":     maxSeverity(kept),
 		"gate":             req.Gate,
 		"truncation_level": assembled.Stats["truncation_level"],
 	}
@@ -282,6 +273,23 @@ func dedupe(findings []Finding) []Finding {
 func proseHash(f Finding) string {
 	sum := sha256.Sum256([]byte(f.Rationale + "\x00" + f.SuggestedPatch))
 	return hex.EncodeToString(sum[:6])
+}
+
+// maxSeverity returns the highest-ranked finding's normalized severity for the
+// stats.max_severity field, or "none" when no finding carries a recognized
+// severity (including the empty set). Mirrors the gate's ranking so the reported
+// max and the gate decision never disagree.
+func maxSeverity(findings []Finding) string {
+	maxRank, maxSev := 0, ""
+	for _, f := range findings {
+		if r := rankOf(f.Severity); r > maxRank {
+			maxRank, maxSev = r, normSeverity(f.Severity)
+		}
+	}
+	if maxSev == "" {
+		return "none"
+	}
+	return maxSev
 }
 
 // MaxSeverityRank returns the numeric rank of a finding set's worst severity.

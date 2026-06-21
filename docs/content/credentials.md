@@ -10,7 +10,7 @@ miu-cr is **bring-your-own-key**. You supply an LLM API key via an environment v
 ```sh
 export ANTHROPIC_API_KEY=...                                      # Anthropic
 export ANTHROPIC_BASE_URL=https://api.z.ai/api/anthropic \
-       ANTHROPIC_AUTH_TOKEN=$ZAI_API_KEY                          # GLM via z.ai
+       ANTHROPIC_AUTH_TOKEN=$ZAI_API_KEY                          # GLM via z.ai (Anthropic-compatible)
 export OPENAI_API_KEY=...                                         # OpenAI-compatible
 ```
 
@@ -21,7 +21,19 @@ miucr review --staged --api-key "$MY_KEY"
 miucr review --staged --auth-token "$ZAI_API_KEY" --base-url https://api.z.ai/api/anthropic
 ```
 
-See [Providers](/providers/) for the full resolution matrix per provider.
+You can also name a provider profile in the optional config file and have it
+reference an env var by name (`auth_env`) instead of putting the token inline —
+the token still resolves from the environment at run time and is never written
+back. See [Providers](/providers/) for the config schema, named-profile examples
+(z.ai/GLM, a generic OpenAI-compatible gateway), and the full resolution matrix.
+
+:::caution[Prefer `auth_env` over `auth_token`]
+A profile credential can be `auth_env` (the **name** of an env var) or `auth_token` (a **literal** token). Prefer `auth_env` — with `auth_token` the secret is stored **in plaintext on disk** in `config.toml`. When both are set, `auth_token` wins, and miu-cr prints a one-time stderr warning whenever a plaintext `auth_token` is used.
+:::
+
+:::note[Migrating from `ZAI_API_KEY`]
+Earlier builds special-cased a bare `ZAI_API_KEY`. That hardcoding is gone — use a config profile with `auth_env = "ZAI_API_KEY"`, or set `ANTHROPIC_BASE_URL` + `ANTHROPIC_AUTH_TOKEN`. See [Providers](/providers/) for the full z.ai example.
+:::
 
 ## What is never persisted
 
@@ -40,4 +52,6 @@ Both the CLI envelope and the MCP tool outputs are scrubbed before they leave th
 
 ## Local state
 
-The SQLite review history is a local file. The project `.gitignore` excludes `*.db` and `state.db` so review state — and the code it references — is never committed. Treat the history database as local-only.
+The SQLite review history is a local file at `~/.config/miu/cr/state.db` (same on macOS and Linux), alongside `config.toml`. The project `.gitignore` excludes `*.db` and `state.db` so review state — and the code it references — is never committed. Treat the history database as local-only.
+
+The state DB moved here from the older `miucr` directory. If you have an existing `state.db` under the old location, move it to `~/.config/miu/cr/state.db` to keep your history; otherwise miu-cr re-creates an empty one on first run.

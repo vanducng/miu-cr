@@ -8,6 +8,7 @@ import (
 
 	openai "github.com/openai/openai-go/v3"
 
+	"github.com/vanducng/miu-cr/internal/config"
 	"github.com/vanducng/miu-cr/internal/engine"
 )
 
@@ -142,13 +143,36 @@ func TestOpenAIAgentEmptyRoundsBail(t *testing.T) {
 	}
 }
 
-// New(creds) with the OpenAI provider must build an openaiAgent (interface
+// New(creds) with the OpenAI kind must build an openaiAgent (interface
 // satisfied) without touching the network.
 func TestNewBuildsOpenAIAgent(t *testing.T) {
-	creds := Credentials{Provider: ProviderOpenAI, APIKey: secretToken, Model: "gpt-test"}
-	a := New(creds, 0)
+	creds := Credentials{Kind: config.KindOpenAI, APIKey: secretToken, Model: "gpt-test"}
+	a, err := New(creds, 0)
+	if err != nil {
+		t.Fatalf("New: %v", err)
+	}
 	if _, ok := a.(*openaiAgent); !ok {
 		t.Fatalf("expected *openaiAgent, got %T", a)
 	}
 	_ = engine.Finding{}
+}
+
+// The request must carry max_tokens (broadly compatible) and NOT the newer
+// max_completion_tokens, so OpenAI-compatible gateways accept the call.
+func TestOpenAIUsesMaxTokens(t *testing.T) {
+	fc := &fakeOpenAI{responses: []string{textCompletion(`{"findings":[]}`)}}
+	a := &openaiAgent{client: fc, model: "gpt-test"}
+	if _, err := a.Review(stdctx.Background(), Context{Text: "ctx", RepoDir: t.TempDir()}); err != nil {
+		t.Fatalf("Review: %v", err)
+	}
+	if len(fc.seen) == 0 {
+		t.Fatal("no request captured")
+	}
+	p := fc.seen[0]
+	if p.MaxTokens.Value != int64(maxTokens) {
+		t.Fatalf("max_tokens not set: got %v, want %d", p.MaxTokens, maxTokens)
+	}
+	if p.MaxCompletionTokens.Valid() {
+		t.Fatalf("max_completion_tokens must be unset for gateway compatibility, got %v", p.MaxCompletionTokens)
+	}
 }

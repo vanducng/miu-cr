@@ -8,6 +8,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/vanducng/miu-cr/internal/config"
 	"github.com/vanducng/miu-cr/internal/engine"
 	"github.com/vanducng/miu-cr/internal/store"
 )
@@ -176,14 +177,19 @@ func TestGetReviewNotFoundMessage(t *testing.T) {
 	}
 }
 
-// DefaultPath ends in miucr/state.db under the user config dir.
+// DefaultPath is config.Dir()/state.db, so config and state share the one
+// ~/.config/miu/cr directory on every OS.
 func TestDefaultPath(t *testing.T) {
 	p, err := DefaultPath()
 	if err != nil {
-		t.Skipf("UserConfigDir unavailable: %v", err)
+		t.Skipf("UserHomeDir unavailable: %v", err)
 	}
-	if filepath.Base(p) != "state.db" || filepath.Base(filepath.Dir(p)) != "miucr" {
-		t.Fatalf("DefaultPath = %q, want .../miucr/state.db", p)
+	dir, err := config.Dir()
+	if err != nil {
+		t.Skipf("config.Dir unavailable: %v", err)
+	}
+	if want := filepath.Join(dir, "state.db"); p != want {
+		t.Fatalf("DefaultPath = %q, want %q", p, want)
 	}
 }
 

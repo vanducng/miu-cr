@@ -11,6 +11,7 @@ import (
 	openaiopt "github.com/openai/openai-go/v3/option"
 	"github.com/openai/openai-go/v3/shared"
 
+	"github.com/vanducng/miu-cr/internal/config"
 	"github.com/vanducng/miu-cr/internal/engine"
 	"github.com/vanducng/miu-cr/internal/engine/gitcmd"
 )
@@ -37,7 +38,7 @@ type openaiAgent struct {
 func newOpenAIAgent(creds Credentials, timeout time.Duration) *openaiAgent {
 	baseURL := strings.TrimRight(creds.BaseURL, "/")
 	if baseURL == "" {
-		baseURL = openAIBaseURL
+		baseURL = config.DefaultOpenAIBaseURL
 	}
 	// Total wall clock is owned by the ctx deadline (WithTimeout in Review),
 	// matching the Anthropic path; no per-request timeout so retries don't get
@@ -83,14 +84,12 @@ func openAITools() []openai.ChatCompletionToolUnionParam {
 }
 
 func (a *openaiAgent) Review(ctx stdctx.Context, rc Context) ([]engine.Finding, error) {
+	// The ctx deadline (below) owns the wall clock; each turn checks ctx.Err()
+	// rather than tracking a parallel manual deadline.
 	if a.timeout > 0 {
 		var cancel stdctx.CancelFunc
 		ctx, cancel = stdctx.WithTimeout(ctx, a.timeout)
 		defer cancel()
-	}
-	deadline := time.Time{}
-	if a.timeout > 0 {
-		deadline = time.Now().Add(a.timeout)
 	}
 	if rc.Runner == nil {
 		rc.Runner = gitcmd.New()
@@ -101,19 +100,18 @@ func (a *openaiAgent) Review(ctx stdctx.Context, rc Context) ([]engine.Finding, 
 		openai.UserMessage(BuildUserPrompt(rc.Text)),
 	}
 	params := openai.ChatCompletionNewParams{
-		Model:               shared.ChatModel(a.model),
-		Messages:            messages,
-		Tools:               openAITools(),
-		MaxCompletionTokens: openai.Int(int64(maxTokens)),
+		Model:    shared.ChatModel(a.model),
+		Messages: messages,
+		Tools:    openAITools(),
+		// max_tokens (not max_completion_tokens) for the broadest compatibility
+		// with OpenAI-compatible gateways, many of which lag the newer field.
+		MaxTokens: openai.Int(int64(maxTokens)),
 	}
 
 	emptyRounds := 0
 	for turn := 0; turn < maxToolTurns; turn++ {
 		if err := ctx.Err(); err != nil {
 			return nil, err
-		}
-		if !deadline.IsZero() && time.Now().After(deadline) {
-			return nil, fmt.Errorf("agent: tool loop exceeded wall-clock cap of %s", a.timeout)
 		}
 
 		resp, err := a.client.create(ctx, params)
