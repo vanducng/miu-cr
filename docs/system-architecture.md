@@ -125,10 +125,16 @@ must be subtracted. After the review, the store is populated from
 post-empty-guard, post-APPROVE-degrade), never `res.Findings`, so a cap-omitted or
 empty-guarded finding never records `status=posted`. Resolution: a prior `posted`
 fingerprint absent from the current run whose **path is still in the PR diff** →
-`MarkResolved`. The `*sqlite.Store` is opened **once** (serve reuses it across the
-loop; one-shot opens-then-defer-Close) and passed nil-able into `publishReview`,
-which never opens its own. **With `prStore == nil`, publish is byte-for-byte the
-M2/M9 path.**
+`MarkResolved`. The `*sqlite.Store` is opened per review inside `ReviewPR`
+(`newPRThreadStore` → `sqlite.Open` → `defer Close`) and passed nil-able into
+`publishReview`, which never opens its own — so serve opens/closes one handle per
+PR event, not a single long-lived handle. The Open is a sub-millisecond, idempotent
+`CREATE TABLE IF NOT EXISTS` dwarfed by the clone + LLM pass, and it is opt-in
+(`MIUCR_PR_STORE`). Cross-worker / cross-process correctness therefore rests on
+**WAL + `busy_timeout` + idempotent `ON CONFLICT` upsert / SQL `MarkResolved`** —
+NOT on the per-`Store` `prMu` (which only serializes a single `Store`'s write
+loop, and does not span the `ListFindings`→`UpsertPosted`/`MarkResolved` window).
+**With `prStore == nil`, publish is byte-for-byte the M2/M9 path.**
 
 ## Write-action safety model (M9)
 
