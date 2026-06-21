@@ -22,6 +22,13 @@ comment with a new marker); subsequent re-runs dedupe normally. On a
 first M5 review **manually** (or off-hours) to absorb the one-time re-post before
 the next scheduled run.
 
+## [0.7.0](https://github.com/vanducng/miu-cr/compare/v0.6.0...v0.7.0) (2026-06-21)
+
+
+### Features
+
+* PR-thread store — content-stable cross-push dedupe + resolution/reopen (M5) ([d3e7d58](https://github.com/vanducng/miu-cr/commit/d3e7d58b1b57f550ec2767cb8dc125414db60ed1))
+
 ## [0.6.0](https://github.com/vanducng/miu-cr/compare/v0.5.0...v0.6.0) (2026-06-21)
 
 
