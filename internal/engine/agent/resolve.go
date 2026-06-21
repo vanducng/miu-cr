@@ -125,6 +125,18 @@ func resolveAnthropic(in ResolveInput, prof config.Provider) (Credentials, error
 		}
 	}
 
+	// A Bearer auth_token only makes sense for an Anthropic-compatible gateway,
+	// which requires a base_url. Without one it would be sent to api.anthropic.com
+	// (which uses x-api-key, not Bearer) — leaking the token and failing the call.
+	if authToken != "" && baseURL == "" {
+		return Credentials{}, &clierr.CLIError{
+			Code:    "agent.auth_token_requires_base_url",
+			Message: "auth_token/auth_env is a Bearer token for an Anthropic-compatible gateway, but no base_url is configured",
+			Hint:    "set base_url on the provider profile (or ANTHROPIC_BASE_URL), or use an API key (ANTHROPIC_API_KEY / --api-key)",
+			Exit:    1,
+		}
+	}
+
 	model := firstNonEmpty(in.Model, os.Getenv("ANTHROPIC_MODEL"), prof.Model, config.DefaultAnthropicModel)
 	return Credentials{
 		Kind:      config.KindAnthropic,

@@ -5,7 +5,9 @@
 #   ~/.config/miu/cr/config.toml
 #
 # Precedence, highest wins:  CLI flags  >  environment  >  this file  >  built-in defaults.
-# Credentials live in memory only for the duration of a call and are NEVER persisted.
+# With the recommended `auth_env`, miu-cr never writes credentials to disk and the
+# resolved token lives in memory for one call only. A literal `auth_token` (below) is
+# the exception: it sits in plaintext in this file you author.
 #
 # Credentials — prefer `auth_env` (the NAME of an env var holding the token) so no
 # secret is written to this file. `auth_token` (a literal token) is supported but
