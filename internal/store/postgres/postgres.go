@@ -27,9 +27,11 @@ import (
 const connectTimeout = 10 * time.Second
 
 // Store is the Postgres-backed review store. It holds no per-process write lock:
-// Postgres serializes via MVCC + the unique-PK upsert, and a per-process lock
-// would defeat a multi-instance serve. Multi-row writes stay transactional
-// (BeginTx/Commit).
+// Postgres serializes via MVCC, and a per-process lock would defeat a
+// multi-instance serve. SaveReview is a plain INSERT of a freshly-generated
+// unique ID (no ON CONFLICT — no duplicate is expected); the ON CONFLICT upsert
+// serialization applies to pr_findings (see UpsertPosted). Multi-row writes stay
+// transactional (BeginTx/Commit).
 type Store struct {
 	db *sql.DB
 }
@@ -49,6 +51,13 @@ func Open(ctx context.Context, dsn string) (*Store, error) {
 	if err != nil {
 		return nil, unavailable("open postgres", err)
 	}
+	// Postgres is a network DB shared across instances; bound the pool so a
+	// long-running multi-instance serve can't exhaust max_connections. The
+	// single-file SQLite backend needs no such limits (its busy_timeout/WAL story
+	// is separate).
+	db.SetMaxOpenConns(10)
+	db.SetMaxIdleConns(5)
+	db.SetConnMaxLifetime(time.Hour)
 	pingCtx, cancel := context.WithTimeout(ctx, connectTimeout)
 	defer cancel()
 	if err := db.PingContext(pingCtx); err != nil {

@@ -2,8 +2,10 @@ package wire
 
 import (
 	stdctx "context"
+	"fmt"
 	"os"
 
+	"github.com/vanducng/miu-cr/internal/cli"
 	"github.com/vanducng/miu-cr/internal/config"
 	"github.com/vanducng/miu-cr/internal/engine"
 	"github.com/vanducng/miu-cr/internal/store"
@@ -28,11 +30,34 @@ func pgDSN(cfg config.Config) string {
 	return firstNonEmpty(os.Getenv("MIUCR_PG_DSN"), cfg.Store.DSN)
 }
 
+// validateBackend resolves the backend and rejects an unrecognized explicit value
+// (e.g. a "postgre" typo) with a typed, redacted config.invalid CLIError instead
+// of silently falling back to sqlite. Empty/unset resolves to sqlite (the default).
+func validateBackend(cfg config.Config) (string, error) {
+	backend := resolveBackend(cfg)
+	switch backend {
+	case "sqlite", "postgres":
+		return backend, nil
+	default:
+		return "", &cli.CLIError{
+			Code:    "config.invalid",
+			Message: config.RedactString(fmt.Sprintf("unknown store backend %q (want \"sqlite\" or \"postgres\")", backend)),
+			Hint:    "set [store] backend to sqlite or postgres",
+			Exit:    2,
+		}
+	}
+}
+
 // openStore opens the review store for the selected backend, returning the store,
-// a closer, and an error. A postgres open failure surfaces a typed redacted
-// store.unavailable CLIError; never a panic, never a silent nil.
+// a closer, and an error. An unknown backend surfaces config.invalid; a postgres
+// open failure surfaces a typed redacted store.unavailable CLIError; never a
+// panic, never a silent nil.
 func openStore(ctx stdctx.Context, cfg config.Config) (store.Store, func(), error) {
-	switch resolveBackend(cfg) {
+	backend, err := validateBackend(cfg)
+	if err != nil {
+		return nil, nil, err
+	}
+	switch backend {
 	case "postgres":
 		s, err := postgres.Open(ctx, pgDSN(cfg))
 		if err != nil {
@@ -55,7 +80,11 @@ func openStore(ctx stdctx.Context, cfg config.Config) (store.Store, func(), erro
 // openPRThreadStore opens the PR-thread store for the selected backend. The
 // returned store satisfies store.PRThreadStore; both backends' *Store do.
 func openPRThreadStore(ctx stdctx.Context, cfg config.Config) (store.PRThreadStore, func(), error) {
-	switch resolveBackend(cfg) {
+	backend, err := validateBackend(cfg)
+	if err != nil {
+		return nil, nil, err
+	}
+	switch backend {
 	case "postgres":
 		s, err := postgres.Open(ctx, pgDSN(cfg))
 		if err != nil {
@@ -85,7 +114,10 @@ func engineStoreFor(s store.Store) engine.Store {
 	case *sqlite.Store:
 		return sqlite.EngineStore{S: v}
 	default:
-		return nil
+		// Unreachable: openStore only yields *postgres.Store or *sqlite.Store after
+		// validateBackend. Panic rather than return nil so a future backend that
+		// forgets its adapter fails here, not on a later nil-deref in the engine.
+		panic(fmt.Sprintf("engineStoreFor: unsupported concrete store type %T", s))
 	}
 }
 

@@ -41,7 +41,7 @@ type Provider struct {
 // miucr itself and is always redacted in errors/logs; prefer the MIUCR_PG_DSN
 // env var so the password need not sit in plaintext config.
 type Store struct {
-	Backend string `toml:"backend,omitempty"` // "sqlite" (default) | "postgres"
+	Backend string `toml:"backend,omitempty"` // "sqlite" (default) | "postgres"; any other value is rejected (config.invalid)
 	DSN     string `toml:"dsn,omitempty"`     // postgres DSN; env MIUCR_PG_DSN wins
 }
 

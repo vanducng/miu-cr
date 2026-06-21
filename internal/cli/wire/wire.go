@@ -113,16 +113,17 @@ var newGitHubClient = mgithub.NewClient
 //
 // Backend selection routes through the wire factory. The SQLite path keeps the
 // silent nil-degrade (resolution off, review proceeds) — it is implicitly
-// opt-in. An explicit backend=postgres open failure PROPAGATES the typed,
-// redacted store.unavailable error: a user who chose Postgres must know it
-// failed rather than silently lose resolution tracking.
+// opt-in. Any non-sqlite backend PROPAGATES its failure: an explicit
+// backend=postgres open failure surfaces the typed, redacted store.unavailable,
+// and an unknown backend surfaces config.invalid — a user who chose a non-default
+// backend must know it failed rather than silently lose resolution tracking.
 var newPRThreadStore = func(ctx stdctx.Context, cfg config.Config) (store.PRThreadStore, func(), error) {
 	if os.Getenv("MIUCR_PR_STORE") == "" {
 		return nil, nil, nil
 	}
 	prStore, closeStore, err := openPRThreadStore(ctx, cfg)
 	if err != nil {
-		if resolveBackend(cfg) == "postgres" {
+		if resolveBackend(cfg) != "sqlite" {
 			return nil, nil, err
 		}
 		slog.Warn("pr-thread store disabled: " + config.RedactString(err.Error()))
@@ -207,7 +208,10 @@ func (prReviewer) ReviewPR(ctx stdctx.Context, req cli.PRReviewRequest) (cli.Rev
 	}
 
 	if req.Post {
-		cfg, _ := config.Load()
+		cfg, lerr := config.Load()
+		if lerr != nil {
+			slog.Warn("config load failed, using built-in defaults: " + config.RedactString(lerr.Error()))
+		}
 		prStore, closeStore, serr := newPRThreadStore(ctx, cfg)
 		if serr != nil {
 			return cli.ReviewOutcome{}, serr
@@ -385,14 +389,18 @@ func (mcpServerImpl) Serve(ctx stdctx.Context, req cli.MCPRequest) error {
 	runner := gitcmd.New()
 	eng := engine.New(lazyAgent{timeout: req.Timeout}, runner)
 
-	cfg, _ := config.Load()
+	cfg, lerr := config.Load()
+	if lerr != nil {
+		slog.Warn("config load failed, using built-in defaults: " + config.RedactString(lerr.Error()))
+	}
 	var st store.Store
 	s, closeStore, oerr := openStore(ctx, cfg)
 	if oerr != nil {
-		// An explicit backend=postgres open failure is fatal (surface the typed,
-		// redacted store.unavailable). The SQLite default degrades silently so the
-		// MCP handshake/tools-list still work without a writable state dir.
-		if resolveBackend(cfg) == "postgres" {
+		// A non-sqlite backend failure is fatal (surface the typed, redacted
+		// store.unavailable for postgres, or config.invalid for an unknown backend).
+		// The SQLite default degrades silently so the MCP handshake/tools-list still
+		// work without a writable state dir.
+		if resolveBackend(cfg) != "sqlite" {
 			return oerr
 		}
 		slog.Warn("mcp store disabled: " + config.RedactString(oerr.Error()))

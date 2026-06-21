@@ -36,6 +36,53 @@ func TestResolveBackendPrecedence(t *testing.T) {
 	}
 }
 
+// validateBackend accepts the known backends (empty/unset -> sqlite) and rejects
+// an unrecognized explicit value with a typed config.invalid CLIError that names
+// the bad value — never a silent sqlite fallback.
+func TestValidateBackend(t *testing.T) {
+	cases := []struct {
+		name    string
+		cfg     string
+		want    string
+		wantErr bool
+	}{
+		{"empty -> sqlite", "", "sqlite", false},
+		{"sqlite", "sqlite", "sqlite", false},
+		{"postgres", "postgres", "postgres", false},
+		{"bogus -> error", "postgre", "", true},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Setenv("MIUCR_STORE_BACKEND", "")
+			got, err := validateBackend(config.Config{Store: config.Store{Backend: tc.cfg}})
+			if tc.wantErr {
+				if err == nil {
+					t.Fatalf("validateBackend(%q) = %q, want error", tc.cfg, got)
+				}
+				var ce *cli.CLIError
+				if ce2, ok := err.(*cli.CLIError); ok {
+					ce = ce2
+				} else {
+					t.Fatalf("want *cli.CLIError, got %T: %v", err, err)
+				}
+				if ce.Code != "config.invalid" {
+					t.Fatalf("code = %q, want config.invalid", ce.Code)
+				}
+				if !strings.Contains(ce.Message, tc.cfg) {
+					t.Fatalf("message %q must name the bad value %q", ce.Message, tc.cfg)
+				}
+				return
+			}
+			if err != nil {
+				t.Fatalf("validateBackend(%q) unexpected error: %v", tc.cfg, err)
+			}
+			if got != tc.want {
+				t.Fatalf("validateBackend(%q) = %q, want %q", tc.cfg, got, tc.want)
+			}
+		})
+	}
+}
+
 // A backend=postgres open failure surfaces a typed, redacted store.unavailable
 // from both factory entry points — never a panic, never a silent nil.
 func TestOpenStorePostgresFailureSurfaces(t *testing.T) {

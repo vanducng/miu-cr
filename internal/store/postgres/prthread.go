@@ -27,6 +27,8 @@ func (s *Store) UpsertPosted(ctx context.Context, key store.PRKey, findings []st
 	}
 	defer func() { _ = tx.Rollback() }()
 
+	// One round-trip per finding, bounded by the inline finding cap (N≤40), mirroring
+	// the SQLite impl. A batched unnest()/multi-row upsert is a future optimization.
 	for _, f := range findings {
 		_, err := tx.ExecContext(ctx,
 			`INSERT INTO pr_findings (owner, repo, number, fingerprint, path, status, first_seen, last_seen)
