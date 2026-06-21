@@ -30,6 +30,21 @@ func pgDSN(cfg config.Config) string {
 	return firstNonEmpty(os.Getenv("MIUCR_PG_DSN"), cfg.Store.DSN)
 }
 
+// requirePGDSN fast-fails when backend=postgres but no DSN is set: sql.Open("pgx","")
+// is lazy and would otherwise hang ~10s to a cryptic store.unavailable on Ping.
+func requirePGDSN(cfg config.Config) (string, error) {
+	dsn := pgDSN(cfg)
+	if dsn == "" {
+		return "", &cli.CLIError{
+			Code:    "config.invalid",
+			Message: "store backend is postgres but no DSN is configured",
+			Hint:    "set MIUCR_PG_DSN or [store] dsn",
+			Exit:    2,
+		}
+	}
+	return dsn, nil
+}
+
 // validateBackend resolves the backend and rejects an unrecognized explicit value
 // (e.g. a "postgre" typo) with a typed, redacted config.invalid CLIError instead
 // of silently falling back to sqlite. Empty/unset resolves to sqlite (the default).
@@ -59,7 +74,11 @@ func openStore(ctx stdctx.Context, cfg config.Config) (store.Store, func(), erro
 	}
 	switch backend {
 	case "postgres":
-		s, err := postgres.Open(ctx, pgDSN(cfg))
+		dsn, err := requirePGDSN(cfg)
+		if err != nil {
+			return nil, nil, err
+		}
+		s, err := postgres.Open(ctx, dsn)
 		if err != nil {
 			return nil, nil, err
 		}
@@ -86,7 +105,11 @@ func openPRThreadStore(ctx stdctx.Context, cfg config.Config) (store.PRThreadSto
 	}
 	switch backend {
 	case "postgres":
-		s, err := postgres.Open(ctx, pgDSN(cfg))
+		dsn, err := requirePGDSN(cfg)
+		if err != nil {
+			return nil, nil, err
+		}
+		s, err := postgres.Open(ctx, dsn)
 		if err != nil {
 			return nil, nil, err
 		}
