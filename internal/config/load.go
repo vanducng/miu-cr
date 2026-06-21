@@ -87,6 +87,9 @@ func Merge(base, file Config) Config {
 	return out
 }
 
+// mergeProvider overlays non-empty file fields onto base. An empty string in the
+// file means "inherit base" — you cannot clear a built-in field to empty via
+// config (and resolve falls back to defaults for empty fields anyway).
 func mergeProvider(base, file Provider) Provider {
 	out := base
 	if file.Kind != "" {

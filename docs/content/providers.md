@@ -34,11 +34,15 @@ default_provider = "anthropic"   # profile to use when --provider is omitted
 kind       = "anthropic"         # or "openai" — the first-class family
 base_url   = "https://…"         # optional; gateway/endpoint override
 model      = "…"                 # optional; default model for this profile
-auth_token = "…"                 # optional literal credential
-auth_env   = "MY_TOKEN"          # optional; NAME of an env var holding the credential
+auth_env   = "MY_TOKEN"          # RECOMMENDED; NAME of an env var holding the credential
+auth_token = "…"                 # discouraged literal credential — plaintext on disk
 ```
 
 The two built-in profiles `anthropic` and `openai` always exist; you only declare a `[providers.<name>]` block to add a vendor or override a built-in's `model`/`base_url`. A profile's credential (`auth_token` or `auth_env`) is sent as a **Bearer token** on the Anthropic path and as the **API key** on the OpenAI path. Standard env vars and CLI flags still override it.
+
+:::caution[Prefer `auth_env` over `auth_token`]
+`auth_env` names an env var; the token is read at run time and never written to the config file. `auth_token` stores the literal token **in plaintext on disk** — use it only when an env var isn't practical. When both are set, `auth_token` wins, and miu-cr prints a one-time warning whenever a plaintext `auth_token` is used.
+:::
 
 ## Anthropic
 
@@ -67,7 +71,7 @@ z.ai exposes an **Anthropic-compatible** gateway, so it's an `anthropic`-kind pr
 [providers.zai]
 kind     = "anthropic"
 base_url = "https://api.z.ai/api/anthropic"
-model    = "glm-4.6"
+model    = "glm-5.2"
 auth_env = "ZAI_API_KEY"          # or: auth_token = "<token>"
 ```
 
@@ -81,7 +85,7 @@ Equivalent without a config file, using the generic Anthropic env vars:
 ```sh
 export ANTHROPIC_BASE_URL=https://api.z.ai/api/anthropic
 export ANTHROPIC_AUTH_TOKEN=$ZAI_API_KEY
-miucr review --staged --model glm-4.6
+miucr review --staged --model glm-5.2
 ```
 
 …or entirely via flags:
@@ -90,7 +94,7 @@ miucr review --staged --model glm-4.6
 miucr review --staged \
   --base-url https://api.z.ai/api/anthropic \
   --auth-token "$ZAI_API_KEY" \
-  --model glm-4.6
+  --model glm-5.2
 ```
 
 :::tip

@@ -301,13 +301,12 @@ func TestResolveDoesNotEmitPersistableFields(t *testing.T) {
 }
 
 // Resolve (full path, no config file present) falls back to built-in defaults
-// and resolves an Anthropic key from env. Isolate the config dir so a developer
-// machine's real ~/.config/miucr/config.toml can't perturb the result.
+// and resolves an Anthropic key from env. Isolate HOME so a developer machine's
+// real ~/.config/miu/cr/config.toml can't perturb the result.
 func TestResolveEndToEndDefaults(t *testing.T) {
 	clearProviderEnv(t)
 	dir := t.TempDir()
 	t.Setenv("HOME", dir)
-	t.Setenv("XDG_CONFIG_HOME", dir)
 	t.Setenv("ANTHROPIC_API_KEY", "ant-key")
 	creds, err := Resolve(ResolveInput{})
 	if err != nil {

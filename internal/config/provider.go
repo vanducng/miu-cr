@@ -25,12 +25,16 @@ const (
 // AuthToken/AuthEnv is sent as a Bearer token on the Anthropic path and as the
 // API key on the OpenAI path. Standard env vars (ANTHROPIC_API_KEY, …) and CLI
 // flags still override a profile credential.
+//
+// Precedence when both are set: AuthToken (the literal) wins over AuthEnv (see
+// resolve's profileSecret). Prefer AuthEnv — it keeps the secret out of the
+// plaintext config file.
 type Provider struct {
 	Kind      Kind   `toml:"kind"`
 	BaseURL   string `toml:"base_url,omitempty"`
 	Model     string `toml:"model,omitempty"`
-	AuthToken string `toml:"auth_token,omitempty"`
-	AuthEnv   string `toml:"auth_env,omitempty"`
+	AuthToken string `toml:"auth_token,omitempty"` // literal credential; wins over AuthEnv when both set
+	AuthEnv   string `toml:"auth_env,omitempty"`   // NAME of an env var holding the credential (preferred)
 }
 
 // Config is the layered configuration: a set of named provider profiles plus

@@ -6,6 +6,11 @@
 #
 # Precedence, highest wins:  CLI flags  >  environment  >  this file  >  built-in defaults.
 # Credentials live in memory only for the duration of a call and are NEVER persisted.
+#
+# Credentials — prefer `auth_env` (the NAME of an env var holding the token) so no
+# secret is written to this file. `auth_token` (a literal token) is supported but
+# DISCOURAGED: it sits in plaintext on disk. When both are set, auth_token wins;
+# miu-cr prints a one-time warning whenever a plaintext auth_token is used.
 
 # Profile to use when --provider is omitted and env auto-detect doesn't force a
 # choice. Built-in profiles are "anthropic" and "openai".
@@ -14,22 +19,27 @@ default_provider = "anthropic"
 # ── Built-in profiles (for reference — you do NOT need to redeclare these) ──
 # [providers.anthropic]
 # kind  = "anthropic"
-# model = "claude-sonnet-4-5-20250929"   # x-api-key comes from ANTHROPIC_API_KEY
+# model = "claude-sonnet-4-5-20250929"
+# # x-api-key comes from ANTHROPIC_API_KEY (or --api-key).
 #
 # [providers.openai]
 # kind     = "openai"
 # base_url = "https://api.openai.com/v1"
-# model    = "gpt-4o"                     # API key comes from OPENAI_API_KEY
+# model    = "gpt-4o"
+# # API key comes from OPENAI_API_KEY (or --api-key).
 
 # ── Example: GLM via z.ai (an Anthropic-compatible gateway) ──
-# A named profile of kind "anthropic" pointed at the gateway. The credential —
-# auth_token (literal) or auth_env (name of an env var holding it) — is sent as a
-# Bearer token. Select it with:  miucr review --staged --provider zai
+# A named profile of kind "anthropic" pointed at the gateway; the credential is
+# sent as a Bearer token. There is NO z.ai-specific code — this is pure config.
+# Ready to uncomment, then:
+#   export ZAI_API_KEY=...
+#   miucr review --staged --provider zai
 # [providers.zai]
 # kind     = "anthropic"
 # base_url = "https://api.z.ai/api/anthropic"
-# model    = "glm-4.6"
-# auth_env = "ZAI_API_KEY"               # or: auth_token = "<token>"
+# model    = "glm-5.2"
+# auth_env = "ZAI_API_KEY"               # RECOMMENDED: name of the env var holding the token
+# # auth_token = "<token>"               # discouraged: plaintext on disk — prefer auth_env
 
 # ── Example: a generic OpenAI-compatible gateway (DeepSeek, Moonshot, self-hosted, …) ──
 # Any endpoint speaking the OpenAI chat-completions API. The credential is sent
@@ -38,4 +48,5 @@ default_provider = "anthropic"
 # kind     = "openai"
 # base_url = "https://gateway.example.com/v1"
 # model    = "your-model-id"
-# auth_env = "MY_GATEWAY_TOKEN"          # or: auth_token = "<token>"
+# auth_env = "MY_GATEWAY_TOKEN"          # RECOMMENDED: name of the env var holding the token
+# # auth_token = "<token>"               # discouraged: plaintext on disk — prefer auth_env

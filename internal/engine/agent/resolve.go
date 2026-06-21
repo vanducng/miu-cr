@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"os"
 	"strings"
+	"sync"
 
 	"github.com/vanducng/miu-cr/internal/cli/clierr"
 	"github.com/vanducng/miu-cr/internal/config"
@@ -90,6 +91,11 @@ func pickProviderName(cfg config.Config, in ResolveInput) string {
 // autoDetectName picks OpenAI only when an OpenAI key is present and no Anthropic
 // credential is; otherwise it defers to config.DefaultProvider (Anthropic by
 // default), the sensible base since it backs the native API and gateways alike.
+//
+// --api-key applies to the selected/default provider: with no --provider and no
+// OpenAI-forcing env, that's Anthropic (or config default_provider). To send
+// --api-key to OpenAI, pass --provider openai. We deliberately do NOT sniff the
+// key's prefix to guess the vendor.
 func autoDetectName(cfg config.Config, in ResolveInput) string {
 	hasAnthropic := strings.TrimSpace(in.APIKey) != "" ||
 		strings.TrimSpace(in.AuthToken) != "" ||
@@ -114,7 +120,7 @@ func resolveAnthropic(in ResolveInput, prof config.Provider) (Credentials, error
 		return Credentials{}, &clierr.CLIError{
 			Code:    "agent.no_credentials",
 			Message: "no Anthropic credentials: set ANTHROPIC_API_KEY or ANTHROPIC_AUTH_TOKEN, configure a provider in " + config.FilePathOrEmpty() + ", or pass --api-key / --auth-token",
-			Hint:    "export ANTHROPIC_API_KEY=... or run with --api-key",
+			Hint:    "export ANTHROPIC_API_KEY=... or run with --api-key; see config.example.toml for provider profiles (e.g. a gateway via auth_env)",
 			Exit:    1,
 		}
 	}
@@ -145,7 +151,7 @@ func resolveOpenAI(in ResolveInput, prof config.Provider) (Credentials, error) {
 		return Credentials{}, &clierr.CLIError{
 			Code:    "agent.no_credentials",
 			Message: "no OpenAI API key: set OPENAI_API_KEY, configure a provider in " + config.FilePathOrEmpty() + ", or pass --api-key",
-			Hint:    "export OPENAI_API_KEY=... or run with --api-key",
+			Hint:    "export OPENAI_API_KEY=... or run with --api-key; see config.example.toml for provider profiles (e.g. a gateway via auth_env)",
 			Exit:    1,
 		}
 	}
@@ -159,10 +165,16 @@ func resolveOpenAI(in ResolveInput, prof config.Provider) (Credentials, error) {
 	}, nil
 }
 
-// profileSecret returns a profile's literal AuthToken, else the value of the
-// env var it names via AuthEnv.
+var plaintextAuthTokenWarn sync.Once
+
+// profileSecret returns a profile's literal AuthToken (which wins over AuthEnv),
+// else the value of the env var named by AuthEnv. A literal auth_token lives in
+// plaintext on disk, so its first use emits a one-time stderr warning.
 func profileSecret(prof config.Provider) string {
 	if s := strings.TrimSpace(prof.AuthToken); s != "" {
+		plaintextAuthTokenWarn.Do(func() {
+			fmt.Fprintln(os.Stderr, "miu-cr: warning: provider auth_token is stored in plaintext on disk; prefer auth_env (the NAME of an env var holding the token)")
+		})
 		return s
 	}
 	if prof.AuthEnv != "" {

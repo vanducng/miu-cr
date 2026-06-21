@@ -162,7 +162,7 @@ func reviewCommand(opts *options) *cobra.Command {
 	f.StringSliceVar(&exclude, "exclude", nil, "Doublestar globs to drop")
 	f.StringSliceVar(&exts, "ext", nil, "Restrict review to these file extensions")
 	f.StringVar(&provider, "provider", "auto", "LLM provider profile: anthropic|openai|<configured name>|auto (auto detects from env / config default_provider)")
-	f.StringVar(&apiKey, "api-key", "", "API key (overrides ANTHROPIC_API_KEY/OPENAI_API_KEY; never persisted)")
+	f.StringVar(&apiKey, "api-key", "", "API key for the selected/default provider (anthropic unless --provider or config default_provider says otherwise; for OpenAI pass --provider openai); overrides ANTHROPIC_API_KEY/OPENAI_API_KEY; never persisted")
 	f.StringVar(&baseURL, "base-url", "", "Override provider base URL (e.g. an Anthropic-compatible gateway; never persisted)")
 	f.StringVar(&authToken, "auth-token", "", "Bearer auth token for Anthropic-compatible gateways, Anthropic only (never persisted)")
 	f.StringVar(&model, "model", "", "Override the review model (else ANTHROPIC_MODEL/OPENAI_MODEL or pinned default)")
