@@ -35,6 +35,11 @@ type Job struct {
 	Ref     string
 	Token   string
 	Timeout time.Duration
+	// OnDone, when non-nil, runs after the review returns: nil on success, the
+	// reviewFn's error (or a recovered panic) on failure. Additive — the webhook Job leaves it nil so the
+	// webhook path is byte-for-byte unchanged; the poller sets it to record its
+	// dedup cursor only on review success.
+	OnDone func(error)
 }
 
 // Dispatcher accepts review jobs. Submit returns false when the work could not
@@ -127,7 +132,7 @@ func newServer(cfg Config) *Server {
 // (the real reviewFn calls cli.ReviewPRForServe); any cfg.Dispatcher is ignored
 // (tests inject a fake via the lower-level newServer). Returns the Server plus the
 // Pool so Run can Drain it.
-func New(cfg Config, reviewFn func(Job)) (*Server, *Pool, error) {
+func New(cfg Config, reviewFn func(Job) error) (*Server, *Pool, error) {
 	if len(cfg.Secret) == 0 {
 		return nil, nil, errors.New("serve: webhook secret must be non-empty")
 	}

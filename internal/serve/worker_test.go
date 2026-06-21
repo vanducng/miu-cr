@@ -20,10 +20,11 @@ func TestPool_CoalescesSameKey(t *testing.T) {
 	var calls atomic.Int64
 	release := make(chan struct{})
 	started := make(chan struct{}, 1)
-	reviewFn := func(Job) {
+	reviewFn := func(Job) error {
 		calls.Add(1)
 		started <- struct{}{}
 		<-release // hold the job in flight so the second Submit coalesces
+		return nil
 	}
 	p := NewPool(reviewFn, discardLog())
 
@@ -45,7 +46,7 @@ func TestPool_CoalescesSameKey(t *testing.T) {
 
 func TestPool_DistinctKeysBothRun(t *testing.T) {
 	var calls atomic.Int64
-	reviewFn := func(Job) { calls.Add(1) }
+	reviewFn := func(Job) error { calls.Add(1); return nil }
 	p := NewPool(reviewFn, discardLog())
 
 	if !p.Submit(Job{Key: key("o", "r", 1)}) {
@@ -65,9 +66,10 @@ func TestPool_FullQueueLoudDrop(t *testing.T) {
 	// Block every worker so the buffered channel fills and the next Submit drops.
 	block := make(chan struct{})
 	var ran sync.WaitGroup
-	reviewFn := func(Job) {
+	reviewFn := func(Job) error {
 		ran.Done()
 		<-block
+		return nil
 	}
 	p := NewPool(reviewFn, discardLog())
 
@@ -104,13 +106,14 @@ func TestPool_PanicSurvival(t *testing.T) {
 	var ok atomic.Bool
 	done := make(chan struct{})
 	first := make(chan struct{})
-	reviewFn := func(j Job) {
+	reviewFn := func(j Job) error {
 		if j.Key.Number == 1 {
 			close(first)
 			panic("boom")
 		}
 		ok.Store(true)
 		close(done)
+		return nil
 	}
 	p := NewPool(reviewFn, discardLog())
 
@@ -135,9 +138,10 @@ func TestPool_PanicSurvival(t *testing.T) {
 
 func TestPool_DrainWaitsInFlight(t *testing.T) {
 	var completed atomic.Bool
-	reviewFn := func(Job) {
+	reviewFn := func(Job) error {
 		time.Sleep(50 * time.Millisecond)
 		completed.Store(true)
+		return nil
 	}
 	p := NewPool(reviewFn, discardLog())
 	if !p.Submit(Job{Key: key("o", "r", 1)}) {
@@ -153,7 +157,7 @@ func TestPool_DrainWaitsInFlight(t *testing.T) {
 // -race. The send on p.jobs must never hit a closed channel (the historic "send
 // on closed channel" panic), and every Submit after Drain must return false.
 func TestPool_SubmitRacesDrainNoPanic(t *testing.T) {
-	p := NewPool(func(Job) {}, discardLog())
+	p := NewPool(func(Job) error { return nil }, discardLog())
 
 	var wg sync.WaitGroup
 	for i := range 64 {

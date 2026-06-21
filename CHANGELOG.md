@@ -4,6 +4,21 @@
 
 ### Features
 
+* **Poll-mode trigger (M4).** `miucr serve --poll` adds an opt-in trigger that
+  periodically asks GitHub which PRs need review on an `--repos` allowlist and
+  dispatches each one onto the **same** serve review path — the webhook stays the
+  default. Two sources: `--poll-source notifications` (default; PRs the PAT is
+  subscribed to/requested on) and `--poll-source pulls` (lists open PRs per repo —
+  full coverage / cold-start-complete). Per-head-SHA dedup means each distinct
+  head is reviewed exactly once (a re-pushed head = one fresh review; **each new
+  head SHA is one full LLM review** — the allowlist + dedup are the spend guards).
+  `--poll-interval` is a floor; the effective interval is `max(it, X-Poll-Interval)`,
+  and rate-limit / transient errors back off without re-reviewing or advancing the
+  cursor. Dedup state is a restart-safe JSON cursor under `~/.config/miu/cr`
+  (atomic write, pruned by staleness) that **never holds the GitHub token**.
+  Poll-only mode needs no `WEBHOOK_SECRET`; webhook+poll share one context and
+  drain exactly once on shutdown.
+
 * **Cross-push dedupe (M5).** Inline-comment fingerprints are now line-free
   (`path | category | sha256(normalized quoted code)`), so a finding that
   re-anchors to a different line after a push is no longer re-posted. Dedupe state

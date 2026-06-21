@@ -83,6 +83,101 @@ In the target repo: **Settings → Webhooks → Add webhook**.
 `SIGINT` / `SIGTERM` triggers a graceful HTTP shutdown followed by a pool drain,
 so in-flight reviews finish before the process exits.
 
+## Poll mode (opt-in)
+
+The webhook is the **default**. For environments that can't receive an inbound
+webhook (a laptop behind NAT, a private runner, a bot PAT), `--poll` turns serve
+into a **trigger** that periodically *asks* GitHub which PRs need review and
+dispatches each one onto the **same** review path. It is a trigger only — there
+is no second review engine, no change to fork handling or publish.
+
+```sh
+# Poll-only (no webhook secret needed):
+GITHUB_TOKEN=… ANTHROPIC_API_KEY=… \
+  miucr serve --poll --repos owner/repo,owner/other --poll-interval 60s
+
+# Webhook AND poll together (both share one ctx; a secret is still required for
+# the webhook half):
+WEBHOOK_SECRET=… GITHUB_TOKEN=… ANTHROPIC_API_KEY=… \
+  miucr serve --poll --repos owner/repo --addr :8080
+```
+
+| Flag              | Default         | Notes                                                                 |
+|-------------------|-----------------|-----------------------------------------------------------------------|
+| `--poll`          | off             | Opt-in. Without it serve is webhook-only (the default).               |
+| `--poll-interval` | `60s`           | Poll **floor**. Effective interval = `max(this, X-Poll-Interval)`.    |
+| `--poll-source`   | `notifications` | Candidate source: `notifications` (default) or `pulls`.               |
+| `--repos`         | **required**    | The same owner/repo allowlist — bounds the PAT + LLM blast radius.    |
+
+> **Cost model — each new head SHA is one full LLM review.** Poll mode reviews a
+> PR once per distinct head commit. The poller keeps a local dedup cursor so the
+> *same* head is never reviewed twice, but a re-pushed head is a new SHA and gets
+> a fresh review. The allowlist and the per-head dedup are the only spend guards
+> — there is no budget cap, so keep `--repos` tight and the interval sane.
+
+### Candidate sources
+
+- **`notifications`** (default, lighter) — reads your GitHub **notifications**
+  with a `Since` cursor and maps `review_requested` / mention notifications to the
+  PR. Only sees PRs the PAT is **subscribed to / requested on**, and **misses PRs
+  opened before** the poller started (cold start). Best for a bot that is added as
+  a reviewer.
+- **`pulls`** (full coverage) — lists **open PRs per allowlisted repo**
+  (`Pulls.List(state=open)`). The only source that works for a PAT **not
+  subscribed** to a repo and the only **cold-start-complete** one. Costs one list
+  call per repo per tick; use it when you need every open PR reviewed regardless
+  of subscription.
+
+### How a tick works
+
+1. **Enumerate** candidates (per the source above), filtered to `--repos`;
+   non-`PullRequest` notification subjects are dropped.
+2. **Pre-`GetPR` dedup** (notifications only) — if a notification's `updated_at`
+   is unchanged since last tick, the candidate is skipped with **no `GetPR`** (a
+   cheap cost guard before spending any API call to resolve the head).
+3. **Resolve the head SHA** — one `GetPR` for the notifications source; the
+   `pulls` source already carries `pr.Head.SHA` (no extra call).
+4. **Per-head dedup** — if the cursor already saw this `owner/repo#N` at this head
+   SHA, **skip** (no review). Otherwise dispatch onto the serve pool.
+5. **Record on success only** — the head SHA is recorded as reviewed **after the
+   review succeeds** (via an `OnDone` callback). A failed/dropped review stays
+   retryable next tick. The `Since` cursor advances to the tick start **only after
+   every candidate that tick is handled**, so no candidate is lost.
+
+### Rate limits & interval floor
+
+The poller never polls faster than the server's `X-Poll-Interval` header (read off
+each response): the effective wait is `max(--poll-interval, X-Poll-Interval)`. On
+a `*RateLimitError` it sleeps until the rate `Reset`; on an `*AbuseRateLimitError`
+it honors `Retry-After`; other transient errors back off exponentially with jitter
+(cap ~15 min). **On any error the cursor is never advanced and no review is
+re-run** — there is never a tight retry loop.
+
+### The cursor (restart-safe, never holds the token)
+
+Dedup state is a small JSON file under `~/.config/miu/cr/poll-cursor.json`:
+
+```json
+{ "since": "…", "seen": { "owner/repo#N": "<head-sha>" },
+  "notif_seen": { "owner/repo#N": "<updated_at>" } }
+```
+
+- Written **atomically** (`MkdirAll(0700)` + temp file + rename, file mode `0600`).
+- The **GitHub token is never a field** — it is resolved per tick in memory only,
+  never persisted, never logged.
+- A **missing or corrupt** file is tolerated as an empty cursor (warn, never
+  fatal) so the poller always starts.
+- Entries are pruned by **staleness** (untouched ~14 days), not by absence from a
+  tick — so an open PR that drops out of one tick's candidate set keeps its
+  reviewed-head and is never re-reviewed.
+
+### Poll-mode shutdown
+
+`SIGINT` / `SIGTERM` cancels the shared context: the ticker stops and the worker
+pool is drained **exactly once** (poll-only drains in `RunPoll`; in webhook+poll
+the HTTP server is the sole drainer and the poller never drains), so in-flight
+reviews finish and there is no goroutine leak.
+
 ## GitHub Action
 
 A reusable **composite** action (the static binary makes a Docker action pure
