@@ -98,6 +98,25 @@ func TestAnthropicAgentParsesFindings(t *testing.T) {
 	}
 }
 
+// Hits-injected: a non-empty SemanticContext must reach the Anthropic user turn
+// (the advisory header + body), proving the lockstep field threads agent.go's
+// BuildUserPrompt call. Mirrors the OpenAI provider test.
+func TestAnthropicAgentInjectsSemanticContext(t *testing.T) {
+	fc := &fakeAnthropic{responses: []string{textMessage(`{"findings":[]}`)}}
+	a := &anthropicAgent{client: fc, model: "claude-test"}
+	advisory := "- [bug] prior off-by-one"
+	if _, err := a.Review(stdctx.Background(), Context{Text: "ctx", SemanticContext: advisory, RepoDir: t.TempDir()}); err != nil {
+		t.Fatalf("Review: %v", err)
+	}
+	raw, _ := json.Marshal(fc.seen[0])
+	if !strings.Contains(string(raw), semanticAdvisoryHeader) {
+		t.Fatalf("advisory header missing from Anthropic user turn: %s", raw)
+	}
+	if !strings.Contains(string(raw), advisory) {
+		t.Fatalf("advisory body missing from Anthropic user turn: %s", raw)
+	}
+}
+
 // A tool_use turn followed by a findings turn: the loop must dispatch the tool
 // (grep against an empty temp repo) and thread a tool_result into the next request.
 func TestAnthropicAgentToolLoopThenFindings(t *testing.T) {

@@ -23,11 +23,15 @@ import (
 // the reviewed revision so the tool loop reads the SAME content the diff came
 // from (rev=="" is the staged index).
 type Context struct {
-	Text    string
-	Rules   string // fenced rules section emitted before the diff in the USER turn
-	RepoDir string
-	Rev     string
-	Runner  *gitcmd.Runner
+	Text  string
+	Rules string // fenced rules section emitted before the diff in the USER turn
+	// SemanticContext is the optional M7 advisory block. LOCKSTEP: mirror Rules —
+	// it threads engine.AgentContext -> here -> PromptParts -> BuildUserPrompt in
+	// BOTH agent.go and openai.go, or it is silently dropped.
+	SemanticContext string
+	RepoDir         string
+	Rev             string
+	Runner          *gitcmd.Runner
 }
 
 // Agent runs one review pass over the assembled context and returns findings
@@ -132,7 +136,7 @@ func (a *anthropicAgent) Review(ctx stdctx.Context, rc Context) ([]engine.Findin
 		System:    []anthropic.TextBlockParam{{Text: systemPrompt}},
 		Tools:     reviewTools(),
 		Messages: []anthropic.MessageParam{
-			anthropic.NewUserMessage(anthropic.NewTextBlock(BuildUserPrompt(PromptParts{Rules: rc.Rules, Diff: rc.Text}))),
+			anthropic.NewUserMessage(anthropic.NewTextBlock(BuildUserPrompt(PromptParts{Rules: rc.Rules, SemanticContext: rc.SemanticContext, Diff: rc.Text}))),
 		},
 	}
 

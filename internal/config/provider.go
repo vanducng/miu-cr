@@ -45,12 +45,38 @@ type Store struct {
 	DSN     string `toml:"dsn,omitempty"`     // postgres DSN; env MIUCR_PG_DSN wins
 }
 
+// DefaultEmbeddingModel and DefaultEmbeddingDim are the built-in defaults for the
+// opt-in semantic layer; text-embedding-3-small at 1536 dims matches OpenAI's
+// default and the pgvector column dim templated in the store (M7/P2).
+const (
+	DefaultEmbeddingModel = "text-embedding-3-small"
+	DefaultEmbeddingDim   = 1536
+	// MaxEmbeddingDim is pgvector's hard ceiling for a vector(N) column; a dim
+	// outside [1,MaxEmbeddingDim] is rejected before any DDL is rendered.
+	MaxEmbeddingDim = 16000
+)
+
+// Embedding configures the opt-in semantic-recall layer (M7). It is OFF unless
+// Enabled is explicitly true AND the store backend is postgres — never enabled
+// by provider-presence, so copying an example config cannot silently start
+// sending code-derived text off-box. The credential is resolved at runtime from
+// the same env/flag chain as the LLM provider and is never persisted/redacted;
+// BaseURL is a non-secret endpoint override for self-hosted/compatible APIs.
+type Embedding struct {
+	Enabled  bool   `toml:"enabled"`
+	Provider string `toml:"provider,omitempty"` // profile kind hint: "openai" (default); reserved
+	Model    string `toml:"model,omitempty"`
+	BaseURL  string `toml:"base_url,omitempty"`
+	Dim      int    `toml:"dim,omitempty"`
+}
+
 // Config is the layered configuration: a set of named provider profiles plus
 // the profile to use when none is selected on the command line.
 type Config struct {
 	DefaultProvider string              `toml:"default_provider"`
 	Providers       map[string]Provider `toml:"providers"`
 	Store           Store               `toml:"store"`
+	Embedding       Embedding           `toml:"embedding"`
 }
 
 // Defaults returns the built-in configuration: the two first-class kinds as
@@ -63,6 +89,7 @@ func Defaults() Config {
 			string(KindAnthropic): {Kind: KindAnthropic, Model: DefaultAnthropicModel},
 			string(KindOpenAI):    {Kind: KindOpenAI, BaseURL: DefaultOpenAIBaseURL, Model: DefaultOpenAIModel},
 		},
-		Store: Store{Backend: "sqlite"},
+		Store:     Store{Backend: "sqlite"},
+		Embedding: Embedding{Enabled: false, Model: DefaultEmbeddingModel, Dim: DefaultEmbeddingDim},
 	}
 }

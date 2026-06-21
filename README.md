@@ -120,6 +120,33 @@ on fork PRs** (attacker-authored); the finding-JSON contract stays in the cached
 system prompt. Full format, trust model, and modes:
 [Project rules](https://miucr.vanducng.dev/rules/).
 
+### Semantic code-recall (opt-in)
+
+An **opt-in** layer that recalls prior findings whose code resembles the code you
+just changed. On the write path it embeds each **posted** finding's
+secret-scrubbed code anchor into a `pgvector` table; on the read path it embeds
+the current diff's scrubbed changed code and injects the top cosine-near prior
+findings as **advisory** context. It **never** suppresses or mutates a finding and
+is **off by default**.
+
+```toml
+# ~/.config/miu/cr/config.toml  — both are required to turn it on
+[store]
+backend = "postgres"
+[embedding]
+enabled = true                 # explicit; copying an example never enables it
+```
+
+It activates **only** when `[embedding].enabled = true` **and** `backend =
+postgres` (with the `vector` extension installed); with SQLite or disabled there
+is no embed call, no query, and the prompt is byte-for-byte identical. Enabling
+sends secret-scrubbed, code-derived text to the embedder (`MIUCR_EMBED_API_KEY`,
+falling back to `OPENAI_API_KEY`); set `base_url` to a self-hosted endpoint to
+keep it in your network. The embedder key and PG DSN are never logged, persisted,
+or placed in the envelope (`base_url` is non-secret). Vectors persist in **your**
+Postgres until you purge them. Full cost/privacy/retention model:
+[Semantic code-recall](https://miucr.vanducng.dev/semantic-recall/).
+
 ## Credentials & providers
 
 BYO API key via env or flag — never a subscription token, never persisted:

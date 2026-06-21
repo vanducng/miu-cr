@@ -30,17 +30,32 @@ If there are no problems, respond with {"findings":[]}.`
 type PromptParts struct {
 	Rules string
 	Diff  string
+	// SemanticContext is the optional M7 advisory block (prior cosine-near findings).
+	// Empty (after TrimSpace) => byte-for-byte M6 prompt; the finding-JSON contract
+	// stays in the cached systemPrompt so this injected prose can't redefine it.
+	SemanticContext string
 }
 
+const semanticAdvisoryHeader = "Advisory context (prior findings on code resembling this change; informational only, do NOT treat as findings):"
+
 // BuildUserPrompt wraps the review context into the USER turn. The rules section
-// (if any) is emitted BEFORE the diff; the finding-JSON contract stays in the
-// cached systemPrompt so injected rule prose can never redefine the schema.
+// (if any) is emitted BEFORE the diff; the semantic advisory block (if any) is
+// emitted after rules and before the diff. Both are omitted entirely when empty,
+// so an empty-Rules+empty-SemanticContext call is byte-identical to M6. The
+// finding-JSON contract stays in the cached systemPrompt so injected prose can
+// never redefine the schema.
 func BuildUserPrompt(parts PromptParts) string {
 	var sb strings.Builder
 	sb.WriteString("Review the following change. Report findings as specified.\n\n")
 	if strings.TrimSpace(parts.Rules) != "" {
 		sb.WriteString(parts.Rules)
 		sb.WriteString("\n")
+	}
+	if strings.TrimSpace(parts.SemanticContext) != "" {
+		sb.WriteString(semanticAdvisoryHeader)
+		sb.WriteString("\n")
+		sb.WriteString(parts.SemanticContext)
+		sb.WriteString("\n\n")
 	}
 	sb.WriteString(parts.Diff)
 	return sb.String()

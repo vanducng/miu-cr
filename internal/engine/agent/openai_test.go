@@ -100,6 +100,25 @@ func TestOpenAIAgentParsesFindings(t *testing.T) {
 	}
 }
 
+// Hits-injected: a non-empty SemanticContext must reach the OpenAI user turn
+// (the advisory header + body), proving the lockstep field threads openai.go's
+// BuildUserPrompt call. Mirrors the Anthropic provider test.
+func TestOpenAIAgentInjectsSemanticContext(t *testing.T) {
+	fc := &fakeOpenAI{responses: []string{textCompletion(`{"findings":[]}`)}}
+	a := &openaiAgent{client: fc, model: "gpt-test"}
+	advisory := "- [bug] prior off-by-one"
+	if _, err := a.Review(stdctx.Background(), Context{Text: "ctx", SemanticContext: advisory, RepoDir: t.TempDir()}); err != nil {
+		t.Fatalf("Review: %v", err)
+	}
+	raw, _ := json.Marshal(fc.seen[0])
+	if !strings.Contains(string(raw), semanticAdvisoryHeader) {
+		t.Fatalf("advisory header missing from OpenAI user turn: %s", raw)
+	}
+	if !strings.Contains(string(raw), advisory) {
+		t.Fatalf("advisory body missing from OpenAI user turn: %s", raw)
+	}
+}
+
 // A tool_use turn followed by a findings turn: the loop must dispatch the tool
 // (grep with no matches against an empty temp repo) and parse the next turn.
 func TestOpenAIAgentToolLoopThenFindings(t *testing.T) {
