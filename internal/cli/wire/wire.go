@@ -177,6 +177,23 @@ func (prReviewer) ReviewPR(ctx stdctx.Context, req cli.PRReviewRequest) (cli.Rev
 	}
 	defer cleanup()
 
+	// M7 semantic layer (opt-in: [embedding].enabled AND backend=postgres). Built
+	// here so the Retriever can be injected into the --pr engine.Request and the
+	// embedder reused on the post-publish write path. Off => nils => byte-for-byte M6.
+	cfg, lerr := config.Load()
+	if lerr != nil {
+		slog.Warn("config load failed, using built-in defaults: " + config.RedactString(lerr.Error()))
+	}
+	repo := repoKey(info.Owner, info.Repo)
+	emb, embStore, closeEmb := buildSemantic(ctx, cfg)
+	if closeEmb != nil {
+		defer closeEmb()
+	}
+	var retr engine.Retriever
+	if emb != nil && embStore != nil {
+		retr = &retriever{emb: emb, store: embStore, repo: repo}
+	}
+
 	eng := engine.New(agentAdapter{inner: llm}, runner)
 	res, err := eng.Review(ctx, engine.Request{
 		Mode:         diff.ModeRange,
@@ -193,6 +210,7 @@ func (prReviewer) ReviewPR(ctx stdctx.Context, req cli.PRReviewRequest) (cli.Rev
 		Rules:            loadRules(dir, !info.IsFork),
 		RulesFork:        info.IsFork,
 		RulesTokenBudget: defaultRulesTokenBudget,
+		Retriever:        retr,
 	})
 	if err != nil {
 		return cli.ReviewOutcome{}, err
@@ -208,10 +226,6 @@ func (prReviewer) ReviewPR(ctx stdctx.Context, req cli.PRReviewRequest) (cli.Rev
 	}
 
 	if req.Post {
-		cfg, lerr := config.Load()
-		if lerr != nil {
-			slog.Warn("config load failed, using built-in defaults: " + config.RedactString(lerr.Error()))
-		}
 		prStore, closeStore, serr := newPRThreadStore(ctx, cfg)
 		if serr != nil {
 			return cli.ReviewOutcome{}, serr
@@ -219,7 +233,8 @@ func (prReviewer) ReviewPR(ctx stdctx.Context, req cli.PRReviewRequest) (cli.Rev
 		if closeStore != nil {
 			defer closeStore()
 		}
-		if err := publishReview(ctx, client, runner, dir, info, res, prResult, req, prStore); err != nil {
+		ew := embedWriter{emb: emb, store: embStore, repo: repo}
+		if err := publishReview(ctx, client, runner, dir, info, res, prResult, req, prStore, ew); err != nil {
 			return cli.ReviewOutcome{}, err
 		}
 	}
@@ -236,7 +251,7 @@ func (prReviewer) ReviewPR(ctx stdctx.Context, req cli.PRReviewRequest) (cli.Rev
 // last so a partial failure leaves the summary reflecting reality. It computes
 // gateClean via engine.GateFailed + reviewedFiles from stats, threads both opt-in
 // write-actions (default OFF) into PostReviewOptions, and fills the outcome fields.
-func publishReview(ctx stdctx.Context, client mgithub.Client, runner *gitcmd.Runner, dir string, info *mgithub.PRInfo, res engine.ReviewResult, prResult *cli.PRResult, req cli.PRReviewRequest, prStore store.PRThreadStore) error {
+func publishReview(ctx stdctx.Context, client mgithub.Client, runner *gitcmd.Runner, dir string, info *mgithub.PRInfo, res engine.ReviewResult, prResult *cli.PRResult, req cli.PRReviewRequest, prStore store.PRThreadStore, ew embedWriter) error {
 	diffs, err := mgithub.DiffsForPR(ctx, runner, dir, info.BaseSHA, info.HeadSHA)
 	if err != nil {
 		return err
@@ -306,6 +321,11 @@ func publishReview(ctx stdctx.Context, client mgithub.Client, runner *gitcmd.Run
 		}
 	}
 
+	// M7 write path (gated by [embedding].enabled+postgres, independent of the
+	// PR-thread store): embed the actually-posted findings' scrubbed code anchors.
+	// Best-effort — never affects the published review.
+	ew.write(ctx, pr.PostedFindings, res.Findings, res.Stats)
+
 	prResult.Posted = true
 	prResult.PostedInline = pr.Posted
 	prResult.SummaryAction = action
@@ -372,11 +392,12 @@ type agentAdapter struct{ inner agent.Agent }
 
 func (a agentAdapter) Review(ctx stdctx.Context, rc engine.AgentContext) ([]engine.Finding, error) {
 	return a.inner.Review(ctx, agent.Context{
-		Text:    rc.Text,
-		Rules:   rc.Rules, // lockstep: forgetting this silently drops all rules
-		RepoDir: rc.RepoDir,
-		Rev:     rc.Rev,
-		Runner:  rc.Runner,
+		Text:            rc.Text,
+		Rules:           rc.Rules,           // lockstep: forgetting this silently drops all rules
+		SemanticContext: rc.SemanticContext, // lockstep: forgetting this silently drops M7 advisory
+		RepoDir:         rc.RepoDir,
+		Rev:             rc.Rev,
+		Runner:          rc.Runner,
 	})
 }
 

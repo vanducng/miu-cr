@@ -97,6 +97,31 @@ func Merge(base, file Config) Config {
 		out.Providers[name] = mergeProvider(out.Providers[name], fp)
 	}
 	out.Store = mergeStore(base.Store, file.Store)
+	out.Embedding = mergeEmbedding(base.Embedding, file.Embedding)
+	return out
+}
+
+// mergeEmbedding overlays non-empty file [embedding] fields onto base. Enabled is
+// a plain bool: a file with [embedding].enabled = true flips it on; an absent or
+// false value leaves base (default disabled). Empty string/zero fields inherit
+// base so a user can flip enabled without restating model/dim.
+func mergeEmbedding(base, file Embedding) Embedding {
+	out := base
+	if file.Enabled {
+		out.Enabled = true
+	}
+	if file.Provider != "" {
+		out.Provider = file.Provider
+	}
+	if file.Model != "" {
+		out.Model = file.Model
+	}
+	if file.BaseURL != "" {
+		out.BaseURL = file.BaseURL
+	}
+	if file.Dim != 0 {
+		out.Dim = file.Dim
+	}
 	return out
 }
 

@@ -52,3 +52,32 @@ default_provider = "anthropic"
 # model    = "your-model-id"
 # auth_env = "MY_GATEWAY_TOKEN"          # RECOMMENDED: name of the env var holding the token
 # # auth_token = "<token>"               # discouraged: plaintext on disk — prefer auth_env
+
+# ── Store backend (optional; default = sqlite) ──
+# SQLite is the default and needs no config. Postgres is opt-in for shared/serve.
+# Prefer the MIUCR_PG_DSN env var so the password is not in plaintext on disk.
+# [store]
+# backend = "postgres"   # "sqlite" (default) | "postgres"
+# # dsn = "postgres://user@host:5432/miucr?sslmode=require"  # prefer MIUCR_PG_DSN
+
+# ── Semantic code-recall (OPT-IN; default = OFF) ──
+# Embeds each POSTED finding's secret-SCRUBBED code anchor into a pgvector table,
+# then at review time retrieves prior cosine-near findings as ADVISORY context. It
+# NEVER suppresses or mutates a finding and is byte-for-byte M6 when off.
+#
+# REQUIRES: backend = "postgres" (above) with the `vector` extension installed
+# (`CREATE EXTENSION vector;` — needs a role allowed to create it). With sqlite or
+# enabled = false there is NO embed call, NO pgvector query, identical prompt.
+#
+# PRIVACY: enabling sends secret-scrubbed, code-DERIVED text to the embedder API.
+# Point base_url at a self-hosted/compatible endpoint to keep it in your network.
+# The embedder key (MIUCR_EMBED_API_KEY, falling back to OPENAI_API_KEY) and the
+# PG DSN are never logged/persisted/in the envelope; base_url is non-secret.
+# Vectors persist in YOUR Postgres until you purge them (see the docs).
+#
+# This block ships COMMENTED so copying this file does NOT enable embedding.
+# [embedding]
+# enabled  = true                        # MUST be set true (default false) to turn it on
+# model    = "text-embedding-3-small"    # embedding model (must match the pgvector column dim)
+# dim      = 1536                         # vector dimension; immutable per DB — a mismatch fails loud
+# # base_url = "https://api.openai.com/v1"  # non-secret; override for self-hosted/compatible

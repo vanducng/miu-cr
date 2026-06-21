@@ -18,17 +18,33 @@ func init() { engine.SetAnchorer(anchor.ResolveLineNumbers) }
 // fakeAgent returns canned findings, ignoring the assembled context. No network,
 // no API key. It records the rev it was invoked with for revision-source asserts.
 type fakeAgent struct {
-	findings []engine.Finding
-	gotRev   string
-	gotRules string
+	findings    []engine.Finding
+	gotRev      string
+	gotRules    string
+	gotSemantic string
 }
 
 func (f *fakeAgent) Review(_ stdctx.Context, rc engine.AgentContext) ([]engine.Finding, error) {
 	f.gotRev = rc.Rev
 	f.gotRules = rc.Rules
+	f.gotSemantic = rc.SemanticContext
 	out := make([]engine.Finding, len(f.findings))
 	copy(out, f.findings)
 	return out, nil
+}
+
+// fakeRetriever drives the engine's semantic seam without embed/DB/network.
+type fakeRetriever struct {
+	advisory string
+	err      error
+	gotCode  []string
+	called   bool
+}
+
+func (r *fakeRetriever) Related(_ stdctx.Context, changedCode []string) (string, error) {
+	r.called = true
+	r.gotCode = changedCode
+	return r.advisory, r.err
 }
 
 func git(t *testing.T, dir string, args ...string) {
@@ -137,6 +153,104 @@ func TestReviewSurvivesPersistFailure(t *testing.T) {
 	}
 	if res.Stats["persist_error"] != "disk full" {
 		t.Errorf("persist_error: want %q, got %v", "disk full", res.Stats["persist_error"])
+	}
+}
+
+// semanticDir builds a staged change with one finding-worthy line, returning the
+// repo dir + the canned finding set.
+func semanticDir(t *testing.T) (string, []engine.Finding) {
+	t.Helper()
+	dir := initRepo(t)
+	writeFile(t, dir, "app.go", "package app\n\nfunc Existing() int { return 1 }\n")
+	git(t, dir, "add", ".")
+	git(t, dir, "commit", "-q", "-m", "base")
+	writeFile(t, dir, "app.go", "package app\n\nfunc Existing() int { return 1 }\n\nfunc Risky() {\n\tpassword := \"hunter2\"\n\t_ = password\n}\n")
+	git(t, dir, "add", "app.go")
+	return dir, []engine.Finding{
+		{File: "app.go", Severity: "high", Category: "security", Rationale: "hardcoded credential", QuotedCode: "password := \"hunter2\""},
+	}
+}
+
+// Retriever nil => SemanticContext empty (byte-for-byte M6) and no stat.
+func TestReviewRetrieverNilIsM6(t *testing.T) {
+	dir, findings := semanticDir(t)
+	fa := &fakeAgent{findings: findings}
+	eng := engine.New(fa, gitcmd.New())
+	res, err := eng.Review(stdctx.Background(), engine.Request{Mode: 0, RepoDir: dir, Gate: "high", Extensions: []string{"go"}})
+	if err != nil {
+		t.Fatalf("Review: %v", err)
+	}
+	if fa.gotSemantic != "" {
+		t.Errorf("nil Retriever must leave SemanticContext empty, got %q", fa.gotSemantic)
+	}
+	if _, ok := res.Stats["semantic_recall"]; ok {
+		t.Errorf("nil Retriever must not set semantic_recall stat: %v", res.Stats["semantic_recall"])
+	}
+}
+
+// Retriever returning zero matches (empty advisory) => SemanticContext empty
+// (still M6 prompt) but a no_matches stat for cost/outcome visibility.
+func TestReviewRetrieverZeroMatchesIsM6(t *testing.T) {
+	dir, findings := semanticDir(t)
+	fa := &fakeAgent{findings: findings}
+	r := &fakeRetriever{advisory: ""}
+	eng := engine.New(fa, gitcmd.New())
+	res, err := eng.Review(stdctx.Background(), engine.Request{Mode: 0, RepoDir: dir, Gate: "high", Extensions: []string{"go"}, Retriever: r})
+	if err != nil {
+		t.Fatalf("Review: %v", err)
+	}
+	if !r.called || len(r.gotCode) == 0 {
+		t.Fatal("Retriever must be called with the change's code anchors")
+	}
+	if fa.gotSemantic != "" {
+		t.Errorf("zero matches must leave SemanticContext empty, got %q", fa.gotSemantic)
+	}
+	if res.Stats["semantic_recall"] != "no_matches" {
+		t.Errorf("semantic_recall: want no_matches, got %v", res.Stats["semantic_recall"])
+	}
+}
+
+// Retriever with hits => advisory injected into SemanticContext; findings count
+// and content unchanged (additive only).
+func TestReviewRetrieverHitsInject(t *testing.T) {
+	dir, findings := semanticDir(t)
+	fa := &fakeAgent{findings: findings}
+	r := &fakeRetriever{advisory: "- [bug] prior off-by-one"}
+	eng := engine.New(fa, gitcmd.New())
+	res, err := eng.Review(stdctx.Background(), engine.Request{Mode: 0, RepoDir: dir, Gate: "high", Extensions: []string{"go"}, Retriever: r})
+	if err != nil {
+		t.Fatalf("Review: %v", err)
+	}
+	if fa.gotSemantic != "- [bug] prior off-by-one" {
+		t.Errorf("advisory not threaded into SemanticContext, got %q", fa.gotSemantic)
+	}
+	if res.Stats["semantic_recall"] != "injected" {
+		t.Errorf("semantic_recall: want injected, got %v", res.Stats["semantic_recall"])
+	}
+	if len(res.Findings) != 1 || res.Findings[0].Category != "security" {
+		t.Errorf("semantic injection mutated findings: %+v", res.Findings)
+	}
+}
+
+// Retriever error => SemanticContext empty (degrade to M6) + an error stat; the
+// review never fails.
+func TestReviewRetrieverErrorDegrades(t *testing.T) {
+	dir, findings := semanticDir(t)
+	fa := &fakeAgent{findings: findings}
+	r := &fakeRetriever{err: errors.New("embedder timeout")}
+	eng := engine.New(fa, gitcmd.New())
+	res, err := eng.Review(stdctx.Background(), engine.Request{Mode: 0, RepoDir: dir, Gate: "high", Extensions: []string{"go"}, Retriever: r})
+	if err != nil {
+		t.Fatalf("Retriever error must not fail the review: %v", err)
+	}
+	if fa.gotSemantic != "" {
+		t.Errorf("Retriever error must leave SemanticContext empty, got %q", fa.gotSemantic)
+	}
+	if res.Stats["semantic_recall"] != "error" {
+		t.Errorf("semantic_recall: want error, got %v", res.Stats["semantic_recall"])
+	}
+	if len(res.Findings) != 1 {
+		t.Errorf("Retriever error dropped findings: %+v", res.Findings)
 	}
 }
 

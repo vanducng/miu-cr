@@ -49,7 +49,7 @@ jobs:
     runs-on: ubuntu-latest
     services:
       postgres:
-        image: postgres:16
+        image: pgvector/pgvector:pg16   # pgvector image so CREATE EXTENSION vector + the EmbeddingStore tests run
         env:
           POSTGRES_USER: miucr
           POSTGRES_PASSWORD: miucr

@@ -97,7 +97,7 @@ func (a *openaiAgent) Review(ctx stdctx.Context, rc Context) ([]engine.Finding, 
 
 	messages := []openai.ChatCompletionMessageParamUnion{
 		openai.SystemMessage(systemPrompt),
-		openai.UserMessage(BuildUserPrompt(PromptParts{Rules: rc.Rules, Diff: rc.Text})),
+		openai.UserMessage(BuildUserPrompt(PromptParts{Rules: rc.Rules, SemanticContext: rc.SemanticContext, Diff: rc.Text})),
 	}
 	params := openai.ChatCompletionNewParams{
 		Model:    shared.ChatModel(a.model),

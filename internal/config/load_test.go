@@ -169,3 +169,64 @@ func TestMergeStoreOverlay(t *testing.T) {
 		t.Fatalf("dsn overlay: got %q", out.Store.DSN)
 	}
 }
+
+// No [embedding] section -> disabled by default with the built-in model/dim.
+func TestEmbeddingDefaultsDisabled(t *testing.T) {
+	d := Defaults()
+	if d.Embedding.Enabled {
+		t.Fatal("embedding must be disabled by default")
+	}
+	if d.Embedding.Model != DefaultEmbeddingModel || d.Embedding.Dim != DefaultEmbeddingDim {
+		t.Fatalf("embedding defaults wrong: %+v", d.Embedding)
+	}
+	out := Merge(d, Config{}) // file with no [embedding]
+	if out.Embedding.Enabled {
+		t.Fatal("merge without [embedding] must keep disabled")
+	}
+	if out.Embedding.Model != DefaultEmbeddingModel || out.Embedding.Dim != DefaultEmbeddingDim {
+		t.Fatalf("merge without [embedding] dropped defaults: %+v", out.Embedding)
+	}
+}
+
+// An [embedding] section flips enabled and overlays fields; absent fields inherit
+// the base defaults.
+func TestMergeEmbeddingOverlay(t *testing.T) {
+	out := Merge(Defaults(), Config{Embedding: Embedding{Enabled: true, BaseURL: "https://gw/v1"}})
+	if !out.Embedding.Enabled {
+		t.Fatal("enabled overlay not applied")
+	}
+	if out.Embedding.BaseURL != "https://gw/v1" {
+		t.Fatalf("base_url overlay: got %q", out.Embedding.BaseURL)
+	}
+	if out.Embedding.Model != DefaultEmbeddingModel || out.Embedding.Dim != DefaultEmbeddingDim {
+		t.Fatalf("absent model/dim must inherit defaults: %+v", out.Embedding)
+	}
+}
+
+func TestLoadEmbeddingFromFile(t *testing.T) {
+	dir := t.TempDir()
+	userHomeDir = func() (string, error) { return dir, nil }
+	t.Cleanup(func() { userHomeDir = os.UserHomeDir })
+
+	body := `[embedding]
+enabled = true
+model = "text-embedding-3-large"
+dim = 256
+base_url = "https://gw.example/v1"
+`
+	cfgDir := filepath.Join(dir, ".config", "miu", "cr")
+	if err := os.MkdirAll(cfgDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(cfgDir, "config.toml"), []byte(body), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	cfg, err := Load()
+	if err != nil {
+		t.Fatalf("Load: %v", err)
+	}
+	if !cfg.Embedding.Enabled || cfg.Embedding.Model != "text-embedding-3-large" || cfg.Embedding.Dim != 256 || cfg.Embedding.BaseURL != "https://gw.example/v1" {
+		t.Fatalf("embedding not loaded: %+v", cfg.Embedding)
+	}
+}

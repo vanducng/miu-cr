@@ -1,5 +1,7 @@
 package postgres
 
+import "fmt"
+
 // SchemaSQL is the idempotent Postgres schema, mirroring sqlite.SchemaSQL
 // table-for-table and column-for-column (types modulo dialect; time stays TEXT
 // for byte-parity with the SQLite rows). No vector/embeddings column — that is
@@ -26,3 +28,29 @@ CREATE TABLE IF NOT EXISTS pr_findings (
 	PRIMARY KEY (owner, repo, number, fingerprint)
 );
 `
+
+// embeddingSchemaTemplate is the M7 finding-embeddings schema, run conditionally
+// (NOT part of SchemaSQL, so the schema-parity test stays untouched). The vector
+// dimension is templated from config at create time; it is immutable per DB. The
+// category/rationale columns carry the advisory prose so SimilarFindings needs no
+// join. created_at stays TEXT for byte-parity with the other tables.
+const embeddingSchemaTemplate = `
+CREATE EXTENSION IF NOT EXISTS vector;
+CREATE TABLE IF NOT EXISTS finding_embeddings (
+	repo         TEXT NOT NULL,
+	fingerprint  TEXT NOT NULL,
+	model        TEXT NOT NULL,
+	category     TEXT NOT NULL,
+	rationale    TEXT NOT NULL,
+	content_hash TEXT NOT NULL,
+	embedding    vector(%d) NOT NULL,
+	created_at   TEXT NOT NULL,
+	PRIMARY KEY (repo, fingerprint, model)
+);
+`
+
+// EmbeddingSchemaSQL renders the finding-embeddings DDL for the given vector
+// dimension. dim must match the configured embedder's Dim().
+func EmbeddingSchemaSQL(dim int) string {
+	return fmt.Sprintf(embeddingSchemaTemplate, dim)
+}

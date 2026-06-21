@@ -72,17 +72,20 @@ byte-for-byte row parity across a switch.
 - `pr_findings` — PR-thread dedupe/resolution state
   (`owner, repo, number, fingerprint, path, status`).
 
-There is **no vector/embeddings column** and **no `pgvector`** in this release.
-pgvector + semantic dedupe are deferred to M7 (they land with the embedding code
-that uses them).
+The opt-in semantic-recall layer adds a separate, Postgres-only
+`finding_embeddings` table (a `pgvector` column), created conditionally and only
+when `[embedding].enabled = true`. The core `reviews`/`pr_findings` schema and its
+parity test are untouched by it. See
+[Semantic code-recall](/semantic-recall/) for the cost/privacy/retention model.
 
 ## Testing & the integration smoke
 
 - The default test suite (`go test ./...`) is **keyless and serverless**: it runs
   the shared backend-conformance suite against SQLite only.
 - CI additionally runs the **same conformance suite against real Postgres** via a
-  `postgres:16` service container (`MIUCR_TEST_PG_DSN` set in that job), so the
-  Postgres path is exercised on every PR.
+  `pgvector/pgvector:pg16` service container (`MIUCR_TEST_PG_DSN` set in that job),
+  so the Postgres path — including the opt-in `pgvector` EmbeddingStore — is
+  exercised on every PR.
 - A manual, gated end-to-end smoke against your own Postgres:
 
   ```bash

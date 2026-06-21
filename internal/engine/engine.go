@@ -10,6 +10,7 @@ import (
 	"fmt"
 	"path/filepath"
 	"sort"
+	"strings"
 	"time"
 
 	"github.com/vanducng/miu-cr/internal/cli/clierr"
@@ -56,11 +57,24 @@ func SetAnchorer(a Anchorer) { anchorLineNumbers = a }
 // package) so engine sits below agent in the import graph; the wire layer adapts
 // the concrete Anthropic agent to this interface.
 type AgentContext struct {
-	Text    string
-	Rules   string // fenced rules section injected into the USER turn before the diff
-	RepoDir string
-	Rev     string
-	Runner  *gitcmd.Runner
+	Text  string
+	Rules string // fenced rules section injected into the USER turn before the diff
+	// SemanticContext is the optional M7 advisory block (prior findings whose code
+	// is cosine-near the current change). Empty => byte-for-byte M6 prompt. LOCKSTEP:
+	// mirror this field everywhere Rules is threaded or it is silently dropped.
+	SemanticContext string
+	RepoDir         string
+	Rev             string
+	Runner          *gitcmd.Runner
+}
+
+// Retriever is the engine-local seam for M7 semantic recall: wire injects an
+// implementation that scrubs+embeds the current changed code and returns prior
+// cosine-near findings. The engine does NO embedding/DB/network itself (it
+// imports neither openai-go nor pgx), exactly like the Rules injection. nil =>
+// the default M6 path (no SemanticContext).
+type Retriever interface {
+	Related(ctx stdctx.Context, changedCode []string) (string, error)
 }
 
 // Agent runs one review pass over the assembled context and returns findings
@@ -92,6 +106,11 @@ type Request struct {
 	Rules            []rules.Rule
 	RulesFork        bool
 	RulesTokenBudget int
+
+	// Retriever is the optional M7 semantic-recall seam. When non-nil the engine
+	// calls it with the current change's code anchors BEFORE the agent and threads
+	// the returned advisory prose into AgentContext.SemanticContext. nil => M6.
+	Retriever Retriever
 }
 
 // Engine orchestrates a review with an injectable Agent so the pipeline is
@@ -186,13 +205,16 @@ func (e *Engine) Review(ctx stdctx.Context, req Request) (ReviewResult, error) {
 		ExpandWindow: req.ExpandWindow,
 	})
 
+	semanticContext, semanticStat := retrieveSemantic(ctx, req.Retriever, selected)
+
 	rev := selected[0].Ref
 	raw, err := e.Agent.Review(ctx, AgentContext{
-		Text:    assembled.Text,
-		Rules:   rulesText,
-		RepoDir: req.RepoDir,
-		Rev:     rev,
-		Runner:  e.Runner,
+		Text:            assembled.Text,
+		Rules:           rulesText,
+		SemanticContext: semanticContext,
+		RepoDir:         req.RepoDir,
+		Rev:             rev,
+		Runner:          e.Runner,
 	})
 	if err != nil {
 		return ReviewResult{}, err
@@ -215,6 +237,9 @@ func (e *Engine) Review(ctx stdctx.Context, req Request) (ReviewResult, error) {
 		"truncation_level": assembled.Stats["truncation_level"],
 		"rules_applied":    float64(rulesApplied),
 		"rules_truncated":  rulesTruncated,
+	}
+	if semanticStat != "" {
+		stats["semantic_recall"] = semanticStat
 	}
 
 	result := ReviewResult{Findings: kept, Stats: stats}
@@ -264,6 +289,50 @@ func trustedOnly(in []rules.Rule) []rules.Rule {
 	for _, r := range in {
 		if r.Provenance.Trusted() {
 			out = append(out, r)
+		}
+	}
+	return out
+}
+
+// retrieveSemantic runs the optional M7 Retriever over the change's code anchors
+// (the SAME code representation the write path embeds). It is best-effort: a nil
+// Retriever, an empty result, or any error yields an empty advisory block (=> M6
+// prompt) and a redacted stat; it never fails the review. The returned stat (when
+// non-empty) is recorded under stats.semantic_recall so cost/outcome is visible.
+func retrieveSemantic(ctx stdctx.Context, r Retriever, selected []diff.Diff) (advisory, stat string) {
+	if r == nil {
+		return "", ""
+	}
+	code := changedCodeOf(selected)
+	if len(code) == 0 {
+		return "", "empty_change"
+	}
+	advisory, err := r.Related(ctx, code)
+	if err != nil {
+		return "", "error"
+	}
+	if strings.TrimSpace(advisory) == "" {
+		return "", "no_matches"
+	}
+	return advisory, "injected"
+}
+
+// changedCodeOf collects the added+deleted code lines across the selected diffs:
+// the code-anchor representation embedded on the read path, matching the write
+// path which embeds each finding's QuotedCode (also changed code).
+func changedCodeOf(selected []diff.Diff) []string {
+	var out []string
+	for _, d := range selected {
+		for _, h := range diff.ParseHunks(d.Diff) {
+			for _, l := range h.Lines {
+				if l.Type == diff.HunkContext {
+					continue
+				}
+				if strings.TrimSpace(l.Content) == "" {
+					continue
+				}
+				out = append(out, l.Content)
+			}
 		}
 	}
 	return out
