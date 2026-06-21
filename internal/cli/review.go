@@ -297,8 +297,8 @@ func reviewCommand(opts *options) *cobra.Command {
 	f.StringVar(&token, "token", "", "GitHub PAT (overrides GITHUB_TOKEN/GH_TOKEN; required only for --post; never persisted)")
 	f.BoolVar(&post, "post", false, "Publish inline comments + a summary to the PR (requires a token)")
 	f.BoolVar(&noPost, "no-post", false, "Dry-run the PR review without posting (default for --pr)")
-	f.BoolVar(&suggest, "suggest", false, "Emit GitHub native one-click suggestions for proven single-line replacements; author-applied, never pushed (default OFF; else a plain hint)")
-	f.BoolVar(&approveClean, "approve-clean", false, "Submit Event=APPROVE only on a clean, non-fork, trusted-author PR; skipped (→ COMMENT) otherwise, never errors. A PAT APPROVE counts toward required reviews (default OFF)")
+	f.BoolVar(&suggest, "suggest", false, "Emit GitHub native one-click suggestions for proven single-line replacements; author-applied, never pushed. Requires --post (inert in dry-run) (default OFF; else a plain hint)")
+	f.BoolVar(&approveClean, "approve-clean", false, "Submit Event=APPROVE only on a clean, non-fork, trusted-author PR; skipped (→ COMMENT) otherwise, never errors. A PAT APPROVE counts toward required reviews. Requires --post (inert in dry-run) (default OFF)")
 
 	cmd.MarkFlagsRequiredTogether("from", "to")
 	return cmd

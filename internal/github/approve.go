@@ -9,30 +9,34 @@ import (
 // Approve reason codes recorded in PRResult when the resolver degrades APPROVE to
 // COMMENT. All are non-fatal: a precondition miss never fails a run.
 const (
-	approveReasonApproved      = "approved"
-	approveReasonNotRequested  = "not_requested"
-	approveReasonGateFailed    = "gate_failed"
-	approveReasonFork          = "fork"
-	approveReasonUntrusted     = "untrusted_author"
-	approveReasonNothingDone   = "nothing_reviewed"
-	approveReasonHeadMoved     = "head_moved"
-	approveReasonAlreadyDone   = "already_approved"
-	approveReasonSelfForbidden = "self_approve_forbidden"
+	approveReasonApproved              = "approved"
+	approveReasonNotRequested          = "not_requested"
+	approveReasonGateFailed            = "gate_failed"
+	approveReasonFork                  = "fork"
+	approveReasonUntrusted             = "untrusted_author"
+	approveReasonNothingDone           = "nothing_reviewed"
+	approveReasonHeadMoved             = "head_moved"
+	approveReasonAlreadyDone           = "already_approved"
+	approveReasonSelfForbidden         = "self_approve_forbidden"
+	approveReasonRejected              = "approve_rejected"
+	approveReasonIdempotencyUnverified = "idempotency_unverified"
 )
 
-// untrustedAssociations are AuthorAssociation values we never auto-approve. Forks
-// are excluded separately; this guards the same-repo low-trust author case that
-// fork-exclusion alone misses.
-var untrustedAssociations = map[string]bool{
-	"NONE":                   true,
-	"FIRST_TIME_CONTRIBUTOR": true,
-	"FIRST_TIMER":            true,
+// trustedAssociations are the only AuthorAssociation values we auto-approve. This
+// is a fail-CLOSED allowlist, not a denylist: an empty string (API didn't populate
+// it / missing scope / contract change), NONE, CONTRIBUTOR, a first-timer tier, or
+// any future low-trust value GitHub may add are all untrusted by default. Forks are
+// excluded separately; this guards the same-repo low-trust author case.
+var trustedAssociations = map[string]bool{
+	"OWNER":        true,
+	"MEMBER":       true,
+	"COLLABORATOR": true,
 }
 
-// trustedAuthor reports whether the PR author's association is outside the
-// never-approve set.
+// trustedAuthor reports whether the PR author's association is in the trusted
+// allowlist (fail-closed: unknown/empty → untrusted).
 func trustedAuthor(info PRInfo) bool {
-	return !untrustedAssociations[info.AuthorAssociation]
+	return trustedAssociations[info.AuthorAssociation]
 }
 
 // resolveEvent decides the CreateReview Event. It returns APPROVE only when
@@ -62,8 +66,10 @@ func resolveEvent(opts PostReviewOptions, info PRInfo, gateClean bool, reviewedF
 }
 
 // alreadyApproved reports whether an APPROVED review already exists at the current
-// head SHA, so a re-run at the same SHA posts no second APPROVE. First page only —
-// full pagination adds rate-limit cost for a cosmetic dedupe.
+// head SHA, so a re-run at the same SHA posts no second APPROVE. First page only
+// (PerPage:100): a PR with >100 reviews may miss an existing APPROVE and post a
+// duplicate — low-harm (a redundant APPROVE on an already-clean PR), so full
+// pagination's rate-limit cost isn't worth it (YAGNI).
 func alreadyApproved(ctx stdctx.Context, client Client, info *PRInfo) (bool, error) {
 	reviews, _, err := client.ListReviews(ctx, info.Owner, info.Repo, info.Number, &gh.ListOptions{PerPage: 100})
 	if err != nil {

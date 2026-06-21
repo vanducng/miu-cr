@@ -26,7 +26,7 @@ type recordClient struct {
 	headSHA string // GetPR returns this head SHA; empty means "headsha"
 
 	createReviewErr  error
-	createReviewErrN error // returned only on the Nth (1-based) CreateReview call
+	createReviewErrN error // returned only on the FIRST CreateReview call (the APPROVE attempt)
 	createIssueErr   error
 	editErr          error
 
@@ -359,7 +359,10 @@ func TestCommentBodyEscapesEmbeddedFence(t *testing.T) {
 		SuggestedPatch: "before\n```\nafter",
 	}
 	// Suggest OFF and multi-line patch → plain hint, never a one-click suggestion.
-	body := commentBody(f, "", PostReviewOptions{})
+	body, native := commentBody(f, "", PostReviewOptions{})
+	if native {
+		t.Error("Suggest OFF must report native=false")
+	}
 	if strings.Contains(body, "suggestion") {
 		t.Errorf("must NOT emit a one-click suggestion fence (latent M2 bug):\n%s", body)
 	}

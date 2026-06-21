@@ -149,8 +149,11 @@ type PostReviewResult struct {
 // 422-triggering oversized review can't happen), then submits ONE review anchored to
 // the head SHA with comfort-fade inline comments (Side=RIGHT/Line only, never
 // Position). The Event is COMMENT unless opts.ApproveClean and every safety
-// predicate holds (resolveEvent), in which case it is APPROVE; a self-approve 422
-// degrades back to COMMENT (reason self_approve_forbidden), never an error.
+// predicate holds (resolveEvent), in which case it is APPROVE. A failed APPROVE
+// degrades to COMMENT when the cause is a 422 precondition miss — self_approve_forbidden
+// (the bot is the author) or approve_rejected (any other 422: stale head, branch
+// protection, …) — never an error. A non-422 API failure surfaces as an error and
+// never reports a phantom approval.
 func PostReview(ctx stdctx.Context, client Client, info *PRInfo, findings []engine.Finding, diffs []diff.Diff, summary string, existingFPs map[string]bool, opts PostReviewOptions) (PostReviewResult, error) {
 	newFileContent := make(map[string]string, len(diffs))
 	for i := range diffs {
@@ -181,10 +184,11 @@ func PostReview(ctx stdctx.Context, client Client, info *PRInfo, findings []engi
 	comments := make([]*gh.DraftReviewComment, 0, len(toPost))
 	suggestions := 0
 	for _, f := range toPost {
-		if emitsNativeSuggestion(f, newFileContent[f.File], opts) {
+		rendered, native := commentBody(f, newFileContent[f.File], opts)
+		if native {
 			suggestions++
 		}
-		body := commentBody(f, newFileContent[f.File], opts) + "\n\n" + fpMarker(fingerprint(f))
+		body := rendered + "\n\n" + fpMarker(fingerprint(f))
 		comments = append(comments, &gh.DraftReviewComment{
 			Path: gh.Ptr(f.File),
 			Body: gh.Ptr(body),
@@ -212,17 +216,32 @@ func PostReview(ctx stdctx.Context, client Client, info *PRInfo, findings []engi
 	}
 
 	if _, err := client.CreateReview(ctx, info.Owner, info.Repo, info.Number, req); err != nil {
-		// A self-approval 422 is a precondition miss, not a failure: retry as COMMENT.
-		if event == "APPROVE" && isSelfApprove422(err) {
-			req.Event = gh.Ptr("COMMENT")
-			result.Event = "COMMENT"
-			result.Reason = approveReasonSelfForbidden
-			if _, rerr := client.CreateReview(ctx, info.Owner, info.Repo, info.Number, req); rerr != nil {
-				return result, mapWriteError("github.create_review_failed", "creating review", rerr)
-			}
+		if event != "APPROVE" {
+			return PostReviewResult{Omitted: omitted, Event: "COMMENT"}, mapWriteError("github.create_review_failed", "creating review", err)
+		}
+		// APPROVE failed. A 422 is a precondition miss: self-approve (bot==author)
+		// or any other 422 (stale head, branch protection, …) → degrade to COMMENT,
+		// never a run failure. A non-422 error is a real API failure: surface it,
+		// and never claim a phantom approval (returned Event stays COMMENT).
+		switch {
+		case isSelfApprove422(err):
+			result.Event, result.Reason = "COMMENT", approveReasonSelfForbidden
+		case is422(err):
+			result.Event, result.Reason = "COMMENT", approveReasonRejected
+		default:
+			return PostReviewResult{Omitted: omitted, Event: "COMMENT"}, mapWriteError("github.create_review_failed", "creating review", err)
+		}
+		// Re-apply the empty-review guard once the event is COMMENT: don't submit a
+		// review with no inline comments and no body — GitHub 422s an empty COMMENT.
+		if len(comments) == 0 && strings.TrimSpace(summary) == "" {
+			result.Posted = 0
 			return result, nil
 		}
-		return PostReviewResult{Omitted: omitted, Event: event, Reason: reason}, mapWriteError("github.create_review_failed", "creating review", err)
+		req.Event = gh.Ptr("COMMENT")
+		if _, rerr := client.CreateReview(ctx, info.Owner, info.Repo, info.Number, req); rerr != nil {
+			return result, mapWriteError("github.create_review_failed", "creating review", rerr)
+		}
+		return result, nil
 	}
 	return result, nil
 }
@@ -236,7 +255,13 @@ func resolveApproveEvent(ctx stdctx.Context, client Client, info *PRInfo, opts P
 		return "COMMENT", approveReasonNotRequested
 	}
 
-	if done, err := alreadyApproved(ctx, client, info); err == nil && done {
+	// Idempotency guard. If the dedupe read itself fails we can't confirm there
+	// isn't already an APPROVE — degrade rather than risk a duplicate APPROVE.
+	done, err := alreadyApproved(ctx, client, info)
+	if err != nil {
+		return "COMMENT", approveReasonIdempotencyUnverified
+	}
+	if done {
 		return "COMMENT", approveReasonAlreadyDone
 	}
 
@@ -250,25 +275,40 @@ func resolveApproveEvent(ctx stdctx.Context, client Client, info *PRInfo, opts P
 	return resolveEvent(opts, *info, opts.GateClean, opts.ReviewedFiles, headUnchanged)
 }
 
-// isSelfApprove422 reports whether err is a GitHub 422 from approving one's own
-// PR (the bot PAT identity == the PR author). Matched reactively at the
-// CreateReview call — there is no proactive bot-identity lookup.
+// isSelfApprove422 reports whether err is a GitHub 422 specifically from approving
+// one's own PR (the bot PAT identity == the PR author). Matched reactively at the
+// CreateReview call — there is no proactive bot-identity lookup. It inspects the
+// error message (top-level and nested errors[]) so unrelated 422s (stale head,
+// branch protection, invalid line) are NOT misclassified as self-approve.
 func isSelfApprove422(err error) bool {
 	var er *gh.ErrorResponse
 	if !errors.As(err, &er) || er.Response == nil || er.Response.StatusCode != 422 {
 		return false
 	}
-	return true
+	msg := strings.ToLower(er.Message)
+	for _, e := range er.Errors {
+		msg += " " + strings.ToLower(e.Message)
+	}
+	return strings.Contains(msg, "own pull request")
 }
 
-// commentBody renders one inline comment. A native one-click ```suggestion fence
-// is emitted ONLY when opts.Suggest AND isCleanReplacement proves a verbatim
-// single-line replacement of the raw new-file line AND the severity meets the
-// floor; otherwise (and whenever there's a patch but the gate isn't met) the patch
-// is shown as a plain fenced hint, never a one-click suggestion. This is also the
-// fix for the latent M2 bug where a ```suggestion fence was emitted
-// unconditionally — one-click-applying an unverified, possibly multi-line patch.
-func commentBody(f engine.Finding, newFileContent string, opts PostReviewOptions) string {
+// is422 reports whether err is any GitHub 422 (Unprocessable Entity).
+func is422(err error) bool {
+	var er *gh.ErrorResponse
+	return errors.As(err, &er) && er.Response != nil && er.Response.StatusCode == 422
+}
+
+// commentBody renders one inline comment and reports whether it emitted a native
+// one-click ```suggestion fence. The fence is emitted ONLY when opts.Suggest AND
+// isCleanReplacement proves a verbatim single-line replacement of the raw new-file
+// line AND the severity meets the floor; otherwise (and whenever there's a patch
+// but the gate isn't met) the patch is shown as a plain fenced hint, never a
+// one-click suggestion. This is also the fix for the latent M2 bug where a
+// ```suggestion fence was emitted unconditionally — one-click-applying an
+// unverified, possibly multi-line patch. Returning the native flag lets PostReview
+// count suggestions from this single render pass (no second isCleanReplacement /
+// file split per finding).
+func commentBody(f engine.Finding, newFileContent string, opts PostReviewOptions) (string, bool) {
 	var b strings.Builder
 	sev := strings.ToUpper(f.Severity)
 	if sev == "" {
@@ -284,29 +324,18 @@ func commentBody(f engine.Finding, newFileContent string, opts PostReviewOptions
 
 	patch := strings.TrimSpace(f.SuggestedPatch)
 	if patch == "" {
-		return b.String()
+		return b.String(), false
 	}
 
 	if opts.Suggest && meetsSuggestionFloor(f.Severity) {
 		if sug, ok := isCleanReplacement(f, newFileContent); ok {
 			fmt.Fprintf(&b, "\n\n%ssuggestion\n%s\n%s", fenceFor(sug), sug, fenceFor(sug))
-			return b.String()
+			return b.String(), true
 		}
 	}
 
 	fmt.Fprintf(&b, "\n\n%sgo\n%s\n%s", fenceFor(patch), patch, fenceFor(patch))
-	return b.String()
-}
-
-// emitsNativeSuggestion reports whether commentBody will render a native one-click
-// ```suggestion fence for f (vs the plain hint). Mirrors commentBody's gate so
-// PostReview can count suggestions without re-deriving the body.
-func emitsNativeSuggestion(f engine.Finding, newFileContent string, opts PostReviewOptions) bool {
-	if !opts.Suggest || strings.TrimSpace(f.SuggestedPatch) == "" || !meetsSuggestionFloor(f.Severity) {
-		return false
-	}
-	_, ok := isCleanReplacement(f, newFileContent)
-	return ok
+	return b.String(), false
 }
 
 // fenceFor grows a code fence past any backtick run in s so an embedded ``` can't

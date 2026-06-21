@@ -26,12 +26,17 @@ func TestResolveEvent(t *testing.T) {
 		wantReason    string
 	}{
 		{"approve all pass", on, base, true, 3, true, "APPROVE", approveReasonApproved},
+		{"trusted owner", on, withAssoc(base, "OWNER"), true, 3, true, "APPROVE", approveReasonApproved},
+		{"trusted collaborator", on, withAssoc(base, "COLLABORATOR"), true, 3, true, "APPROVE", approveReasonApproved},
 		{"not requested", PostReviewOptions{}, base, true, 3, true, "COMMENT", approveReasonNotRequested},
 		{"gate failed", on, base, false, 3, true, "COMMENT", approveReasonGateFailed},
 		{"fork", on, withFork(base), true, 3, true, "COMMENT", approveReasonFork},
 		{"untrusted none", on, withAssoc(base, "NONE"), true, 3, true, "COMMENT", approveReasonUntrusted},
 		{"untrusted first-timer", on, withAssoc(base, "FIRST_TIMER"), true, 3, true, "COMMENT", approveReasonUntrusted},
 		{"untrusted first-time-contrib", on, withAssoc(base, "FIRST_TIME_CONTRIBUTOR"), true, 3, true, "COMMENT", approveReasonUntrusted},
+		{"untrusted contributor", on, withAssoc(base, "CONTRIBUTOR"), true, 3, true, "COMMENT", approveReasonUntrusted},
+		{"untrusted empty fails closed", on, withAssoc(base, ""), true, 3, true, "COMMENT", approveReasonUntrusted},
+		{"untrusted unknown tier", on, withAssoc(base, "MANNEQUIN"), true, 3, true, "COMMENT", approveReasonUntrusted},
 		{"nothing reviewed", on, base, true, 0, true, "COMMENT", approveReasonNothingDone},
 		{"head moved", on, base, true, 3, false, "COMMENT", approveReasonHeadMoved},
 	}
@@ -202,15 +207,19 @@ func TestPostReviewSelfApprove422DegradesToComment(t *testing.T) {
 	}
 }
 
-func TestPostReviewApproveSurvivesListReviewsError(t *testing.T) {
-	// A read failure on the idempotency check must not block APPROVE (degrade, not error).
+func TestPostReviewApproveListReviewsErrorDegradesToComment(t *testing.T) {
+	// The idempotency check failing means we can't confirm there isn't already an
+	// APPROVE → degrade to COMMENT (never a duplicate APPROVE), never an error.
 	c := &recordClient{listReviewsErr: errBoom{}}
 	res, err := PostReview(stdctx.Background(), c, approveInfo(), nil, nil, "review", nil, approveOpts())
 	if err != nil {
 		t.Fatalf("ListReviews error must not surface: %v", err)
 	}
-	if res.Event != "APPROVE" {
-		t.Fatalf("a ListReviews read error must still allow APPROVE, got %q", res.Event)
+	if res.Event != "COMMENT" || res.Reason != approveReasonIdempotencyUnverified {
+		t.Fatalf("idempotency-unverified must degrade to COMMENT, got (%q,%q)", res.Event, res.Reason)
+	}
+	if c.gotReview.GetEvent() == "APPROVE" {
+		t.Fatal("must not post an APPROVE when idempotency is unverified")
 	}
 }
 
@@ -253,5 +262,68 @@ func selfApprove422() error {
 	return &gh.ErrorResponse{
 		Response: &http.Response{StatusCode: 422},
 		Message:  "Can not approve your own pull request",
+	}
+}
+
+// generic422 is a 422 unrelated to self-approval (e.g. a stale commit, branch
+// protection); its message must NOT contain the self-approve marker.
+func generic422() error {
+	return &gh.ErrorResponse{
+		Response: &http.Response{StatusCode: 422},
+		Message:  "Unprocessable Entity: No commit found for SHA",
+	}
+}
+
+func TestPostReviewNonSelfApprove422DegradesToCommentRejected(t *testing.T) {
+	// A 422 that is NOT a self-approve must degrade to COMMENT/approve_rejected,
+	// never be mislabeled self_approve_forbidden, and never surface as an error.
+	c := &recordClient{createReviewErrN: generic422()}
+	res, err := PostReview(stdctx.Background(), c, approveInfo(), nil, nil, "review", nil, approveOpts())
+	if err != nil {
+		t.Fatalf("a non-self 422 must degrade, not error: %v", err)
+	}
+	if res.Event != "COMMENT" || res.Reason != approveReasonRejected {
+		t.Fatalf("want COMMENT/approve_rejected, got (%q,%q)", res.Event, res.Reason)
+	}
+	if c.createReviewN != 2 {
+		t.Fatalf("want a COMMENT retry after the 422, got %d CreateReview calls", c.createReviewN)
+	}
+	if last := c.gotReviews[len(c.gotReviews)-1]; last.GetEvent() != "COMMENT" {
+		t.Fatalf("retry Event must be COMMENT, got %q", last.GetEvent())
+	}
+}
+
+func TestPostReviewApproveRealErrorSurfaces(t *testing.T) {
+	// A genuine (non-422) CreateReview failure on the APPROVE path must surface as
+	// an error and must NOT report a phantom approval in the returned result.
+	c := &recordClient{createReviewErrN: errBoom{}}
+	res, err := PostReview(stdctx.Background(), c, approveInfo(), nil, nil, "review", nil, approveOpts())
+	if err == nil {
+		t.Fatal("a real CreateReview error must surface to the caller")
+	}
+	if res.Event == "APPROVE" {
+		t.Fatalf("must not report a phantom approval on error, got Event=%q", res.Event)
+	}
+	if c.createReviewN != 1 {
+		t.Fatalf("a real error must not be retried as COMMENT, got %d calls", c.createReviewN)
+	}
+}
+
+func TestPostReviewApprove422EmptyDegradeSkipsPost(t *testing.T) {
+	// APPROVE 422s, but with 0 inline comments AND no summary there is nothing to
+	// post — skip the empty COMMENT review (GitHub would 422 it anyway).
+	c := &recordClient{createReviewErrN: selfApprove422()}
+	res, err := PostReview(stdctx.Background(), c, approveInfo(), nil, nil, "", nil, approveOpts())
+	if err != nil {
+		t.Fatalf("empty degrade must not error: %v", err)
+	}
+	if res.Event != "COMMENT" || res.Reason != approveReasonSelfForbidden {
+		t.Fatalf("want COMMENT/self_approve_forbidden, got (%q,%q)", res.Event, res.Reason)
+	}
+	if res.Posted != 0 {
+		t.Fatalf("nothing to post → Posted must be 0, got %d", res.Posted)
+	}
+	if c.createReviewN != 1 {
+		t.Fatalf("must not submit an empty COMMENT review, got %d CreateReview calls", c.createReviewN)
 	}
 }
