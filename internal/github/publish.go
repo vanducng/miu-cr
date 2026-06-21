@@ -7,6 +7,7 @@ import (
 	"errors"
 	"fmt"
 	"regexp"
+	"sort"
 	"strings"
 	"time"
 
@@ -25,6 +26,11 @@ import (
 const SummarySentinel = "<!-- miu-cr-review -->"
 
 const fpPrefix = "miucr:fp="
+
+// maxInlineComments caps inline comments in a single review. GitHub 422s the whole
+// review when it carries too many inline comments (~50); we post the top-N by
+// severity and note any omitted count in the summary body.
+const maxInlineComments = 40
 
 var fpMarkerRe = regexp.MustCompile(`<!-- miucr:fp=([0-9a-f]{16}) -->`)
 
@@ -82,6 +88,8 @@ func filterToDiffHunks(findings []engine.Finding, diffs []diff.Diff) []engine.Fi
 
 // fingerprint is a stable short hash over path|line|category|prosehash, where
 // prosehash folds the rationale so identical findings dedupe across re-runs.
+// M2 limitation: Line is part of the key, so re-running on the SAME head SHA dedupes,
+// but a new push that shifts lines may re-post; full cross-push thread tracking is M5.
 func fingerprint(f engine.Finding) string {
 	prose := sha256.Sum256([]byte(f.Rationale))
 	key := fmt.Sprintf("%s|%d|%s|%x", f.File, f.Line, f.Category, prose[:8])
@@ -99,7 +107,7 @@ func ExistingFingerprints(ctx stdctx.Context, client Client, info *PRInfo) (map[
 	for {
 		comments, resp, err := client.ListReviewComments(ctx, info.Owner, info.Repo, info.Number, opts)
 		if err != nil {
-			return nil, ghWriteError("github.list_review_comments_failed", "listing review comments", err)
+			return nil, mapWriteError("github.list_review_comments_failed", "listing review comments", err)
 		}
 		for _, c := range comments {
 			for _, m := range fpMarkerRe.FindAllStringSubmatch(c.GetBody(), -1) {
@@ -115,19 +123,33 @@ func ExistingFingerprints(ctx stdctx.Context, client Client, info *PRInfo) (map[
 }
 
 // PostReview filters findings to the diff hunks, skips any whose fingerprint is
-// already posted, then submits ONE Event=COMMENT review anchored to the head SHA
-// with comfort-fade inline comments (Side=RIGHT/Line only, never Position).
-// Returns the number of inline comments posted.
-func PostReview(ctx stdctx.Context, client Client, info *PRInfo, findings []engine.Finding, diffs []diff.Diff, summary string, existingFPs map[string]bool) (int, error) {
+// already posted, caps the result at maxInlineComments (highest severity first so a
+// 422-triggering oversized review can't happen), then submits ONE Event=COMMENT
+// review anchored to the head SHA with comfort-fade inline comments (Side=RIGHT/Line
+// only, never Position). Returns the count posted and the count omitted by the cap.
+func PostReview(ctx stdctx.Context, client Client, info *PRInfo, findings []engine.Finding, diffs []diff.Diff, summary string, existingFPs map[string]bool) (int, int, error) {
 	inHunk := filterToDiffHunks(findings, diffs)
 
-	var comments []*gh.DraftReviewComment
+	toPost := make([]engine.Finding, 0, len(inHunk))
 	for _, f := range inHunk {
-		fp := fingerprint(f)
-		if existingFPs[fp] {
+		if existingFPs[fingerprint(f)] {
 			continue
 		}
-		body := commentBody(f) + "\n\n" + fpMarker(fp)
+		toPost = append(toPost, f)
+	}
+
+	omitted := 0
+	if len(toPost) > maxInlineComments {
+		sort.SliceStable(toPost, func(i, j int) bool {
+			return severityRank(toPost[i].Severity) < severityRank(toPost[j].Severity)
+		})
+		omitted = len(toPost) - maxInlineComments
+		toPost = toPost[:maxInlineComments]
+	}
+
+	comments := make([]*gh.DraftReviewComment, 0, len(toPost))
+	for _, f := range toPost {
+		body := commentBody(f) + "\n\n" + fpMarker(fingerprint(f))
 		comments = append(comments, &gh.DraftReviewComment{
 			Path: gh.Ptr(f.File),
 			Body: gh.Ptr(body),
@@ -137,7 +159,7 @@ func PostReview(ctx stdctx.Context, client Client, info *PRInfo, findings []engi
 	}
 
 	if len(comments) == 0 && strings.TrimSpace(summary) == "" {
-		return 0, nil
+		return 0, omitted, nil
 	}
 
 	req := &gh.PullRequestReviewRequest{
@@ -150,9 +172,9 @@ func PostReview(ctx stdctx.Context, client Client, info *PRInfo, findings []engi
 	}
 
 	if _, err := client.CreateReview(ctx, info.Owner, info.Repo, info.Number, req); err != nil {
-		return 0, mapWriteError("github.create_review_failed", "creating review", err)
+		return 0, omitted, mapWriteError("github.create_review_failed", "creating review", err)
 	}
-	return len(comments), nil
+	return len(comments), omitted, nil
 }
 
 func commentBody(f engine.Finding) string {
@@ -169,7 +191,13 @@ func commentBody(f engine.Finding) string {
 	}
 	b.WriteString(f.Rationale)
 	if patch := strings.TrimSpace(f.SuggestedPatch); patch != "" {
-		fmt.Fprintf(&b, "\n\n```suggestion\n%s\n```", patch)
+		// Grow the fence past any backtick run in the patch so an embedded ``` can't
+		// terminate the suggestion block early.
+		fence := "```"
+		for strings.Contains(patch, fence) {
+			fence += "`"
+		}
+		fmt.Fprintf(&b, "\n\n%ssuggestion\n%s\n%s", fence, patch, fence)
 	}
 	return b.String()
 }
@@ -184,7 +212,7 @@ func UpsertSummaryComment(ctx stdctx.Context, client Client, info *PRInfo, body 
 	for {
 		comments, resp, err := client.ListIssueComments(ctx, info.Owner, info.Repo, info.Number, opts)
 		if err != nil {
-			return "", ghWriteError("github.list_issue_comments_failed", "listing issue comments", err)
+			return "", mapWriteError("github.list_issue_comments_failed", "listing issue comments", err)
 		}
 		for _, c := range comments {
 			if strings.Contains(c.GetBody(), SummarySentinel) {

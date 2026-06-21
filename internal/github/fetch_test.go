@@ -21,6 +21,8 @@ func TestParseRef(t *testing.T) {
 		{"url trailing slash", "https://github.com/o/r/pull/7/", PRRef{"o", "r", 7}, false},
 		{"http scheme", "http://github.com/o/r/pull/3", PRRef{"o", "r", 3}, false},
 		{"short", "vanducng/miu-cr#99", PRRef{"vanducng", "miu-cr", 99}, false},
+		{"whitespace short", "  vanducng/miu-cr#42  ", PRRef{"vanducng", "miu-cr", 42}, false},
+		{"whitespace url", "\thttps://github.com/o/r/pull/7\n", PRRef{"o", "r", 7}, false},
 		{"malformed", "not a ref", PRRef{}, true},
 		{"missing number", "owner/repo#", PRRef{}, true},
 		{"zero number", "owner/repo#0", PRRef{}, true},
@@ -124,6 +126,18 @@ func TestFetchPR(t *testing.T) {
 		}
 		if fc.listCalls != 2 {
 			t.Errorf("want 2 ListFiles calls (2 pages), got %d", fc.listCalls)
+		}
+	})
+
+	t.Run("case-insensitive owner/repo is not a fork", func(t *testing.T) {
+		// ref is vanducng/miu-cr; canonical casing from the API differs.
+		fc := &fakeClient{pr: prFixture("Vanducng", "Miu-CR", "h", "b", "main")}
+		info, err := FetchPR(stdctx.Background(), fc, ref)
+		if err != nil {
+			t.Fatalf("FetchPR: %v", err)
+		}
+		if info.IsFork {
+			t.Error("casing differences must not flag a same-repo PR as a fork")
 		}
 	})
 

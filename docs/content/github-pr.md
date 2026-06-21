@@ -98,6 +98,15 @@ A single summary comment is posted last. Its first line is a hidden sentinel:
 Inline comments are posted **before** the summary so that if posting partially
 fails, the summary always reflects the latest successful run.
 
+> **M2 dedupe scope.** The inline fingerprint includes the re-anchored line number,
+> so re-running on the **same** PR commit dedupes reliably. Pushing **new** commits
+> can shift lines and cause a finding to be re-posted; full cross-push thread
+> tracking is planned for M5.
+
+If a review would carry more inline comments than GitHub accepts in one request,
+miu-cr posts the highest-severity findings up to a fixed cap (40) and notes the
+omitted count in the summary body, so the whole review can't 422 on size.
+
 ## Fork PRs
 
 For a PR from a fork (or one whose head repo was deleted), `is_fork` is `true`.

@@ -79,11 +79,11 @@ func runPublishWithDiffs(t *testing.T, c Client, info *PRInfo, findings []engine
 	if err != nil {
 		t.Fatalf("ExistingFingerprints: %v", err)
 	}
-	posted, err := PostReview(ctx, c, info, findings, diffs, "", existing)
+	posted, omitted, err := PostReview(ctx, c, info, findings, diffs, "", existing)
 	if err != nil {
 		t.Fatalf("PostReview: %v", err)
 	}
-	action, err := UpsertSummaryComment(ctx, c, info, RenderSummary(info, findings, nil))
+	action, err := UpsertSummaryComment(ctx, c, info, RenderSummary(info, findings, nil, omitted))
 	if err != nil {
 		t.Fatalf("UpsertSummaryComment: %v", err)
 	}
@@ -129,6 +129,13 @@ func TestPublishFlowPostThenRerun(t *testing.T) {
 	if len(c.reviewComments) != 2 {
 		t.Errorf("re-run must not duplicate inline comments, have %d", len(c.reviewComments))
 	}
+	// The final summary body must carry exactly one sentinel (no double-sentinel).
+	if len(c.issueComments) != 1 {
+		t.Fatalf("want exactly one summary issue comment, got %d", len(c.issueComments))
+	}
+	if got := strings.Count(c.issueComments[0].GetBody(), SummarySentinel); got != 1 {
+		t.Errorf("final summary must carry exactly one sentinel, got %d:\n%s", got, c.issueComments[0].GetBody())
+	}
 }
 
 func TestRenderSummaryShape(t *testing.T) {
@@ -137,10 +144,13 @@ func TestRenderSummaryShape(t *testing.T) {
 		{Severity: "high"}, {Severity: "high"}, {Severity: "low"}, {Severity: ""},
 	}
 	stats := map[string]any{"truncation_level": "hunks", "files_reviewed": float64(3)}
-	out := RenderSummary(info, findings, stats)
+	out := RenderSummary(info, findings, stats, 0)
 
-	if !strings.HasPrefix(out, SummarySentinel) {
-		t.Fatalf("summary must start with the sentinel: %q", out[:min(40, len(out))])
+	if strings.Contains(out, SummarySentinel) {
+		t.Fatalf("summary body must NOT include the sentinel (UpsertSummaryComment owns it): %q", out[:min(40, len(out))])
+	}
+	if !strings.HasPrefix(out, "## miu-cr review") {
+		t.Fatalf("summary must start with the heading: %q", out[:min(40, len(out))])
 	}
 	for _, want := range []string{"high: 2", "low: 1", "info: 1", "deadbeef", "hunks", "Files reviewed: 3", "fork"} {
 		if !strings.Contains(out, want) {
@@ -151,14 +161,25 @@ func TestRenderSummaryShape(t *testing.T) {
 
 func TestRenderSummaryNoFindings(t *testing.T) {
 	info := &PRInfo{HeadSHA: "abc"}
-	out := RenderSummary(info, nil, nil)
-	if !strings.HasPrefix(out, SummarySentinel) {
-		t.Fatal("must start with sentinel")
+	out := RenderSummary(info, nil, nil, 0)
+	if strings.Contains(out, SummarySentinel) {
+		t.Fatal("body must not contain the sentinel")
 	}
 	if !strings.Contains(out, "No findings") {
 		t.Errorf("want No findings:\n%s", out)
 	}
 	if !strings.Contains(out, "full") {
 		t.Errorf("want default truncation full:\n%s", out)
+	}
+}
+
+func TestRenderSummaryOmittedInlineNote(t *testing.T) {
+	info := &PRInfo{HeadSHA: "abc"}
+	out := RenderSummary(info, []engine.Finding{{Severity: "high"}}, nil, 5)
+	if !strings.Contains(out, "Omitted inline: 5") {
+		t.Errorf("summary must note omitted inline count:\n%s", out)
+	}
+	if zero := RenderSummary(info, nil, nil, 0); strings.Contains(zero, "Omitted inline") {
+		t.Errorf("no omitted note when omittedInline==0:\n%s", zero)
 	}
 }

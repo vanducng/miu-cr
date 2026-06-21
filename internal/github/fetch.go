@@ -4,6 +4,7 @@ import (
 	stdctx "context"
 	"fmt"
 	"os"
+	"strings"
 
 	gh "github.com/google/go-github/v84/github"
 
@@ -80,7 +81,9 @@ func isFork(ref PRRef, pr *gh.PullRequest) bool {
 	if pr.Head.Repo.Owner != nil {
 		owner = pr.Head.Repo.Owner.GetLogin()
 	}
-	return owner != ref.Owner || pr.Head.Repo.GetName() != ref.Repo
+	// GitHub owner/repo names are case-insensitive; EqualFold avoids misflagging a
+	// same-repo PR as a fork when the user-typed ref differs in casing from canonical.
+	return !strings.EqualFold(owner, ref.Owner) || !strings.EqualFold(pr.Head.Repo.GetName(), ref.Repo)
 }
 
 // gitFetcher is the git subset FetchIntoTempClone needs; *gitcmd.Runner satisfies

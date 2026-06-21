@@ -10,14 +10,13 @@ import (
 // severityOrder ranks severities high→low for a stable histogram.
 var severityOrder = []string{"critical", "high", "medium", "low", "info"}
 
-// RenderSummary builds the sentinel-headed PR summary body: the hidden
-// SummarySentinel must be the first line (UpsertSummaryComment relies on it),
-// followed by a severity histogram, truncation level, head SHA, files reviewed,
-// and a short footer.
-func RenderSummary(info *PRInfo, findings []engine.Finding, stats map[string]any) string {
+// RenderSummary builds the PR summary body WITHOUT the sentinel — UpsertSummaryComment
+// owns prepending SummarySentinel as the first line, so the body must not repeat it.
+// It emits a severity histogram, truncation level, head SHA, files reviewed, an optional
+// omitted-inline note, and a short footer.
+func RenderSummary(info *PRInfo, findings []engine.Finding, stats map[string]any, omittedInline int) string {
 	var b strings.Builder
-	b.WriteString(SummarySentinel)
-	b.WriteString("\n## miu-cr review\n\n")
+	b.WriteString("## miu-cr review\n\n")
 
 	counts := map[string]int{}
 	for _, f := range findings {
@@ -51,6 +50,9 @@ func RenderSummary(info *PRInfo, findings []engine.Finding, stats map[string]any
 	if info.IsFork {
 		b.WriteString("- Source: fork (comments posted to the base repo)\n")
 	}
+	if omittedInline > 0 {
+		fmt.Fprintf(&b, "- Omitted inline: %d finding(s) over the %d-comment limit were not posted inline\n", omittedInline, maxInlineComments)
+	}
 
 	b.WriteString("\n<sub>Posted by miu-cr. Re-runs edit this summary and skip already-posted inline comments.</sub>")
 	return b.String()
@@ -63,6 +65,17 @@ func known(sev string) bool {
 		}
 	}
 	return false
+}
+
+// severityRank orders a severity high→low for top-N inline selection; unknown sorts last.
+func severityRank(sev string) int {
+	s := strings.ToLower(strings.TrimSpace(sev))
+	for i, x := range severityOrder {
+		if x == s {
+			return i
+		}
+	}
+	return len(severityOrder)
 }
 
 func truncationLevel(stats map[string]any) string {

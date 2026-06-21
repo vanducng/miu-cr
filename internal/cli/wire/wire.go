@@ -80,6 +80,12 @@ var newGitHubClient = mgithub.NewClient
 // for findings; the GitHub token is optional (anonymous client for public repos).
 type prReviewer struct{}
 
+// GateFailed evaluates the gate from the PR review's own findings, so --pr gating
+// stays correct regardless of how the local-mode reviewer is wired.
+func (prReviewer) GateFailed(findings []cli.ReviewFinding, gate string) bool {
+	return engine.GateFailed(toEngineFindings(findings), gate)
+}
+
 func (prReviewer) ReviewPR(ctx stdctx.Context, req cli.PRReviewRequest) (cli.ReviewOutcome, error) {
 	ref, err := mgithub.ParseRef(req.Ref)
 	if err != nil {
@@ -166,12 +172,12 @@ func publishReview(ctx stdctx.Context, client mgithub.Client, runner *gitcmd.Run
 	if err != nil {
 		return err
 	}
-	summary := mgithub.RenderSummary(info, res.Findings, res.Stats)
 
-	posted, err := mgithub.PostReview(ctx, client, info, res.Findings, diffs, "", existing)
+	posted, omitted, err := mgithub.PostReview(ctx, client, info, res.Findings, diffs, "", existing)
 	if err != nil {
 		return err
 	}
+	summary := mgithub.RenderSummary(info, res.Findings, res.Stats, omitted)
 	action, err := mgithub.UpsertSummaryComment(ctx, client, info, summary)
 	if err != nil {
 		return err

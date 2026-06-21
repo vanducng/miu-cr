@@ -8,8 +8,11 @@ package github
 import (
 	stdctx "context"
 	"fmt"
+	"net/http"
 	"regexp"
 	"strconv"
+	"strings"
+	"time"
 
 	gh "github.com/google/go-github/v84/github"
 
@@ -36,9 +39,11 @@ type Client interface {
 // avoid pulling in an external auth-transport dependency.
 type ghClient struct{ c *gh.Client }
 
-// NewClient returns a Client. token=="" → anonymous; else WithAuthToken (PAT).
+// NewClient returns a Client. token=="" → anonymous; else WithAuthToken (PAT). The
+// underlying http.Client carries a 30s timeout so a stalled connection (DNS/TLS) can
+// never hang indefinitely even if a caller forgets to bound the context.
 func NewClient(token string) Client {
-	c := gh.NewClient(nil)
+	c := gh.NewClient(&http.Client{Timeout: 30 * time.Second})
 	if token != "" {
 		c = c.WithAuthToken(token)
 	}
@@ -89,9 +94,11 @@ var (
 	shortRefRe = regexp.MustCompile(`^([^/]+)/([^/#]+)#(\d+)$`)
 )
 
-// ParseRef accepts "https://github.com/owner/repo/pull/N" or "owner/repo#N".
-// Anything else is a typed github.bad_pr_ref error.
+// ParseRef accepts "https://github.com/owner/repo/pull/N" or "owner/repo#N",
+// tolerating surrounding whitespace from pasted refs. Anything else is a typed
+// github.bad_pr_ref error.
 func ParseRef(s string) (PRRef, error) {
+	s = strings.TrimSpace(s)
 	if m := urlRefRe.FindStringSubmatch(s); m != nil {
 		return prRefFrom(m[1], m[2], m[3])
 	}

@@ -109,9 +109,11 @@ type PRReviewRequest struct {
 
 // PRReviewer fetches a GitHub PR, runs the engine on a temp clone via ModeRange,
 // and (in P2) publishes. Injected from wire so cli stays below github/engine in
-// the import graph.
+// the import graph. GateFailed mirrors Reviewer so the --pr gate is evaluated from
+// the PR review's own findings, not a separate local-mode reviewer instance.
 type PRReviewer interface {
 	ReviewPR(ctx stdctx.Context, req PRReviewRequest) (ReviewOutcome, error)
+	GateFailed(findings []ReviewFinding, gate string) bool
 }
 
 var prReviewer PRReviewer
@@ -347,7 +349,7 @@ func runPRReview(cmd *cobra.Command, a prRunArgs) error {
 	} else if err := writeSuccess(cmd.OutOrStdout(), "review", "review.result", data, summary); err != nil {
 		return err
 	}
-	if reviewer != nil && reviewer.GateFailed(out.Findings, a.gate) {
+	if prReviewer.GateFailed(out.Findings, a.gate) {
 		return &CLIError{
 			Code:           "review.gate_failed",
 			Message:        fmt.Sprintf("findings reached gate %q", a.gate),
@@ -359,14 +361,22 @@ func runPRReview(cmd *cobra.Command, a prRunArgs) error {
 }
 
 // validatePRFlags rejects --post together with --no-post and (defense-in-depth)
-// surfaces the post-without-token failure early; full token resolution happens in
-// runPRReview where env vars are read.
-func validatePRFlags(post, noPost bool, _ string) error {
+// surfaces the post-without-token failure early in PreRunE by resolving the same
+// precedence (--token > GITHUB_TOKEN > GH_TOKEN) runPRReview uses.
+func validatePRFlags(post, noPost bool, token string) error {
 	if post && noPost {
 		return &CLIError{
 			Code:    "flags.conflict",
 			Message: "--post and --no-post are mutually exclusive",
 			Hint:    "pass one or neither (default is dry-run)",
+			Exit:    2,
+		}
+	}
+	if post && resolveGitHubToken(token) == "" {
+		return &CLIError{
+			Code:    "github.post_requires_token",
+			Message: "--post needs a GitHub token: pass --token or set GITHUB_TOKEN/GH_TOKEN",
+			Hint:    "create a PAT with repo scope; dry-run (--no-post) needs no token for public repos",
 			Exit:    2,
 		}
 	}

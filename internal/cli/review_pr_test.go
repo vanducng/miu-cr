@@ -17,6 +17,29 @@ func (f *fakePRReviewer) ReviewPR(_ stdctx.Context, req PRReviewRequest) (Review
 	return f.outcome, nil
 }
 
+func (f *fakePRReviewer) GateFailed(findings []ReviewFinding, gate string) bool {
+	if gate == "" || gate == "none" {
+		return false
+	}
+	rank := map[string]int{"info": 1, "low": 2, "medium": 3, "high": 4, "critical": 5}
+	max := 0
+	for _, fn := range findings {
+		if r := rank[fn.Severity]; r > max {
+			max = r
+		}
+	}
+	return max >= rank[gate]
+}
+
+// stubGateReviewer is a local-mode Reviewer whose gate verdict is fixed, used to
+// prove the --pr gate is evaluated from the PRReviewer, not this instance.
+type stubGateReviewer struct{ gateFailed bool }
+
+func (s *stubGateReviewer) Review(stdctx.Context, ReviewRequest) (ReviewOutcome, error) {
+	return ReviewOutcome{}, nil
+}
+func (s *stubGateReviewer) GateFailed([]ReviewFinding, string) bool { return s.gateFailed }
+
 func runPR(t *testing.T, pr PRReviewer, rev Reviewer, args ...string) (string, error) {
 	t.Helper()
 	prevPR, prevRev := prReviewer, reviewer
@@ -67,6 +90,21 @@ func TestPRDryRunEmitsFindingsAndPRBlock(t *testing.T) {
 	}
 	if pr.gotReq.Post {
 		t.Error("--no-post must not request posting")
+	}
+}
+
+func TestPRGateUsesPRReviewerNotLocalReviewer(t *testing.T) {
+	pr := &fakePRReviewer{outcome: ReviewOutcome{
+		Findings: []ReviewFinding{{File: "a.go", Line: 1, Severity: "critical"}},
+		Stats:    map[string]any{},
+		PR:       &PRResult{Owner: "o", Repo: "r", Number: 1, HeadSHA: "h"},
+	}}
+	// A local reviewer that would WRONGLY pass the gate; the --pr path must ignore it.
+	local := &stubGateReviewer{gateFailed: false}
+	_, err := runPR(t, pr, local, "--pr", "o/r#1", "--no-post", "--gate", "high")
+	var ce *CLIError
+	if !asCLIError(err, &ce) || ce.Code != "review.gate_failed" || ce.Exit != 2 {
+		t.Fatalf("want review.gate_failed exit 2 from the PR reviewer's own gate, got %+v", err)
 	}
 }
 
