@@ -1,6 +1,8 @@
-// Package sqlite is the pure-Go (modernc.org/sqlite, CGO_ENABLED=0) store
-// implementation writing to a local state DB. It never persists credentials.
-package sqlite
+// Package postgres is the opt-in Postgres store backend behind the unchanged M5
+// store interfaces. It uses pgx/v5 via its database/sql stdlib adapter so the
+// *sql.DB/Tx shape is shared with the sqlite backend. It is pure-Go (pgx is
+// pure-Go) so CGO_ENABLED=0 still builds. It never persists credentials.
+package postgres
 
 import (
 	"context"
@@ -10,82 +12,75 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"net/url"
-	"os"
-	"path/filepath"
-	"strings"
-	"sync"
 	"time"
 
-	_ "modernc.org/sqlite"
+	_ "github.com/jackc/pgx/v5/stdlib"
 
+	"github.com/vanducng/miu-cr/internal/cli/clierr"
 	"github.com/vanducng/miu-cr/internal/config"
 	"github.com/vanducng/miu-cr/internal/engine"
 	"github.com/vanducng/miu-cr/internal/store"
 )
 
-// Store is the pure-Go SQLite-backed review store; it persists findings/stats but
-// never credentials.
+// connectTimeout bounds the initial Ping so a bad host fast-fails instead of
+// hanging on the default TCP connect timeout.
+const connectTimeout = 10 * time.Second
+
+// Store is the Postgres-backed review store. It holds no per-process write lock:
+// Postgres serializes via MVCC, and a per-process lock would defeat a
+// multi-instance serve. SaveReview is a plain INSERT of a freshly-generated
+// unique ID (no ON CONFLICT — no duplicate is expected); the ON CONFLICT upsert
+// serialization applies to pr_findings (see UpsertPosted). Multi-row writes stay
+// transactional (BeginTx/Commit).
 type Store struct {
-	db   *sql.DB
-	prMu sync.Mutex
+	db *sql.DB
 }
 
-// DefaultPath returns ~/.config/miu/cr/state.db, sharing config.Dir() with the
-// config file so both live under one miu-cr directory.
-func DefaultPath() (string, error) {
-	dir, err := config.Dir()
+var (
+	_ store.Store         = (*Store)(nil)
+	_ store.PRThreadStore = (*Store)(nil)
+	_ engine.Store        = EngineStore{}
+)
+
+// Open dials the Postgres DSN via pgx's database/sql adapter, Pings within a
+// bounded timeout, and idempotently migrates the schema. Any failure is mapped
+// to a typed store.unavailable CLIError with a fully redacted message so the DSN
+// password never leaks. Driver name "pgx" is the stdlib registration.
+func Open(ctx context.Context, dsn string) (*Store, error) {
+	db, err := sql.Open("pgx", dsn)
 	if err != nil {
-		return "", err
+		return nil, unavailable("open postgres", err)
 	}
-	return filepath.Join(dir, "state.db"), nil
-}
-
-// dsn builds the modernc DSN as a file: URI so a '?'/'#' or other special char in
-// path can't be mis-parsed as the query/fragment (string concatenation breaks
-// there). The path is percent-escaped via url.URL; the pragmas stay DSN-level so
-// busy_timeout + WAL apply to EVERY pooled connection.
-func dsn(path string) string {
-	if abs, err := filepath.Abs(path); err == nil {
-		path = abs
-	}
-	// Forward slashes + a leading slash so the file: URI is valid on Windows too:
-	// C:\x -> /C:/x -> file:///C:/x. Without this, url.URL emits "file:C:/x" (no
-	// authority), which modernc/SQLite rejects on Windows.
-	p := filepath.ToSlash(path)
-	if !strings.HasPrefix(p, "/") {
-		p = "/" + p
-	}
-	u := url.URL{
-		Scheme:   "file",
-		Path:     p,
-		RawQuery: "_pragma=busy_timeout(5000)&_pragma=journal_mode(WAL)",
-	}
-	return u.String()
-}
-
-// Open opens (creating parent dirs) the state DB at path and idempotently
-// migrates the schema. Driver name "sqlite" is modernc's pure-Go registration.
-func Open(path string) (*Store, error) {
-	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
-		return nil, fmt.Errorf("create state dir: %w", err)
-	}
-	// DSN-level pragmas so EVERY pooled connection inherits them (busy_timeout
-	// is per-connection — a one-shot db.Exec only sets it on one connection,
-	// leaving other/cross-process writers to fail SQLITE_BUSY immediately).
-	db, err := sql.Open("sqlite", dsn(path))
-	if err != nil {
-		return nil, err
-	}
-	if err := db.Ping(); err != nil {
+	// Postgres is a network DB shared across instances; bound the pool so a
+	// long-running multi-instance serve can't exhaust max_connections. The
+	// single-file SQLite backend needs no such limits (its busy_timeout/WAL story
+	// is separate).
+	db.SetMaxOpenConns(10)
+	db.SetMaxIdleConns(5)
+	db.SetConnMaxLifetime(time.Hour)
+	pingCtx, cancel := context.WithTimeout(ctx, connectTimeout)
+	defer cancel()
+	if err := db.PingContext(pingCtx); err != nil {
 		_ = db.Close()
-		return nil, err
+		return nil, unavailable("connect postgres", err)
 	}
-	if _, err := db.Exec(SchemaSQL); err != nil {
+	if _, err := db.ExecContext(ctx, SchemaSQL); err != nil {
 		_ = db.Close()
-		return nil, fmt.Errorf("migrate schema: %w", err)
+		return nil, unavailable("migrate postgres schema", err)
 	}
 	return &Store{db: db}, nil
+}
+
+// unavailable wraps a backend failure as a typed, redacted store.unavailable
+// CLIError. The DSN/password can appear in the underlying error (host, userinfo)
+// so the message is funneled through config.RedactString before it escapes.
+func unavailable(op string, err error) error {
+	return &clierr.CLIError{
+		Code:      "store.unavailable",
+		Message:   config.RedactString(fmt.Sprintf("%s: %v", op, err)),
+		Exit:      1,
+		SafeRetry: true,
+	}
 }
 
 // Close releases the underlying database handle.
@@ -122,7 +117,7 @@ func (s *Store) SaveReview(ctx context.Context, rec store.ReviewRecord) (string,
 	}
 	_, err = s.db.ExecContext(ctx,
 		`INSERT INTO reviews (id, repo_dir, mode, head_sha, created_at, findings_json, stats_json)
-		 VALUES (?, ?, ?, ?, ?, ?, ?)`,
+		 VALUES ($1, $2, $3, $4, $5, $6, $7)`,
 		rec.ID, rec.RepoDir, rec.Mode, rec.HeadSHA,
 		rec.CreatedAt.UTC().Format(time.RFC3339Nano), string(findingsJSON), string(statsJSON),
 	)
@@ -142,7 +137,7 @@ func (s *Store) GetReview(ctx context.Context, id string) (store.ReviewRecord, e
 	)
 	row := s.db.QueryRowContext(ctx,
 		`SELECT id, repo_dir, mode, head_sha, created_at, findings_json, stats_json
-		 FROM reviews WHERE id = ?`, id)
+		 FROM reviews WHERE id = $1`, id)
 	err := row.Scan(&rec.ID, &rec.RepoDir, &rec.Mode, &rec.HeadSHA, &createdAt, &findingsJSON, &statsJSON)
 	if errors.Is(err, sql.ErrNoRows) {
 		return store.ReviewRecord{}, fmt.Errorf("review %q not found", id)
@@ -163,8 +158,8 @@ func (s *Store) GetReview(ctx context.Context, id string) (store.ReviewRecord, e
 }
 
 // EngineStore adapts this Store to engine.Store (engine.PersistRecord <->
-// store.ReviewRecord), letting the engine persist without importing the store
-// package's record type.
+// store.ReviewRecord), mirroring the sqlite adapter so the engine persists
+// without importing the store package's record type.
 type EngineStore struct{ S *Store }
 
 // SaveReview adapts an engine.PersistRecord to the store record and persists it.

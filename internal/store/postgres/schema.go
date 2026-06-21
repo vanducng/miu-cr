@@ -1,7 +1,9 @@
-package sqlite
+package postgres
 
-// SchemaSQL is the idempotent SQLite schema. Exported so the cross-backend
-// schema-parity test can compare it against postgres.SchemaSQL.
+// SchemaSQL is the idempotent Postgres schema, mirroring sqlite.SchemaSQL
+// table-for-table and column-for-column (types modulo dialect; time stays TEXT
+// for byte-parity with the SQLite rows). No vector/embeddings column — that is
+// M7. A schema-parity test asserts both backends define the same shape.
 const SchemaSQL = `
 CREATE TABLE IF NOT EXISTS reviews (
 	id            TEXT PRIMARY KEY,
@@ -15,7 +17,7 @@ CREATE TABLE IF NOT EXISTS reviews (
 CREATE TABLE IF NOT EXISTS pr_findings (
 	owner       TEXT NOT NULL,
 	repo        TEXT NOT NULL,
-	number      INTEGER NOT NULL,
+	number      BIGINT NOT NULL,
 	fingerprint TEXT NOT NULL,
 	path        TEXT NOT NULL,
 	status      TEXT NOT NULL CHECK(status IN ('posted','resolved')),

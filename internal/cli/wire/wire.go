@@ -22,7 +22,6 @@ import (
 	"github.com/vanducng/miu-cr/internal/mcpserver"
 	"github.com/vanducng/miu-cr/internal/rules"
 	"github.com/vanducng/miu-cr/internal/store"
-	"github.com/vanducng/miu-cr/internal/store/sqlite"
 )
 
 // defaultRulesTokenBudget caps the rendered rules section. Always-on baseline so
@@ -110,22 +109,27 @@ var newGitHubClient = mgithub.NewClient
 // (and a closer) ONLY when MIUCR_PR_STORE is set — never on the action/CI path,
 // which must stay stateless and byte-for-byte M2/M9. A nil store disables all
 // resolution tracking; the caller MUST nil-check. Tests override it to inject a
-// temp store. An open failure degrades to nil (resolution off, review proceeds).
-var newPRThreadStore = func() (store.PRThreadStore, func()) {
+// temp store.
+//
+// Backend selection routes through the wire factory. The SQLite path keeps the
+// silent nil-degrade (resolution off, review proceeds) — it is implicitly
+// opt-in. Any non-sqlite backend PROPAGATES its failure: an explicit
+// backend=postgres open failure surfaces the typed, redacted store.unavailable,
+// and an unknown backend surfaces config.invalid — a user who chose a non-default
+// backend must know it failed rather than silently lose resolution tracking.
+var newPRThreadStore = func(ctx stdctx.Context, cfg config.Config) (store.PRThreadStore, func(), error) {
 	if os.Getenv("MIUCR_PR_STORE") == "" {
-		return nil, nil
+		return nil, nil, nil
 	}
-	path, err := sqlite.DefaultPath()
+	prStore, closeStore, err := openPRThreadStore(ctx, cfg)
 	if err != nil {
-		slog.Warn("pr-thread store disabled: " + err.Error())
-		return nil, nil
+		if resolveBackend(cfg) != "sqlite" {
+			return nil, nil, err
+		}
+		slog.Warn("pr-thread store disabled: " + config.RedactString(err.Error()))
+		return nil, nil, nil
 	}
-	s, err := sqlite.Open(path)
-	if err != nil {
-		slog.Warn("pr-thread store disabled: " + err.Error())
-		return nil, nil
-	}
-	return s.PRThread(), func() { _ = s.Close() }
+	return prStore, closeStore, nil
 }
 
 // prReviewer fetches a GitHub PR into a non-shallow temp clone and runs the M1
@@ -204,7 +208,14 @@ func (prReviewer) ReviewPR(ctx stdctx.Context, req cli.PRReviewRequest) (cli.Rev
 	}
 
 	if req.Post {
-		prStore, closeStore := newPRThreadStore()
+		cfg, lerr := config.Load()
+		if lerr != nil {
+			slog.Warn("config load failed, using built-in defaults: " + config.RedactString(lerr.Error()))
+		}
+		prStore, closeStore, serr := newPRThreadStore(ctx, cfg)
+		if serr != nil {
+			return cli.ReviewOutcome{}, serr
+		}
 		if closeStore != nil {
 			defer closeStore()
 		}
@@ -378,13 +389,25 @@ func (mcpServerImpl) Serve(ctx stdctx.Context, req cli.MCPRequest) error {
 	runner := gitcmd.New()
 	eng := engine.New(lazyAgent{timeout: req.Timeout}, runner)
 
+	cfg, lerr := config.Load()
+	if lerr != nil {
+		slog.Warn("config load failed, using built-in defaults: " + config.RedactString(lerr.Error()))
+	}
 	var st store.Store
-	if path, err := sqlite.DefaultPath(); err == nil {
-		if s, oerr := sqlite.Open(path); oerr == nil {
-			eng.Store = sqlite.EngineStore{S: s}
-			st = s
-			defer func() { _ = s.Close() }()
+	s, closeStore, oerr := openStore(ctx, cfg)
+	if oerr != nil {
+		// A non-sqlite backend failure is fatal (surface the typed, redacted
+		// store.unavailable for postgres, or config.invalid for an unknown backend).
+		// The SQLite default degrades silently so the MCP handshake/tools-list still
+		// work without a writable state dir.
+		if resolveBackend(cfg) != "sqlite" {
+			return oerr
 		}
+		slog.Warn("mcp store disabled: " + config.RedactString(oerr.Error()))
+	} else {
+		eng.Store = engineStoreFor(s)
+		st = s
+		defer closeStore()
 	}
 
 	err := mcpserver.Serve(ctx, mcpserver.Deps{Engine: eng, Store: st}, mcpserver.Options{
