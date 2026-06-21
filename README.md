@@ -54,7 +54,7 @@ miucr mcp                                          # MCP stdio server
 miucr version -o json
 ```
 
-## Credentials
+## Credentials & providers
 
 BYO API key via env or flag — never a subscription token, never persisted:
 
@@ -64,6 +64,8 @@ export ANTHROPIC_API_KEY=...                       # Anthropic
 export ANTHROPIC_BASE_URL=https://api.z.ai/api/anthropic ANTHROPIC_AUTH_TOKEN=$ZAI_API_KEY
 export OPENAI_API_KEY=...                           # OpenAI-compatible
 ```
+
+Providers are **config-driven**: two first-class kinds (`anthropic`, `openai`) plus any vendor as a **named profile** — no rebuild to add one. Settings layer **CLI flags > env > config file > built-in defaults**. The optional config file lives at `~/.config/miu/cr/config.toml` (same on macOS and Linux, alongside `state.db`); a fully commented starter is in [`config.example.toml`](config.example.toml). Select a profile with `--provider <name>`. See [Providers](https://miucr.vanducng.dev/providers/) for the schema and z.ai/GLM + generic OpenAI-gateway examples.
 
 ## License
 

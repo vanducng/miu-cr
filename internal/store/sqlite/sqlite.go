@@ -16,6 +16,7 @@ import (
 
 	_ "modernc.org/sqlite"
 
+	"github.com/vanducng/miu-cr/internal/config"
 	"github.com/vanducng/miu-cr/internal/engine"
 	"github.com/vanducng/miu-cr/internal/store"
 )
@@ -26,13 +27,14 @@ type Store struct {
 	db *sql.DB
 }
 
-// DefaultPath returns os.UserConfigDir()/miucr/state.db.
+// DefaultPath returns ~/.config/miu/cr/state.db, sharing config.Dir() with the
+// config file so both live under one miu-cr directory.
 func DefaultPath() (string, error) {
-	dir, err := os.UserConfigDir()
+	dir, err := config.Dir()
 	if err != nil {
 		return "", err
 	}
-	return filepath.Join(dir, "miucr", "state.db"), nil
+	return filepath.Join(dir, "state.db"), nil
 }
 
 // Open opens (creating parent dirs) the state DB at path and idempotently

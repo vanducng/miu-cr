@@ -1,0 +1,41 @@
+# miu-cr configuration — OPTIONAL. Everything works with zero config; this file
+# only adds named provider profiles and picks a default.
+#
+# Copy to the per-user config path (same on macOS and Linux), then edit:
+#   ~/.config/miu/cr/config.toml
+#
+# Precedence, highest wins:  CLI flags  >  environment  >  this file  >  built-in defaults.
+# Credentials live in memory only for the duration of a call and are NEVER persisted.
+
+# Profile to use when --provider is omitted and env auto-detect doesn't force a
+# choice. Built-in profiles are "anthropic" and "openai".
+default_provider = "anthropic"
+
+# ── Built-in profiles (for reference — you do NOT need to redeclare these) ──
+# [providers.anthropic]
+# kind  = "anthropic"
+# model = "claude-sonnet-4-5-20250929"   # x-api-key comes from ANTHROPIC_API_KEY
+#
+# [providers.openai]
+# kind     = "openai"
+# base_url = "https://api.openai.com/v1"
+# model    = "gpt-4o"                     # API key comes from OPENAI_API_KEY
+
+# ── Example: GLM via z.ai (an Anthropic-compatible gateway) ──
+# A named profile of kind "anthropic" pointed at the gateway. The credential —
+# auth_token (literal) or auth_env (name of an env var holding it) — is sent as a
+# Bearer token. Select it with:  miucr review --staged --provider zai
+# [providers.zai]
+# kind     = "anthropic"
+# base_url = "https://api.z.ai/api/anthropic"
+# model    = "glm-4.6"
+# auth_env = "ZAI_API_KEY"               # or: auth_token = "<token>"
+
+# ── Example: a generic OpenAI-compatible gateway (DeepSeek, Moonshot, self-hosted, …) ──
+# Any endpoint speaking the OpenAI chat-completions API. The credential is sent
+# as the API key. Select it with:  miucr review --staged --provider my-gateway
+# [providers.my-gateway]
+# kind     = "openai"
+# base_url = "https://gateway.example.com/v1"
+# model    = "your-model-id"
+# auth_env = "MY_GATEWAY_TOKEN"          # or: auth_token = "<token>"

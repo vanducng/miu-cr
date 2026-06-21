@@ -1,1 +1,0 @@
-- [miu-cr security posture](project_miucr_security.md) — exec/path/SQL/token model and the few known redaction gaps for the security lens

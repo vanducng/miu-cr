@@ -60,13 +60,9 @@ type anthropicAgent struct {
 	timeout time.Duration
 }
 
-// New returns a provider-backed Agent. timeout (the global --timeout) bounds
-// both the request context deadline and the tool-loop wall clock; <=0 disables
-// the agent-imposed cap (the caller's ctx still applies).
-func New(creds Credentials, timeout time.Duration) Agent {
-	if creds.Provider == ProviderOpenAI {
-		return newOpenAIAgent(creds, timeout)
-	}
+// newAnthropicAgent builds the Anthropic-backed Agent (registered for
+// config.KindAnthropic; see registry.go for the dispatch).
+func newAnthropicAgent(creds Credentials, timeout time.Duration) *anthropicAgent {
 	return &anthropicAgent{
 		client:  sdkAnthropicClient{sdk: anthropic.NewClient(anthropicOptions(creds)...)},
 		model:   creds.Model,
@@ -75,9 +71,9 @@ func New(creds Credentials, timeout time.Duration) Agent {
 }
 
 // anthropicOptions builds SDK request options from resolved credentials,
-// supporting Anthropic-compatible gateways (e.g. z.ai/glm) via base URL +
-// Bearer auth token. When AuthToken is set it is sent as Authorization (and
-// x-api-key is dropped); otherwise APIKey goes via x-api-key.
+// supporting Anthropic-compatible gateways via base URL + Bearer auth token.
+// When AuthToken is set it is sent as Authorization (and x-api-key is dropped);
+// otherwise APIKey goes via x-api-key.
 func anthropicOptions(creds Credentials) []option.RequestOption {
 	var opts []option.RequestOption
 	if creds.BaseURL != "" {
@@ -114,14 +110,12 @@ func reviewTools() []anthropic.ToolUnionParam {
 }
 
 func (a *anthropicAgent) Review(ctx stdctx.Context, rc Context) ([]engine.Finding, error) {
+	// The ctx deadline (below) owns the wall clock; each turn checks ctx.Err()
+	// rather than tracking a parallel manual deadline.
 	if a.timeout > 0 {
 		var cancel stdctx.CancelFunc
 		ctx, cancel = stdctx.WithTimeout(ctx, a.timeout)
 		defer cancel()
-	}
-	deadline := time.Time{}
-	if a.timeout > 0 {
-		deadline = time.Now().Add(a.timeout)
 	}
 	if rc.Runner == nil {
 		rc.Runner = gitcmd.New()
@@ -141,9 +135,6 @@ func (a *anthropicAgent) Review(ctx stdctx.Context, rc Context) ([]engine.Findin
 	for turn := 0; turn < maxToolTurns; turn++ {
 		if err := ctx.Err(); err != nil {
 			return nil, err
-		}
-		if !deadline.IsZero() && time.Now().After(deadline) {
-			return nil, fmt.Errorf("agent: tool loop exceeded wall-clock cap of %s", a.timeout)
 		}
 
 		msg, err := a.client.newMessage(ctx, params)

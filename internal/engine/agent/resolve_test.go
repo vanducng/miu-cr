@@ -5,6 +5,7 @@ import (
 	"testing"
 
 	"github.com/vanducng/miu-cr/internal/cli/clierr"
+	"github.com/vanducng/miu-cr/internal/config"
 )
 
 // clearProviderEnv unsets every credential env var so each case starts clean.
@@ -12,7 +13,7 @@ func clearProviderEnv(t *testing.T) {
 	t.Helper()
 	for _, k := range []string{
 		"ANTHROPIC_API_KEY", "ANTHROPIC_MODEL", "ANTHROPIC_BASE_URL", "ANTHROPIC_AUTH_TOKEN",
-		"ZAI_API_KEY", "OPENAI_API_KEY", "OPENAI_BASE_URL", "OPENAI_MODEL",
+		"OPENAI_API_KEY", "OPENAI_BASE_URL", "OPENAI_MODEL", "ZAI_API_KEY", "GATEWAY_TOKEN",
 	} {
 		t.Setenv(k, "")
 	}
@@ -21,17 +22,17 @@ func clearProviderEnv(t *testing.T) {
 func TestResolveFlagWinsOverEnv(t *testing.T) {
 	clearProviderEnv(t)
 	t.Setenv("ANTHROPIC_API_KEY", "env-key")
-	creds, err := Resolve(ResolveInput{APIKey: "flag-key"})
+	creds, err := resolveWith(config.Defaults(), ResolveInput{APIKey: "flag-key"})
 	if err != nil {
-		t.Fatalf("Resolve: %v", err)
+		t.Fatalf("resolve: %v", err)
 	}
-	if creds.Provider != ProviderAnthropic {
-		t.Fatalf("want anthropic, got %q", creds.Provider)
+	if creds.Kind != config.KindAnthropic {
+		t.Fatalf("want anthropic, got %q", creds.Kind)
 	}
 	if creds.APIKey != "flag-key" {
 		t.Fatalf("flag must win: got %q", creds.APIKey)
 	}
-	if creds.Model != defaultModel {
+	if creds.Model != config.DefaultAnthropicModel {
 		t.Fatalf("default model expected, got %q", creds.Model)
 	}
 }
@@ -40,9 +41,9 @@ func TestResolveEnvKeyAndModel(t *testing.T) {
 	clearProviderEnv(t)
 	t.Setenv("ANTHROPIC_API_KEY", "env-key")
 	t.Setenv("ANTHROPIC_MODEL", "custom-model")
-	creds, err := Resolve(ResolveInput{})
+	creds, err := resolveWith(config.Defaults(), ResolveInput{})
 	if err != nil {
-		t.Fatalf("Resolve: %v", err)
+		t.Fatalf("resolve: %v", err)
 	}
 	if creds.APIKey != "env-key" {
 		t.Fatalf("env key expected, got %q", creds.APIKey)
@@ -54,7 +55,7 @@ func TestResolveEnvKeyAndModel(t *testing.T) {
 
 func TestResolveMissingKeyTypedError(t *testing.T) {
 	clearProviderEnv(t)
-	_, err := Resolve(ResolveInput{APIKey: "   ", Provider: "anthropic"})
+	_, err := resolveWith(config.Defaults(), ResolveInput{APIKey: "   ", Provider: "anthropic"})
 	if err == nil {
 		t.Fatal("expected error for missing credentials")
 	}
@@ -67,40 +68,81 @@ func TestResolveMissingKeyTypedError(t *testing.T) {
 	}
 }
 
-// z.ai: ZAI_API_KEY routes through the Anthropic client as a Bearer auth token
-// against the Anthropic-compatible gateway base URL.
-func TestResolveZAIGateway(t *testing.T) {
+// z.ai via a CONFIG PROFILE (no hardcoding): a named anthropic-kind profile with
+// a gateway base_url and auth_env resolves to the Anthropic kind, sends the key
+// as a Bearer auth token, and never as x-api-key.
+func TestResolveZAIViaConfigProfile(t *testing.T) {
 	clearProviderEnv(t)
 	t.Setenv("ZAI_API_KEY", "zai-secret")
-	creds, err := Resolve(ResolveInput{Model: "glm-5.2"})
+	cfg := config.Merge(config.Defaults(), config.Config{
+		Providers: map[string]config.Provider{
+			"zai": {Kind: config.KindAnthropic, BaseURL: "https://api.z.ai/api/anthropic", Model: "glm-4.6", AuthEnv: "ZAI_API_KEY"},
+		},
+	})
+	creds, err := resolveWith(cfg, ResolveInput{Provider: "zai"})
 	if err != nil {
-		t.Fatalf("Resolve: %v", err)
+		t.Fatalf("resolve: %v", err)
 	}
-	if creds.Provider != ProviderAnthropic {
-		t.Fatalf("z.ai must route through anthropic, got %q", creds.Provider)
+	if creds.Kind != config.KindAnthropic {
+		t.Fatalf("z.ai profile must route through anthropic, got %q", creds.Kind)
 	}
 	if creds.AuthToken != "zai-secret" {
-		t.Fatalf("ZAI key must become AuthToken, got %q", creds.AuthToken)
+		t.Fatalf("profile key must become Bearer AuthToken, got %q", creds.AuthToken)
 	}
 	if creds.APIKey != "" {
-		t.Fatalf("APIKey must be empty for the bearer-token path, got %q", creds.APIKey)
+		t.Fatalf("APIKey must be empty on the bearer path, got %q", creds.APIKey)
 	}
 	if creds.BaseURL != "https://api.z.ai/api/anthropic" {
-		t.Fatalf("z.ai base URL not set, got %q", creds.BaseURL)
+		t.Fatalf("profile base URL not honored, got %q", creds.BaseURL)
 	}
-	if creds.Model != "glm-5.2" {
-		t.Fatalf("model flag not honored, got %q", creds.Model)
+	if creds.Model != "glm-4.6" {
+		t.Fatalf("profile model not honored, got %q", creds.Model)
 	}
 }
 
-// Explicit Anthropic base URL + auth token via env (gateway not z.ai).
+// A literal auth_token in a profile is honored when its named env var is unset.
+func TestResolveProfileLiteralAuthToken(t *testing.T) {
+	clearProviderEnv(t)
+	cfg := config.Merge(config.Defaults(), config.Config{
+		Providers: map[string]config.Provider{
+			"gw": {Kind: config.KindAnthropic, BaseURL: "https://gw.example/anthropic", AuthToken: "literal-bearer"},
+		},
+	})
+	creds, err := resolveWith(cfg, ResolveInput{Provider: "gw"})
+	if err != nil {
+		t.Fatalf("resolve: %v", err)
+	}
+	if creds.AuthToken != "literal-bearer" || creds.BaseURL != "https://gw.example/anthropic" {
+		t.Fatalf("literal profile auth not honored: %+v", creds)
+	}
+}
+
+// env overrides a profile credential (layering: flags > env > file > defaults).
+func TestResolveEnvBeatsProfile(t *testing.T) {
+	clearProviderEnv(t)
+	t.Setenv("ANTHROPIC_AUTH_TOKEN", "env-token")
+	cfg := config.Merge(config.Defaults(), config.Config{
+		Providers: map[string]config.Provider{
+			"gw": {Kind: config.KindAnthropic, BaseURL: "https://gw.example/anthropic", AuthToken: "file-token"},
+		},
+	})
+	creds, err := resolveWith(cfg, ResolveInput{Provider: "gw"})
+	if err != nil {
+		t.Fatalf("resolve: %v", err)
+	}
+	if creds.AuthToken != "env-token" {
+		t.Fatalf("env must override file profile token, got %q", creds.AuthToken)
+	}
+}
+
+// Explicit Anthropic base URL + auth token via env (a generic gateway).
 func TestResolveAnthropicBaseURLAndAuthToken(t *testing.T) {
 	clearProviderEnv(t)
 	t.Setenv("ANTHROPIC_BASE_URL", "https://gateway.example/anthropic")
 	t.Setenv("ANTHROPIC_AUTH_TOKEN", "bearer-xyz")
-	creds, err := Resolve(ResolveInput{})
+	creds, err := resolveWith(config.Defaults(), ResolveInput{})
 	if err != nil {
-		t.Fatalf("Resolve: %v", err)
+		t.Fatalf("resolve: %v", err)
 	}
 	if creds.BaseURL != "https://gateway.example/anthropic" {
 		t.Fatalf("base URL not resolved, got %q", creds.BaseURL)
@@ -115,9 +157,9 @@ func TestResolveBaseURLAuthTokenFlagsWin(t *testing.T) {
 	clearProviderEnv(t)
 	t.Setenv("ANTHROPIC_BASE_URL", "https://env.example")
 	t.Setenv("ANTHROPIC_AUTH_TOKEN", "env-token")
-	creds, err := Resolve(ResolveInput{BaseURL: "https://flag.example", AuthToken: "flag-token"})
+	creds, err := resolveWith(config.Defaults(), ResolveInput{BaseURL: "https://flag.example", AuthToken: "flag-token"})
 	if err != nil {
-		t.Fatalf("Resolve: %v", err)
+		t.Fatalf("resolve: %v", err)
 	}
 	if creds.BaseURL != "https://flag.example" || creds.AuthToken != "flag-token" {
 		t.Fatalf("flags must win: %+v", creds)
@@ -129,12 +171,12 @@ func TestResolveOpenAIExplicit(t *testing.T) {
 	t.Setenv("OPENAI_API_KEY", "oai-key")
 	t.Setenv("OPENAI_BASE_URL", "https://oai.example/v1")
 	t.Setenv("OPENAI_MODEL", "gpt-test")
-	creds, err := Resolve(ResolveInput{Provider: "openai"})
+	creds, err := resolveWith(config.Defaults(), ResolveInput{Provider: "openai"})
 	if err != nil {
-		t.Fatalf("Resolve: %v", err)
+		t.Fatalf("resolve: %v", err)
 	}
-	if creds.Provider != ProviderOpenAI {
-		t.Fatalf("want openai, got %q", creds.Provider)
+	if creds.Kind != config.KindOpenAI {
+		t.Fatalf("want openai, got %q", creds.Kind)
 	}
 	if creds.APIKey != "oai-key" {
 		t.Fatalf("openai key, got %q", creds.APIKey)
@@ -147,12 +189,56 @@ func TestResolveOpenAIExplicit(t *testing.T) {
 	}
 }
 
+// A configured OpenAI-compatible gateway: kind openai with a custom base_url and
+// a profile key, no env at all.
+func TestResolveOpenAICompatProfile(t *testing.T) {
+	clearProviderEnv(t)
+	cfg := config.Merge(config.Defaults(), config.Config{
+		Providers: map[string]config.Provider{
+			"deepseek": {Kind: config.KindOpenAI, BaseURL: "https://api.deepseek.com/v1", Model: "deepseek-chat", AuthEnv: "GATEWAY_TOKEN"},
+		},
+	})
+	t.Setenv("GATEWAY_TOKEN", "ds-key")
+	creds, err := resolveWith(cfg, ResolveInput{Provider: "deepseek"})
+	if err != nil {
+		t.Fatalf("resolve: %v", err)
+	}
+	if creds.Kind != config.KindOpenAI || creds.APIKey != "ds-key" {
+		t.Fatalf("openai-compat profile not resolved: %+v", creds)
+	}
+	if creds.BaseURL != "https://api.deepseek.com/v1" || creds.Model != "deepseek-chat" {
+		t.Fatalf("openai-compat base/model not honored: %+v", creds)
+	}
+}
+
 func TestResolveOpenAIMissingKey(t *testing.T) {
 	clearProviderEnv(t)
-	_, err := Resolve(ResolveInput{Provider: "openai"})
+	_, err := resolveWith(config.Defaults(), ResolveInput{Provider: "openai"})
 	var cerr *clierr.CLIError
 	if !errors.As(err, &cerr) || cerr.Code != "agent.no_credentials" {
 		t.Fatalf("expected no_credentials, got %v", err)
+	}
+}
+
+// --auth-token is Anthropic-only: pairing it with an OpenAI provider is a typed
+// error, not a silent ignore.
+func TestResolveAuthTokenOpenAIRejected(t *testing.T) {
+	clearProviderEnv(t)
+	t.Setenv("OPENAI_API_KEY", "oai-key")
+	_, err := resolveWith(config.Defaults(), ResolveInput{Provider: "openai", AuthToken: "should-not-be-here"})
+	var cerr *clierr.CLIError
+	if !errors.As(err, &cerr) || cerr.Code != "agent.auth_token_unsupported" {
+		t.Fatalf("expected auth_token_unsupported, got %v", err)
+	}
+}
+
+// An unknown --provider name (no built-in, no profile) is a typed error.
+func TestResolveUnknownProvider(t *testing.T) {
+	clearProviderEnv(t)
+	_, err := resolveWith(config.Defaults(), ResolveInput{Provider: "nope"})
+	var cerr *clierr.CLIError
+	if !errors.As(err, &cerr) || cerr.Code != "agent.unknown_provider" {
+		t.Fatalf("expected unknown_provider, got %v", err)
 	}
 }
 
@@ -160,12 +246,12 @@ func TestResolveOpenAIMissingKey(t *testing.T) {
 func TestResolveAutoDetectOpenAI(t *testing.T) {
 	clearProviderEnv(t)
 	t.Setenv("OPENAI_API_KEY", "oai-key")
-	creds, err := Resolve(ResolveInput{Provider: "auto"})
+	creds, err := resolveWith(config.Defaults(), ResolveInput{Provider: "auto"})
 	if err != nil {
-		t.Fatalf("Resolve: %v", err)
+		t.Fatalf("resolve: %v", err)
 	}
-	if creds.Provider != ProviderOpenAI {
-		t.Fatalf("auto must pick openai, got %q", creds.Provider)
+	if creds.Kind != config.KindOpenAI {
+		t.Fatalf("auto must pick openai, got %q", creds.Kind)
 	}
 }
 
@@ -174,39 +260,60 @@ func TestResolveAutoDetectPrefersAnthropic(t *testing.T) {
 	clearProviderEnv(t)
 	t.Setenv("OPENAI_API_KEY", "oai-key")
 	t.Setenv("ANTHROPIC_API_KEY", "ant-key")
-	creds, err := Resolve(ResolveInput{})
+	creds, err := resolveWith(config.Defaults(), ResolveInput{})
 	if err != nil {
-		t.Fatalf("Resolve: %v", err)
+		t.Fatalf("resolve: %v", err)
 	}
-	if creds.Provider != ProviderAnthropic {
-		t.Fatalf("auto must prefer anthropic when both set, got %q", creds.Provider)
+	if creds.Kind != config.KindAnthropic {
+		t.Fatalf("auto must prefer anthropic when both set, got %q", creds.Kind)
 	}
 }
 
-// auto-detect: only ZAI_API_KEY => anthropic gateway, not openai.
-func TestResolveAutoDetectZAIIsAnthropic(t *testing.T) {
+// config.default_provider selects the profile when nothing else forces a choice.
+func TestResolveDefaultProviderFromConfig(t *testing.T) {
 	clearProviderEnv(t)
 	t.Setenv("OPENAI_API_KEY", "oai-key")
-	t.Setenv("ZAI_API_KEY", "zai-key")
-	creds, err := Resolve(ResolveInput{})
+	cfg := config.Defaults()
+	cfg.DefaultProvider = "openai"
+	// Anthropic key also present, so env auto-detect would NOT force openai;
+	// the config default decides.
+	t.Setenv("ANTHROPIC_API_KEY", "ant-key")
+	creds, err := resolveWith(cfg, ResolveInput{})
 	if err != nil {
-		t.Fatalf("Resolve: %v", err)
+		t.Fatalf("resolve: %v", err)
 	}
-	if creds.Provider != ProviderAnthropic {
-		t.Fatalf("ZAI presence must keep anthropic, got %q", creds.Provider)
+	if creds.Kind != config.KindOpenAI {
+		t.Fatalf("config default_provider must select openai, got %q", creds.Kind)
 	}
 }
 
 // Tokens must never appear persisted; resolution only returns in-memory creds.
-// (Belt-and-suspenders: the store layer never sees Credentials at all.)
 func TestResolveDoesNotEmitPersistableFields(t *testing.T) {
 	clearProviderEnv(t)
 	t.Setenv("ANTHROPIC_API_KEY", "sekret")
+	creds, err := resolveWith(config.Defaults(), ResolveInput{})
+	if err != nil {
+		t.Fatalf("resolve: %v", err)
+	}
+	if creds.APIKey != "sekret" {
+		t.Fatalf("expected in-memory key, got %q", creds.APIKey)
+	}
+}
+
+// Resolve (full path, no config file present) falls back to built-in defaults
+// and resolves an Anthropic key from env. Isolate the config dir so a developer
+// machine's real ~/.config/miucr/config.toml can't perturb the result.
+func TestResolveEndToEndDefaults(t *testing.T) {
+	clearProviderEnv(t)
+	dir := t.TempDir()
+	t.Setenv("HOME", dir)
+	t.Setenv("XDG_CONFIG_HOME", dir)
+	t.Setenv("ANTHROPIC_API_KEY", "ant-key")
 	creds, err := Resolve(ResolveInput{})
 	if err != nil {
 		t.Fatalf("Resolve: %v", err)
 	}
-	if creds.APIKey != "sekret" {
-		t.Fatalf("expected in-memory key, got %q", creds.APIKey)
+	if creds.Kind != config.KindAnthropic || creds.APIKey != "ant-key" {
+		t.Fatalf("end-to-end resolve: %+v", creds)
 	}
 }

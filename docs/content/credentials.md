@@ -10,7 +10,7 @@ miu-cr is **bring-your-own-key**. You supply an LLM API key via an environment v
 ```sh
 export ANTHROPIC_API_KEY=...                                      # Anthropic
 export ANTHROPIC_BASE_URL=https://api.z.ai/api/anthropic \
-       ANTHROPIC_AUTH_TOKEN=$ZAI_API_KEY                          # GLM via z.ai
+       ANTHROPIC_AUTH_TOKEN=$ZAI_API_KEY                          # GLM via z.ai (Anthropic-compatible)
 export OPENAI_API_KEY=...                                         # OpenAI-compatible
 ```
 
@@ -21,7 +21,11 @@ miucr review --staged --api-key "$MY_KEY"
 miucr review --staged --auth-token "$ZAI_API_KEY" --base-url https://api.z.ai/api/anthropic
 ```
 
-See [Providers](/providers/) for the full resolution matrix per provider.
+You can also name a provider profile in the optional config file and have it
+reference an env var by name (`auth_env`) instead of putting the token inline —
+the token still resolves from the environment at run time and is never written
+back. See [Providers](/providers/) for the config schema, named-profile examples
+(z.ai/GLM, a generic OpenAI-compatible gateway), and the full resolution matrix.
 
 ## What is never persisted
 

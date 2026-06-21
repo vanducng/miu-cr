@@ -5,6 +5,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/vanducng/miu-cr/internal/config"
 	"github.com/vanducng/miu-cr/internal/engine"
 	"github.com/vanducng/miu-cr/internal/engine/anchor"
 	"github.com/vanducng/miu-cr/internal/engine/diff"
@@ -139,8 +140,11 @@ func TestStripMarkdownFencesLanguageTag(t *testing.T) {
 }
 
 func TestTokenNeverInFindings(t *testing.T) {
-	creds := Credentials{APIKey: secretToken, Model: defaultModel}
-	a := New(creds, 0)
+	creds := Credentials{Kind: config.KindAnthropic, APIKey: secretToken, Model: config.DefaultAnthropicModel}
+	a, err := New(creds, 0)
+	if err != nil {
+		t.Fatalf("New: %v", err)
+	}
 	if a == nil {
 		t.Fatal("New returned nil")
 	}

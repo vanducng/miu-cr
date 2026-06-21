@@ -16,7 +16,7 @@ func registerTools(server *mcp.Server, deps Deps, opts Options, policy safetyPol
 	}, func(ctx context.Context, req *mcp.CallToolRequest, in reviewRunInput) (*mcp.CallToolResult, reviewRunOutput, error) {
 		expand := 5
 		if in.Expand != nil {
-			expand = *in.Expand
+			expand = clampExpand(*in.Expand)
 		}
 		gate := in.Gate
 		if gate == "" {
@@ -62,6 +62,18 @@ func registerTools(server *mcp.Server, deps Deps, opts Options, policy safetyPol
 		}
 		return nil, out, policy.enforceBytes(out)
 	})
+}
+
+// clampExpand bounds the caller-supplied context-window size to [0,50]:
+// negatives disable expansion, oversized values are capped.
+func clampExpand(n int) int {
+	if n < 0 {
+		return 0
+	}
+	if n > 50 {
+		return 50
+	}
+	return n
 }
 
 func modeFor(in reviewRunInput) diff.Mode {

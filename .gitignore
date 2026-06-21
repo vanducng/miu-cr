@@ -21,3 +21,6 @@ docs/dist/
 .DS_Store
 *.test
 *.out
+
+# agent-local config / memory
+.claude/
