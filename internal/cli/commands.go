@@ -123,7 +123,16 @@ func serveCommand(opts *options) *cobra.Command {
 			reviewTO := 15 * time.Minute
 			gateVal := gate
 			reviewFn := func(j serve.Job) {
-				out, err := ReviewPRForServe(cmd.Context(), PRReviewRequest{
+				// Detach from cmd.Context() (the SIGTERM signal context): on shutdown
+				// it cancels immediately and would abort every in-flight review before
+				// serve.Run's graceful drain can finish. j.Timeout still bounds the job.
+				jobCtx := stdctx.Background()
+				if j.Timeout > 0 {
+					var cancel stdctx.CancelFunc
+					jobCtx, cancel = stdctx.WithTimeout(jobCtx, j.Timeout)
+					defer cancel()
+				}
+				out, err := ReviewPRForServe(jobCtx, PRReviewRequest{
 					Ref:     j.Ref,
 					Token:   j.Token,
 					Post:    true,
@@ -140,7 +149,7 @@ func serveCommand(opts *options) *cobra.Command {
 				}
 				log.Info("review done", "ref", j.Ref, "findings", len(out.Findings), "posted_inline", posted, "summary", action)
 			}
-			srv, pool := serve.New(serve.Config{
+			srv, pool, err := serve.New(serve.Config{
 				Addr:          addr,
 				Secret:        []byte(secret),
 				Repos:         repos,
@@ -148,6 +157,9 @@ func serveCommand(opts *options) *cobra.Command {
 				Logger:        log,
 				ReviewTimeout: reviewTO,
 			}, reviewFn)
+			if err != nil {
+				return &CLIError{Code: "serve.config_invalid", Message: err.Error(), Exit: 2}
+			}
 			return srv.Run(cmd.Context(), pool)
 		},
 	}

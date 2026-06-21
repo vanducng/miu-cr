@@ -118,7 +118,9 @@ type PRReviewer interface {
 
 var prReviewer PRReviewer
 
-// SetPRReviewer wires the github-backed PR reviewer. Called once from wire.init.
+// SetPRReviewer wires the github-backed PR reviewer. Called exactly once from
+// wire.init, which happens-before any serve worker goroutine that calls
+// ReviewPRForServe — so the package-level read needs no lock or atomic.
 func SetPRReviewer(r PRReviewer) { prReviewer = r }
 
 // ReviewPRForServe is the in-process seam serve calls: it delegates straight to

@@ -19,6 +19,7 @@ type Pool struct {
 	jobs     chan Job
 	mu       sync.Mutex
 	inflight map[prKey]bool
+	closed   bool // guarded by mu; once true, Submit refuses and jobs is closed
 	wg       sync.WaitGroup
 	reviewFn func(Job)
 	log      *slog.Logger
@@ -48,10 +49,17 @@ func NewPool(reviewFn func(Job), log *slog.Logger) *Pool {
 	return p
 }
 
-// Submit enqueues a job. It returns false (without enqueuing) when the same PR is
-// already in flight (coalesced) or when the queue is full (loud-logged + counted).
+// Submit enqueues a job. It returns false (without enqueuing) after Drain (the
+// pool is closed), when the same PR is already in flight (coalesced), or when the
+// queue is full (loud-logged + counted). The closed check and the channel send
+// both happen under p.mu — and Drain closes the channel under the same lock — so
+// Submit can never send on a closed channel (no "send on closed channel" panic).
 func (p *Pool) Submit(j Job) bool {
 	p.mu.Lock()
+	if p.closed {
+		p.mu.Unlock()
+		return false
+	}
 	if p.inflight[j.Key] {
 		p.mu.Unlock()
 		p.log.Info("review coalesced: PR already in flight", "repo", j.Key.Owner+"/"+j.Key.Repo, "number", j.Key.Number)
@@ -95,8 +103,18 @@ func (p *Pool) run(j Job) {
 	p.reviewFn(j)
 }
 
-// Drain stops accepting work and blocks until in-flight jobs finish.
+// Drain stops accepting work and blocks until in-flight jobs finish. It sets
+// closed and closes the channel under p.mu so a concurrent Submit can never send
+// on the closed channel; wg.Wait runs after releasing the lock because workers
+// re-acquire p.mu in run's cleanup. Idempotent: a second Drain is a no-op.
 func (p *Pool) Drain() {
+	p.mu.Lock()
+	if p.closed {
+		p.mu.Unlock()
+		return
+	}
+	p.closed = true
 	close(p.jobs)
+	p.mu.Unlock()
 	p.wg.Wait()
 }

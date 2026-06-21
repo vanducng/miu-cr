@@ -2,7 +2,6 @@ package serve
 
 import (
 	"errors"
-	"fmt"
 	"net/http"
 
 	"github.com/google/go-github/v84/github"
@@ -104,16 +103,23 @@ func (s *Server) handleWebhook(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// Respond 200 BEFORE dispatch so the review never runs on the HTTP goroutine
-	// and GitHub's delivery budget is never spent on the LLM.
+	// and GitHub's delivery budget is never spent on the LLM. GitHub will not
+	// redeliver a delivery once it has been 200'd, so this is a deliberate
+	// respond-fast tradeoff: a subsequent dropped Submit (full queue) is loud-logged
+	// + counted (Pool.drops) rather than retried — the next push to the PR fires a
+	// fresh webhook that re-triggers the review.
 	writeJSON(w, http.StatusOK, `{"status":"accepted"}`)
 
+	pk := prKey{Owner: owner, Repo: repo, Number: number}
 	job := Job{
-		Key:     prKey{Owner: owner, Repo: repo, Number: number},
-		Ref:     fmt.Sprintf("%s/%s#%d", owner, repo, number),
+		Key:     pk,
+		Ref:     pk.String(), // single source of truth (server.go); no format drift
 		Token:   token,
 		Timeout: s.reviewTO,
 	}
 	if !s.dispatcher.Submit(job) {
+		// Dropped (queue full): the 200'd delivery won't be redelivered by GitHub,
+		// so surface it loudly here instead of silently losing the review.
 		s.log.Error("webhook: job dropped, dispatch queue full",
 			"delivery", delivery, "repo", owner+"/"+repo, "number", number, "action", action)
 		return

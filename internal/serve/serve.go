@@ -43,6 +43,11 @@ func (s *Server) Run(ctx context.Context, pool *Pool) error {
 		s.log.Info("serve: drained, exiting")
 		return nil
 	case err := <-errCh:
+		// Server failed to start (e.g. address in use). Drain the pool so its
+		// worker goroutines exit instead of leaking, then surface the error.
+		if pool != nil {
+			pool.Drain()
+		}
 		if errors.Is(err, http.ErrServerClosed) {
 			return nil
 		}

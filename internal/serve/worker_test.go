@@ -149,6 +149,33 @@ func TestPool_DrainWaitsInFlight(t *testing.T) {
 	}
 }
 
+// TestPool_SubmitRacesDrainNoPanic hammers Submit concurrently with Drain under
+// -race. The send on p.jobs must never hit a closed channel (the historic "send
+// on closed channel" panic), and every Submit after Drain must return false.
+func TestPool_SubmitRacesDrainNoPanic(t *testing.T) {
+	p := NewPool(func(Job) {}, discardLog())
+
+	var wg sync.WaitGroup
+	for i := range 64 {
+		wg.Add(1)
+		go func(n int) {
+			defer wg.Done()
+			defer func() {
+				if r := recover(); r != nil {
+					t.Errorf("Submit panicked: %v", r)
+				}
+			}()
+			p.Submit(Job{Key: key("o", "r", n)})
+		}(i)
+	}
+	p.Drain() // races the Submit goroutines above
+	wg.Wait()
+
+	if p.Submit(Job{Key: key("o", "r", 999)}) {
+		t.Fatal("Submit after Drain must return false")
+	}
+}
+
 func numWorkers(p *Pool) int {
 	w := runtime.NumCPU()
 	if w < 2 {

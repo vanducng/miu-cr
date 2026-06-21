@@ -5,9 +5,11 @@
 package serve
 
 import (
+	"errors"
 	"fmt"
 	"log/slog"
 	"net/http"
+	"strings"
 	"time"
 )
 
@@ -42,22 +44,37 @@ type Dispatcher interface {
 	Submit(Job) bool
 }
 
+// repoRef is the structural allowlist key. Comparing {owner,repo} fields (rather
+// than a joined "owner/repo" string) removes path-confusion: a malformed entry
+// like "a/b/c" can never alias allows("a","b/c") or allows("a/b","c").
+type repoRef struct {
+	Owner string
+	Repo  string
+}
+
 // repoAllowlist is the set of owner/repo serve is permitted to review. A forged
 // or odd webhook for any other repo is 200-ignored, so the PAT can never be used
 // to clone an arbitrary repo (SSRF / cost-abuse guard). An empty allowlist
 // denies everything.
-type repoAllowlist map[string]struct{}
+type repoAllowlist map[repoRef]struct{}
 
+// newRepoAllowlist parses each entry as exactly "owner/repo". Entries that aren't
+// well-formed (missing or extra "/", empty halves) are skipped — they can never
+// match a real owner/repo lookup, so the safe default is deny.
 func newRepoAllowlist(repos []string) repoAllowlist {
 	a := make(repoAllowlist, len(repos))
 	for _, r := range repos {
-		a[r] = struct{}{}
+		owner, repo, ok := strings.Cut(r, "/")
+		if !ok || owner == "" || repo == "" || strings.Contains(repo, "/") {
+			continue
+		}
+		a[repoRef{Owner: owner, Repo: repo}] = struct{}{}
 	}
 	return a
 }
 
 func (a repoAllowlist) allows(owner, repo string) bool {
-	_, ok := a[owner+"/"+repo]
+	_, ok := a[repoRef{Owner: owner, Repo: repo}]
 	return ok
 }
 
@@ -103,18 +120,34 @@ func newServer(cfg Config) *Server {
 	}
 }
 
-// New builds the production Server: if cfg.Dispatcher is nil it constructs the
-// bounded worker Pool with the given reviewFn (the real one calls
-// cli.ReviewPRForServe). Returns the Server plus the Pool so Run can Drain it.
-func New(cfg Config, reviewFn func(Job)) (*Server, *Pool) {
+// New builds the production Server. It fails fast on security-critical
+// misconfiguration — an empty Secret would make ValidatePayload accept any
+// payload, and a nil ResolveToken would panic on the first request — rather than
+// degrading silently at runtime. New always builds its own bounded worker Pool
+// (the real reviewFn calls cli.ReviewPRForServe); any cfg.Dispatcher is ignored
+// (tests inject a fake via the lower-level newServer). Returns the Server plus the
+// Pool so Run can Drain it.
+func New(cfg Config, reviewFn func(Job)) (*Server, *Pool, error) {
+	if len(cfg.Secret) == 0 {
+		return nil, nil, errors.New("serve: webhook secret must be non-empty")
+	}
+	if cfg.ResolveToken == nil {
+		return nil, nil, errors.New("serve: ResolveToken must be set")
+	}
+	if reviewFn == nil {
+		return nil, nil, errors.New("serve: reviewFn must be set")
+	}
 	log := cfg.Logger
 	if log == nil {
 		log = slog.Default()
 	}
 	cfg.Logger = log
+	if cfg.Dispatcher != nil {
+		log.Warn("serve: cfg.Dispatcher is ignored; New always builds its own pool")
+	}
 	pool := NewPool(reviewFn, log)
 	cfg.Dispatcher = pool
-	return newServer(cfg), pool
+	return newServer(cfg), pool, nil
 }
 
 // handler builds the serve mux: /webhook (POST, HMAC) and /healthz (GET).

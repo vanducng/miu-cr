@@ -26,12 +26,15 @@ func TestServeSmoke(t *testing.T) {
 		got <- j.Ref
 	}
 
-	srv, pool := New(Config{
+	srv, pool, err := New(Config{
 		Addr:         ":0",
 		Secret:       []byte(testSecret),
 		Repos:        []string{"octocat/hello"},
 		ResolveToken: func() (string, error) { return testToken, nil },
 	}, reviewFn)
+	if err != nil {
+		t.Fatalf("New: %v", err)
+	}
 	defer pool.Drain()
 
 	ts := httptest.NewServer(srv.handler())
