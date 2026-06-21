@@ -37,6 +37,13 @@ comment with a new marker); subsequent re-runs dedupe normally. On a
 first M5 review **manually** (or off-hours) to absorb the one-time re-post before
 the next scheduled run.
 
+## [0.10.0](https://github.com/vanducng/miu-cr/compare/v0.9.0...v0.10.0) (2026-06-21)
+
+
+### Features
+
+* opt-in notifications poller / pull-mode trigger (serve --poll) (M4) ([bab82f1](https://github.com/vanducng/miu-cr/commit/bab82f17912a3a588652b2a63df4f78e1e0a9c59))
+
 ## [0.9.0](https://github.com/vanducng/miu-cr/compare/v0.8.0...v0.9.0) (2026-06-21)
 
 
