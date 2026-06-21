@@ -25,10 +25,10 @@ type recordClient struct {
 
 	headSHA string // GetPR returns this head SHA; empty means "headsha"
 
-	createReviewErr  error
-	createReviewErrN error // returned only on the FIRST CreateReview call (the APPROVE attempt)
-	createIssueErr   error
-	editErr          error
+	createReviewErr      error
+	createReviewErrFirst error // returned on the FIRST CreateReview call only (the APPROVE attempt)
+	createIssueErr       error
+	editErr              error
 
 	gotReview     *gh.PullRequestReviewRequest
 	gotReviews    []*gh.PullRequestReviewRequest
@@ -55,8 +55,8 @@ func (c *recordClient) CreateReview(_ stdctx.Context, _, _ string, _ int, r *gh.
 	c.createReviewN++
 	c.gotReview = r
 	c.gotReviews = append(c.gotReviews, r)
-	if c.createReviewErrN != nil && c.createReviewN == 1 {
-		return nil, c.createReviewErrN
+	if c.createReviewErrFirst != nil && c.createReviewN == 1 {
+		return nil, c.createReviewErrFirst
 	}
 	return &gh.PullRequestReview{}, c.createReviewErr
 }
@@ -366,11 +366,11 @@ func TestCommentBodyEscapesEmbeddedFence(t *testing.T) {
 	if strings.Contains(body, "suggestion") {
 		t.Errorf("must NOT emit a one-click suggestion fence (latent M2 bug):\n%s", body)
 	}
-	if !strings.Contains(body, "````go") {
-		t.Errorf("want a 4-backtick hint fence so the embedded ``` cannot terminate it early:\n%s", body)
+	if !strings.Contains(body, "````\nbefore\n```\nafter\n````") {
+		t.Errorf("want a neutral (no-language) 4-backtick hint fence so the embedded ``` cannot terminate it early:\n%s", body)
 	}
-	if !strings.Contains(body, "before\n```\nafter") {
-		t.Errorf("patch content must survive intact:\n%s", body)
+	if strings.Contains(body, "````go") {
+		t.Errorf("hint fence must NOT hardcode a go language tag (findings span languages):\n%s", body)
 	}
 	if c := strings.Count(body, "````"); c != 2 {
 		t.Errorf("want exactly one opening + one closing 4-backtick fence, got %d:\n%s", c, body)
@@ -488,6 +488,42 @@ func TestSuggestNoOpDegradesToHint(t *testing.T) {
 	}
 	if strings.Contains(postedBody(t, c), "suggestion") {
 		t.Error("a no-op replacement must degrade to a hint")
+	}
+}
+
+func TestSuggestOperatorPrefixedPatchStillSuggests(t *testing.T) {
+	// A patch that legitimately begins with +/- (operator-prefixed code) and
+	// differs from the raw line must still emit a suggestion — the no-op check
+	// must NOT strip +/- from the patch (else it falsely reads as a no-op).
+	c := &recordClient{}
+	info := &PRInfo{Owner: "o", Repo: "r", Number: 1, HeadSHA: "h"}
+	d := `@@ -1,3 +1,3 @@
+ package p
+-var a = 0
++delta
+ func f() {}
+`
+	diffs := []diff.Diff{{
+		NewPath:        "p.go",
+		Diff:           d,
+		NewFileContent: "package p\ndelta\nfunc f() {}\n",
+	}}
+	f := engine.Finding{
+		File:           "p.go",
+		Line:           2,
+		Severity:       "high",
+		Category:       "bug",
+		Rationale:      "negate the delta",
+		QuotedCode:     "delta",
+		SuggestedPatch: "+delta", // starts with '+' but differs from raw "delta"
+	}
+	_, err := PostReview(stdctx.Background(), c, info, []engine.Finding{f}, diffs, "", nil, PostReviewOptions{Suggest: true})
+	if err != nil {
+		t.Fatalf("PostReview: %v", err)
+	}
+	body := postedBody(t, c)
+	if !strings.Contains(body, "```suggestion\n+delta\n```") {
+		t.Errorf("operator-prefixed patch differing from the raw line must still suggest:\n%s", body)
 	}
 }
 

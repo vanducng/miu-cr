@@ -239,7 +239,7 @@ func PostReview(ctx stdctx.Context, client Client, info *PRInfo, findings []engi
 		}
 		req.Event = gh.Ptr("COMMENT")
 		if _, rerr := client.CreateReview(ctx, info.Owner, info.Repo, info.Number, req); rerr != nil {
-			return result, mapWriteError("github.create_review_failed", "creating review", rerr)
+			return PostReviewResult{Omitted: omitted, Event: "COMMENT"}, mapWriteError("github.create_review_failed", "creating review", rerr)
 		}
 		return result, nil
 	}
@@ -334,7 +334,7 @@ func commentBody(f engine.Finding, newFileContent string, opts PostReviewOptions
 		}
 	}
 
-	fmt.Fprintf(&b, "\n\n%sgo\n%s\n%s", fenceFor(patch), patch, fenceFor(patch))
+	fmt.Fprintf(&b, "\n\n%s\n%s\n%s", fenceFor(patch), patch, fenceFor(patch))
 	return b.String(), false
 }
 

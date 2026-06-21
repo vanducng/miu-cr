@@ -39,6 +39,7 @@ func TestResolveEvent(t *testing.T) {
 		{"untrusted unknown tier", on, withAssoc(base, "MANNEQUIN"), true, 3, true, "COMMENT", approveReasonUntrusted},
 		{"nothing reviewed", on, base, true, 0, true, "COMMENT", approveReasonNothingDone},
 		{"head moved", on, base, true, 3, false, "COMMENT", approveReasonHeadMoved},
+		{"head unknown beats unchanged", on, withHead(base, ""), true, 3, true, "COMMENT", approveReasonHeadUnknown},
 	}
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
@@ -55,6 +56,7 @@ func withAssoc(p PRInfo, a string) PRInfo {
 	p.AuthorAssociation = a
 	return p
 }
+func withHead(p PRInfo, h string) PRInfo { p.HeadSHA = h; return p }
 
 // cleanFinding is below the empty gate so a clean PR has no gate-failing findings.
 func approveInfo() *PRInfo {
@@ -191,7 +193,7 @@ func TestPostReviewApproveReevaluatesAtNewSHA(t *testing.T) {
 }
 
 func TestPostReviewSelfApprove422DegradesToComment(t *testing.T) {
-	c := &recordClient{createReviewErrN: selfApprove422()}
+	c := &recordClient{createReviewErrFirst: selfApprove422()}
 	res, err := PostReview(stdctx.Background(), c, approveInfo(), nil, nil, "review", nil, approveOpts())
 	if err != nil {
 		t.Fatalf("self-approve 422 must NOT error: %v", err)
@@ -277,7 +279,7 @@ func generic422() error {
 func TestPostReviewNonSelfApprove422DegradesToCommentRejected(t *testing.T) {
 	// A 422 that is NOT a self-approve must degrade to COMMENT/approve_rejected,
 	// never be mislabeled self_approve_forbidden, and never surface as an error.
-	c := &recordClient{createReviewErrN: generic422()}
+	c := &recordClient{createReviewErrFirst: generic422()}
 	res, err := PostReview(stdctx.Background(), c, approveInfo(), nil, nil, "review", nil, approveOpts())
 	if err != nil {
 		t.Fatalf("a non-self 422 must degrade, not error: %v", err)
@@ -296,7 +298,7 @@ func TestPostReviewNonSelfApprove422DegradesToCommentRejected(t *testing.T) {
 func TestPostReviewApproveRealErrorSurfaces(t *testing.T) {
 	// A genuine (non-422) CreateReview failure on the APPROVE path must surface as
 	// an error and must NOT report a phantom approval in the returned result.
-	c := &recordClient{createReviewErrN: errBoom{}}
+	c := &recordClient{createReviewErrFirst: errBoom{}}
 	res, err := PostReview(stdctx.Background(), c, approveInfo(), nil, nil, "review", nil, approveOpts())
 	if err == nil {
 		t.Fatal("a real CreateReview error must surface to the caller")
@@ -309,10 +311,66 @@ func TestPostReviewApproveRealErrorSurfaces(t *testing.T) {
 	}
 }
 
+func TestAlreadyApprovedIgnoresEmptyCommitAgainstEmptyHead(t *testing.T) {
+	// A malformed review (APPROVED, empty CommitID) must NOT match an empty
+	// HeadSHA — otherwise "" == "" falsely blocks a needed APPROVE.
+	c := &recordClient{
+		reviews: []*gh.PullRequestReview{
+			{State: gh.Ptr("APPROVED"), CommitID: gh.Ptr("")},
+		},
+	}
+	info := &PRInfo{Owner: "o", Repo: "r", Number: 1, HeadSHA: ""}
+	done, err := alreadyApproved(stdctx.Background(), c, info)
+	if err != nil {
+		t.Fatalf("alreadyApproved: %v", err)
+	}
+	if done {
+		t.Fatal("empty CommitID must not match an empty HeadSHA")
+	}
+}
+
+func TestPostReviewApproveDegradesEmptyHeadToCommentUnknown(t *testing.T) {
+	// An empty HeadSHA makes head verification unreliable → degrade to COMMENT
+	// with head_unknown, never an APPROVE on an unknown head.
+	c := &recordClient{}
+	info := approveInfo()
+	info.HeadSHA = ""
+	res, err := PostReview(stdctx.Background(), c, info, nil, nil, "review", nil, approveOpts())
+	if err != nil {
+		t.Fatalf("PostReview: %v", err)
+	}
+	if res.Event != "COMMENT" || res.Reason != approveReasonHeadUnknown {
+		t.Fatalf("empty head must degrade to COMMENT/head_unknown, got (%q,%q)", res.Event, res.Reason)
+	}
+	if c.gotReview.GetEvent() == "APPROVE" {
+		t.Fatal("must not APPROVE on an unknown head")
+	}
+}
+
+func TestPostReviewApprove422CommentRetryFailureZeroesPostedAndErrors(t *testing.T) {
+	// APPROVE 422s → degrade to COMMENT, but the COMMENT retry itself fails. The
+	// returned result must report Posted==0 (nothing landed) and surface the error.
+	c := &recordClient{
+		createReviewErrFirst: generic422(), // call 1 (APPROVE) → degrade to COMMENT
+		createReviewErr:      errBoom{},    // call 2 (COMMENT retry) → hard failure
+	}
+	findings := []engine.Finding{{File: "p.go", Line: 2, Severity: "high", Category: "bug", Rationale: "boom"}}
+	res, err := PostReview(stdctx.Background(), c, approveInfo(), findings, sampleDiffs(), "review", nil, approveOpts())
+	if err == nil {
+		t.Fatal("a failed COMMENT retry must surface an error")
+	}
+	if res.Posted != 0 {
+		t.Fatalf("nothing landed → Posted must be 0, got %d", res.Posted)
+	}
+	if c.createReviewN != 2 {
+		t.Fatalf("want APPROVE then a COMMENT retry, got %d CreateReview calls", c.createReviewN)
+	}
+}
+
 func TestPostReviewApprove422EmptyDegradeSkipsPost(t *testing.T) {
 	// APPROVE 422s, but with 0 inline comments AND no summary there is nothing to
 	// post — skip the empty COMMENT review (GitHub would 422 it anyway).
-	c := &recordClient{createReviewErrN: selfApprove422()}
+	c := &recordClient{createReviewErrFirst: selfApprove422()}
 	res, err := PostReview(stdctx.Background(), c, approveInfo(), nil, nil, "", nil, approveOpts())
 	if err != nil {
 		t.Fatalf("empty degrade must not error: %v", err)

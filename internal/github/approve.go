@@ -15,6 +15,7 @@ const (
 	approveReasonFork                  = "fork"
 	approveReasonUntrusted             = "untrusted_author"
 	approveReasonNothingDone           = "nothing_reviewed"
+	approveReasonHeadUnknown           = "head_unknown"
 	approveReasonHeadMoved             = "head_moved"
 	approveReasonAlreadyDone           = "already_approved"
 	approveReasonSelfForbidden         = "self_approve_forbidden"
@@ -59,6 +60,12 @@ func resolveEvent(opts PostReviewOptions, info PRInfo, gateClean bool, reviewedF
 	if reviewedFiles <= 0 {
 		return "COMMENT", approveReasonNothingDone
 	}
+	// An empty HeadSHA makes the head-unchanged comparison unreliable: we can't
+	// confirm what we'd be approving, so treat it as not-safe rather than risk an
+	// APPROVE on an unknown head.
+	if info.HeadSHA == "" {
+		return "COMMENT", approveReasonHeadUnknown
+	}
 	if !headUnchanged {
 		return "COMMENT", approveReasonHeadMoved
 	}
@@ -76,7 +83,9 @@ func alreadyApproved(ctx stdctx.Context, client Client, info *PRInfo) (bool, err
 		return false, mapWriteError("github.list_reviews_failed", "listing reviews", err)
 	}
 	for _, r := range reviews {
-		if r.GetState() == "APPROVED" && r.GetCommitID() == info.HeadSHA {
+		// Guard the empty case: an empty HeadSHA must never match a review whose
+		// CommitID is also empty ("" == "" → a false-positive that blocks APPROVE).
+		if r.GetState() == "APPROVED" && info.HeadSHA != "" && r.GetCommitID() == info.HeadSHA {
 			return true, nil
 		}
 	}

@@ -47,7 +47,8 @@ func normalizeLine(s string) string {
 //     at f.Line IS the anchored line. f.Line can be an OLD-file number when the
 //     anchor resolver falls back to the old side; without this re-match a
 //     suggestion could replace an unrelated new-file line.
-//   - the patch is not a no-op (differs from the raw line after normalization)
+//   - the patch is not a no-op (differs from the whitespace-trimmed raw line;
+//     +/- are NOT stripped from the patch, which may be operator-prefixed code)
 func isCleanReplacement(f engine.Finding, newFileContent string) (string, bool) {
 	if f.EndLine != 0 && f.EndLine != f.Line {
 		return "", false
@@ -70,7 +71,11 @@ func isCleanReplacement(f engine.Finding, newFileContent string) (string, bool) 
 	if normalizeLine(rawLine) != normalizeLine(f.QuotedCode) {
 		return "", false
 	}
-	if normalizeLine(rawLine) == normalizeLine(patch) {
+	// No-op check compares with whitespace-trim ONLY — never strip +/- from the
+	// patch: SuggestedPatch is replacement CODE that can legitimately begin with
+	// +/- (e.g. an arithmetic `+offset`), so normalizing it would wrongly flag a
+	// real fix as a no-op. QuotedCode anchoring above keeps normalizeLine.
+	if strings.TrimSpace(rawLine) == patch {
 		return "", false
 	}
 	return patch, true
