@@ -1,0 +1,71 @@
+name: miu-cr PR Review
+description: AI code review on a pull request — installs the released miucr binary and runs `miucr review --pr --post`.
+author: vanducng
+
+branding:
+  icon: eye
+  color: purple
+
+inputs:
+  github-token:
+    description: GitHub token used to read the PR and post review comments.
+    required: false
+    default: ${{ github.token }}
+  api-key:
+    description: API key for the review provider (Anthropic by default; sent as ANTHROPIC_API_KEY / ANTHROPIC_AUTH_TOKEN).
+    required: true
+  gate:
+    description: Severity gate — fail the run if a finding reaches this level (none|low|medium|high|critical).
+    required: false
+    default: high
+  version:
+    description: miucr release tag to install (defaults to the latest published release).
+    required: false
+    default: latest
+  base-url:
+    description: Optional Anthropic-compatible gateway base URL (e.g. a GLM/z.ai endpoint).
+    required: false
+    default: ""
+  model:
+    description: Optional model override (else the provider/profile default).
+    required: false
+    default: ""
+
+runs:
+  using: composite
+  steps:
+    - name: Install miucr
+      shell: bash
+      env:
+        MIUCR_VERSION: ${{ inputs.version }}
+      run: |
+        set -euo pipefail
+        export MIUCR_INSTALL_DIR="$HOME/.local/bin"
+        mkdir -p "$MIUCR_INSTALL_DIR"
+        curl -fsSL https://raw.githubusercontent.com/vanducng/miu-cr/main/install.sh | sh
+        echo "$MIUCR_INSTALL_DIR" >> "$GITHUB_PATH"
+        export PATH="$MIUCR_INSTALL_DIR:$PATH"
+        command -v miucr
+
+    - name: Review PR
+      shell: bash
+      env:
+        GITHUB_TOKEN: ${{ inputs.github-token }}
+        API_KEY: ${{ inputs.api-key }}
+        BASE_URL: ${{ inputs.base-url }}
+        MODEL: ${{ inputs.model }}
+        GATE: ${{ inputs.gate }}
+        PR_NUMBER: ${{ github.event.pull_request.number }}
+      run: |
+        set -euo pipefail
+        # A gateway base-url means Bearer auth (ANTHROPIC_AUTH_TOKEN); plain
+        # Anthropic uses x-api-key (ANTHROPIC_API_KEY). miucr rejects an
+        # auth-token with no base-url, so set exactly one.
+        if [ -n "$BASE_URL" ]; then
+          export ANTHROPIC_AUTH_TOKEN="$API_KEY" ANTHROPIC_BASE_URL="$BASE_URL"
+        else
+          export ANTHROPIC_API_KEY="$API_KEY"
+        fi
+        if [ -n "$MODEL" ]; then export ANTHROPIC_MODEL="$MODEL"; fi
+        REF="${GITHUB_REPOSITORY}#${PR_NUMBER}"
+        miucr review --pr "$REF" --post --gate "$GATE"

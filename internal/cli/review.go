@@ -118,8 +118,20 @@ type PRReviewer interface {
 
 var prReviewer PRReviewer
 
-// SetPRReviewer wires the github-backed PR reviewer. Called once from wire.init.
+// SetPRReviewer wires the github-backed PR reviewer. Called exactly once from
+// wire.init, which happens-before any serve worker goroutine that calls
+// ReviewPRForServe — so the package-level read needs no lock or atomic.
 func SetPRReviewer(r PRReviewer) { prReviewer = r }
+
+// ReviewPRForServe is the in-process seam serve calls: it delegates straight to
+// the wired prReviewer.ReviewPR (NOT runPRReview) so the gate_failed exit path is
+// bypassed — serve's gate governs publish severity only, never worker liveness.
+func ReviewPRForServe(ctx stdctx.Context, req PRReviewRequest) (ReviewOutcome, error) {
+	if prReviewer == nil {
+		return ReviewOutcome{}, &CLIError{Code: "review.not_wired", Message: "PR review engine not wired", Exit: 1}
+	}
+	return prReviewer.ReviewPR(ctx, req)
+}
 
 // resolveGitHubToken applies the M2 token precedence: --token > GITHUB_TOKEN >
 // GH_TOKEN. Empty is allowed (anonymous client for public-repo reads); the
