@@ -57,6 +57,13 @@ type PRResult struct {
 	Posted        bool   `json:"posted"`
 	PostedInline  int    `json:"posted_inline"`
 	SummaryAction string `json:"summary_action"`
+
+	// Opt-in write-action outcomes (default OFF). ApproveAction is approved|commented;
+	// ApproveReason carries the degrade reason when commented. SuggestionsPosted counts
+	// native one-click suggestions emitted this run.
+	ApproveAction     string `json:"approve_action"`
+	ApproveReason     string `json:"approve_reason"`
+	SuggestionsPosted int    `json:"suggestions_posted"`
 }
 
 // ReviewFinding is a single anchored finding rendered/serialized by cli.
@@ -89,16 +96,18 @@ func SetReviewer(r Reviewer) { reviewer = r }
 // in-memory-only GitHub token (PAT) and whether to post. The LLM-credential
 // fields mirror ReviewRequest (findings still require the LLM).
 type PRReviewRequest struct {
-	Ref       string
-	Token     string
-	Post      bool
-	Gate      string
-	Provider  string
-	APIKey    string
-	BaseURL   string
-	AuthToken string
-	Model     string
-	Timeout   time.Duration
+	Ref          string
+	Token        string
+	Post         bool
+	Suggest      bool
+	ApproveClean bool
+	Gate         string
+	Provider     string
+	APIKey       string
+	BaseURL      string
+	AuthToken    string
+	Model        string
+	Timeout      time.Duration
 
 	IncludeGlobs []string
 	ExcludeGlobs []string
@@ -148,26 +157,28 @@ func resolveGitHubToken(flag string) string {
 
 func reviewCommand(opts *options) *cobra.Command {
 	var (
-		staged      bool
-		from        string
-		to          string
-		commit      string
-		gate        string
-		repoDir     string
-		include     []string
-		exclude     []string
-		exts        []string
-		provider    string
-		apiKey      string
-		baseURL     string
-		authToken   string
-		model       string
-		expand      int
-		tokenBudget int
-		pr          string
-		token       string
-		post        bool
-		noPost      bool
+		staged       bool
+		from         string
+		to           string
+		commit       string
+		gate         string
+		repoDir      string
+		include      []string
+		exclude      []string
+		exts         []string
+		provider     string
+		apiKey       string
+		baseURL      string
+		authToken    string
+		model        string
+		expand       int
+		tokenBudget  int
+		pr           string
+		token        string
+		post         bool
+		noPost       bool
+		suggest      bool
+		approveClean bool
 	)
 
 	cmd := &cobra.Command{
@@ -187,21 +198,23 @@ func reviewCommand(opts *options) *cobra.Command {
 			}
 			if pr != "" {
 				return runPRReview(cmd, prRunArgs{
-					ref:         pr,
-					token:       token,
-					post:        post && !noPost,
-					gate:        gate,
-					provider:    provider,
-					apiKey:      apiKey,
-					baseURL:     baseURL,
-					authToken:   authToken,
-					model:       model,
-					timeout:     opts.timeout,
-					include:     include,
-					exclude:     exclude,
-					exts:        exts,
-					expand:      expand,
-					tokenBudget: tokenBudget,
+					ref:          pr,
+					token:        token,
+					post:         post && !noPost,
+					suggest:      suggest,
+					approveClean: approveClean,
+					gate:         gate,
+					provider:     provider,
+					apiKey:       apiKey,
+					baseURL:      baseURL,
+					authToken:    authToken,
+					model:        model,
+					timeout:      opts.timeout,
+					include:      include,
+					exclude:      exclude,
+					exts:         exts,
+					expand:       expand,
+					tokenBudget:  tokenBudget,
 				})
 			}
 			if reviewer == nil {
@@ -284,6 +297,8 @@ func reviewCommand(opts *options) *cobra.Command {
 	f.StringVar(&token, "token", "", "GitHub PAT (overrides GITHUB_TOKEN/GH_TOKEN; required only for --post; never persisted)")
 	f.BoolVar(&post, "post", false, "Publish inline comments + a summary to the PR (requires a token)")
 	f.BoolVar(&noPost, "no-post", false, "Dry-run the PR review without posting (default for --pr)")
+	f.BoolVar(&suggest, "suggest", false, "Emit GitHub native one-click suggestions for proven single-line replacements; author-applied, never pushed. Requires --post (inert in dry-run) (default OFF; else a plain hint)")
+	f.BoolVar(&approveClean, "approve-clean", false, "Submit Event=APPROVE only on a clean, non-fork, trusted-author PR; skipped (→ COMMENT) otherwise, never errors. A PAT APPROVE counts toward required reviews. Requires --post (inert in dry-run) (default OFF)")
 
 	cmd.MarkFlagsRequiredTogether("from", "to")
 	return cmd
@@ -291,16 +306,18 @@ func reviewCommand(opts *options) *cobra.Command {
 
 // prRunArgs bundles the --pr invocation values RunE forwards to runPRReview.
 type prRunArgs struct {
-	ref       string
-	token     string
-	post      bool
-	gate      string
-	provider  string
-	apiKey    string
-	baseURL   string
-	authToken string
-	model     string
-	timeout   time.Duration
+	ref          string
+	token        string
+	post         bool
+	suggest      bool
+	approveClean bool
+	gate         string
+	provider     string
+	apiKey       string
+	baseURL      string
+	authToken    string
+	model        string
+	timeout      time.Duration
 
 	include     []string
 	exclude     []string
@@ -337,6 +354,8 @@ func runPRReview(cmd *cobra.Command, a prRunArgs) error {
 		Ref:          a.ref,
 		Token:        ghToken,
 		Post:         a.post,
+		Suggest:      a.suggest,
+		ApproveClean: a.approveClean,
 		Gate:         a.gate,
 		Provider:     a.provider,
 		APIKey:       a.apiKey,

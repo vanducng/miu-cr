@@ -181,7 +181,7 @@ func (prReviewer) ReviewPR(ctx stdctx.Context, req cli.PRReviewRequest) (cli.Rev
 	}
 
 	if req.Post {
-		if err := publishReview(ctx, client, runner, dir, info, res, prResult); err != nil {
+		if err := publishReview(ctx, client, runner, dir, info, res, prResult, req); err != nil {
 			return cli.ReviewOutcome{}, err
 		}
 	}
@@ -195,9 +195,10 @@ func (prReviewer) ReviewPR(ctx stdctx.Context, req cli.PRReviewRequest) (cli.Rev
 
 // publishReview posts the review THIS run: inline comments first (skipping any
 // already-posted via the per-comment fingerprint), then the sentinel summary
-// last so a partial failure leaves the summary reflecting reality. It fills
-// prResult.PostedInline + SummaryAction.
-func publishReview(ctx stdctx.Context, client mgithub.Client, runner *gitcmd.Runner, dir string, info *mgithub.PRInfo, res engine.ReviewResult, prResult *cli.PRResult) error {
+// last so a partial failure leaves the summary reflecting reality. It computes
+// gateClean via engine.GateFailed + reviewedFiles from stats, threads both opt-in
+// write-actions (default OFF) into PostReviewOptions, and fills the outcome fields.
+func publishReview(ctx stdctx.Context, client mgithub.Client, runner *gitcmd.Runner, dir string, info *mgithub.PRInfo, res engine.ReviewResult, prResult *cli.PRResult, req cli.PRReviewRequest) error {
 	diffs, err := mgithub.DiffsForPR(ctx, runner, dir, info.BaseSHA, info.HeadSHA)
 	if err != nil {
 		return err
@@ -207,20 +208,49 @@ func publishReview(ctx stdctx.Context, client mgithub.Client, runner *gitcmd.Run
 		return err
 	}
 
-	posted, omitted, err := mgithub.PostReview(ctx, client, info, res.Findings, diffs, "", existing)
+	opts := mgithub.PostReviewOptions{
+		Suggest:       req.Suggest,
+		ApproveClean:  req.ApproveClean,
+		Gate:          req.Gate,
+		GateClean:     !engine.GateFailed(res.Findings, req.Gate),
+		ReviewedFiles: reviewedFilesFromStats(res.Stats),
+	}
+
+	pr, err := mgithub.PostReview(ctx, client, info, res.Findings, diffs, "", existing, opts)
 	if err != nil {
 		return err
 	}
-	summary := mgithub.RenderSummary(info, res.Findings, res.Stats, omitted)
+	summary := mgithub.RenderSummary(info, res.Findings, res.Stats, pr.Omitted)
 	action, err := mgithub.UpsertSummaryComment(ctx, client, info, summary)
 	if err != nil {
 		return err
 	}
 
 	prResult.Posted = true
-	prResult.PostedInline = posted
+	prResult.PostedInline = pr.Posted
 	prResult.SummaryAction = action
+	prResult.SuggestionsPosted = pr.Suggestions
+	prResult.ApproveAction = approveActionFor(pr.Event)
+	prResult.ApproveReason = pr.Reason
 	return nil
+}
+
+// approveActionFor maps the resolved CreateReview Event to the PRResult action
+// label (approved|commented).
+func approveActionFor(event string) string {
+	if event == "APPROVE" {
+		return "approved"
+	}
+	return "commented"
+}
+
+// reviewedFilesFromStats reads the engine's files_reviewed stat (a float64) so the
+// approve resolver can require ≥1 file actually reviewed.
+func reviewedFilesFromStats(stats map[string]any) int {
+	if v, ok := stats["files_reviewed"].(float64); ok {
+		return int(v)
+	}
+	return 0
 }
 
 // agentAdapter bridges the concrete Anthropic agent (agent.Context) to the

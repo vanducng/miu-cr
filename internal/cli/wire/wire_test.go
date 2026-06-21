@@ -27,17 +27,30 @@ type fakeGitHub struct {
 	createReviewN int
 	createIssueN  int
 	editN         int
+
+	headSHA      string                       // re-fetched head SHA returned by GetPR (defaults to "headsha")
+	reviews      []*gh.PullRequestReview      // existing reviews returned by ListReviews
+	lastReviewed *gh.PullRequestReviewRequest // last CreateReview request, for Event assertions
 }
 
 func (f *fakeGitHub) GetPR(stdctx.Context, string, string, int) (*gh.PullRequest, error) {
-	return nil, nil
+	sha := f.headSHA
+	if sha == "" {
+		sha = "headsha"
+	}
+	return &gh.PullRequest{Head: &gh.PullRequestBranch{SHA: gh.Ptr(sha)}}, nil
 }
 func (f *fakeGitHub) ListFiles(stdctx.Context, string, string, int, *gh.ListOptions) ([]*gh.CommitFile, *gh.Response, error) {
 	return nil, &gh.Response{}, nil
 }
+func (f *fakeGitHub) ListReviews(stdctx.Context, string, string, int, *gh.ListOptions) ([]*gh.PullRequestReview, *gh.Response, error) {
+	f.order = append(f.order, "list_reviews")
+	return f.reviews, &gh.Response{}, nil
+}
 
 func (f *fakeGitHub) CreateReview(_ stdctx.Context, _, _ string, _ int, r *gh.PullRequestReviewRequest) (*gh.PullRequestReview, error) {
 	f.order = append(f.order, "create_review")
+	f.lastReviewed = r
 	f.createReviewN++
 	for _, dc := range r.Comments {
 		f.nextID++
@@ -141,7 +154,7 @@ func TestPublishReviewWireFlow(t *testing.T) {
 
 	// First run: one inline posted + summary created.
 	pr := &cli.PRResult{SummaryAction: "none"}
-	if err := publishReview(stdctx.Background(), client, runner, dir, info, res, pr); err != nil {
+	if err := publishReview(stdctx.Background(), client, runner, dir, info, res, pr, cli.PRReviewRequest{Gate: "high"}); err != nil {
 		t.Fatalf("publishReview: %v", err)
 	}
 	if pr.PostedInline != 1 {
@@ -161,7 +174,7 @@ func TestPublishReviewWireFlow(t *testing.T) {
 	// Re-run: 0 new inline (fingerprint skip), summary edited (not duplicated).
 	fake.order = nil
 	pr2 := &cli.PRResult{SummaryAction: "none"}
-	if err := publishReview(stdctx.Background(), client, runner, dir, info, res, pr2); err != nil {
+	if err := publishReview(stdctx.Background(), client, runner, dir, info, res, pr2, cli.PRReviewRequest{Gate: "high"}); err != nil {
 		t.Fatalf("publishReview re-run: %v", err)
 	}
 	if pr2.PostedInline != 0 {
@@ -191,4 +204,144 @@ func indexOf(s []string, want string) int {
 		}
 	}
 	return -1
+}
+
+// cleanReviewResult builds a no-finding result with ≥1 file reviewed so the
+// approve resolver's gateClean + reviewedFiles predicates can hold.
+func cleanReviewResult() engine.ReviewResult {
+	return engine.ReviewResult{
+		Findings: nil,
+		Stats:    map[string]any{"truncation_level": "full", "files_reviewed": float64(1)},
+	}
+}
+
+func TestPublishReviewApproveClean(t *testing.T) {
+	runner := gitcmd.New()
+	dir, base, head := setupRepo(t, runner)
+
+	fake := &fakeGitHub{headSHA: head} // re-fetched head matches → head unchanged
+	restore := newGitHubClient
+	newGitHubClient = func(string) mgithub.Client { return fake }
+	t.Cleanup(func() { newGitHubClient = restore })
+	client := newGitHubClient("")
+
+	// Clean, non-fork, trusted author → APPROVE.
+	info := &mgithub.PRInfo{Owner: "o", Repo: "r", Number: 7, HeadSHA: head, BaseSHA: base, BaseBranch: "main", AuthorAssociation: "MEMBER"}
+	pr := &cli.PRResult{SummaryAction: "none"}
+	if err := publishReview(stdctx.Background(), client, runner, dir, info, cleanReviewResult(), pr, cli.PRReviewRequest{Gate: "high", ApproveClean: true}); err != nil {
+		t.Fatalf("publishReview: %v", err)
+	}
+	if pr.ApproveAction != "approved" || pr.ApproveReason != "approved" {
+		t.Fatalf("clean trusted non-fork PR must APPROVE, got action=%q reason=%q", pr.ApproveAction, pr.ApproveReason)
+	}
+	if fake.lastReviewed == nil || fake.lastReviewed.GetEvent() != "APPROVE" {
+		t.Fatalf("CreateReview Event must be APPROVE, got %v", fake.lastReviewed)
+	}
+}
+
+func TestPublishReviewApproveDegradesFork(t *testing.T) {
+	runner := gitcmd.New()
+	dir, base, head := setupRepo(t, runner)
+
+	fake := &fakeGitHub{headSHA: head}
+	restore := newGitHubClient
+	newGitHubClient = func(string) mgithub.Client { return fake }
+	t.Cleanup(func() { newGitHubClient = restore })
+	client := newGitHubClient("")
+
+	// Fork → COMMENT with reason "fork", never APPROVE.
+	info := &mgithub.PRInfo{Owner: "o", Repo: "r", Number: 7, HeadSHA: head, BaseSHA: base, BaseBranch: "main", AuthorAssociation: "MEMBER", IsFork: true}
+	pr := &cli.PRResult{SummaryAction: "none"}
+	if err := publishReview(stdctx.Background(), client, runner, dir, info, cleanReviewResult(), pr, cli.PRReviewRequest{Gate: "high", ApproveClean: true}); err != nil {
+		t.Fatalf("publishReview: %v", err)
+	}
+	if pr.ApproveAction != "commented" || pr.ApproveReason != "fork" {
+		t.Fatalf("fork must degrade to commented/fork, got action=%q reason=%q", pr.ApproveAction, pr.ApproveReason)
+	}
+	if fake.lastReviewed != nil && fake.lastReviewed.GetEvent() == "APPROVE" {
+		t.Fatalf("fork must never submit APPROVE")
+	}
+}
+
+func TestPublishReviewApproveDegradesUntrusted(t *testing.T) {
+	runner := gitcmd.New()
+	dir, base, head := setupRepo(t, runner)
+
+	fake := &fakeGitHub{headSHA: head}
+	restore := newGitHubClient
+	newGitHubClient = func(string) mgithub.Client { return fake }
+	t.Cleanup(func() { newGitHubClient = restore })
+	client := newGitHubClient("")
+
+	info := &mgithub.PRInfo{Owner: "o", Repo: "r", Number: 7, HeadSHA: head, BaseSHA: base, BaseBranch: "main", AuthorAssociation: "FIRST_TIME_CONTRIBUTOR"}
+	pr := &cli.PRResult{SummaryAction: "none"}
+	if err := publishReview(stdctx.Background(), client, runner, dir, info, cleanReviewResult(), pr, cli.PRReviewRequest{Gate: "high", ApproveClean: true}); err != nil {
+		t.Fatalf("publishReview: %v", err)
+	}
+	if pr.ApproveAction != "commented" || pr.ApproveReason != "untrusted_author" {
+		t.Fatalf("untrusted author must degrade, got action=%q reason=%q", pr.ApproveAction, pr.ApproveReason)
+	}
+}
+
+func TestPublishReviewApproveDefaultOff(t *testing.T) {
+	runner := gitcmd.New()
+	dir, base, head := setupRepo(t, runner)
+
+	fake := &fakeGitHub{headSHA: head}
+	restore := newGitHubClient
+	newGitHubClient = func(string) mgithub.Client { return fake }
+	t.Cleanup(func() { newGitHubClient = restore })
+	client := newGitHubClient("")
+
+	// Even a clean trusted non-fork PR is COMMENT when --approve-clean is OFF.
+	info := &mgithub.PRInfo{Owner: "o", Repo: "r", Number: 7, HeadSHA: head, BaseSHA: base, BaseBranch: "main", AuthorAssociation: "MEMBER"}
+	pr := &cli.PRResult{SummaryAction: "none"}
+	if err := publishReview(stdctx.Background(), client, runner, dir, info, cleanReviewResult(), pr, cli.PRReviewRequest{Gate: "high"}); err != nil {
+		t.Fatalf("publishReview: %v", err)
+	}
+	if pr.ApproveAction != "commented" || pr.ApproveReason != "not_requested" {
+		t.Fatalf("flag off must be commented/not_requested, got action=%q reason=%q", pr.ApproveAction, pr.ApproveReason)
+	}
+}
+
+func TestPublishReviewSuggestCount(t *testing.T) {
+	runner := gitcmd.New()
+	dir, base, head := setupRepo(t, runner)
+
+	fake := &fakeGitHub{headSHA: head}
+	restore := newGitHubClient
+	newGitHubClient = func(string) mgithub.Client { return fake }
+	t.Cleanup(func() { newGitHubClient = restore })
+	client := newGitHubClient("")
+
+	info := &mgithub.PRInfo{Owner: "o", Repo: "r", Number: 7, HeadSHA: head, BaseSHA: base, BaseBranch: "main"}
+	// The added line (new-side 4) is "func B() {}"; a single-line verbatim-replacing
+	// patch at/above the medium floor must emit one native suggestion.
+	res := engine.ReviewResult{
+		Findings: []engine.Finding{
+			{File: "foo.go", Line: 4, Severity: "high", Category: "bug", Rationale: "boom", QuotedCode: "func B() {}", SuggestedPatch: "func B() int { return 0 }"},
+		},
+		Stats: map[string]any{"truncation_level": "full", "files_reviewed": float64(1)},
+	}
+
+	// With --suggest OFF: a patch is shown as a plain hint, suggestions_posted=0.
+	prOff := &cli.PRResult{SummaryAction: "none"}
+	if err := publishReview(stdctx.Background(), client, runner, dir, info, res, prOff, cli.PRReviewRequest{Gate: "high"}); err != nil {
+		t.Fatalf("publishReview suggest-off: %v", err)
+	}
+	if prOff.SuggestionsPosted != 0 {
+		t.Fatalf("suggest OFF must post 0 native suggestions, got %d", prOff.SuggestionsPosted)
+	}
+
+	// Fresh fake so the fingerprint dedupe doesn't skip the re-post.
+	fake2 := &fakeGitHub{headSHA: head}
+	newGitHubClient = func(string) mgithub.Client { return fake2 }
+	client2 := newGitHubClient("")
+	prOn := &cli.PRResult{SummaryAction: "none"}
+	if err := publishReview(stdctx.Background(), client2, runner, dir, info, res, prOn, cli.PRReviewRequest{Gate: "high", Suggest: true}); err != nil {
+		t.Fatalf("publishReview suggest-on: %v", err)
+	}
+	if prOn.SuggestionsPosted != 1 {
+		t.Fatalf("suggest ON must post 1 native suggestion, got %d", prOn.SuggestionsPosted)
+	}
 }

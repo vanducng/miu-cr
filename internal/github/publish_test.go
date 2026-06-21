@@ -18,14 +18,20 @@ import (
 type recordClient struct {
 	reviewComments [][]*gh.PullRequestComment
 	issueComments  [][]*gh.IssueComment
+	reviews        []*gh.PullRequestReview
 	listRevErr     error
 	listIssueErr   error
+	listReviewsErr error
 
-	createReviewErr error
-	createIssueErr  error
-	editErr         error
+	headSHA string // GetPR returns this head SHA; empty means "headsha"
+
+	createReviewErr      error
+	createReviewErrFirst error // returned on the FIRST CreateReview call only (the APPROVE attempt)
+	createIssueErr       error
+	editErr              error
 
 	gotReview     *gh.PullRequestReviewRequest
+	gotReviews    []*gh.PullRequestReviewRequest
 	createdIssue  *gh.IssueComment
 	editedID      int64
 	editedBody    string
@@ -35,7 +41,11 @@ type recordClient struct {
 }
 
 func (c *recordClient) GetPR(stdctx.Context, string, string, int) (*gh.PullRequest, error) {
-	return nil, nil
+	sha := c.headSHA
+	if sha == "" {
+		sha = "headsha"
+	}
+	return &gh.PullRequest{Head: &gh.PullRequestBranch{SHA: gh.Ptr(sha)}}, nil
 }
 func (c *recordClient) ListFiles(stdctx.Context, string, string, int, *gh.ListOptions) ([]*gh.CommitFile, *gh.Response, error) {
 	return nil, &gh.Response{}, nil
@@ -44,7 +54,18 @@ func (c *recordClient) ListFiles(stdctx.Context, string, string, int, *gh.ListOp
 func (c *recordClient) CreateReview(_ stdctx.Context, _, _ string, _ int, r *gh.PullRequestReviewRequest) (*gh.PullRequestReview, error) {
 	c.createReviewN++
 	c.gotReview = r
+	c.gotReviews = append(c.gotReviews, r)
+	if c.createReviewErrFirst != nil && c.createReviewN == 1 {
+		return nil, c.createReviewErrFirst
+	}
 	return &gh.PullRequestReview{}, c.createReviewErr
+}
+
+func (c *recordClient) ListReviews(_ stdctx.Context, _, _ string, _ int, _ *gh.ListOptions) ([]*gh.PullRequestReview, *gh.Response, error) {
+	if c.listReviewsErr != nil {
+		return nil, nil, c.listReviewsErr
+	}
+	return c.reviews, &gh.Response{}, nil
 }
 
 func (c *recordClient) ListReviewComments(_ stdctx.Context, _, _ string, _ int, opts *gh.PullRequestListCommentsOptions) ([]*gh.PullRequestComment, *gh.Response, error) {
@@ -153,15 +174,15 @@ func TestPostReviewShape(t *testing.T) {
 		{File: "p.go", Line: 2, Severity: "high", Category: "bug", Rationale: "boom"},
 		{File: "p.go", Line: 99, Rationale: "out of hunk"}, // dropped by filter
 	}
-	n, omitted, err := PostReview(stdctx.Background(), c, info, findings, sampleDiffs(), "summary body", nil)
+	res, err := PostReview(stdctx.Background(), c, info, findings, sampleDiffs(), "summary body", nil, PostReviewOptions{})
 	if err != nil {
 		t.Fatalf("PostReview: %v", err)
 	}
-	if n != 1 {
-		t.Fatalf("want 1 inline comment posted, got %d", n)
+	if res.Posted != 1 {
+		t.Fatalf("want 1 inline comment posted, got %d", res.Posted)
 	}
-	if omitted != 0 {
-		t.Fatalf("want 0 omitted under the cap, got %d", omitted)
+	if res.Omitted != 0 {
+		t.Fatalf("want 0 omitted under the cap, got %d", res.Omitted)
 	}
 	r := c.gotReview
 	if r == nil {
@@ -197,12 +218,12 @@ func TestPostReviewSkipsExistingFingerprints(t *testing.T) {
 	f := engine.Finding{File: "p.go", Line: 2, Category: "bug", Rationale: "dup"}
 	fp := fingerprint(f)
 
-	n, _, err := PostReview(stdctx.Background(), c, info, []engine.Finding{f}, sampleDiffs(), "", map[string]bool{fp: true})
+	res, err := PostReview(stdctx.Background(), c, info, []engine.Finding{f}, sampleDiffs(), "", map[string]bool{fp: true}, PostReviewOptions{})
 	if err != nil {
 		t.Fatalf("PostReview: %v", err)
 	}
-	if n != 0 {
-		t.Fatalf("already-posted fingerprint must be skipped, got %d posted", n)
+	if res.Posted != 0 {
+		t.Fatalf("already-posted fingerprint must be skipped, got %d posted", res.Posted)
 	}
 	if c.createReviewN != 0 {
 		t.Errorf("no review should be created when nothing to post, got %d calls", c.createReviewN)
@@ -277,7 +298,7 @@ func TestPostReviewRateLimitMapped(t *testing.T) {
 	c := &recordClient{createReviewErr: &gh.RateLimitError{Message: "rate limited"}}
 	info := &PRInfo{Owner: "o", Repo: "r", Number: 1, HeadSHA: "h"}
 	findings := []engine.Finding{{File: "p.go", Line: 2, Rationale: "x"}}
-	_, _, err := PostReview(stdctx.Background(), c, info, findings, sampleDiffs(), "", nil)
+	_, err := PostReview(stdctx.Background(), c, info, findings, sampleDiffs(), "", nil, PostReviewOptions{})
 	if err == nil {
 		t.Fatal("want rate-limit error")
 	}
@@ -310,10 +331,11 @@ func TestPostReviewCapsInlineComments(t *testing.T) {
 		})
 	}
 
-	posted, omitted, err := PostReview(stdctx.Background(), c, info, findings, diffs, "", nil)
+	res, err := PostReview(stdctx.Background(), c, info, findings, diffs, "", nil, PostReviewOptions{})
 	if err != nil {
 		t.Fatalf("PostReview: %v", err)
 	}
+	posted, omitted := res.Posted, res.Omitted
 	if posted != maxInlineComments {
 		t.Fatalf("inline must be capped at %d, got %d", maxInlineComments, posted)
 	}
@@ -336,15 +358,213 @@ func TestCommentBodyEscapesEmbeddedFence(t *testing.T) {
 		Rationale:      "embeds a fence",
 		SuggestedPatch: "before\n```\nafter",
 	}
-	body := commentBody(f)
-	if !strings.Contains(body, "````suggestion") {
-		t.Errorf("want a 4-backtick fence so the embedded ``` cannot terminate it early:\n%s", body)
+	// Suggest OFF and multi-line patch → plain hint, never a one-click suggestion.
+	body, native := commentBody(f, "", PostReviewOptions{})
+	if native {
+		t.Error("Suggest OFF must report native=false")
 	}
-	if !strings.Contains(body, "before\n```\nafter") {
-		t.Errorf("patch content must survive intact:\n%s", body)
+	if strings.Contains(body, "suggestion") {
+		t.Errorf("must NOT emit a one-click suggestion fence (latent M2 bug):\n%s", body)
+	}
+	if !strings.Contains(body, "````\nbefore\n```\nafter\n````") {
+		t.Errorf("want a neutral (no-language) 4-backtick hint fence so the embedded ``` cannot terminate it early:\n%s", body)
+	}
+	if strings.Contains(body, "````go") {
+		t.Errorf("hint fence must NOT hardcode a go language tag (findings span languages):\n%s", body)
 	}
 	if c := strings.Count(body, "````"); c != 2 {
 		t.Errorf("want exactly one opening + one closing 4-backtick fence, got %d:\n%s", c, body)
+	}
+}
+
+// suggestDiff carries a 3-line new-file body anchored by a hunk so findings on
+// lines 1..3 survive filterToDiffHunks; line 2 is the candidate for replacement.
+func suggestDiff() []diff.Diff {
+	d := `@@ -1,3 +1,3 @@
+ package p
+-var a = 0
++var a = 1
+ func f() {}
+`
+	return []diff.Diff{{
+		NewPath:        "p.go",
+		Diff:           d,
+		NewFileContent: "package p\nvar a = 1\nfunc f() {}\n",
+	}}
+}
+
+func suggestFinding() engine.Finding {
+	return engine.Finding{
+		File:           "p.go",
+		Line:           2,
+		Severity:       "high",
+		Category:       "bug",
+		Rationale:      "use a constant",
+		QuotedCode:     "var a = 1",
+		SuggestedPatch: "var a = 2",
+	}
+}
+
+func postedBody(t *testing.T, c *recordClient) string {
+	t.Helper()
+	if c.gotReview == nil || len(c.gotReview.Comments) != 1 {
+		t.Fatalf("want exactly 1 inline comment posted, got review=%+v", c.gotReview)
+	}
+	if c.gotReview.Comments[0].StartLine != nil {
+		t.Fatal("StartLine must never be set (multi-line is out)")
+	}
+	if c.gotReview.Comments[0].StartSide != nil {
+		t.Fatal("StartSide must never be set (multi-line is out)")
+	}
+	return c.gotReview.Comments[0].GetBody()
+}
+
+func TestSuggestEmitsNativeSuggestionForCleanSingleLine(t *testing.T) {
+	c := &recordClient{}
+	info := &PRInfo{Owner: "o", Repo: "r", Number: 1, HeadSHA: "h"}
+	_, err := PostReview(stdctx.Background(), c, info, []engine.Finding{suggestFinding()}, suggestDiff(), "", nil, PostReviewOptions{Suggest: true})
+	if err != nil {
+		t.Fatalf("PostReview: %v", err)
+	}
+	body := postedBody(t, c)
+	if !strings.Contains(body, "```suggestion\nvar a = 2\n```") {
+		t.Errorf("want a native single-line suggestion:\n%s", body)
+	}
+}
+
+func TestSuggestOffNeverEmitsSuggestion(t *testing.T) {
+	c := &recordClient{}
+	info := &PRInfo{Owner: "o", Repo: "r", Number: 1, HeadSHA: "h"}
+	_, err := PostReview(stdctx.Background(), c, info, []engine.Finding{suggestFinding()}, suggestDiff(), "", nil, PostReviewOptions{})
+	if err != nil {
+		t.Fatalf("PostReview: %v", err)
+	}
+	body := postedBody(t, c)
+	if strings.Contains(body, "suggestion") {
+		t.Errorf("Suggest OFF must never emit a suggestion fence:\n%s", body)
+	}
+	if !strings.Contains(body, "var a = 2") {
+		t.Errorf("patch must still appear as a hint:\n%s", body)
+	}
+}
+
+func TestSuggestMultiLineDegradesToHint(t *testing.T) {
+	c := &recordClient{}
+	info := &PRInfo{Owner: "o", Repo: "r", Number: 1, HeadSHA: "h"}
+	f := suggestFinding()
+	f.EndLine = 3 // multi-line range → always hint
+	_, err := PostReview(stdctx.Background(), c, info, []engine.Finding{f}, suggestDiff(), "", nil, PostReviewOptions{Suggest: true})
+	if err != nil {
+		t.Fatalf("PostReview: %v", err)
+	}
+	body := postedBody(t, c)
+	if strings.Contains(body, "suggestion") {
+		t.Errorf("multi-line finding must degrade to a hint:\n%s", body)
+	}
+}
+
+func TestSuggestMultiLinePatchDegradesToHint(t *testing.T) {
+	c := &recordClient{}
+	info := &PRInfo{Owner: "o", Repo: "r", Number: 1, HeadSHA: "h"}
+	f := suggestFinding()
+	f.SuggestedPatch = "var a = 2\nvar c = 3" // patch spans 2 lines → not a clean single-line replace
+	_, err := PostReview(stdctx.Background(), c, info, []engine.Finding{f}, suggestDiff(), "", nil, PostReviewOptions{Suggest: true})
+	if err != nil {
+		t.Fatalf("PostReview: %v", err)
+	}
+	if strings.Contains(postedBody(t, c), "suggestion") {
+		t.Error("a multi-line patch must degrade to a hint")
+	}
+}
+
+func TestSuggestNoOpDegradesToHint(t *testing.T) {
+	c := &recordClient{}
+	info := &PRInfo{Owner: "o", Repo: "r", Number: 1, HeadSHA: "h"}
+	f := suggestFinding()
+	f.SuggestedPatch = "var a = 1" // identical to raw line → no-op
+	_, err := PostReview(stdctx.Background(), c, info, []engine.Finding{f}, suggestDiff(), "", nil, PostReviewOptions{Suggest: true})
+	if err != nil {
+		t.Fatalf("PostReview: %v", err)
+	}
+	if strings.Contains(postedBody(t, c), "suggestion") {
+		t.Error("a no-op replacement must degrade to a hint")
+	}
+}
+
+func TestSuggestOperatorPrefixedPatchStillSuggests(t *testing.T) {
+	// A patch that legitimately begins with +/- (operator-prefixed code) and
+	// differs from the raw line must still emit a suggestion — the no-op check
+	// must NOT strip +/- from the patch (else it falsely reads as a no-op).
+	c := &recordClient{}
+	info := &PRInfo{Owner: "o", Repo: "r", Number: 1, HeadSHA: "h"}
+	d := `@@ -1,3 +1,3 @@
+ package p
+-var a = 0
++delta
+ func f() {}
+`
+	diffs := []diff.Diff{{
+		NewPath:        "p.go",
+		Diff:           d,
+		NewFileContent: "package p\ndelta\nfunc f() {}\n",
+	}}
+	f := engine.Finding{
+		File:           "p.go",
+		Line:           2,
+		Severity:       "high",
+		Category:       "bug",
+		Rationale:      "negate the delta",
+		QuotedCode:     "delta",
+		SuggestedPatch: "+delta", // starts with '+' but differs from raw "delta"
+	}
+	_, err := PostReview(stdctx.Background(), c, info, []engine.Finding{f}, diffs, "", nil, PostReviewOptions{Suggest: true})
+	if err != nil {
+		t.Fatalf("PostReview: %v", err)
+	}
+	body := postedBody(t, c)
+	if !strings.Contains(body, "```suggestion\n+delta\n```") {
+		t.Errorf("operator-prefixed patch differing from the raw line must still suggest:\n%s", body)
+	}
+}
+
+func TestSuggestOldSideAnchoredDegradesToHint(t *testing.T) {
+	c := &recordClient{}
+	info := &PRInfo{Owner: "o", Repo: "r", Number: 1, HeadSHA: "h"}
+	f := suggestFinding()
+	// Anchor fell back to old side: QuotedCode does NOT match raw NewFileContent[Line].
+	f.QuotedCode = "var a = 0"
+	_, err := PostReview(stdctx.Background(), c, info, []engine.Finding{f}, suggestDiff(), "", nil, PostReviewOptions{Suggest: true})
+	if err != nil {
+		t.Fatalf("PostReview: %v", err)
+	}
+	if strings.Contains(postedBody(t, c), "suggestion") {
+		t.Error("an old-side-anchored finding must never become a suggestion")
+	}
+}
+
+func TestSuggestBelowFloorDegradesToHint(t *testing.T) {
+	c := &recordClient{}
+	info := &PRInfo{Owner: "o", Repo: "r", Number: 1, HeadSHA: "h"}
+	f := suggestFinding()
+	f.Severity = "low" // below the medium floor
+	_, err := PostReview(stdctx.Background(), c, info, []engine.Finding{f}, suggestDiff(), "", nil, PostReviewOptions{Suggest: true})
+	if err != nil {
+		t.Fatalf("PostReview: %v", err)
+	}
+	if strings.Contains(postedBody(t, c), "suggestion") {
+		t.Error("a below-floor finding must degrade to a hint")
+	}
+}
+
+func TestSuggestSeverityFloorUsesEngineRank(t *testing.T) {
+	if !meetsSuggestionFloor("high") || !meetsSuggestionFloor("critical") || !meetsSuggestionFloor("medium") {
+		t.Fatal("medium/high/critical must meet the floor")
+	}
+	if meetsSuggestionFloor("low") || meetsSuggestionFloor("info") || meetsSuggestionFloor("") {
+		t.Fatal("low/info/empty must be below the floor")
+	}
+	if severityRankOf("high") <= severityRankOf("medium") {
+		t.Fatal("engine rank must order high above medium (NOT the inverted github rank)")
 	}
 }
 

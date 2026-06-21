@@ -24,7 +24,11 @@ type PRInfo struct {
 	BaseSHA    string
 	BaseBranch string
 	IsFork     bool
-	Files      []string
+	// AuthorAssociation is the PR author's repo relationship (OWNER, MEMBER,
+	// COLLABORATOR, CONTRIBUTOR, NONE, FIRST_TIME_CONTRIBUTOR, FIRST_TIMER); the
+	// approve resolver treats the untrusted set as a hard block.
+	AuthorAssociation string
+	Files             []string
 }
 
 // FetchPR resolves a PR's SHAs/fork status and its full changed-file list via a
@@ -43,13 +47,14 @@ func FetchPR(ctx stdctx.Context, client Client, ref PRRef) (*PRInfo, error) {
 	}
 
 	info := &PRInfo{
-		Owner:      ref.Owner,
-		Repo:       ref.Repo,
-		Number:     ref.Number,
-		HeadSHA:    pr.Head.GetSHA(),
-		BaseSHA:    pr.Base.GetSHA(),
-		BaseBranch: pr.Base.GetRef(),
-		IsFork:     isFork(ref, pr),
+		Owner:             ref.Owner,
+		Repo:              ref.Repo,
+		Number:            ref.Number,
+		HeadSHA:           pr.Head.GetSHA(),
+		BaseSHA:           pr.Base.GetSHA(),
+		BaseBranch:        pr.Base.GetRef(),
+		IsFork:            isFork(ref, pr),
+		AuthorAssociation: pr.GetAuthorAssociation(),
 	}
 
 	opts := &gh.ListOptions{PerPage: 100}
