@@ -154,7 +154,7 @@ func TestPublishReviewWireFlow(t *testing.T) {
 
 	// First run: one inline posted + summary created.
 	pr := &cli.PRResult{SummaryAction: "none"}
-	if err := publishReview(stdctx.Background(), client, runner, dir, info, res, pr, cli.PRReviewRequest{Gate: "high"}); err != nil {
+	if err := publishReview(stdctx.Background(), client, runner, dir, info, res, pr, cli.PRReviewRequest{Gate: "high"}, nil); err != nil {
 		t.Fatalf("publishReview: %v", err)
 	}
 	if pr.PostedInline != 1 {
@@ -174,7 +174,7 @@ func TestPublishReviewWireFlow(t *testing.T) {
 	// Re-run: 0 new inline (fingerprint skip), summary edited (not duplicated).
 	fake.order = nil
 	pr2 := &cli.PRResult{SummaryAction: "none"}
-	if err := publishReview(stdctx.Background(), client, runner, dir, info, res, pr2, cli.PRReviewRequest{Gate: "high"}); err != nil {
+	if err := publishReview(stdctx.Background(), client, runner, dir, info, res, pr2, cli.PRReviewRequest{Gate: "high"}, nil); err != nil {
 		t.Fatalf("publishReview re-run: %v", err)
 	}
 	if pr2.PostedInline != 0 {
@@ -228,7 +228,7 @@ func TestPublishReviewApproveClean(t *testing.T) {
 	// Clean, non-fork, trusted author → APPROVE.
 	info := &mgithub.PRInfo{Owner: "o", Repo: "r", Number: 7, HeadSHA: head, BaseSHA: base, BaseBranch: "main", AuthorAssociation: "MEMBER"}
 	pr := &cli.PRResult{SummaryAction: "none"}
-	if err := publishReview(stdctx.Background(), client, runner, dir, info, cleanReviewResult(), pr, cli.PRReviewRequest{Gate: "high", ApproveClean: true}); err != nil {
+	if err := publishReview(stdctx.Background(), client, runner, dir, info, cleanReviewResult(), pr, cli.PRReviewRequest{Gate: "high", ApproveClean: true}, nil); err != nil {
 		t.Fatalf("publishReview: %v", err)
 	}
 	if pr.ApproveAction != "approved" || pr.ApproveReason != "approved" {
@@ -252,7 +252,7 @@ func TestPublishReviewApproveDegradesFork(t *testing.T) {
 	// Fork → COMMENT with reason "fork", never APPROVE.
 	info := &mgithub.PRInfo{Owner: "o", Repo: "r", Number: 7, HeadSHA: head, BaseSHA: base, BaseBranch: "main", AuthorAssociation: "MEMBER", IsFork: true}
 	pr := &cli.PRResult{SummaryAction: "none"}
-	if err := publishReview(stdctx.Background(), client, runner, dir, info, cleanReviewResult(), pr, cli.PRReviewRequest{Gate: "high", ApproveClean: true}); err != nil {
+	if err := publishReview(stdctx.Background(), client, runner, dir, info, cleanReviewResult(), pr, cli.PRReviewRequest{Gate: "high", ApproveClean: true}, nil); err != nil {
 		t.Fatalf("publishReview: %v", err)
 	}
 	if pr.ApproveAction != "commented" || pr.ApproveReason != "fork" {
@@ -275,7 +275,7 @@ func TestPublishReviewApproveDegradesUntrusted(t *testing.T) {
 
 	info := &mgithub.PRInfo{Owner: "o", Repo: "r", Number: 7, HeadSHA: head, BaseSHA: base, BaseBranch: "main", AuthorAssociation: "FIRST_TIME_CONTRIBUTOR"}
 	pr := &cli.PRResult{SummaryAction: "none"}
-	if err := publishReview(stdctx.Background(), client, runner, dir, info, cleanReviewResult(), pr, cli.PRReviewRequest{Gate: "high", ApproveClean: true}); err != nil {
+	if err := publishReview(stdctx.Background(), client, runner, dir, info, cleanReviewResult(), pr, cli.PRReviewRequest{Gate: "high", ApproveClean: true}, nil); err != nil {
 		t.Fatalf("publishReview: %v", err)
 	}
 	if pr.ApproveAction != "commented" || pr.ApproveReason != "untrusted_author" {
@@ -296,7 +296,7 @@ func TestPublishReviewApproveDefaultOff(t *testing.T) {
 	// Even a clean trusted non-fork PR is COMMENT when --approve-clean is OFF.
 	info := &mgithub.PRInfo{Owner: "o", Repo: "r", Number: 7, HeadSHA: head, BaseSHA: base, BaseBranch: "main", AuthorAssociation: "MEMBER"}
 	pr := &cli.PRResult{SummaryAction: "none"}
-	if err := publishReview(stdctx.Background(), client, runner, dir, info, cleanReviewResult(), pr, cli.PRReviewRequest{Gate: "high"}); err != nil {
+	if err := publishReview(stdctx.Background(), client, runner, dir, info, cleanReviewResult(), pr, cli.PRReviewRequest{Gate: "high"}, nil); err != nil {
 		t.Fatalf("publishReview: %v", err)
 	}
 	if pr.ApproveAction != "commented" || pr.ApproveReason != "not_requested" {
@@ -326,7 +326,7 @@ func TestPublishReviewSuggestCount(t *testing.T) {
 
 	// With --suggest OFF: a patch is shown as a plain hint, suggestions_posted=0.
 	prOff := &cli.PRResult{SummaryAction: "none"}
-	if err := publishReview(stdctx.Background(), client, runner, dir, info, res, prOff, cli.PRReviewRequest{Gate: "high"}); err != nil {
+	if err := publishReview(stdctx.Background(), client, runner, dir, info, res, prOff, cli.PRReviewRequest{Gate: "high"}, nil); err != nil {
 		t.Fatalf("publishReview suggest-off: %v", err)
 	}
 	if prOff.SuggestionsPosted != 0 {
@@ -338,7 +338,7 @@ func TestPublishReviewSuggestCount(t *testing.T) {
 	newGitHubClient = func(string) mgithub.Client { return fake2 }
 	client2 := newGitHubClient("")
 	prOn := &cli.PRResult{SummaryAction: "none"}
-	if err := publishReview(stdctx.Background(), client2, runner, dir, info, res, prOn, cli.PRReviewRequest{Gate: "high", Suggest: true}); err != nil {
+	if err := publishReview(stdctx.Background(), client2, runner, dir, info, res, prOn, cli.PRReviewRequest{Gate: "high", Suggest: true}, nil); err != nil {
 		t.Fatalf("publishReview suggest-on: %v", err)
 	}
 	if prOn.SuggestionsPosted != 1 {

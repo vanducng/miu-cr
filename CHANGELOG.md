@@ -1,5 +1,27 @@
 # Changelog
 
+## Unreleased
+
+### Features
+
+* **Cross-push dedupe (M5).** Inline-comment fingerprints are now line-free
+  (`path | category | sha256(normalized quoted code)`), so a finding that
+  re-anchors to a different line after a push is no longer re-posted. Dedupe state
+  lives in the GitHub comment markers, so it works on the ephemeral CI runner with
+  no database. An opt-in SQLite PR-thread store (`MIUCR_PR_STORE`, serve/local
+  only — nil on the Action path) adds per-PR resolution tracking with reopen on
+  recurrence; finding text is stored locally only and never reaches the envelope.
+
+### ⚠ Migration — one-time re-post on upgrade
+
+Fingerprint markers written before this release used the old **line-based** key
+and **will not match** the new content key. As a result, open findings on
+**existing** PRs re-post **once** after you upgrade (each as a fresh inline
+comment with a new marker); subsequent re-runs dedupe normally. On a
+**scheduled-action** repo this can post a burst across many open PRs, so run the
+first M5 review **manually** (or off-hours) to absorb the one-time re-post before
+the next scheduled run.
+
 ## [0.6.0](https://github.com/vanducng/miu-cr/compare/v0.5.0...v0.6.0) (2026-06-21)
 
 

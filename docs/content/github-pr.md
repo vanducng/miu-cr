@@ -102,10 +102,44 @@ A single summary comment is posted last. Its first line is a hidden sentinel:
 Inline comments are posted **before** the summary so that if posting partially
 fails, the summary always reflects the latest successful run.
 
-> **M2 dedupe scope.** The inline fingerprint includes the re-anchored line number,
-> so re-running on the **same** PR commit dedupes reliably. Pushing **new** commits
-> can shift lines and cause a finding to be re-posted; full cross-push thread
-> tracking is planned for M5.
+## Cross-push dedupe (M5)
+
+The inline fingerprint is **line-free**: `path | category |
+sha256(normalized QuotedCode)`. Because the line number is dropped, a finding
+whose quoted code re-anchors to a **different line** after a push keeps the
+**same** fingerprint and is **not** re-posted. This dedupe lives entirely in the
+GitHub comment markers, so it works on the **ephemeral CI runner with no
+database** — the GitHub Action path needs no state of its own.
+
+> **Best-effort, exact-match.** The key is the normalized quoted code, so a
+> re-quote of the same bug (a different span, ±1 line) produces a different
+> fingerprint and can leak a duplicate. Semantic matching is M7. Normalization
+> strips the diff `+`/`-` marker, trailing whitespace, and normalizes CRLF, but
+> **preserves leading indentation and blank lines** — two findings that differ
+> only by indentation stay distinct (no over-dedup).
+
+> **One-time re-post on upgrade.** Markers written before M5 used the old
+> line-based key and won't match the new content key, so open findings on
+> **existing** PRs re-post **once** after the upgrade. On a scheduled-action
+> repo, run the first M5 review manually to absorb the re-post before the next
+> scheduled flood.
+
+### Optional resolution tracking (serve / local)
+
+An **opt-in** SQLite PR-thread store adds per-PR resolution tracking on top of
+the portable comment dedupe. Enable it by setting `MIUCR_PR_STORE` (any value)
+for `miucr serve` or local `miucr review --pr`:
+
+- A finding posted on a prior run that is **absent** from the current run, when
+  its file is **still in the diff**, is marked **resolved** and is not re-raised.
+- Resolution is **reversible**: a resolved finding that **recurs** in a later run
+  is **reopened** and re-posted, so LLM non-determinism can never permanently
+  suppress a real finding.
+
+The store holds finding text **locally only** under `~/.config/miu/cr/state.db`;
+it never reaches the JSON envelope and is never committed. It is **off by
+default** and stays **nil on the GitHub Action / CI path** — with no store, the
+publish behavior is byte-for-byte the M2 path.
 
 If a review would carry more inline comments than GitHub accepts in one request,
 miu-cr posts the highest-severity findings up to a fixed cap (40) and notes the

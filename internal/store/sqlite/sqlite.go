@@ -12,6 +12,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"sync"
 	"time"
 
 	_ "modernc.org/sqlite"
@@ -24,7 +25,8 @@ import (
 // Store is the pure-Go SQLite-backed review store; it persists findings/stats but
 // never credentials.
 type Store struct {
-	db *sql.DB
+	db   *sql.DB
+	prMu sync.Mutex
 }
 
 // DefaultPath returns ~/.config/miu/cr/state.db, sharing config.Dir() with the
@@ -43,7 +45,10 @@ func Open(path string) (*Store, error) {
 	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
 		return nil, fmt.Errorf("create state dir: %w", err)
 	}
-	db, err := sql.Open("sqlite", path)
+	// DSN-level pragmas so EVERY pooled connection inherits them (busy_timeout
+	// is per-connection — a one-shot db.Exec only sets it on one connection,
+	// leaving other/cross-process writers to fail SQLITE_BUSY immediately).
+	db, err := sql.Open("sqlite", path+"?_pragma=busy_timeout(5000)&_pragma=journal_mode(WAL)")
 	if err != nil {
 		return nil, err
 	}

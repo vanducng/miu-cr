@@ -599,13 +599,95 @@ func TestUpsertSummaryListRateLimitMapped(t *testing.T) {
 }
 
 func TestFingerprintStable(t *testing.T) {
-	f := engine.Finding{File: "p.go", Line: 2, Category: "bug", Rationale: "same"}
+	f := engine.Finding{File: "p.go", Line: 2, Category: "bug", QuotedCode: "x := y / 0"}
 	if fingerprint(f) != fingerprint(f) {
 		t.Fatal("fingerprint must be deterministic")
 	}
+}
+
+// Cross-push: the SAME QuotedCode that re-anchors to a different Line must yield
+// the SAME fingerprint so the existing marker dedupes the re-post (no DB needed).
+func TestFingerprintCrossPushSameCode(t *testing.T) {
+	f := engine.Finding{File: "p.go", Line: 2, Category: "bug", QuotedCode: "x := y / 0"}
 	g := f
-	g.Line = 3
+	g.Line = 99
+	if fingerprint(f) != fingerprint(g) {
+		t.Fatal("same QuotedCode at a different Line must yield the SAME fingerprint")
+	}
+}
+
+// Rationale is LLM free-text and must NOT fragment the key.
+func TestFingerprintIgnoresRationale(t *testing.T) {
+	f := engine.Finding{File: "p.go", Category: "bug", QuotedCode: "x := y / 0", Rationale: "divide by zero"}
+	g := f
+	g.Rationale = "totally different prose"
+	if fingerprint(f) != fingerprint(g) {
+		t.Fatal("Rationale must not change the fingerprint")
+	}
+}
+
+// No over-dedup: findings differing only by leading indentation must differ.
+func TestFingerprintIndentationDistinct(t *testing.T) {
+	f := engine.Finding{File: "p.go", Category: "bug", QuotedCode: "x := 1"}
+	g := f
+	g.QuotedCode = "    x := 1"
 	if fingerprint(f) == fingerprint(g) {
-		t.Fatal("different line must yield a different fingerprint")
+		t.Fatal("indentation-only difference must yield a DIFFERENT fingerprint (no over-dedup)")
+	}
+}
+
+// No over-dedup: findings differing only by an interior blank line must differ.
+func TestFingerprintBlankLineDistinct(t *testing.T) {
+	f := engine.Finding{File: "p.go", Category: "bug", QuotedCode: "a()\nb()"}
+	g := f
+	g.QuotedCode = "a()\n\nb()"
+	if fingerprint(f) == fingerprint(g) {
+		t.Fatal("blank-line-only difference must yield a DIFFERENT fingerprint (no over-dedup)")
+	}
+}
+
+// Same file+category but genuinely different code must differ.
+func TestFingerprintDifferentCode(t *testing.T) {
+	f := engine.Finding{File: "p.go", Category: "bug", QuotedCode: "x := y / 0"}
+	g := f
+	g.QuotedCode = "z := w / 0"
+	if fingerprint(f) == fingerprint(g) {
+		t.Fatal("different code must yield a different fingerprint")
+	}
+}
+
+// Under-dedup (documented, best-effort): the same bug quoted with a different span
+// yields a DIFFERENT fingerprint — exact content match is the M5 ceiling, semantic
+// matching is M7. This asserts the accepted limitation rather than a desired win.
+func TestFingerprintUnderDedupDifferentSpan(t *testing.T) {
+	f := engine.Finding{File: "p.go", Category: "bug", QuotedCode: "x := y / 0"}
+	g := f
+	g.QuotedCode = "x := y / 0\nreturn x"
+	if fingerprint(f) == fingerprint(g) {
+		t.Fatal("documented under-dedup: a different quote span is expected to differ (M7 = semantic)")
+	}
+}
+
+// normalizeForFingerprint strips a leading diff +/- marker and trailing whitespace
+// and normalizes CRLF, but preserves leading indentation and blank lines, so a
+// diff-quoted finding maps to the same fp as its plain-quoted twin.
+func TestFingerprintDiffMarkerAndCRLF(t *testing.T) {
+	plain := engine.Finding{File: "p.go", Category: "bug", QuotedCode: "    a()\n    b()"}
+	diffQuoted := engine.Finding{File: "p.go", Category: "bug", QuotedCode: "+    a()  \r\n+    b()  "}
+	if fingerprint(plain) != fingerprint(diffQuoted) {
+		t.Fatalf("diff marker + trailing ws + CRLF must normalize to the plain fp")
+	}
+}
+
+// The marker round-trips: fpMarker(fingerprint(f)) is exactly 16 lowercase hex.
+func TestFingerprintMarkerRoundTrip(t *testing.T) {
+	f := engine.Finding{File: "p.go", Category: "bug", QuotedCode: "x := y / 0"}
+	m := fpMarker(fingerprint(f))
+	got := fpMarkerRe.FindStringSubmatch(m)
+	if got == nil {
+		t.Fatalf("fpMarker(%q) does not match fpMarkerRe", m)
+	}
+	if len(got[1]) != 16 {
+		t.Fatalf("fingerprint width = %d, want 16 hex", len(got[1]))
 	}
 }

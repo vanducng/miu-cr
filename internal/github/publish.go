@@ -86,16 +86,43 @@ func filterToDiffHunks(findings []engine.Finding, diffs []diff.Diff) []engine.Fi
 	return kept
 }
 
-// fingerprint is a stable short hash over path|line|category|prosehash, where
-// prosehash folds the rationale so identical findings dedupe across re-runs.
-// M2 limitation: Line is part of the key, so re-running on the SAME head SHA dedupes,
-// but a new push that shifts lines may re-post; full cross-push thread tracking is M5.
+// normalizeForFingerprint produces the line-free content key fed into
+// fingerprint. It is deliberately LESS lossy than the anchor's splitAndNormalize:
+// per line it strips a single leading diff +/- marker and trailing whitespace and
+// normalizes CRLF→LF, but PRESERVES leading indentation and blank lines so that
+// findings differing only by indentation or blank-line structure keep distinct
+// fingerprints (no over-dedup). It is NOT the anchor's matching normalize.
+func normalizeForFingerprint(s string) string {
+	s = strings.ReplaceAll(s, "\r\n", "\n")
+	s = strings.ReplaceAll(s, "\r", "\n")
+	lines := strings.Split(s, "\n")
+	for i, line := range lines {
+		line = strings.TrimRight(line, " \t")
+		if len(line) > 0 && (line[0] == '+' || line[0] == '-') {
+			line = line[1:]
+		}
+		lines[i] = line
+	}
+	return strings.Join(lines, "\n")
+}
+
+// fingerprint is a stable, line-INDEPENDENT short hash over
+// path|category|sha256(normalizeForFingerprint(QuotedCode)). Dropping Line makes a
+// re-anchored finding map to the SAME hash, so the existing <!-- miucr:fp=hash -->
+// markers dedupe across pushes with no DB. Dropping Rationale (LLM free-text)
+// keeps the key from fragmenting. Best-effort: a re-quoted span for the same bug
+// yields a different fp (under-dedup); semantic matching is M7.
 func fingerprint(f engine.Finding) string {
-	prose := sha256.Sum256([]byte(f.Rationale))
-	key := fmt.Sprintf("%s|%d|%s|%x", f.File, f.Line, f.Category, prose[:8])
+	code := sha256.Sum256([]byte(normalizeForFingerprint(f.QuotedCode)))
+	key := fmt.Sprintf("%s|%s|%x", f.File, f.Category, code[:])
 	sum := sha256.Sum256([]byte(key))
 	return hex.EncodeToString(sum[:8])
 }
+
+// Fingerprint exposes the content-stable, line-independent finding fingerprint to
+// the wire layer so the PR-thread store keys rows on the SAME hash carried by the
+// inline-comment markers (byte-identical to the marker contract).
+func Fingerprint(f engine.Finding) string { return fingerprint(f) }
 
 func fpMarker(fp string) string { return fmt.Sprintf("<!-- %s%s -->", fpPrefix, fp) }
 
@@ -142,6 +169,17 @@ type PostReviewResult struct {
 	Suggestions int // native one-click suggestions emitted this run (subset of Posted)
 	Event       string
 	Reason      string
+	// PostedFindings carries (fingerprint, path) for the inline comments in the
+	// ACTUALLY-submitted review only — set after a successful submit, never on the
+	// empty-guard / pre-submit path. The store records exactly these as posted.
+	PostedFindings []PostedFinding
+}
+
+// PostedFinding is the minimal (fingerprint, path) pair the store needs to track a
+// posted finding; finding text never leaves the local process.
+type PostedFinding struct {
+	Fingerprint string
+	Path        string
 }
 
 // PostReview filters findings to the diff hunks, skips any whose fingerprint is
@@ -182,19 +220,22 @@ func PostReview(ctx stdctx.Context, client Client, info *PRInfo, findings []engi
 	}
 
 	comments := make([]*gh.DraftReviewComment, 0, len(toPost))
+	submitted := make([]PostedFinding, 0, len(toPost))
 	suggestions := 0
 	for _, f := range toPost {
 		rendered, native := commentBody(f, newFileContent[f.File], opts)
 		if native {
 			suggestions++
 		}
-		body := rendered + "\n\n" + fpMarker(fingerprint(f))
+		fp := fingerprint(f)
+		body := rendered + "\n\n" + fpMarker(fp)
 		comments = append(comments, &gh.DraftReviewComment{
 			Path: gh.Ptr(f.File),
 			Body: gh.Ptr(body),
 			Side: gh.Ptr("RIGHT"),
 			Line: gh.Ptr(f.Line),
 		})
+		submitted = append(submitted, PostedFinding{Fingerprint: fp, Path: f.File})
 	}
 
 	event, reason := resolveApproveEvent(ctx, client, info, opts)
@@ -241,8 +282,10 @@ func PostReview(ctx stdctx.Context, client Client, info *PRInfo, findings []engi
 		if _, rerr := client.CreateReview(ctx, info.Owner, info.Repo, info.Number, req); rerr != nil {
 			return PostReviewResult{Omitted: omitted, Event: "COMMENT"}, mapWriteError("github.create_review_failed", "creating review", rerr)
 		}
+		result.PostedFindings = submitted
 		return result, nil
 	}
+	result.PostedFindings = submitted
 	return result, nil
 }
 
