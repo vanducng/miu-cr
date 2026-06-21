@@ -292,3 +292,17 @@ func TestNoCredentialColumns(t *testing.T) {
 		}
 	}
 }
+
+// dsn builds a valid file: URI with DSN-level pragmas, leading-slashed so it is
+// well-formed on Windows (C:\x -> file:///C:/x) as well as Unix.
+func TestDSNFileURIHasAuthorityAndPragmas(t *testing.T) {
+	got := dsn("/tmp/state.db")
+	if !strings.HasPrefix(got, "file:///") {
+		t.Fatalf("dsn = %q, want a file:/// authority prefix", got)
+	}
+	for _, want := range []string{"busy_timeout(5000)", "journal_mode(WAL)"} {
+		if !strings.Contains(got, want) {
+			t.Errorf("dsn %q missing pragma %q", got, want)
+		}
+	}
+}

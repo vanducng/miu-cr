@@ -13,6 +13,7 @@ import (
 	"net/url"
 	"os"
 	"path/filepath"
+	"strings"
 	"sync"
 	"time"
 
@@ -48,9 +49,16 @@ func dsn(path string) string {
 	if abs, err := filepath.Abs(path); err == nil {
 		path = abs
 	}
+	// Forward slashes + a leading slash so the file: URI is valid on Windows too:
+	// C:\x -> /C:/x -> file:///C:/x. Without this, url.URL emits "file:C:/x" (no
+	// authority), which modernc/SQLite rejects on Windows.
+	p := filepath.ToSlash(path)
+	if !strings.HasPrefix(p, "/") {
+		p = "/" + p
+	}
 	u := url.URL{
 		Scheme:   "file",
-		Path:     path,
+		Path:     p,
 		RawQuery: "_pragma=busy_timeout(5000)&_pragma=journal_mode(WAL)",
 	}
 	return u.String()
