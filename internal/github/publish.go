@@ -122,12 +122,43 @@ func ExistingFingerprints(ctx stdctx.Context, client Client, info *PRInfo) (map[
 	return fps, nil
 }
 
+// PostReviewOptions carries the opt-in write-action toggles for PostReview. Both
+// actions default OFF; with the zero value PostReview behaves exactly as the M2
+// comment-only path (modulo the latent unconditional-suggestion-fence fix).
+type PostReviewOptions struct {
+	Suggest       bool   // emit native single-line suggested-changes when proven clean
+	ApproveClean  bool   // resolve Event=APPROVE when the PR is clean and all safety predicates hold
+	Gate          string // gate severity used by the caller to compute GateClean
+	GateClean     bool   // caller-computed !engine.GateFailed(findings, Gate)
+	ReviewedFiles int    // count of files actually reviewed; APPROVE requires >0
+}
+
+// PostReviewResult reports what PostReview did: inline comments posted, comments
+// omitted by the cap, and (for --approve-clean) the resolved review Event and the
+// reason it was chosen. Event is "COMMENT" unless every approve predicate held.
+type PostReviewResult struct {
+	Posted      int
+	Omitted     int
+	Suggestions int // native one-click suggestions emitted this run (subset of Posted)
+	Event       string
+	Reason      string
+}
+
 // PostReview filters findings to the diff hunks, skips any whose fingerprint is
 // already posted, caps the result at maxInlineComments (highest severity first so a
-// 422-triggering oversized review can't happen), then submits ONE Event=COMMENT
-// review anchored to the head SHA with comfort-fade inline comments (Side=RIGHT/Line
-// only, never Position). Returns the count posted and the count omitted by the cap.
-func PostReview(ctx stdctx.Context, client Client, info *PRInfo, findings []engine.Finding, diffs []diff.Diff, summary string, existingFPs map[string]bool) (int, int, error) {
+// 422-triggering oversized review can't happen), then submits ONE review anchored to
+// the head SHA with comfort-fade inline comments (Side=RIGHT/Line only, never
+// Position). The Event is COMMENT unless opts.ApproveClean and every safety
+// predicate holds (resolveEvent), in which case it is APPROVE; a self-approve 422
+// degrades back to COMMENT (reason self_approve_forbidden), never an error.
+func PostReview(ctx stdctx.Context, client Client, info *PRInfo, findings []engine.Finding, diffs []diff.Diff, summary string, existingFPs map[string]bool, opts PostReviewOptions) (PostReviewResult, error) {
+	newFileContent := make(map[string]string, len(diffs))
+	for i := range diffs {
+		if diffs[i].NewPath != "" {
+			newFileContent[diffs[i].NewPath] = diffs[i].NewFileContent
+		}
+	}
+
 	inHunk := filterToDiffHunks(findings, diffs)
 
 	toPost := make([]engine.Finding, 0, len(inHunk))
@@ -148,8 +179,12 @@ func PostReview(ctx stdctx.Context, client Client, info *PRInfo, findings []engi
 	}
 
 	comments := make([]*gh.DraftReviewComment, 0, len(toPost))
+	suggestions := 0
 	for _, f := range toPost {
-		body := commentBody(f) + "\n\n" + fpMarker(fingerprint(f))
+		if emitsNativeSuggestion(f, newFileContent[f.File], opts) {
+			suggestions++
+		}
+		body := commentBody(f, newFileContent[f.File], opts) + "\n\n" + fpMarker(fingerprint(f))
 		comments = append(comments, &gh.DraftReviewComment{
 			Path: gh.Ptr(f.File),
 			Body: gh.Ptr(body),
@@ -158,13 +193,18 @@ func PostReview(ctx stdctx.Context, client Client, info *PRInfo, findings []engi
 		})
 	}
 
-	if len(comments) == 0 && strings.TrimSpace(summary) == "" {
-		return 0, omitted, nil
+	event, reason := resolveApproveEvent(ctx, client, info, opts)
+	result := PostReviewResult{Posted: len(comments), Omitted: omitted, Suggestions: suggestions, Event: event, Reason: reason}
+
+	// Nothing to say AND not approving: don't create an empty review.
+	if len(comments) == 0 && strings.TrimSpace(summary) == "" && event != "APPROVE" {
+		result.Posted = 0
+		return result, nil
 	}
 
 	req := &gh.PullRequestReviewRequest{
 		CommitID: gh.Ptr(info.HeadSHA),
-		Event:    gh.Ptr("COMMENT"),
+		Event:    gh.Ptr(event),
 		Comments: comments,
 	}
 	if strings.TrimSpace(summary) != "" {
@@ -172,12 +212,63 @@ func PostReview(ctx stdctx.Context, client Client, info *PRInfo, findings []engi
 	}
 
 	if _, err := client.CreateReview(ctx, info.Owner, info.Repo, info.Number, req); err != nil {
-		return 0, omitted, mapWriteError("github.create_review_failed", "creating review", err)
+		// A self-approval 422 is a precondition miss, not a failure: retry as COMMENT.
+		if event == "APPROVE" && isSelfApprove422(err) {
+			req.Event = gh.Ptr("COMMENT")
+			result.Event = "COMMENT"
+			result.Reason = approveReasonSelfForbidden
+			if _, rerr := client.CreateReview(ctx, info.Owner, info.Repo, info.Number, req); rerr != nil {
+				return result, mapWriteError("github.create_review_failed", "creating review", rerr)
+			}
+			return result, nil
+		}
+		return PostReviewResult{Omitted: omitted, Event: event, Reason: reason}, mapWriteError("github.create_review_failed", "creating review", err)
 	}
-	return len(comments), omitted, nil
+	return result, nil
 }
 
-func commentBody(f engine.Finding) string {
+// resolveApproveEvent runs the approve-clean idempotency + head-race guards, then
+// resolveEvent. It performs no writes; it returns the Event/reason PostReview
+// submits. Any read error degrades to COMMENT (never an error) so a precondition
+// check can't fail a run; the self-approve 422 is handled reactively in PostReview.
+func resolveApproveEvent(ctx stdctx.Context, client Client, info *PRInfo, opts PostReviewOptions) (event, reason string) {
+	if !opts.ApproveClean {
+		return "COMMENT", approveReasonNotRequested
+	}
+
+	if done, err := alreadyApproved(ctx, client, info); err == nil && done {
+		return "COMMENT", approveReasonAlreadyDone
+	}
+
+	// Re-fetch the head SHA right before deciding: the LLM pass can take long
+	// enough for a new push to land; an APPROVE on a stale head is unsafe.
+	headUnchanged := false
+	if fresh, err := client.GetPR(ctx, info.Owner, info.Repo, info.Number); err == nil && fresh != nil && fresh.GetHead() != nil {
+		headUnchanged = fresh.GetHead().GetSHA() == info.HeadSHA
+	}
+
+	return resolveEvent(opts, *info, opts.GateClean, opts.ReviewedFiles, headUnchanged)
+}
+
+// isSelfApprove422 reports whether err is a GitHub 422 from approving one's own
+// PR (the bot PAT identity == the PR author). Matched reactively at the
+// CreateReview call — there is no proactive bot-identity lookup.
+func isSelfApprove422(err error) bool {
+	var er *gh.ErrorResponse
+	if !errors.As(err, &er) || er.Response == nil || er.Response.StatusCode != 422 {
+		return false
+	}
+	return true
+}
+
+// commentBody renders one inline comment. A native one-click ```suggestion fence
+// is emitted ONLY when opts.Suggest AND isCleanReplacement proves a verbatim
+// single-line replacement of the raw new-file line AND the severity meets the
+// floor; otherwise (and whenever there's a patch but the gate isn't met) the patch
+// is shown as a plain fenced hint, never a one-click suggestion. This is also the
+// fix for the latent M2 bug where a ```suggestion fence was emitted
+// unconditionally — one-click-applying an unverified, possibly multi-line patch.
+func commentBody(f engine.Finding, newFileContent string, opts PostReviewOptions) string {
 	var b strings.Builder
 	sev := strings.ToUpper(f.Severity)
 	if sev == "" {
@@ -190,16 +281,42 @@ func commentBody(f engine.Finding) string {
 		fmt.Fprintf(&b, "**%s**\n\n", sev)
 	}
 	b.WriteString(f.Rationale)
-	if patch := strings.TrimSpace(f.SuggestedPatch); patch != "" {
-		// Grow the fence past any backtick run in the patch so an embedded ``` can't
-		// terminate the suggestion block early.
-		fence := "```"
-		for strings.Contains(patch, fence) {
-			fence += "`"
-		}
-		fmt.Fprintf(&b, "\n\n%ssuggestion\n%s\n%s", fence, patch, fence)
+
+	patch := strings.TrimSpace(f.SuggestedPatch)
+	if patch == "" {
+		return b.String()
 	}
+
+	if opts.Suggest && meetsSuggestionFloor(f.Severity) {
+		if sug, ok := isCleanReplacement(f, newFileContent); ok {
+			fmt.Fprintf(&b, "\n\n%ssuggestion\n%s\n%s", fenceFor(sug), sug, fenceFor(sug))
+			return b.String()
+		}
+	}
+
+	fmt.Fprintf(&b, "\n\n%sgo\n%s\n%s", fenceFor(patch), patch, fenceFor(patch))
 	return b.String()
+}
+
+// emitsNativeSuggestion reports whether commentBody will render a native one-click
+// ```suggestion fence for f (vs the plain hint). Mirrors commentBody's gate so
+// PostReview can count suggestions without re-deriving the body.
+func emitsNativeSuggestion(f engine.Finding, newFileContent string, opts PostReviewOptions) bool {
+	if !opts.Suggest || strings.TrimSpace(f.SuggestedPatch) == "" || !meetsSuggestionFloor(f.Severity) {
+		return false
+	}
+	_, ok := isCleanReplacement(f, newFileContent)
+	return ok
+}
+
+// fenceFor grows a code fence past any backtick run in s so an embedded ``` can't
+// terminate the block early.
+func fenceFor(s string) string {
+	fence := "```"
+	for strings.Contains(s, fence) {
+		fence += "`"
+	}
+	return fence
 }
 
 // UpsertSummaryComment ensures exactly one sentinel-headed summary issue comment:

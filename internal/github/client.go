@@ -28,6 +28,7 @@ type Client interface {
 	ListFiles(ctx stdctx.Context, owner, repo string, number int, opts *gh.ListOptions) ([]*gh.CommitFile, *gh.Response, error)
 
 	CreateReview(ctx stdctx.Context, owner, repo string, number int, review *gh.PullRequestReviewRequest) (*gh.PullRequestReview, error)
+	ListReviews(ctx stdctx.Context, owner, repo string, number int, opts *gh.ListOptions) ([]*gh.PullRequestReview, *gh.Response, error)
 	ListReviewComments(ctx stdctx.Context, owner, repo string, number int, opts *gh.PullRequestListCommentsOptions) ([]*gh.PullRequestComment, *gh.Response, error)
 	ListIssueComments(ctx stdctx.Context, owner, repo string, number int, opts *gh.IssueListCommentsOptions) ([]*gh.IssueComment, *gh.Response, error)
 	CreateIssueComment(ctx stdctx.Context, owner, repo string, number int, comment *gh.IssueComment) (*gh.IssueComment, error)
@@ -62,6 +63,10 @@ func (g ghClient) ListFiles(ctx stdctx.Context, owner, repo string, number int, 
 func (g ghClient) CreateReview(ctx stdctx.Context, owner, repo string, number int, review *gh.PullRequestReviewRequest) (*gh.PullRequestReview, error) {
 	r, _, err := g.c.PullRequests.CreateReview(ctx, owner, repo, number, review)
 	return r, err
+}
+
+func (g ghClient) ListReviews(ctx stdctx.Context, owner, repo string, number int, opts *gh.ListOptions) ([]*gh.PullRequestReview, *gh.Response, error) {
+	return g.c.PullRequests.ListReviews(ctx, owner, repo, number, opts)
 }
 
 func (g ghClient) ListReviewComments(ctx stdctx.Context, owner, repo string, number int, opts *gh.PullRequestListCommentsOptions) ([]*gh.PullRequestComment, *gh.Response, error) {

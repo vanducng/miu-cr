@@ -134,11 +134,15 @@ func serveCommand(opts *options) *cobra.Command {
 					defer cancel()
 				}
 				out, err := ReviewPRForServe(jobCtx, PRReviewRequest{
-					Ref:     j.Ref,
-					Token:   j.Token,
-					Post:    true,
-					Gate:    gateVal,
-					Timeout: j.Timeout,
+					Ref:   j.Ref,
+					Token: j.Token,
+					Post:  true,
+					// serve inherits both opt-in write-actions OFF: a webhook-driven
+					// daemon must not auto-suggest or auto-approve by default.
+					Suggest:      false,
+					ApproveClean: false,
+					Gate:         gateVal,
+					Timeout:      j.Timeout,
 				})
 				if err != nil {
 					log.Error("review failed", "ref", j.Ref, "err", config.RedactString(err.Error()))

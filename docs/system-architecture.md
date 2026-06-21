@@ -84,6 +84,69 @@ it does no review logic.
   sentinel. `stats.rules_applied` / `rules_truncated` expose the result. Rules
   are context only — never gating.
 
+## Write-action safety model (M9)
+
+`review --pr` gains two **opt-in** write-actions, **both default OFF** and both
+gated on the same M2 publish path (`internal/github.PostReview`, driven by a
+`PostReviewOptions` struct). Without the flags, M2 behavior is unchanged — except
+a latent bug is fixed: `commentBody` no longer emits a one-click `suggestion`
+fence unconditionally (an unproven patch could one-click-apply garbage); it now
+emits a native suggestion only under the gate below, else a plain fenced hint.
+
+**`--suggest`** — GitHub native single-line suggested-changes. A native
+`suggestion` fence is emitted only when ALL hold (`isCleanReplacement`); anything
+else degrades to the safe plain hint:
+
+- the finding is **single-line** (`EndLine == 0 || EndLine == Line`) — multi-line
+  is out (`EndLine` is QuotedCode-derived with no proven relation to the
+  free-form patch, and a wrong range 422s the whole review);
+- `SuggestedPatch` is a single non-empty line;
+- the raw new-file line at `Line` (from `diff.Diff.NewFileContent`) exists AND
+  `normalizeLine(rawLine) == normalizeLine(QuotedCode)` — proving the line at
+  `Line` IS the anchored line (`Finding.Line` can be an OLD-file number when the
+  anchor resolver falls back to the old side; re-matching rejects that case);
+- the patch is not a no-op;
+- severity ≥ the floor (default `medium`, via `engine.MaxSeverityRank` — the
+  engine low→critical scale, NOT the inverted github rank).
+
+Suggestions are **author-applied** (the PR author clicks "Commit suggestion") —
+miu-cr never pushes or commits to the PR branch.
+
+**`--approve-clean`** — `Event=APPROVE` instead of the default `COMMENT`, only
+when **every** precondition holds (`resolveEvent` → `resolveApproveEvent`);
+otherwise `COMMENT` with an `approve_reason`. A precondition miss **degrades to
+COMMENT, never errors** (a CI run is never failed by an approve-precondition):
+
+- gate clean (`engine.GateFailed` reports no finding ≥ gate);
+- **not a fork** (`IsFork`);
+- **trusted author** — `AuthorAssociation` ∉ {`NONE`, `FIRST_TIME_CONTRIBUTOR`,
+  `FIRST_TIMER`} (fork-exclusion alone misses the same-repo low-trust author);
+- **≥1 file actually reviewed** (clean ≠ skipped);
+- **head unchanged** — the head SHA is **re-fetched via `GetPR` immediately
+  before** `CreateReview`; if it moved (or is nil) → COMMENT, reason `head_moved`;
+- **not already approved** — `ListReviews` (first page) skips a second APPROVE
+  when an `APPROVED` review already exists at `CommitID == HeadSHA` (idempotent
+  per head SHA; a new push = new SHA re-evaluates — no `DismissReview` needed);
+- **self-approve** — a 422 from approving one's own PR is caught **reactively**
+  after `CreateReview` and degrades to COMMENT (reason `self_approve_forbidden`);
+  there is no proactive bot-identity lookup.
+
+Outcomes surface in the `data.pr` envelope block: `approve_action`
+(`approved`|`commented`), `approve_reason`, and `suggestions_posted`.
+
+**Inheritance.** `serve` inherits both flags **OFF** (a webhook daemon must not
+auto-suggest or auto-approve). The **GHA action stays comment-only for v1** — a
+default `GITHUB_TOKEN` APPROVE is a self-approve / supply-chain risk — so no
+`suggest`/`approve-clean` inputs are exposed in `action.yml`.
+
+> **Caveat — a PAT APPROVE is NOT advisory.** A review submitted by a PAT
+> **satisfies branch-protection required-reviews** and can enable auto-merge, so
+> "the human still owns merge" is **not** an invariant of `--approve-clean`.
+> Recommend it only where the bot identity does **not** count toward required
+> reviews, or with auto-merge disabled; the PAT must be a **distinct identity**
+> from the PR author (GitHub Apps are self-approval-safe by construction). When in
+> doubt, leave `--approve-clean` OFF.
+
 ## Token seam (M3 → M8)
 
 serve resolves the GitHub token through a `func() (string, error)` resolver and

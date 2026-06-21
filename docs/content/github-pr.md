@@ -39,7 +39,9 @@ envelope carries `data.findings`, `data.stats`, and a `data.pr` block:
     "pr": {
       "owner": "owner", "repo": "repo", "number": 123,
       "head_sha": "deadbeef", "is_fork": false,
-      "posted": false, "posted_inline": 0, "summary_action": "none"
+      "posted": false, "posted_inline": 0, "summary_action": "none",
+      "approve_action": "commented", "approve_reason": "not_requested",
+      "suggestions_posted": 0
     }
   }
 }
@@ -75,8 +77,10 @@ With `--post`, inline comments are filtered to lines **inside the PR's diff
 hunks** (re-derived deterministically from the same diff the engine anchored
 against), so GitHub never 422s on an out-of-hunk line. Each inline comment uses
 the modern comfort-fade API (`Side: RIGHT`, `Line`) and the review is anchored
-to the **head SHA** with `Event: COMMENT` — miu-cr never approves or requests
-changes.
+to the **head SHA**. By default the review uses `Event: COMMENT` and never
+approves or requests changes; two opt-in write-actions (`--suggest`,
+`--approve-clean`, both default OFF) are described under **Opt-in write-actions**
+below. miu-cr never requests changes and never pushes commits.
 
 A single summary comment is posted last. Its first line is a hidden sentinel:
 
@@ -106,6 +110,58 @@ fails, the summary always reflects the latest successful run.
 If a review would carry more inline comments than GitHub accepts in one request,
 miu-cr posts the highest-severity findings up to a fixed cap (40) and notes the
 omitted count in the summary body, so the whole review can't 422 on size.
+
+## Opt-in write-actions
+
+Two write-actions extend `--post`. **Both default OFF**; without them the review
+is comment-only.
+
+```sh
+miucr review --pr owner/repo#123 --post --suggest --approve-clean
+```
+
+### `--suggest` — native one-click suggestions
+
+Emits a GitHub native `suggestion` block (one-click "Commit suggestion") **only**
+for a finding that is a proven verbatim **single-line** replacement: the
+suggested patch is a single line, the finding is single-line, and the raw new-file
+line at the anchored position matches the finding's quoted code (so the suggestion
+can't replace an unrelated line). It must also reach a severity floor (default
+`medium`). Everything else — multi-line findings, non-verbatim patches, below the
+floor — falls back to a plain fenced hint (the safe default). Suggestions are
+**author-applied**: miu-cr never pushes or commits to the branch. The count
+emitted this run is reported as `suggestions_posted`.
+
+### `--approve-clean` — APPROVE only on a clean, trusted PR
+
+Submits `Event=APPROVE` instead of `COMMENT`, but **only** when every safety
+precondition holds: the PR is clean (no finding reaches the gate), is **not a
+fork**, the author is **trusted** (`AuthorAssociation` not `NONE` /
+`FIRST_TIME_CONTRIBUTOR` / `FIRST_TIMER`), **at least one file was actually
+reviewed**, the **head SHA is unchanged** (re-fetched right before submitting),
+and no `APPROVED` review already exists at that SHA. Re-runs at the same head SHA
+post **no second APPROVE**.
+
+Any missed precondition silently **degrades to `COMMENT`** with a reason — it
+**never fails the run**. The outcome is reported as `approve_action`
+(`approved` | `commented`) and `approve_reason` (e.g. `gate_failed`, `fork`,
+`untrusted_author`, `nothing_reviewed`, `head_moved`, `already_approved`,
+`self_approve_forbidden`).
+
+> **`--approve-clean` is not advisory.** A review submitted by a **PAT satisfies
+> branch-protection required-reviews** and can enable auto-merge — so a human does
+> **not** necessarily still own the merge. Use it only where the bot identity does
+> **not** count toward required reviews, or with auto-merge disabled, and ensure
+> the PAT is a **distinct identity** from the PR author (a bot can't approve its
+> own PR — that degrades to `self_approve_forbidden`). GitHub Apps are
+> self-approval-safe. When unsure, leave it OFF.
+
+### Inheritance
+
+`serve` inherits both flags **OFF** — a webhook daemon must not auto-suggest or
+auto-approve. The GitHub Action stays **comment-only** for now (a default-token
+APPROVE is a self-approve / supply-chain risk), so it exposes no
+`suggest`/`approve-clean` inputs.
 
 ## Fork PRs
 

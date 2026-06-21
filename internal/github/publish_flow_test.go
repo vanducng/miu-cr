@@ -25,7 +25,11 @@ type statefulClient struct {
 }
 
 func (c *statefulClient) GetPR(stdctx.Context, string, string, int) (*gh.PullRequest, error) {
-	return nil, nil
+	return &gh.PullRequest{Head: &gh.PullRequestBranch{SHA: gh.Ptr("headsha")}}, nil
+}
+
+func (c *statefulClient) ListReviews(stdctx.Context, string, string, int, *gh.ListOptions) ([]*gh.PullRequestReview, *gh.Response, error) {
+	return nil, &gh.Response{}, nil
 }
 func (c *statefulClient) ListFiles(stdctx.Context, string, string, int, *gh.ListOptions) ([]*gh.CommitFile, *gh.Response, error) {
 	return nil, &gh.Response{}, nil
@@ -79,15 +83,15 @@ func runPublishWithDiffs(t *testing.T, c Client, info *PRInfo, findings []engine
 	if err != nil {
 		t.Fatalf("ExistingFingerprints: %v", err)
 	}
-	posted, omitted, err := PostReview(ctx, c, info, findings, diffs, "", existing)
+	res, err := PostReview(ctx, c, info, findings, diffs, "", existing, PostReviewOptions{})
 	if err != nil {
 		t.Fatalf("PostReview: %v", err)
 	}
-	action, err := UpsertSummaryComment(ctx, c, info, RenderSummary(info, findings, nil, omitted))
+	action, err := UpsertSummaryComment(ctx, c, info, RenderSummary(info, findings, nil, res.Omitted))
 	if err != nil {
 		t.Fatalf("UpsertSummaryComment: %v", err)
 	}
-	return posted, action
+	return res.Posted, action
 }
 
 func TestPublishFlowPostThenRerun(t *testing.T) {

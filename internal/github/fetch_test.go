@@ -87,6 +87,9 @@ func (f *fakeClient) ListFiles(_ stdctx.Context, _, _ string, _ int, opts *gh.Li
 func (f *fakeClient) CreateReview(stdctx.Context, string, string, int, *gh.PullRequestReviewRequest) (*gh.PullRequestReview, error) {
 	return nil, nil
 }
+func (f *fakeClient) ListReviews(stdctx.Context, string, string, int, *gh.ListOptions) ([]*gh.PullRequestReview, *gh.Response, error) {
+	return nil, &gh.Response{}, nil
+}
 func (f *fakeClient) ListReviewComments(stdctx.Context, string, string, int, *gh.PullRequestListCommentsOptions) ([]*gh.PullRequestComment, *gh.Response, error) {
 	return nil, &gh.Response{}, nil
 }
