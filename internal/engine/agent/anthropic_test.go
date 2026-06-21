@@ -144,17 +144,57 @@ func TestAnthropicAgentEmptyRoundsBail(t *testing.T) {
 	}
 }
 
-// maxToolTurns must bound the loop: a client that always asks for a tool exhausts
-// the turn budget instead of spinning forever.
-func TestAnthropicAgentMaxToolTurns(t *testing.T) {
-	resp := make([]string, maxToolTurns)
-	for i := range resp {
-		resp[i] = toolUseMessage(fmt.Sprintf("tu_%d", i), "grep", map[string]any{"pattern": "x"})
+// toolHungryAnthropic always asks for a tool WHILE tools are offered; once the
+// loop withdraws them on the forced final turn it returns findings (if scripted),
+// modelling a real model that keeps exploring a large diff until forced to answer.
+type toolHungryAnthropic struct {
+	findings string // returned once tools are withdrawn; "" => degenerate (never finalizes)
+	calls    int
+}
+
+func (f *toolHungryAnthropic) newMessage(_ stdctx.Context, params anthropic.MessageNewParams) (*anthropic.Message, error) {
+	f.calls++
+	body := toolUseMessage(fmt.Sprintf("tu_%d", f.calls), "grep", map[string]any{"pattern": "x"})
+	if len(params.Tools) == 0 && f.findings != "" {
+		body = textMessage(f.findings)
 	}
-	a := &anthropicAgent{client: &fakeAnthropic{responses: resp}, model: "claude-test"}
+	var msg anthropic.Message
+	if err := json.Unmarshal([]byte(body), &msg); err != nil {
+		return nil, err
+	}
+	return &msg, nil
+}
+
+var _ anthropicClient = (*toolHungryAnthropic)(nil)
+
+// On a large diff the model may keep requesting tools to the budget. The loop
+// must FORCE finalization on the last turn (withdraw tools + nudge) so the model
+// is driven to emit findings — a real review, not a hard maxToolTurns failure.
+func TestAnthropicAgentForcedFinalizeReturnsFindings(t *testing.T) {
+	fc := &toolHungryAnthropic{findings: `{"findings":[{"file":"a.go","existing_code":"x","severity":"warning","category":"bug","rationale":"r"}]}`}
+	a := &anthropicAgent{client: fc, model: "claude-test"}
+	got, err := a.Review(stdctx.Background(), Context{Text: "ctx", RepoDir: t.TempDir()})
+	if err != nil {
+		t.Fatalf("Review: %v", err)
+	}
+	// Findings only come back if the loop withdrew tools on the final turn.
+	if len(got) != 1 {
+		t.Fatalf("want 1 finding from forced finalize, got %d", len(got))
+	}
+	if fc.calls != maxToolTurns {
+		t.Fatalf("expected %d calls (explore to budget then finalize), got %d", maxToolTurns, fc.calls)
+	}
+}
+
+// Genuinely-degenerate case: the model returns neither tools-less findings nor
+// parseable JSON even when forced. The loop must still error (never silently
+// return empty findings, which would read as "no issues").
+func TestAnthropicAgentForcedFinalizeStillErrors(t *testing.T) {
+	fc := &toolHungryAnthropic{} // never finalizes
+	a := &anthropicAgent{client: fc, model: "claude-test"}
 	_, err := a.Review(stdctx.Background(), Context{Text: "ctx", RepoDir: t.TempDir()})
-	if err == nil || !strings.Contains(err.Error(), "maxToolTurns") {
-		t.Fatalf("expected maxToolTurns exhaustion, got %v", err)
+	if err == nil || !strings.Contains(err.Error(), "finalization") {
+		t.Fatalf("expected forced-finalization error, got %v", err)
 	}
 }
 

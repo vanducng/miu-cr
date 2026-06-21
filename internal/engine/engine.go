@@ -8,6 +8,7 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"fmt"
+	"path/filepath"
 	"sort"
 	"time"
 
@@ -15,6 +16,7 @@ import (
 	enginectx "github.com/vanducng/miu-cr/internal/engine/context"
 	"github.com/vanducng/miu-cr/internal/engine/diff"
 	"github.com/vanducng/miu-cr/internal/engine/gitcmd"
+	"github.com/vanducng/miu-cr/internal/rules"
 )
 
 // PersistRecord is the engine's view of a persisted review. The store package
@@ -55,6 +57,7 @@ func SetAnchorer(a Anchorer) { anchorLineNumbers = a }
 // the concrete Anthropic agent to this interface.
 type AgentContext struct {
 	Text    string
+	Rules   string // fenced rules section injected into the USER turn before the diff
 	RepoDir string
 	Rev     string
 	Runner  *gitcmd.Runner
@@ -81,6 +84,14 @@ type Request struct {
 	Extensions   []string
 	TokenBudget  int
 	ExpandWindow int
+
+	// Rules are the loaded, trust-tagged rule files (wire loads + tags them; the
+	// engine selects them against the changed files in-memory). RulesFork drops
+	// Untrusted (repo) rules + their context_files before selection (attacker-
+	// authored on fork PRs). RulesTokenBudget caps the rendered rules section.
+	Rules            []rules.Rule
+	RulesFork        bool
+	RulesTokenBudget int
 }
 
 // Engine orchestrates a review with an injectable Agent so the pipeline is
@@ -168,14 +179,17 @@ func (e *Engine) Review(ctx stdctx.Context, req Request) (ReviewResult, error) {
 		}, nil
 	}
 
+	rulesText, rulesApplied, rulesTruncated := e.buildRules(req, selected)
+
 	assembled := enginectx.AssembleContext(selected, enginectx.AssembleOptions{
-		TokenBudget:  req.TokenBudget,
+		TokenBudget:  diffBudget(req.TokenBudget, req.RulesTokenBudget),
 		ExpandWindow: req.ExpandWindow,
 	})
 
 	rev := selected[0].Ref
 	raw, err := e.Agent.Review(ctx, AgentContext{
 		Text:    assembled.Text,
+		Rules:   rulesText,
 		RepoDir: req.RepoDir,
 		Rev:     rev,
 		Runner:  e.Runner,
@@ -199,6 +213,8 @@ func (e *Engine) Review(ctx stdctx.Context, req Request) (ReviewResult, error) {
 		"max_severity":     maxSeverity(kept),
 		"gate":             req.Gate,
 		"truncation_level": assembled.Stats["truncation_level"],
+		"rules_applied":    float64(rulesApplied),
+		"rules_truncated":  rulesTruncated,
 	}
 
 	result := ReviewResult{Findings: kept, Stats: stats}
@@ -221,6 +237,78 @@ func (e *Engine) Review(ctx stdctx.Context, req Request) (ReviewResult, error) {
 	}
 
 	return result, nil
+}
+
+// buildRules selects the loaded rules against the changed paths and renders the
+// fenced rules section. On a fork PR, Untrusted (repo) rules are dropped before
+// selection and their context_files are never inlined.
+func (e *Engine) buildRules(req Request, selected []diff.Diff) (text string, applied int, truncated bool) {
+	loaded := req.Rules
+	if req.RulesFork {
+		loaded = trustedOnly(loaded)
+	}
+	if len(loaded) == 0 {
+		return "", 0, false
+	}
+	picked := rules.SelectRules(loaded, changedPathsOf(selected))
+	if len(picked) == 0 {
+		return "", 0, false
+	}
+	return rules.BuildRulesSection(picked, !req.RulesFork, req.RulesTokenBudget)
+}
+
+// trustedOnly drops Untrusted (repo) rules, used on fork PRs where repo rules
+// are attacker-authored.
+func trustedOnly(in []rules.Rule) []rules.Rule {
+	out := make([]rules.Rule, 0, len(in))
+	for _, r := range in {
+		if r.Provenance.Trusted() {
+			out = append(out, r)
+		}
+	}
+	return out
+}
+
+// changedPathsOf derives forward-slash relative paths from the selected diffs
+// (NewPath, plus OldPath for renames) for glob matching.
+func changedPathsOf(selected []diff.Diff) []string {
+	out := make([]string, 0, len(selected)*2) // worst case: a rename adds OldPath + NewPath
+	seen := map[string]bool{}
+	add := func(p string) {
+		p = filepath.ToSlash(p)
+		if p == "" || seen[p] {
+			return
+		}
+		seen[p] = true
+		out = append(out, p)
+	}
+	for _, d := range selected {
+		add(d.NewPath)
+		if d.IsRenamed {
+			add(d.OldPath)
+		}
+	}
+	return out
+}
+
+// diffBudget splits the caller's total token budget between the diff and the
+// rules section. The rules cap is bounded to at most half the total so the diff
+// always keeps a usable share even when rulesCap (default ~4096) dwarfs a small
+// total; the result is clamped to [1, total]. A disabled total (<=0) stays
+// disabled; a non-positive rulesCap means no rules section, so the diff gets the
+// whole total.
+func diffBudget(total, rulesCap int) int {
+	if total <= 0 {
+		return total
+	}
+	if rulesCap <= 0 {
+		return total
+	}
+	b := total - min(rulesCap, total/2)
+	if b < 1 {
+		return 1
+	}
+	return b
 }
 
 func modeName(m diff.Mode) string {

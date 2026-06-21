@@ -54,6 +54,36 @@ serve is a network daemon, so the guards are mandatory:
 - All serve-side errors routed through `config.RedactString` (the clone URL
   embeds the PAT); secrets never logged, never in the envelope, never persisted.
 
+## Project-rules injection seam
+
+Markdown project rules (`.miu/cr/rules/*.md` repo, `~/.config/miu/cr/rules/*.md`
+user, plus embedded defaults) feed deterministic context into the reviewer.
+`internal/rules` is self-contained (frontmatter parse + layered load + glob
+selection + context-file inliner) and sits **below** engine in the import graph;
+it does no review logic.
+
+- **wire loads + trust-tags.** Only the wire layer knows whether the path is a
+  working tree (local) or a fork-PR temp clone, so it owns discovery, provenance
+  (defaults/user = Trusted, repo = Untrusted), and `IsFork`. It passes the loaded
+  `[]rules.Rule` + `isFork` into `engine.Request`; it never selects.
+- **engine selects after `SelectFiles`.** Selection needs the changed paths,
+  which only exist after file selection — so the engine selects in-memory (no FS
+  access) from the slice wire passed in. `changedPaths` derive from
+  `selected[].NewPath` (+ `OldPath` for renames), forward-slash. This is the same
+  `rules.SelectRules` entry point `miucr rules check` calls.
+- **USER-turn fenced section.** `BuildUserPrompt` takes a `PromptParts` struct
+  (not positional args) and emits the rules section before the diff. Repo
+  (Untrusted) rules are wrapped in a context-only fence; on `IsFork` they and
+  their `context_files` are dropped before selection. The finding-JSON contract
+  stays in the cached `systemPrompt`.
+- **Lockstep adapter copy.** The wire `agentAdapter.Review` (and the lazy agent)
+  must copy `rc.Rules` into the concrete agent context — a forgotten copy
+  silently drops every rule, so a test asserts it survives the adapter.
+- **Budget.** Rules get their own cap, subtracted from the diff budget with a
+  `minDiffBudget` floor so the diff budget never hits the `<=0` disabled
+  sentinel. `stats.rules_applied` / `rules_truncated` expose the result. Rules
+  are context only — never gating.
+
 ## Token seam (M3 → M8)
 
 serve resolves the GitHub token through a `func() (string, error)` resolver and

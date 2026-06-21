@@ -3,6 +3,7 @@ package agent
 import (
 	stdctx "context"
 	"encoding/json"
+	"fmt"
 	"strings"
 	"testing"
 
@@ -140,6 +141,58 @@ func TestOpenAIAgentEmptyRoundsBail(t *testing.T) {
 	_, err := a.Review(stdctx.Background(), Context{Text: "ctx", RepoDir: t.TempDir()})
 	if err == nil || !strings.Contains(err.Error(), "no parseable findings") {
 		t.Fatalf("expected empty-round bail, got %v", err)
+	}
+}
+
+// toolHungryOpenAI always asks for a tool WHILE tools are offered; once the loop
+// withdraws them on the forced final turn it returns findings (if scripted),
+// modelling a real model exploring a large diff until forced to answer.
+type toolHungryOpenAI struct {
+	findings string // returned once tools are withdrawn; "" => degenerate (never finalizes)
+	calls    int
+}
+
+func (f *toolHungryOpenAI) create(_ stdctx.Context, params openai.ChatCompletionNewParams) (*openai.ChatCompletion, error) {
+	f.calls++
+	body := toolCallCompletion(fmt.Sprintf("call_%d", f.calls), "grep", `{"pattern":"x"}`)
+	if len(params.Tools) == 0 && f.findings != "" {
+		body = textCompletion(f.findings)
+	}
+	var cc openai.ChatCompletion
+	if err := json.Unmarshal([]byte(body), &cc); err != nil {
+		return nil, err
+	}
+	return &cc, nil
+}
+
+var _ openaiClient = (*toolHungryOpenAI)(nil)
+
+// On a large diff the model may keep requesting tools to the budget. The loop
+// must FORCE finalization on the last turn (withdraw tools + nudge) so it is
+// driven to emit findings — a real review, not a hard maxToolTurns failure.
+func TestOpenAIAgentForcedFinalizeReturnsFindings(t *testing.T) {
+	fc := &toolHungryOpenAI{findings: `{"findings":[{"file":"a.go","existing_code":"x","severity":"warning","category":"bug","rationale":"r"}]}`}
+	a := &openaiAgent{client: fc, model: "gpt-test"}
+	got, err := a.Review(stdctx.Background(), Context{Text: "ctx", RepoDir: t.TempDir()})
+	if err != nil {
+		t.Fatalf("Review: %v", err)
+	}
+	if len(got) != 1 {
+		t.Fatalf("want 1 finding from forced finalize, got %d", len(got))
+	}
+	if fc.calls != maxToolTurns {
+		t.Fatalf("expected %d calls (explore to budget then finalize), got %d", maxToolTurns, fc.calls)
+	}
+}
+
+// Genuinely-degenerate case: never finalizes even when forced → still errors,
+// never silently returns empty findings.
+func TestOpenAIAgentForcedFinalizeStillErrors(t *testing.T) {
+	fc := &toolHungryOpenAI{}
+	a := &openaiAgent{client: fc, model: "gpt-test"}
+	_, err := a.Review(stdctx.Background(), Context{Text: "ctx", RepoDir: t.TempDir()})
+	if err == nil || !strings.Contains(err.Error(), "finalization") {
+		t.Fatalf("expected forced-finalization error, got %v", err)
 	}
 }
 

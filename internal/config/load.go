@@ -24,6 +24,18 @@ func Dir() (string, error) {
 	return filepath.Join(home, ".config", "miu", "cr"), nil
 }
 
+// RulesDir returns the user rules directory (Dir()/rules), or "" when the home
+// dir is unresolvable so callers can treat it as "no user rule layer". This is
+// the single source of truth shared by the live reviewer (wire) and `rules
+// check` (cli) so the two never diverge.
+func RulesDir() string {
+	dir, err := Dir()
+	if err != nil {
+		return ""
+	}
+	return filepath.Join(dir, "rules")
+}
+
 // FilePath returns the user config file location (Dir()/config.toml). The file
 // is optional; its absence is not an error.
 func FilePath() (string, error) {

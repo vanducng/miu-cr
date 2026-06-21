@@ -24,11 +24,25 @@ Respond with a single JSON object, no prose, no markdown fences:
 
 If there are no problems, respond with {"findings":[]}.`
 
-// BuildUserPrompt wraps the assembled review context into the user turn.
-func BuildUserPrompt(assembledContext string) string {
+// PromptParts is the structured input to BuildUserPrompt. It is a struct (not
+// positional args) so future per-review fields don't break callers. Rules is the
+// already-rendered, trust-fenced rules section; Diff is the assembled context.
+type PromptParts struct {
+	Rules string
+	Diff  string
+}
+
+// BuildUserPrompt wraps the review context into the USER turn. The rules section
+// (if any) is emitted BEFORE the diff; the finding-JSON contract stays in the
+// cached systemPrompt so injected rule prose can never redefine the schema.
+func BuildUserPrompt(parts PromptParts) string {
 	var sb strings.Builder
 	sb.WriteString("Review the following change. Report findings as specified.\n\n")
-	sb.WriteString(assembledContext)
+	if strings.TrimSpace(parts.Rules) != "" {
+		sb.WriteString(parts.Rules)
+		sb.WriteString("\n")
+	}
+	sb.WriteString(parts.Diff)
 	return sb.String()
 }
 

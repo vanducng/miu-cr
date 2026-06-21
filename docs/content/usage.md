@@ -116,6 +116,10 @@ miucr review --staged --exclude '**/*_test.go'          # doublestar globs to dr
 - `--provider anthropic|openai|auto` (default `auto`).
 - `--api-key`, `--base-url`, `--auth-token`, `--model` — all optional overrides, **never persisted**.
 
+## Project rules
+
+Every review gets a built-in baseline plus any project rules under `.miu/cr/rules/*.md` (and `~/.config/miu/cr/rules/*.md`) that match the changed files. Rules are review **context only** — they never gate. Scaffold one with `miucr rules init` and inspect selection with `miucr rules check <path>`. See the [Project rules](/rules/) guide for the format, trust model, and how rules flow through local / `--pr` / serve.
+
 ## version
 
 ```sh
