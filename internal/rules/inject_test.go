@@ -17,7 +17,7 @@ func untrustedRule(stem, body string) Rule {
 
 func TestBuildRulesSectionTrustFraming(t *testing.T) {
 	t.Run("trusted rule is not fenced", func(t *testing.T) {
-		text, applied, truncated := BuildRulesSection([]Rule{trustedRule("a", "trusted body")}, "", true, 0)
+		text, applied, truncated := BuildRulesSection([]Rule{trustedRule("a", "trusted body")}, true, 0)
 		if applied != 1 || truncated {
 			t.Fatalf("applied=%d truncated=%v", applied, truncated)
 		}
@@ -30,7 +30,7 @@ func TestBuildRulesSectionTrustFraming(t *testing.T) {
 	})
 
 	t.Run("untrusted rule is context-only fenced", func(t *testing.T) {
-		text, _, _ := BuildRulesSection([]Rule{untrustedRule("r", "repo body")}, "", true, 0)
+		text, _, _ := BuildRulesSection([]Rule{untrustedRule("r", "repo body")}, true, 0)
 		if !strings.Contains(text, "UNTRUSTED") {
 			t.Errorf("untrusted rule must be fenced: %q", text)
 		}
@@ -57,7 +57,7 @@ func TestBuildRulesSectionContextFiles(t *testing.T) {
 	}
 
 	t.Run("inlined when allowed", func(t *testing.T) {
-		text, _, _ := BuildRulesSection([]Rule{rule}, dir, true, 0)
+		text, _, _ := BuildRulesSection([]Rule{rule}, true, 0)
 		if !strings.Contains(text, "CONTEXT CONTENT") {
 			t.Errorf("context_file not inlined: %q", text)
 		}
@@ -67,7 +67,7 @@ func TestBuildRulesSectionContextFiles(t *testing.T) {
 	})
 
 	t.Run("skipped when context files disallowed (fork)", func(t *testing.T) {
-		text, _, _ := BuildRulesSection([]Rule{rule}, dir, false, 0)
+		text, _, _ := BuildRulesSection([]Rule{rule}, false, 0)
 		if strings.Contains(text, "CONTEXT CONTENT") {
 			t.Errorf("context_file must NOT be inlined when disallowed: %q", text)
 		}
@@ -76,7 +76,7 @@ func TestBuildRulesSectionContextFiles(t *testing.T) {
 	t.Run("absolute path rejected", func(t *testing.T) {
 		r := rule
 		r.FM.ContextFiles = []string{filepath.Join(dir, "ctx.txt")}
-		text, _, _ := BuildRulesSection([]Rule{r}, dir, true, 0)
+		text, _, _ := BuildRulesSection([]Rule{r}, true, 0)
 		if strings.Contains(text, "CONTEXT CONTENT") {
 			t.Errorf("absolute path must be rejected: %q", text)
 		}
@@ -88,7 +88,7 @@ func TestBuildRulesSectionContextFiles(t *testing.T) {
 	t.Run("traversal rejected", func(t *testing.T) {
 		r := rule
 		r.FM.ContextFiles = []string{"../../etc/passwd"}
-		text, _, _ := BuildRulesSection([]Rule{r}, dir, true, 0)
+		text, _, _ := BuildRulesSection([]Rule{r}, true, 0)
 		if strings.Contains(text, "root:") {
 			t.Errorf("traversal must be rejected: %q", text)
 		}
@@ -100,7 +100,7 @@ func TestBuildRulesSectionContextFiles(t *testing.T) {
 	t.Run("missing file warns and skips", func(t *testing.T) {
 		r := rule
 		r.FM.ContextFiles = []string{"nope.txt"}
-		text, applied, _ := BuildRulesSection([]Rule{r}, dir, true, 0)
+		text, applied, _ := BuildRulesSection([]Rule{r}, true, 0)
 		if applied != 1 {
 			t.Errorf("rule should still apply with a missing context_file, applied=%d", applied)
 		}
@@ -124,7 +124,7 @@ func TestBuildRulesSectionTotalByteCap(t *testing.T) {
 		Provenance: UserTrusted,
 		FM:         Frontmatter{AlwaysApply: true, ContextFiles: []string{"a.txt", "b.txt", "c.txt", "d.txt", "e.txt"}},
 	}
-	text, _, _ := BuildRulesSection([]Rule{rule}, dir, true, 0)
+	text, _, _ := BuildRulesSection([]Rule{rule}, true, 0)
 	xs := strings.Count(text, "X")
 	if xs > maxContextTotalBytes {
 		t.Errorf("inlined %d context bytes, exceeds total cap %d", xs, maxContextTotalBytes)
@@ -143,7 +143,7 @@ func TestBuildRulesSectionCapTruncates(t *testing.T) {
 		trustedRule("d", body),
 	}
 	cap := 500 // tokens; only ~1 rule fits
-	text, applied, truncated := BuildRulesSection(rules, "", true, cap)
+	text, applied, truncated := BuildRulesSection(rules, true, cap)
 	if !truncated {
 		t.Errorf("expected truncated=true under tight cap")
 	}

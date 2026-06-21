@@ -2,6 +2,7 @@ package rules
 
 import (
 	"fmt"
+	"io"
 	"os"
 	"path/filepath"
 	"strings"
@@ -25,12 +26,13 @@ func estTokens(s string) int { return len(s) / 4 }
 // BuildRulesSection renders the selected rules into a single USER-turn section
 // (description + body, with context_files inlined). Untrusted (repo) rules are
 // wrapped in an explicit context-only fence. context_files are resolved relative
-// to each rule file, reject absolute / `..`-escaping paths, are byte-capped per
-// file and in total, and are skipped entirely when allowContextFiles is false
-// (fork PRs). The whole section is held under cap tokens by dropping the
-// least-important rules last (input order is the truncation order); truncated is
-// set when any selected rule is dropped. A cap of <=0 disables the token cap.
-func BuildRulesSection(selected []Rule, repoDir string, allowContextFiles bool, cap int) (text string, applied int, truncated bool) {
+// to each rule file, reject absolute / `..`-escaping / symlink-escaping paths,
+// are byte-capped per file and in total, and are skipped entirely when
+// allowContextFiles is false (fork PRs). The whole section is held under cap
+// tokens by dropping the least-important rules last (input order is the
+// truncation order); truncated is set when any selected rule is dropped. A cap
+// of <=0 disables the token cap.
+func BuildRulesSection(selected []Rule, allowContextFiles bool, cap int) (text string, applied int, truncated bool) {
 	if len(selected) == 0 {
 		return "", 0, false
 	}
@@ -38,7 +40,7 @@ func BuildRulesSection(selected []Rule, repoDir string, allowContextFiles bool, 
 	var totalContext int
 	blocks := make([]string, 0, len(selected))
 	for _, r := range selected {
-		blocks = append(blocks, renderRule(r, repoDir, allowContextFiles, &totalContext))
+		blocks = append(blocks, renderRule(r, allowContextFiles, &totalContext))
 	}
 
 	kept := len(blocks)
@@ -68,7 +70,7 @@ func assembleSection(blocks []string) string {
 	return sb.String()
 }
 
-func renderRule(r Rule, repoDir string, allowContextFiles bool, totalContext *int) string {
+func renderRule(r Rule, allowContextFiles bool, totalContext *int) string {
 	var sb strings.Builder
 	untrusted := !r.Provenance.Trusted()
 	if untrusted {
@@ -96,55 +98,92 @@ func renderRule(r Rule, repoDir string, allowContextFiles bool, totalContext *in
 	return sb.String()
 }
 
-// inlineContextFile resolves cf relative to the rule file, rejecting absolute and
-// `..`-escaping paths, then inlines the file content under per-file and total
-// byte caps. Missing or rejected files become a one-line warning comment so the
-// model knows the hint was attempted but skipped.
+// inlineContextFile resolves cf relative to the rule file, rejecting absolute,
+// `..`-escaping, and symlink-escaping paths, then inlines the file content under
+// per-file and total byte caps that are enforced BEFORE the file is read (so an
+// oversized or already-over-cap file is never pulled into memory). Missing or
+// rejected files become a one-line warning comment — never carrying an absolute
+// path — so the model knows the hint was attempted but skipped.
 func inlineContextFile(r Rule, cf string, totalContext *int) string {
 	if cf == "" {
 		return ""
 	}
 	if filepath.IsAbs(cf) {
-		return fmt.Sprintf("[context_file %q skipped: absolute path rejected]\n", cf)
+		return skipContext(cf, "absolute path rejected")
 	}
 	clean := filepath.Clean(cf)
 	if clean == ".." || strings.HasPrefix(clean, ".."+string(filepath.Separator)) {
-		return fmt.Sprintf("[context_file %q skipped: path escapes the rule directory]\n", cf)
+		return skipContext(cf, "path escapes the rule directory")
 	}
 
 	base := filepath.Dir(r.Path)
 	full := filepath.Join(base, clean)
 	if !withinBase(base, full) {
-		return fmt.Sprintf("[context_file %q skipped: path escapes the rule directory]\n", cf)
+		return skipContext(cf, "path escapes the rule directory")
 	}
 
-	data, err := os.ReadFile(full)
+	// Resolve symlinks on both base and target, then re-check containment: this
+	// defeats a symlinked path component pointing outside the rule directory and
+	// also normalizes platform symlinks (e.g. macOS /var -> /private/var) so the
+	// comparison is apples-to-apples.
+	evalBase, err := filepath.EvalSymlinks(base)
 	if err != nil {
-		return fmt.Sprintf("[context_file %q skipped: %v]\n", cf, err)
+		return skipContext(cf, "read error")
+	}
+	evalFull, err := filepath.EvalSymlinks(full)
+	if err != nil {
+		return skipContext(cf, "not found")
+	}
+	if !withinBase(evalBase, evalFull) {
+		return skipContext(cf, "path escapes the rule directory")
+	}
+
+	fi, err := os.Stat(evalFull)
+	if err != nil {
+		return skipContext(cf, "read error")
+	}
+	if !fi.Mode().IsRegular() {
+		return skipContext(cf, "not a regular file")
 	}
 	if *totalContext >= maxContextTotalBytes {
-		return fmt.Sprintf("[context_file %q skipped: total context byte cap reached]\n", cf)
+		return skipContext(cf, "total context byte cap reached")
 	}
-	content := data
-	if len(content) > maxContextFileBytes {
-		content = content[:maxContextFileBytes]
+
+	// Read budget bounded by both the per-file cap and the remaining total cap,
+	// applied via LimitReader so memory stays bounded regardless of file size.
+	budget := maxContextFileBytes
+	if rem := maxContextTotalBytes - *totalContext; rem < budget {
+		budget = rem
 	}
-	if *totalContext+len(content) > maxContextTotalBytes {
-		content = content[:maxContextTotalBytes-*totalContext]
+	f, err := os.Open(evalFull)
+	if err != nil {
+		return skipContext(cf, "read error")
+	}
+	defer f.Close()
+	content, err := io.ReadAll(io.LimitReader(f, int64(budget)))
+	if err != nil {
+		return skipContext(cf, "read error")
 	}
 	*totalContext += len(content)
 
 	var sb strings.Builder
 	sb.WriteString(fmt.Sprintf("--- context_file: %s ---\n", clean))
-	sb.WriteString(string(content))
+	sb.Write(content)
 	if len(content) > 0 && content[len(content)-1] != '\n' {
 		sb.WriteString("\n")
 	}
 	return sb.String()
 }
 
-// withinBase reports whether full resolves inside base (defense-in-depth beyond
-// the lexical `..` check, e.g. for symlink-free relative joins).
+// skipContext renders a uniform skip note that never embeds an absolute path,
+// so a server-side directory layout can't leak into the prompt.
+func skipContext(cf, reason string) string {
+	return fmt.Sprintf("[context_file %q skipped: %s]\n", cf, reason)
+}
+
+// withinBase reports whether full lexically resolves inside base. Callers pass
+// symlink-evaluated paths for the security-critical check; the lexical form is
+// also used as a cheap first pass before symlink resolution.
 func withinBase(base, full string) bool {
 	rel, err := filepath.Rel(base, full)
 	if err != nil {

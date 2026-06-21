@@ -24,13 +24,13 @@ func rulesCommand(opts *options) *cobra.Command {
 	return cmd
 }
 
-const exampleRulePath = ".miucr/rules/example.md"
+const exampleRulePath = ".miu/cr/rules/example.md"
 
 func rulesInitCommand(_ *options) *cobra.Command {
 	var force bool
 	cmd := &cobra.Command{
 		Use:   "init",
-		Short: "Scaffold an annotated .miucr/rules/example.md",
+		Short: "Scaffold an annotated .miu/cr/rules/example.md",
 		RunE: func(cmd *cobra.Command, args []string) error {
 			dir := filepath.Dir(exampleRulePath)
 			if err := os.MkdirAll(dir, 0o755); err != nil {
@@ -68,7 +68,10 @@ func rulesCheckCommand(_ *options) *cobra.Command {
 				return &CLIError{Code: "rules.check_path_required", Message: "a non-empty path is required", Hint: "miucr rules check <path>", Exit: 2}
 			}
 
-			loaded, warnings := rules.LoadRules(userRulesDirForCheck(), filepath.Join(".miucr", "rules"), true)
+			// Mirror engineReviewer: a local `rules check` always allows the
+			// repo layer (the fork-PR demotion only applies to --pr reviews).
+			const includeRepoRules = true
+			loaded, warnings := rules.LoadRules(config.RulesDir(), filepath.Join(".miu", "cr", "rules"), includeRepoRules)
 			selected := rules.SelectRules(loaded, []string{changed})
 
 			applicable := make([]map[string]any, 0, len(selected))
@@ -103,22 +106,12 @@ func rulesCheckCommand(_ *options) *cobra.Command {
 	return cmd
 }
 
-// userRulesDirForCheck mirrors wire.userRulesDir without importing wire (which
-// sits above cli): ~/.config/miu/cr/rules, or "" when home is unresolvable.
-func userRulesDirForCheck() string {
-	dir, err := config.Dir()
-	if err != nil {
-		return ""
-	}
-	return filepath.Join(dir, "rules")
-}
-
 const noFenceMarker = "(no frontmatter fence)"
 
 // bodyOnlyWarnings surfaces fence-less files the loader skipped, loudly, so a
 // stray .md author sees why their file is not a rule.
 func bodyOnlyWarnings(warnings []string) []string {
-	out := make([]string, 0)
+	out := make([]string, 0, len(warnings))
 	for _, w := range warnings {
 		if strings.Contains(w, noFenceMarker) {
 			out = append(out, w)

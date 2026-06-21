@@ -6,6 +6,7 @@ package wire
 import (
 	stdctx "context"
 	"errors"
+	"log/slog"
 	"path/filepath"
 	"time"
 
@@ -28,25 +29,20 @@ import (
 // of the prompt.
 const defaultRulesTokenBudget = 4096
 
-// userRulesDir returns ~/.config/miu/cr/rules, or "" when the home dir is
-// unresolvable (LoadRules treats "" as no user layer).
-func userRulesDir() string {
-	dir, err := config.Dir()
-	if err != nil {
-		return ""
-	}
-	return filepath.Join(dir, "rules")
-}
-
 // loadRules discovers + trust-tags rules for a review. repoDir is the working
 // tree (local) or the PR temp clone (--pr). allowRepo gates the Untrusted repo
-// layer: false on fork PRs (attacker-authored). Warnings are non-fatal.
+// layer: false on fork PRs (attacker-authored). Warnings are non-fatal but are
+// logged to stderr (never the JSON envelope or the prompt) so a user can see why
+// a rule didn't load (bad YAML, skipped symlink, oversized file, invalid glob).
 func loadRules(repoDir string, allowRepo bool) []rules.Rule {
 	repoRulesDir := ""
 	if repoDir != "" {
-		repoRulesDir = filepath.Join(repoDir, ".miucr", "rules")
+		repoRulesDir = filepath.Join(repoDir, ".miu", "cr", "rules")
 	}
-	loaded, _ := rules.LoadRules(userRulesDir(), repoRulesDir, allowRepo)
+	loaded, warnings := rules.LoadRules(config.RulesDir(), repoRulesDir, allowRepo)
+	for _, w := range warnings {
+		slog.Warn(w)
+	}
 	return loaded
 }
 

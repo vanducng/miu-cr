@@ -3,7 +3,9 @@ package rules
 import (
 	"embed"
 	"fmt"
+	"path/filepath"
 	"sort"
+	"strings"
 )
 
 //go:embed defaults/*.md
@@ -18,7 +20,7 @@ func loadDefaults() (rules []Rule, warnings []string) {
 		return nil, []string{fmt.Sprintf("rules: read embedded defaults: %v", err)}
 	}
 	for _, e := range entries {
-		if e.IsDir() {
+		if e.IsDir() || !strings.EqualFold(filepath.Ext(e.Name()), ".md") {
 			continue
 		}
 		path := "defaults/" + e.Name()
@@ -33,6 +35,7 @@ func loadDefaults() (rules []Rule, warnings []string) {
 			continue
 		}
 		r.Provenance = BuiltinDefault
+		warnings = append(warnings, validateGlobs(r)...)
 		rules = append(rules, r)
 	}
 	sort.Slice(rules, func(i, j int) bool { return rules[i].Stem < rules[j].Stem })

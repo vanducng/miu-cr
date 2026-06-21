@@ -2,7 +2,7 @@ package rules
 
 // RuleTemplate returns an annotated example rule for `miucr rules init`. It
 // covers every v1 frontmatter key plus a sample prose body so a repo can copy it
-// into .miucr/rules/ and edit.
+// into .miu/cr/rules/ and edit.
 func RuleTemplate() string {
 	return `---
 # description: one line summarizing what this rule tells the reviewer. Optional.

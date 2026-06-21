@@ -259,7 +259,7 @@ func (e *Engine) buildRules(req Request, selected []diff.Diff) (text string, app
 	if len(picked) == 0 {
 		return "", 0, false
 	}
-	return rules.BuildRulesSection(picked, req.RepoDir, !req.RulesFork, req.RulesTokenBudget)
+	return rules.BuildRulesSection(picked, !req.RulesFork, req.RulesTokenBudget)
 }
 
 // trustedOnly drops Untrusted (repo) rules, used on fork PRs where repo rules
@@ -297,7 +297,9 @@ func changedPathsOf(selected []diff.Diff) []string {
 }
 
 // diffBudget subtracts the rules cap from the diff token budget with a floor so
-// the diff budget never hits the <=0 disabled sentinel. A disabled diff budget
+// the diff budget never hits the <=0 disabled sentinel. The floor only acts as a
+// safety net: it is clamped to the caller's total so a large rules cap can never
+// hand back MORE diff budget than the caller asked for. A disabled diff budget
 // (<=0) stays disabled.
 func diffBudget(total, rulesCap int) int {
 	if total <= 0 || rulesCap <= 0 {
@@ -305,7 +307,7 @@ func diffBudget(total, rulesCap int) int {
 	}
 	b := total - rulesCap
 	if b < minDiffBudget {
-		return minDiffBudget
+		return min(total, minDiffBudget)
 	}
 	return b
 }

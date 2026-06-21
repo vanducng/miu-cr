@@ -9,7 +9,7 @@ type Provenance int
 const (
 	BuiltinDefault Provenance = iota // embedded baseline ruleset (Trusted)
 	UserTrusted                      // ~/.config/miu/cr/rules (Trusted)
-	RepoUntrusted                    // .miucr/rules (Untrusted; attacker-authored on fork PRs)
+	RepoUntrusted                    // .miu/cr/rules (Untrusted; attacker-authored on fork PRs)
 )
 
 func (p Provenance) String() string {

@@ -41,3 +41,19 @@ Rule of thumb: if a change alters what a user types or sees, the skill is likely
 stale — update it in the same work session, don't defer. There is intentionally
 **no in-repo `.claude` skill**; the skill is maintained out-of-tree and synced
 manually.
+
+## Path namespace — `miu/cr` (never a flat `.miucr/`)
+
+miu config, state, and rules ALWAYS live under the `miu/cr` namespace:
+
+- **Repo-level:** `.miu/cr/**` — e.g. `.miu/cr/rules/*.md`. Never introduce a flat `.miucr/` directory.
+- **User-level:** `~/.config/miu/cr/**` — `config.toml`, `state.db`, `rules/`. Matches the miu family (miu-db uses `~/.config/miu/db`); built via `os.UserHomeDir()` + `.config/miu/cr`, NOT `os.UserConfigDir()` (which differs on macOS).
+
+## Engineering conventions
+
+- **Pure-Go, `CGO_ENABLED=0`** — no cgo deps (SQLite is `modernc.org/sqlite`); the static-binary invariant is CI-asserted. Don't add a module when a promote/stdlib/existing-dep works.
+- **Output = the `miucr.cli/v1` JSON envelope** (`writeSuccess`); errors are typed `cli.CLIError` with stable `code` + `exit`. Secrets never appear in the envelope, logs, or on disk.
+- **Engine does no filesystem access for rules** — the wire/cli layer discovers, loads, and trust-tags rules and passes them into `engine.Request`; the engine only selects (after `SelectFiles`) + injects.
+- **Rules trust model:** repo `.miu/cr/rules` are **Untrusted** (attacker-authored on fork PRs) → fenced context-only, dropped on fork PRs, byte-capped, no symlink-follow, cannot override a Trusted stem; the finding-JSON contract stays in the cached **systemPrompt** so injected prose can't redefine the schema. User + built-in-default rules are Trusted.
+- **Tests:** table tests + fakes (`fakeAgent`, fake github client, `httptest`); no live network/LLM in unit tests; one manual key-gated live smoke only.
+- **Before merge:** verify EVERY CI check (incl. the non-required dogfood) and read all bot PR comments; never dismiss a red as "transient" without reading its log.

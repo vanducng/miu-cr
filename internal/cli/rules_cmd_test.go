@@ -124,7 +124,7 @@ func TestRulesCheckNonMatchingPath(t *testing.T) {
 
 func TestRulesCheckReportsBodyOnlyFile(t *testing.T) {
 	repo := isolateRulesEnv(t)
-	rulesDir := filepath.Join(repo, ".miucr", "rules")
+	rulesDir := filepath.Join(repo, ".miu", "cr", "rules")
 	if err := os.MkdirAll(rulesDir, 0o755); err != nil {
 		t.Fatal(err)
 	}

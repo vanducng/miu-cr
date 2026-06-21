@@ -10,14 +10,14 @@ import (
 	"github.com/vanducng/miu-cr/internal/rules"
 )
 
-// End-to-end smoke: a real .miucr rule file on disk flows through LoadRules →
+// End-to-end smoke: a real .miu/cr rule file on disk flows through LoadRules →
 // engine selection → captured prompt, proving the rule prose AND its
 // context-only fence land in AgentContext.Rules with rules_applied>=1. The fork
 // case proves the repo (Untrusted) rule is dropped while embedded defaults
 // still apply.
 func TestRulesSmoke_RepoRuleInfluencesPrompt(t *testing.T) {
 	dir := stagedGoChange(t)
-	repoRulesDir := filepath.Join(dir, ".miucr", "rules")
+	repoRulesDir := filepath.Join(dir, ".miu", "cr", "rules")
 	writeRuleFile(t, repoRulesDir, "go-style.md", ""+
 		"---\n"+
 		"description: Go review hint\n"+
@@ -54,7 +54,7 @@ func TestRulesSmoke_RepoRuleInfluencesPrompt(t *testing.T) {
 
 func TestRulesSmoke_ForkDropsRepoKeepsDefaults(t *testing.T) {
 	dir := stagedGoChange(t)
-	repoRulesDir := filepath.Join(dir, ".miucr", "rules")
+	repoRulesDir := filepath.Join(dir, ".miu", "cr", "rules")
 	writeRuleFile(t, repoRulesDir, "go-style.md", ""+
 		"---\n"+
 		"alwaysApply: true\n"+

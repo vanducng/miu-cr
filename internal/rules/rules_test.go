@@ -147,19 +147,28 @@ func TestLoadRulesLayering(t *testing.T) {
 		}
 	})
 
-	t.Run("repo overrides user on stem", func(t *testing.T) {
-		rules, _ := LoadRules(userDir, repoDir, true)
+	t.Run("repo must NOT override a trusted user stem", func(t *testing.T) {
+		rules, warnings := LoadRules(userDir, repoDir, true)
 		var goStyle Rule
 		for _, r := range rules {
 			if r.Stem == "go-style" {
 				goStyle = r
 			}
 		}
-		if goStyle.Provenance != RepoUntrusted {
-			t.Errorf("go-style provenance = %v, want repo override", goStyle.Provenance)
+		if goStyle.Provenance != UserTrusted {
+			t.Errorf("go-style provenance = %v, want UserTrusted (repo must not override a trusted stem)", goStyle.Provenance)
 		}
-		if !strings.Contains(goStyle.Body, "Repo-specific") {
-			t.Errorf("go-style body not from repo: %q", goStyle.Body)
+		if strings.Contains(goStyle.Body, "Repo-specific") {
+			t.Errorf("trusted user go-style body must survive, got repo body: %q", goStyle.Body)
+		}
+		var warned bool
+		for _, w := range warnings {
+			if strings.Contains(w, "go-style") && strings.Contains(w, "ignore repo rule") {
+				warned = true
+			}
+		}
+		if !warned {
+			t.Errorf("expected a warning that the repo go-style override was ignored, got %v", warnings)
 		}
 	})
 

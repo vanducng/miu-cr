@@ -108,12 +108,12 @@ YAML frontmatter (`description`, `globs`, `alwaysApply`, `context_files`) select
 by glob against the changed files; the prose body is injected into the prompt.
 
 ```sh
-miucr rules init                       # scaffold .miucr/rules/example.md
+miucr rules init                       # scaffold .miu/cr/rules/example.md
 miucr rules check internal/foo/bar.go  # which rules apply to a path
 ```
 
 Every review also gets a built-in baseline (correctness/security/reliability/
-performance/testing). Layers merge by stem: repo (`.miucr/rules/`) > user
+performance/testing). Layers merge by stem: repo (`.miu/cr/rules/`) > user
 (`~/.config/miu/cr/rules/`) > embedded defaults. Rules are review **context
 only** — never gating. Repo rules are trust-fenced as context-only and **dropped
 on fork PRs** (attacker-authored); the finding-JSON contract stays in the cached

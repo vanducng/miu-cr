@@ -8,6 +8,7 @@ import (
 	"sort"
 	"strings"
 
+	"github.com/bmatcuk/doublestar/v4"
 	yaml "go.yaml.in/yaml/v4"
 )
 
@@ -16,6 +17,11 @@ import (
 var ErrNotARule = errors.New("not a rule: missing frontmatter fence")
 
 const fence = "---"
+
+// maxRuleFileBytes caps a single rule file so an attacker-authored repo rule
+// can't OOM the process by being read whole into Rule.Body before the prompt
+// token cap ever applies.
+const maxRuleFileBytes = 64 * 1024
 
 // ParseRule splits the leading `---` fence by hand, unmarshals the YAML block,
 // and returns the remainder as the body. A file without a fence returns
@@ -66,10 +72,14 @@ func stemOf(path string) string {
 }
 
 // LoadRules layers embedded defaults (Trusted), user rules (Trusted), and repo
-// rules (Untrusted, only when allowRepo). Later layers override earlier ones by
-// stem (repo > user > defaults). Per-file parse errors are isolated as warnings
-// and the file is skipped; a missing directory is not an error. The returned
-// slice is sorted deterministically by stem.
+// rules (Untrusted, only when allowRepo). A later layer may override a stem only
+// when it is at least as trusted as the rule already present: defaults and user
+// (both Trusted) may override each other, but the Untrusted repo layer may add
+// NEW stems only — it may NOT replace a stem provided by a Trusted layer (doing
+// so would let an attacker `.miu/cr/rules/security.md` gut the baseline). A
+// blocked override is dropped with a warning. Per-file parse errors are isolated
+// as warnings and the file is skipped; a missing directory is not an error. The
+// returned slice is sorted deterministically by stem.
 func LoadRules(userDir, repoDir string, allowRepo bool) (rules []Rule, warnings []string) {
 	byStem := map[string]Rule{}
 
@@ -89,6 +99,10 @@ func LoadRules(userDir, repoDir string, allowRepo bool) (rules []Rule, warnings 
 		repoRules, rw := loadDir(repoDir, RepoUntrusted)
 		warnings = append(warnings, rw...)
 		for _, r := range repoRules {
+			if existing, ok := byStem[r.Stem]; ok && existing.Provenance.Trusted() {
+				warnings = append(warnings, fmt.Sprintf("rules: ignore repo rule %s (stem %q already provided by trusted layer %s)", r.Path, r.Stem, existing.Provenance))
+				continue
+			}
 			byStem[r.Stem] = r
 		}
 	}
@@ -117,6 +131,22 @@ func loadDir(dir string, prov Provenance) (rules []Rule, warnings []string) {
 			continue
 		}
 		path := filepath.Join(dir, e.Name())
+		// lstat (not stat) so a symlink is detected as a symlink rather than
+		// followed: a committed .miu/cr/rules/link.md -> /etc/passwd must never
+		// be read and injected into the prompt.
+		fi, err := os.Lstat(path)
+		if err != nil {
+			warnings = append(warnings, fmt.Sprintf("rules: skip %s: %v", path, err))
+			continue
+		}
+		if fi.Mode()&os.ModeSymlink != 0 {
+			warnings = append(warnings, fmt.Sprintf("rules: skip %s (symlink not allowed)", path))
+			continue
+		}
+		if fi.Size() > maxRuleFileBytes {
+			warnings = append(warnings, fmt.Sprintf("rules: skip %s (file too large: %d bytes)", path, fi.Size()))
+			continue
+		}
 		data, err := os.ReadFile(path)
 		if err != nil {
 			warnings = append(warnings, fmt.Sprintf("rules: read %s: %v", path, err))
@@ -132,7 +162,23 @@ func loadDir(dir string, prov Provenance) (rules []Rule, warnings []string) {
 			continue
 		}
 		r.Provenance = prov
+		warnings = append(warnings, validateGlobs(r)...)
 		rules = append(rules, r)
 	}
 	return rules, warnings
+}
+
+// validateGlobs reports malformed doublestar glob patterns as load-time
+// warnings so a user sees why a rule never matches, rather than the selector
+// silently failing to match at review time.
+func validateGlobs(r Rule) (warnings []string) {
+	for _, g := range r.FM.Globs {
+		if g == "" {
+			continue
+		}
+		if !doublestar.ValidatePattern(g) {
+			warnings = append(warnings, fmt.Sprintf("rules: invalid glob %q in %s (will never match)", g, r.Path))
+		}
+	}
+	return warnings
 }

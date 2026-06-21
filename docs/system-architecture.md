@@ -56,7 +56,7 @@ serve is a network daemon, so the guards are mandatory:
 
 ## Project-rules injection seam
 
-Markdown project rules (`.miucr/rules/*.md` repo, `~/.config/miu/cr/rules/*.md`
+Markdown project rules (`.miu/cr/rules/*.md` repo, `~/.config/miu/cr/rules/*.md`
 user, plus embedded defaults) feed deterministic context into the reviewer.
 `internal/rules` is self-contained (frontmatter parse + layered load + glob
 selection + context-file inliner) and sits **below** engine in the import graph;
