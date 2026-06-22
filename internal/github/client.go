@@ -39,6 +39,11 @@ type Client interface {
 	// since GitHub caps a single Checks call at 50 annotations.
 	CreateCheckRun(ctx stdctx.Context, owner, repo string, opts gh.CreateCheckRunOptions) (*gh.CheckRun, error)
 	UpdateCheckRun(ctx stdctx.Context, owner, repo string, checkRunID int64, opts gh.UpdateCheckRunOptions) (*gh.CheckRun, error)
+	// ListCheckRunsForRef lets the checks reporter reuse an existing miu-cr run at
+	// a head SHA instead of creating a duplicate: GitHub only auto-dedups runs by
+	// (app, name, head_sha) for GitHub App tokens, so a PAT re-run on the same SHA
+	// would otherwise spawn a second "miu-cr" check run.
+	ListCheckRunsForRef(ctx stdctx.Context, owner, repo, ref string, opts *gh.ListCheckRunsOptions) (*gh.ListCheckRunsResults, *gh.Response, error)
 }
 
 // ghClient wraps *github.Client. An empty token yields an anonymous client (fine
@@ -101,6 +106,10 @@ func (g ghClient) CreateCheckRun(ctx stdctx.Context, owner, repo string, opts gh
 func (g ghClient) UpdateCheckRun(ctx stdctx.Context, owner, repo string, checkRunID int64, opts gh.UpdateCheckRunOptions) (*gh.CheckRun, error) {
 	r, _, err := g.c.Checks.UpdateCheckRun(ctx, owner, repo, checkRunID, opts)
 	return r, err
+}
+
+func (g ghClient) ListCheckRunsForRef(ctx stdctx.Context, owner, repo, ref string, opts *gh.ListCheckRunsOptions) (*gh.ListCheckRunsResults, *gh.Response, error) {
+	return g.c.Checks.ListCheckRunsForRef(ctx, owner, repo, ref, opts)
 }
 
 // PRRef identifies a pull request: owner/repo and its number.

@@ -79,6 +79,9 @@ func (c *statefulClient) CreateCheckRun(stdctx.Context, string, string, gh.Creat
 func (c *statefulClient) UpdateCheckRun(stdctx.Context, string, string, int64, gh.UpdateCheckRunOptions) (*gh.CheckRun, error) {
 	return &gh.CheckRun{ID: gh.Ptr(int64(1))}, nil
 }
+func (c *statefulClient) ListCheckRunsForRef(stdctx.Context, string, string, string, *gh.ListCheckRunsOptions) (*gh.ListCheckRunsResults, *gh.Response, error) {
+	return &gh.ListCheckRunsResults{}, &gh.Response{}, nil
+}
 
 // runPublishWithDiffs mirrors wire.publishReview's order (existing fps → inline
 // → summary last) without the engine, so the flow's cross-run behavior is

@@ -260,10 +260,12 @@ func reviewCommand(opts *options) *cobra.Command {
 			if err := validateFilterMode(filterMode); err != nil {
 				return err
 			}
-			if err := validateMode(mode); err != nil {
-				return err
-			}
+			// --mode (review|checks) only steers the PR reporter; it's inert for a
+			// local review, so only validate it when the PR path is in play.
 			if pr != "" {
+				if err := validateMode(mode); err != nil {
+					return err
+				}
 				return validatePRFlags(post, noPost, token)
 			}
 			return validateReviewFlags(staged, from, to, commit, gate)

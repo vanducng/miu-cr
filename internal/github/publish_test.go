@@ -42,7 +42,12 @@ type recordClient struct {
 	createCheckErr error
 	gotCheck       *gh.CreateCheckRunOptions
 	gotCheckUpd    []*gh.UpdateCheckRunOptions
+	gotCheckUpdID  int64
 	checkRunN      int
+
+	existingCheckRuns []*gh.CheckRun // returned by ListCheckRunsForRef (nil → create path)
+	listCheckErr      error
+	listCheckRunN     int
 }
 
 func (c *recordClient) GetPR(stdctx.Context, string, string, int) (*gh.PullRequest, error) {
@@ -121,10 +126,19 @@ func (c *recordClient) CreateCheckRun(_ stdctx.Context, _, _ string, opts gh.Cre
 	return &gh.CheckRun{ID: gh.Ptr(int64(42))}, nil
 }
 
-func (c *recordClient) UpdateCheckRun(_ stdctx.Context, _, _ string, _ int64, opts gh.UpdateCheckRunOptions) (*gh.CheckRun, error) {
+func (c *recordClient) UpdateCheckRun(_ stdctx.Context, _, _ string, id int64, opts gh.UpdateCheckRunOptions) (*gh.CheckRun, error) {
+	c.gotCheckUpdID = id
 	o := opts
 	c.gotCheckUpd = append(c.gotCheckUpd, &o)
-	return &gh.CheckRun{ID: gh.Ptr(int64(42))}, nil
+	return &gh.CheckRun{ID: gh.Ptr(id)}, nil
+}
+
+func (c *recordClient) ListCheckRunsForRef(_ stdctx.Context, _, _, _ string, _ *gh.ListCheckRunsOptions) (*gh.ListCheckRunsResults, *gh.Response, error) {
+	c.listCheckRunN++
+	if c.listCheckErr != nil {
+		return nil, nil, c.listCheckErr
+	}
+	return &gh.ListCheckRunsResults{CheckRuns: c.existingCheckRuns, Total: gh.Ptr(len(c.existingCheckRuns))}, &gh.Response{}, nil
 }
 
 func optPage(opts *gh.PullRequestListCommentsOptions) int {

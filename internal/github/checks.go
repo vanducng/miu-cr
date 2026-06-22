@@ -81,28 +81,51 @@ func PostChecks(ctx stdctx.Context, client Client, info *PRInfo, findings []engi
 		first = anns[:maxAnnotationsPerBatch]
 	}
 	now := gh.Timestamp{Time: time.Now()}
-	run, err := client.CreateCheckRun(ctx, info.Owner, info.Repo, gh.CreateCheckRunOptions{
+	output := &gh.CheckRunOutput{
+		Title:       gh.Ptr(title),
+		Summary:     gh.Ptr(summary),
+		Annotations: first,
+	}
+
+	// GitHub only auto-dedups check runs by (app, name, head_sha) for GitHub App
+	// tokens; with a PAT a same-SHA re-run would spawn a duplicate "miu-cr" run.
+	// Reuse an existing run via UpdateCheckRun so a re-run shows ONE check run —
+	// accepting that GitHub appends this run's annotations onto the prior run's
+	// (there is no replace-annotations API).
+	runID, err := existingCheckRunID(ctx, client, info)
+	if err != nil {
+		return PostChecksResult{}, err
+	}
+	if runID == 0 {
+		run, cerr := client.CreateCheckRun(ctx, info.Owner, info.Repo, gh.CreateCheckRunOptions{
+			Name:        checkRunName,
+			HeadSHA:     info.HeadSHA,
+			Status:      gh.Ptr("completed"),
+			Conclusion:  gh.Ptr(conclusion),
+			CompletedAt: &now,
+			Output:      output,
+		})
+		if cerr != nil {
+			return PostChecksResult{}, mapWriteError("github.create_check_run_failed", "creating check run", cerr)
+		}
+		runID = run.GetID()
+	} else if _, uerr := client.UpdateCheckRun(ctx, info.Owner, info.Repo, runID, gh.UpdateCheckRunOptions{
 		Name:        checkRunName,
-		HeadSHA:     info.HeadSHA,
 		Status:      gh.Ptr("completed"),
 		Conclusion:  gh.Ptr(conclusion),
 		CompletedAt: &now,
-		Output: &gh.CheckRunOutput{
-			Title:       gh.Ptr(title),
-			Summary:     gh.Ptr(summary),
-			Annotations: first,
-		},
-	})
-	if err != nil {
-		return PostChecksResult{}, mapWriteError("github.create_check_run_failed", "creating check run", err)
+		Output:      output,
+	}); uerr != nil {
+		return PostChecksResult{}, mapWriteError("github.update_check_run_failed", "reusing check run", uerr)
 	}
 
 	// GitHub APPENDS annotations on each UpdateCheckRun (it does NOT replace the
 	// array), so these batches MUST be disjoint slices — sending cumulative
-	// slices would duplicate. Create carried [0:50]; each update appends the next 50.
+	// slices would duplicate. The create/reuse carried [0:50]; each update appends
+	// the next 50.
 	for start := maxAnnotationsPerBatch; start < len(anns); start += maxAnnotationsPerBatch {
 		end := min(start+maxAnnotationsPerBatch, len(anns))
-		if _, uerr := client.UpdateCheckRun(ctx, info.Owner, info.Repo, run.GetID(), gh.UpdateCheckRunOptions{
+		if _, uerr := client.UpdateCheckRun(ctx, info.Owner, info.Repo, runID, gh.UpdateCheckRunOptions{
 			Name: checkRunName,
 			Output: &gh.CheckRunOutput{
 				Title:       gh.Ptr(title),
@@ -114,7 +137,28 @@ func PostChecks(ctx stdctx.Context, client Client, info *PRInfo, findings []engi
 		}
 	}
 
-	return PostChecksResult{CheckRunID: run.GetID(), Annotations: len(anns), Omitted: omitted, Conclusion: conclusion, Posted: posted}, nil
+	return PostChecksResult{CheckRunID: runID, Annotations: len(anns), Omitted: omitted, Conclusion: conclusion, Posted: posted}, nil
+}
+
+// existingCheckRunID returns the id of an existing miu-cr check run at the head
+// SHA (0 if none) so PostChecks reuses it instead of creating a duplicate on a
+// PAT re-run. A list failure is surfaced rather than silently risking a dupe.
+func existingCheckRunID(ctx stdctx.Context, client Client, info *PRInfo) (int64, error) {
+	res, _, err := client.ListCheckRunsForRef(ctx, info.Owner, info.Repo, info.HeadSHA, &gh.ListCheckRunsOptions{
+		CheckName: gh.Ptr(checkRunName),
+	})
+	if err != nil {
+		return 0, mapWriteError("github.list_check_runs_failed", "listing check runs", err)
+	}
+	if res == nil {
+		return 0, nil
+	}
+	for _, r := range res.CheckRuns {
+		if r.GetName() == checkRunName {
+			return r.GetID(), nil
+		}
+	}
+	return 0, nil
 }
 
 // annotationFor maps one finding to a CheckRunAnnotation: repo-relative path,

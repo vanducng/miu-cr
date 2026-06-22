@@ -5,6 +5,8 @@ import (
 	"strings"
 	"testing"
 
+	gh "github.com/google/go-github/v84/github"
+
 	"github.com/vanducng/miu-cr/internal/engine"
 	"github.com/vanducng/miu-cr/internal/engine/diff"
 )
@@ -124,5 +126,41 @@ func TestPostChecksBatchesAnnotationsOver50(t *testing.T) {
 	}
 	if got := len(c.gotCheckUpd[1].Output.Annotations); got != 20 {
 		t.Fatalf("last batch should carry 20 annotations, got %d", got)
+	}
+}
+
+// A second PostChecks at the SAME head SHA must REUSE the existing miu-cr run
+// (UpdateCheckRun) instead of creating a duplicate (CreateCheckRun): GitHub only
+// auto-dedups by name for App tokens, so a PAT re-run would otherwise show two runs.
+func TestPostChecksReusesExistingRunOnSameSHA(t *testing.T) {
+	c := &recordClient{existingCheckRuns: []*gh.CheckRun{
+		{ID: gh.Ptr(int64(99)), Name: gh.Ptr(checkRunName)},
+	}}
+	info := &PRInfo{Owner: "o", Repo: "r", Number: 7, HeadSHA: "headsha"}
+	findings := []engine.Finding{
+		{File: "p.go", Line: 2, EndLine: 3, Severity: "high", Category: "bug", Rationale: "leak"},
+	}
+	res, err := PostChecks(stdctx.Background(), c, info, findings, sampleDiffs(), nil, false, FilterDiffContext)
+	if err != nil {
+		t.Fatalf("PostChecks: %v", err)
+	}
+	if c.checkRunN != 0 {
+		t.Fatalf("reuse must NOT CreateCheckRun, got %d create calls", c.checkRunN)
+	}
+	if c.listCheckRunN != 1 {
+		t.Fatalf("want exactly one ListCheckRunsForRef, got %d", c.listCheckRunN)
+	}
+	if len(c.gotCheckUpd) != 1 {
+		t.Fatalf("reuse must UpdateCheckRun the existing run once, got %d", len(c.gotCheckUpd))
+	}
+	if c.gotCheckUpdID != 99 || res.CheckRunID != 99 {
+		t.Fatalf("must reuse run id 99, got update=%d result=%d", c.gotCheckUpdID, res.CheckRunID)
+	}
+	upd := c.gotCheckUpd[0]
+	if upd.GetConclusion() != "failure" {
+		t.Fatalf("reuse update must carry the conclusion, got %q", upd.GetConclusion())
+	}
+	if upd.Output == nil || len(upd.Output.Annotations) != 1 {
+		t.Fatalf("reuse update must carry the first annotation batch, got %+v", upd.Output)
 	}
 }

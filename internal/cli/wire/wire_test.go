@@ -105,6 +105,10 @@ func (f *fakeGitHub) UpdateCheckRun(stdctx.Context, string, string, int64, gh.Up
 	f.order = append(f.order, "update_check")
 	return &gh.CheckRun{ID: gh.Ptr(int64(7))}, nil
 }
+func (f *fakeGitHub) ListCheckRunsForRef(stdctx.Context, string, string, string, *gh.ListCheckRunsOptions) (*gh.ListCheckRunsResults, *gh.Response, error) {
+	f.order = append(f.order, "list_check")
+	return &gh.ListCheckRunsResults{}, &gh.Response{}, nil
+}
 
 // setupRepo builds a real two-commit repo (base→head) the publish flow's
 // DiffsForPR can diff via ModeRange, returning the dir and both SHAs.
