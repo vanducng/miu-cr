@@ -102,6 +102,15 @@ func (f *fakeClient) CreateIssueComment(stdctx.Context, string, string, int, *gh
 func (f *fakeClient) EditIssueComment(stdctx.Context, string, string, int64, *gh.IssueComment) (*gh.IssueComment, error) {
 	return nil, nil
 }
+func (f *fakeClient) CreateCheckRun(stdctx.Context, string, string, gh.CreateCheckRunOptions) (*gh.CheckRun, error) {
+	return &gh.CheckRun{ID: gh.Ptr(int64(1))}, nil
+}
+func (f *fakeClient) UpdateCheckRun(stdctx.Context, string, string, int64, gh.UpdateCheckRunOptions) (*gh.CheckRun, error) {
+	return &gh.CheckRun{ID: gh.Ptr(int64(1))}, nil
+}
+func (f *fakeClient) ListCheckRunsForRef(stdctx.Context, string, string, string, *gh.ListCheckRunsOptions) (*gh.ListCheckRunsResults, *gh.Response, error) {
+	return &gh.ListCheckRunsResults{}, &gh.Response{}, nil
+}
 
 func TestFetchPR(t *testing.T) {
 	ref := PRRef{Owner: "vanducng", Repo: "miu-cr", Number: 1}

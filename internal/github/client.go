@@ -33,6 +33,17 @@ type Client interface {
 	ListIssueComments(ctx stdctx.Context, owner, repo string, number int, opts *gh.IssueListCommentsOptions) ([]*gh.IssueComment, *gh.Response, error)
 	CreateIssueComment(ctx stdctx.Context, owner, repo string, number int, comment *gh.IssueComment) (*gh.IssueComment, error)
 	EditIssueComment(ctx stdctx.Context, owner, repo string, commentID int64, comment *gh.IssueComment) (*gh.IssueComment, error)
+
+	// CreateCheckRun/UpdateCheckRun back the --mode checks reporter: create the run
+	// (first ≤50 annotations) then update it with each further ≤50-annotation batch,
+	// since GitHub caps a single Checks call at 50 annotations.
+	CreateCheckRun(ctx stdctx.Context, owner, repo string, opts gh.CreateCheckRunOptions) (*gh.CheckRun, error)
+	UpdateCheckRun(ctx stdctx.Context, owner, repo string, checkRunID int64, opts gh.UpdateCheckRunOptions) (*gh.CheckRun, error)
+	// ListCheckRunsForRef lets the checks reporter reuse an existing miu-cr run at
+	// a head SHA instead of creating a duplicate: GitHub only auto-dedups runs by
+	// (app, name, head_sha) for GitHub App tokens, so a PAT re-run on the same SHA
+	// would otherwise spawn a second "miu-cr" check run.
+	ListCheckRunsForRef(ctx stdctx.Context, owner, repo, ref string, opts *gh.ListCheckRunsOptions) (*gh.ListCheckRunsResults, *gh.Response, error)
 }
 
 // ghClient wraps *github.Client. An empty token yields an anonymous client (fine
@@ -85,6 +96,20 @@ func (g ghClient) CreateIssueComment(ctx stdctx.Context, owner, repo string, num
 func (g ghClient) EditIssueComment(ctx stdctx.Context, owner, repo string, commentID int64, comment *gh.IssueComment) (*gh.IssueComment, error) {
 	c, _, err := g.c.Issues.EditComment(ctx, owner, repo, commentID, comment)
 	return c, err
+}
+
+func (g ghClient) CreateCheckRun(ctx stdctx.Context, owner, repo string, opts gh.CreateCheckRunOptions) (*gh.CheckRun, error) {
+	r, _, err := g.c.Checks.CreateCheckRun(ctx, owner, repo, opts)
+	return r, err
+}
+
+func (g ghClient) UpdateCheckRun(ctx stdctx.Context, owner, repo string, checkRunID int64, opts gh.UpdateCheckRunOptions) (*gh.CheckRun, error) {
+	r, _, err := g.c.Checks.UpdateCheckRun(ctx, owner, repo, checkRunID, opts)
+	return r, err
+}
+
+func (g ghClient) ListCheckRunsForRef(ctx stdctx.Context, owner, repo, ref string, opts *gh.ListCheckRunsOptions) (*gh.ListCheckRunsResults, *gh.Response, error) {
+	return g.c.Checks.ListCheckRunsForRef(ctx, owner, repo, ref, opts)
 }
 
 // PRRef identifies a pull request: owner/repo and its number.
