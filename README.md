@@ -11,7 +11,7 @@
 
 **MIU Code Review** — a fast, pure-Go AI code-review CLI with a deterministic + agent engine. Review your own changes locally before you open a PR, gate them in CI, review GitHub PRs with inline comments, or drive the engine from any MCP-capable agent host (Claude Code, Codex, …). One review path, four ways to run it, a stable JSON envelope on stdout.
 
-> **v0.11.0.** Local review, GitHub PR review, project rules, the serve/poll daemon + GitHub Action, SQLite/Postgres stores, opt-in semantic code-recall, a REST API + GitHub App auth, and an MCP server all ship today.
+> **What ships today.** Local review, GitHub PR review, project rules, the serve/poll daemon + GitHub Action, SQLite/Postgres stores, opt-in semantic code-recall, a REST API + GitHub App auth, and an MCP server all ship today.
 
 ## Why
 
@@ -24,7 +24,7 @@ Releases ship static, **pure-Go** binaries (no cgo) for macOS (amd64 + arm64), L
 ```sh
 # Install script (macOS / Linux) — detects OS/arch, verifies the release checksum:
 curl -fsSL https://raw.githubusercontent.com/vanducng/miu-cr/main/install.sh | sh
-curl -fsSL https://raw.githubusercontent.com/vanducng/miu-cr/main/install.sh | sh -s -- v0.11.0   # pin a version
+curl -fsSL https://raw.githubusercontent.com/vanducng/miu-cr/main/install.sh | sh -s -- vX.Y.Z   # pin the latest release — see github.com/vanducng/miu-cr/releases
 
 # Homebrew (macOS / Linux):
 brew install vanducng/tap/miucr
@@ -41,13 +41,48 @@ permissions:
   contents: read
 steps:
   - uses: actions/checkout@v4
-  - uses: vanducng/miu-cr@v0.11.0          # pin a released tag
+  - uses: vanducng/miu-cr@vX.Y.Z          # pin the latest release — see github.com/vanducng/miu-cr/releases
     with:
       api-key: ${{ secrets.ANTHROPIC_API_KEY }}
       gate: high                            # `none` never blocks CI
 ```
 
 **Windows:** download `miucr_windows_x86_64.zip` from [Releases](https://github.com/vanducng/miu-cr/releases), extract `miucr.exe`, and put it on your `PATH`. See [Install](https://miucr.vanducng.dev/install/) for details.
+
+## Getting started
+
+**30 seconds to your first review.** After [installing](#install), let `miucr init` set you up:
+
+```sh
+miucr init               # provider → API-key source → project rules; writes ~/.config/miu/cr/config.toml
+miucr review --staged    # review your staged changes
+```
+
+`miucr init` is an interactive wizard: pick a **provider** (`anthropic` / `openai` / custom gateway), an **API-key source** (an env-var *name* by default — no secret on disk — or paste-now behind an explicit confirm), and it auto-detects your stack (`go.mod`, `package.json`, …) to scaffold a starter rule. It writes a delta-only config and ends on a payoff box pointing at your first command:
+
+```text
+  ✓ Config written: ~/.config/miu/cr/config.toml
+  ✓ Provider: anthropic
+  ✓ Auth: env ANTHROPIC_API_KEY
+  ✓ Rules: .miu/cr/rules/go.md
+
+  ▶ miucr review --staged
+```
+
+In CI, run it with zero prompts:
+
+```sh
+miucr init --non-interactive --provider anthropic --auth-env ANTHROPIC_API_KEY --yes
+```
+
+**Prefer zero config?** Skip `init` — export a key and review (see [Quickstart](#quickstart) for more modes):
+
+```sh
+export ANTHROPIC_API_KEY=...     # or OPENAI_API_KEY
+miucr review --staged
+```
+
+Full walkthrough — editor (MCP) + CI wiring: **[Getting started](https://miucr.vanducng.dev/onboarding/)**.
 
 ## Quickstart
 

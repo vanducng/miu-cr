@@ -3,7 +3,9 @@ title: Credentials
 description: Bring your own API key — passed in memory, never persisted to disk or the store.
 ---
 
-miu-cr is **bring-your-own-key**. You supply an LLM API key via an environment variable or a flag; it lives in memory only for the duration of the call. It is **never** written to disk, the SQLite history, or anywhere else — and never a subscription token.
+miu-cr is **bring-your-own-key**. You supply an LLM API key via an environment variable or a flag; it lives in memory only for the duration of the call. It is **never** written to disk, the SQLite history, or anywhere else.
+
+The one exception is the opt-in OAuth flow below: `miucr login` deliberately caches a subscription token at `~/.config/miu/cr/oauth.json` (`0600`, gitignored) so you can review on your ChatGPT plan. API keys are still never persisted.
 
 ## Supplying a key
 
@@ -34,6 +36,79 @@ A profile credential can be `auth_env` (the **name** of an env var) or `auth_tok
 :::note[Migrating from `ZAI_API_KEY`]
 Earlier builds special-cased a bare `ZAI_API_KEY`. That hardcoding is gone — use a config profile with `auth_env = "ZAI_API_KEY"`, or set `ANTHROPIC_BASE_URL` + `ANTHROPIC_AUTH_TOKEN`. See [Providers](/providers/) for the full z.ai example.
 :::
+
+## Using OpenAI / your ChatGPT plan (`miucr login`)
+
+Instead of a billed platform API key, you can review on your **ChatGPT Pro/Max
+subscription**. `miucr login` runs a standard OpenAI PKCE loopback OAuth flow in
+your browser and caches the token at `~/.config/miu/cr/oauth.json` (dir `0700`,
+file `0600`). A subsequent OpenAI review authed by that token talks to the
+**codex backend** (`chatgpt.com/backend-api/codex`, the Responses protocol the
+codex CLI uses) so it draws on your subscription, not a per-call API bill.
+
+### Local login
+
+```sh
+miucr login --provider openai      # opens the browser, completes PKCE, caches the token
+miucr review --staged              # now runs on your ChatGPT plan
+```
+
+`provider` is an explicit flag backed by a small registry — `openai` is the only
+entry today (`--provider anthropic`/unknown is rejected: third-party Anthropic
+OAuth is ToS-prohibited). The flow binds a loopback callback on one of the
+OpenAI-allow-listed ports (`1455`, then `1457`). On a headless/SSH box use:
+
+```sh
+miucr login --no-browser           # prints the authorize URL to open elsewhere
+```
+
+The `login.result` envelope is **secret-free** — it emits only
+`{provider, oauth_path, expires_at, account_id, has_api_key}`; no tokens.
+
+**Precedence** — the cached login credential sits **below** an explicit key. An
+explicit `--api-key` / `OPENAI_API_KEY` (and any Anthropic path) still wins, so a
+real key always overrides a stale token. OAuth is consulted only when no OpenAI
+key is present.
+
+### CI / GitHub Actions — use an API key, not OAuth
+
+OAuth is interactive (it needs a browser) so it is **not** used in CI. For
+GitHub Actions, generate a key at
+[platform.openai.com](https://platform.openai.com/api-keys), add it as the repo
+secret `OPENAI_API_KEY`, and run `miucr review --provider openai` with that key
+on the step environment. The bundled composite action wires Anthropic env vars,
+so for the OpenAI path invoke the CLI directly:
+
+```yaml
+on:
+  pull_request:
+    types: [opened, synchronize, reopened, ready_for_review]
+permissions:
+  pull-requests: write
+  contents: read
+jobs:
+  review:
+    runs-on: ubuntu-latest
+    if: ${{ github.event.pull_request.head.repo.fork != true }}   # never run on fork PR code
+    steps:
+      - run: curl -fsSL https://raw.githubusercontent.com/vanducng/miu-cr/main/install.sh | sh
+      - name: Review PR on OpenAI
+        env:
+          OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}   # step-level secret export
+          GITHUB_TOKEN:   ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          miucr review --pr "${GITHUB_REPOSITORY}#${{ github.event.pull_request.number }}" \
+            --provider openai --post --gate high --timeout 300s
+```
+
+### Security note
+
+- The token lives **only** in `oauth.json` (`0600`, dir `0700`, atomic write),
+  is **gitignored**, and is **never** logged, never put in the CLI envelope, and
+  redacted from any error string.
+- There is no `miucr logout` — delete `oauth.json` by hand to revoke locally.
+- **Anthropic OAuth is unsupported by design** (Anthropic ToS). Use an API key
+  or an Anthropic-compatible gateway for Anthropic providers.
 
 ## What is never persisted
 

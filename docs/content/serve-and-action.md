@@ -198,7 +198,7 @@ jobs:
     if: ${{ github.event.pull_request.head.repo.fork != true }}
     steps:
       - uses: actions/checkout@v4
-      - uses: vanducng/miu-cr@v0.3.0   # pin a released tag
+      - uses: vanducng/miu-cr@vX.Y.Z   # pin a released tag — see github.com/vanducng/miu-cr/releases
         with:
           api-key: ${{ secrets.ANTHROPIC_API_KEY }}
           gate: high

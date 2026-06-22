@@ -31,6 +31,12 @@ func init() {
 // --timeout) bounds both the request context deadline and the tool loop;
 // <=0 disables the agent-imposed cap (the caller's ctx still applies).
 func New(creds Credentials, timeout time.Duration) (Agent, error) {
+	// The codex backend (OAuth / ChatGPT-plan path) is a distinct transport for
+	// the openai kind, not a separate provider kind, so it short-circuits the
+	// kind registry.
+	if creds.Backend == "codex" {
+		return newCodexAgent(creds, timeout), nil
+	}
 	c, ok := registry[creds.Kind]
 	if !ok {
 		return nil, &clierr.CLIError{

@@ -41,3 +41,9 @@ jobs:
           # version: latest              # pin to a specific release tag if desired
           # model:   claude-sonnet-4-5   # override the default model
           # base-url: https://api.z.ai/api/anthropic  # optional gateway
+
+# OpenAI variant: this composite action wires Anthropic env vars, so to review on
+# OpenAI store an OPENAI_API_KEY secret and invoke the CLI directly with
+# --provider openai instead of `uses: vanducng/miu-cr@v0`. (OAuth / `miucr login`
+# is browser-interactive and is NOT used in CI.) See the docs "Using OpenAI /
+# your ChatGPT plan" section for the full snippet.

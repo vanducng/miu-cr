@@ -5,6 +5,9 @@
 *.db
 state.db
 
+# cached OAuth token (never commit credentials)
+oauth.json
+
 # internal planning artifacts — kept private (public repo)
 .workbench/
 

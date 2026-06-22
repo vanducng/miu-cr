@@ -14,7 +14,7 @@ curl -fsSL https://raw.githubusercontent.com/vanducng/miu-cr/main/install.sh | s
 Pin a specific version:
 
 ```sh
-curl -fsSL https://raw.githubusercontent.com/vanducng/miu-cr/main/install.sh | sh -s -- v0.2.0
+curl -fsSL https://raw.githubusercontent.com/vanducng/miu-cr/main/install.sh | sh -s -- vX.Y.Z   # see github.com/vanducng/miu-cr/releases
 ```
 
 The script detects your OS/arch, downloads the matching archive, **verifies its SHA-256 checksum** against `checksums.txt`, and installs `miucr` to `/usr/local/bin` when that is writable (no sudo) or `~/.local/bin` otherwise. It warns if the chosen directory is not on your `PATH`.
@@ -57,7 +57,7 @@ Download `miucr_windows_x86_64.zip` from [Releases](https://github.com/vanducng/
 In PowerShell:
 
 ```powershell
-$version = "v0.2.0"
+$version = "vX.Y.Z"   # see the Releases page for the latest tag
 $asset = "miucr_windows_x86_64.zip"
 Invoke-WebRequest "https://github.com/vanducng/miu-cr/releases/download/$version/$asset" -OutFile $asset
 Expand-Archive $asset -DestinationPath ".\miucr" -Force
