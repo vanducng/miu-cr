@@ -55,6 +55,13 @@ comment with a new marker); subsequent re-runs dedupe normally. On a
 first M5 review **manually** (or off-hours) to absorb the one-time re-post before
 the next scheduled run.
 
+## [0.11.0](https://github.com/vanducng/miu-cr/compare/v0.10.0...v0.11.0) (2026-06-22)
+
+
+### Features
+
+* REST API + GitHub App installation auth — deployable single-operator service (M8) ([099dbf7](https://github.com/vanducng/miu-cr/commit/099dbf7033e17d8f056354a4c82cbff0fa820442))
+
 ## [0.10.0](https://github.com/vanducng/miu-cr/compare/v0.9.0...v0.10.0) (2026-06-21)
 
 
