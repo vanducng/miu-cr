@@ -34,7 +34,7 @@ Local review, GitHub PR review, project rules, the serve/poll daemon + GitHub Ac
 ## What you get
 
 - **Local review** — `miucr review --staged` / `--from`+`--to` / `--commit`: deterministic select → context → single LLM pass → line-anchor → gate → dedupe. Non-zero exit at/above `--gate` severity (CI-friendly). → [Usage](/usage/)
-- **GitHub PR review** — `review --pr <url|owner/repo#N>`: head-SHA-anchored inline comments + one idempotent summary; content-stable cross-push dedupe + resolution; opt-in `--suggest` and `--approve-clean`. → [GitHub PR review](/github-pr/)
+- **GitHub PR review** — `review --pr <url|owner/repo#N>`: head-SHA-anchored inline comments (multi-line range aware) + one idempotent summary, or a required GitHub **Check Run** (`--mode checks`); `--filter-mode` diff control; SARIF export; content-stable cross-push dedupe + resolution; opt-in `--suggest` and `--approve-clean`. → [GitHub PR review](/github-pr/)
 - **Project rules** — `.miu/cr/rules/*.md` markdown with frontmatter selects context by glob; built-in defaults + user + repo layers, trust-fenced on fork PRs. → [Project rules](/rules/)
 - **serve · poll · Action** — an HMAC webhook daemon, an opt-in poll trigger, and a reusable GitHub Action — all funnel into one review path. → [Serve & Action](/serve-and-action/)
 - **Review history** — every review auto-saves a full record (findings + stats + transcript + raw I/O) to the local store; browse with `miucr history` list/show/prune. → [Review history](/history/)
