@@ -97,6 +97,7 @@ func authOAuth(ctx stdctx.Context, out io.Writer, prof *config.Provider) (authMe
 	}
 	prof.AuthEnv = ""
 	prof.AuthToken = ""
+	prof.Auth = "oauth" // explicit in config: use the ChatGPT plan, never an API key
 	return authMethodOAuth, nil
 }
 

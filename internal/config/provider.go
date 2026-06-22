@@ -39,6 +39,10 @@ type Provider struct {
 	Model     string `toml:"model,omitempty"`
 	AuthToken string `toml:"auth_token,omitempty"` // literal credential; wins over AuthEnv when both set
 	AuthEnv   string `toml:"auth_env,omitempty"`   // NAME of an env var holding the credential (preferred)
+	// Auth explicitly pins the method (OpenAI): "oauth" (use `miucr login`/the
+	// ChatGPT plan, never an API key) | "api_key" (use a key, never OAuth) | ""
+	// (intent-ordered auto: --api-key/profile key > OAuth login > OPENAI_API_KEY).
+	Auth string `toml:"auth,omitempty"`
 }
 
 // Store selects the persistence backend. DSN is never persisted to disk by
