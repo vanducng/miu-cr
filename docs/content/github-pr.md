@@ -82,6 +82,14 @@ approves or requests changes; two opt-in write-actions (`--suggest`,
 `--approve-clean`, both default OFF) are described under **Opt-in write-actions**
 below. miu-cr never requests changes and never pushes commits.
 
+When a finding spans more than one line (the anchor resolves an `EndLine` past
+its `Line`), miu-cr posts a **multi-line range comment** — but only when the
+whole `Line`..`EndLine` span is **contiguous inside a single RIGHT-side diff
+hunk**. That contiguity proof is the GitHub 422 guard: a range that crosses two
+hunks or runs off the diff is rejected, so any finding that fails the proof
+**falls back to a single-line comment** on its anchor line. Single-line findings
+are unaffected.
+
 A single summary comment is posted last. Its first line is a hidden sentinel:
 
 ```
@@ -143,8 +151,59 @@ default** and stays **nil on the GitHub Action / CI path** — with no store, th
 publish behavior is byte-for-byte the stateless comment-dedupe path.
 
 If a review would carry more inline comments than GitHub accepts in one request,
-miu-cr posts the highest-severity findings up to a fixed cap (40) and notes the
-omitted count in the summary body, so the whole review can't 422 on size.
+miu-cr posts the highest-severity findings up to a fixed cap (40), notes the
+omitted count in the summary body, and lists every capped finding in a
+collapsible **`<details>` overflow block** at the end of the summary — each with
+its severity, category, `file:line`, rationale, and a **blob permalink** pinned
+to the head SHA — so a finding dropped from the inline set is never silently
+lost. The whole review can't 422 on size.
+
+## Inline filtering (`--filter-mode`)
+
+`--filter-mode` mirrors reviewdog's diff knob — it controls which findings are
+**eligible for inline comments** on `--pr` (default `diff_context`):
+
+| Mode | Inline-eligible findings |
+|------|--------------------------|
+| `added` | only findings on added (`+`) diff lines |
+| `diff_context` (default) | findings on any added or context diff line |
+| `file` | findings on any file present in the diff |
+| `nofilter` | every finding |
+
+`file` and `nofilter` never widen the **inline** set past the diff (GitHub 422s
+an off-diff inline comment) — they route the extra off-diff findings to the
+**summary**, **SARIF**, and **local output** instead, never inline.
+
+## Check Run reporter
+
+`--mode` selects how findings reach the PR on `--post` (it only steers the PR
+path — it's inert for a local review):
+
+- **`--mode review`** (default) — the inline review comments + idempotent summary
+  comment described above.
+- **`--mode checks`** — a single GitHub **Check Run** named `miu-cr` carrying one
+  annotation per diff-eligible finding (same `--filter-mode` eligibility as the
+  review path). The annotation level maps from severity (critical/high →
+  `failure`, medium → `warning`, low/info → `notice`); the run's conclusion maps
+  from the gate (clean → `success`, gate-hit → `failure`).
+
+```sh
+miucr review --pr owner/repo#123 --post --mode checks
+```
+
+The Checks reporter has properties the review reporter can't offer:
+
+- **Works on fork PRs** — a Check Run needs only `checks: write`, not the
+  comment-write scope a fork's token lacks.
+- **Survives force-push** — annotations attach to the head SHA, not to a diff
+  position a rebase invalidates.
+- **Can be a required check** — the stable `miu-cr` check name can be marked
+  required in branch protection, so a gate-hit blocks merge.
+- **Idempotent per head SHA** — a re-run at the same head reuses the existing
+  `miu-cr` Check Run instead of spawning a duplicate.
+
+Checks-mode outcomes surface in the `data.pr` envelope block as `mode`,
+`check_run_id`, and `check_conclusion`.
 
 ## Opt-in write-actions
 
@@ -158,14 +217,18 @@ miucr review --pr owner/repo#123 --post --suggest --approve-clean
 ### `--suggest` — native one-click suggestions
 
 Emits a GitHub native `suggestion` block (one-click "Commit suggestion") **only**
-for a finding that is a proven verbatim **single-line** replacement: the
-suggested patch is a single line, the finding is single-line, and the raw new-file
-line at the anchored position matches the finding's quoted code (so the suggestion
-can't replace an unrelated line). It must also reach a severity floor (default
-`medium`). Everything else — multi-line findings, non-verbatim patches, below the
-floor — falls back to a plain fenced hint (the safe default). Suggestions are
-**author-applied**: miu-cr never pushes or commits to the branch. The count
-emitted this run is reported as `suggestions_posted`.
+for a **proven verbatim replacement** of the anchored lines: the raw new-file
+line(s) at the anchored position must match the finding's quoted code (so the
+suggestion can't replace an unrelated span), and the finding must reach a severity
+floor (default `medium`). This works for both **single-line** and **multi-line**
+findings — a multi-line suggestion is one-clickable only when its span is the same
+proven contiguous-one-hunk RIGHT-side range used for range comments (a multi-line
+fence on an unproven anchor would *insert* lines instead of replacing the span, a
+broken patch). Everything else — non-verbatim patches, spans that fail the
+contiguity proof, findings below the floor — falls back to a plain fenced hint
+(the safe default). Suggestions are **author-applied**: miu-cr never pushes or
+commits to the branch. The count emitted this run is reported as
+`suggestions_posted`.
 
 ### `--approve-clean` — APPROVE only on a clean, trusted PR
 
@@ -203,6 +266,16 @@ APPROVE is a self-approve / supply-chain risk), so it exposes no
 For a PR from a fork (or one whose head repo was deleted), `is_fork` is `true`.
 Comments are posted to the **base** repository and anchored to the head SHA, so
 review still works without write access to the fork.
+
+On the **GitHub Action** path a fork PR's `GITHUB_TOKEN` is usually read-only, so
+the inline review `CreateReview` call 403s. miu-cr detects that 403 (only under
+Actions) and **falls back to workflow annotations** — it prints one
+`::error file=…,line=…,endLine=…::<rationale>` command per finding to stdout, so
+findings still surface as annotations on the PR's "Files changed" tab instead of
+hard-failing the run. The count is reported as `fallback_annotations` in the
+`data.pr` block. For a first-class fork experience, prefer the [Check Run
+reporter](#check-run-reporter) (`--mode checks`), which needs no comment-write
+scope at all.
 
 ## Caveats
 

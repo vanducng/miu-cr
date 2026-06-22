@@ -253,6 +253,31 @@ A full copy-paste workflow is in
 [`examples/github-action/code-review-sarif.yml`](https://github.com/vanducng/miu-cr/blob/main/examples/github-action/code-review-sarif.yml).
 Locally, `miucr review --pr <ref> -o sarif > out.sarif` produces the same document.
 
+### Required check (`--mode checks`)
+
+The composite action runs the **review** reporter (inline comments + summary).
+For a **required status check** — one that works on **fork PRs**, **survives
+force-push**, and can **block merge** via branch protection — run the **Check
+Run** reporter by invoking miucr directly in a workflow step:
+
+```yaml
+permissions:
+  contents: read
+  checks: write            # required to create the Check Run
+steps:
+  - run: curl -fsSL https://raw.githubusercontent.com/vanducng/miu-cr/main/install.sh | sh
+  - run: |
+      miucr review --pr "${GITHUB_REPOSITORY}#${PR_NUMBER}" --post --mode checks --gate high
+    env:
+      GITHUB_TOKEN:      ${{ secrets.GITHUB_TOKEN }}
+      ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+      PR_NUMBER:         ${{ github.event.pull_request.number }}
+```
+
+Then mark the resulting `miu-cr` check **required** in *Settings → Branches →
+Branch protection*. See the [Check Run reporter](/github-pr/#check-run-reporter)
+for the full reporter semantics.
+
 ### `permissions`
 
 The workflow must grant `pull-requests: write` so the action can post inline

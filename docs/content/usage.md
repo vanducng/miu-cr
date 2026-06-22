@@ -46,6 +46,17 @@ miucr review --staged -o sarif        # SARIF 2.1.0 document for code-scanning /
 
 `sarif` emits a schema-pinned **SARIF 2.1.0** document (stdlib JSON; tool driver `miucr`, `ruleId` = category, `level` from severity, `region` from the anchored line range, `snippet` = quoted code, `fixes` from the suggested patch). Paths are repo-relative only — never absolute or secret. It is review-only (other commands keep the JSON envelope). Upload it to the GitHub code-scanning Security tab with `github/codeql-action/upload-sarif` — see [Action: SARIF](/serve-and-action/#sarif-code-scanning).
 
+### `--sarif-out <file>`
+
+`-o sarif` makes SARIF the **only** output. To get SARIF *alongside* the normal JSON envelope (or a posted PR review), pass `--sarif-out <file>` instead — the **same single review run** also writes a SARIF 2.1.0 document to that path, with no second LLM pass.
+
+```sh
+miucr review --staged --sarif-out miucr.sarif          # JSON on stdout + SARIF file
+miucr review --pr owner/repo#123 --post --sarif-out miucr.sarif
+```
+
+It is written **only on a successful review** (atomically: temp file + rename), so a failed run leaves no file. This is what the GitHub Action uses to publish to the Security tab — see [Action: SARIF](/serve-and-action/#sarif-code-scanning).
+
 ### `--filter-mode`
 
 `--filter-mode` (default `diff_context`) selects which findings are eligible for **inline** PR comments on `--pr`:
