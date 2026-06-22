@@ -86,7 +86,7 @@ func renderOverflow(b *strings.Builder, info *PRInfo, omitted []engine.Finding) 
 		if c := mdInline(f.Category); c != "" {
 			cat = " (" + c + ")"
 		}
-		fmt.Fprintf(b, "- **%s**%s %s — %s\n", sev, cat, loc, mdInline(f.Rationale))
+		fmt.Fprintf(b, "- **%s**%s %s — %s\n", mdInline(sev), cat, loc, mdInline(f.Rationale))
 	}
 	b.WriteString("\n</details>\n")
 }
