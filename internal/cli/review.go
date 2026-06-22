@@ -75,6 +75,14 @@ type PRResult struct {
 	ApproveAction     string `json:"approve_action"`
 	ApproveReason     string `json:"approve_reason"`
 	SuggestionsPosted int    `json:"suggestions_posted"`
+
+	// Mode is the GitHub reporter used: review (inline+summary) | checks (CheckRun).
+	// Checks-only fields are populated under --mode checks; FallbackAnnotations counts
+	// ::error:: workflow annotations emitted on the fork-PR 403 fallback (0 normally).
+	Mode                string `json:"mode,omitempty"`
+	CheckRunID          int64  `json:"check_run_id,omitempty"`
+	CheckConclusion     string `json:"check_conclusion,omitempty"`
+	FallbackAnnotations int    `json:"fallback_annotations,omitempty"`
 }
 
 // ReviewFinding is a single anchored finding rendered/serialized by cli.
@@ -126,6 +134,7 @@ type PRReviewRequest struct {
 	ExpandWindow int
 	TokenBudget  int
 	FilterMode   string       // added|diff_context|file|nofilter (default diff_context)
+	Mode         string       // review (default: inline+summary) | checks (GitHub Checks-API reporter)
 	NoSave       bool         // opt out of persisting this run to the local history store
 	Progress     func(string) // nil = silent; stderr milestones, never the stdout envelope
 }
@@ -226,6 +235,7 @@ func reviewCommand(opts *options) *cobra.Command {
 		expand       int
 		tokenBudget  int
 		filterMode   string
+		mode         string
 		sarifOut     string
 		pr           string
 		token        string
@@ -243,6 +253,9 @@ func reviewCommand(opts *options) *cobra.Command {
 		Short: "Review local git changes and emit gated findings",
 		PreRunE: func(cmd *cobra.Command, args []string) error {
 			if err := validateFilterMode(filterMode); err != nil {
+				return err
+			}
+			if err := validateMode(mode); err != nil {
 				return err
 			}
 			if pr != "" {
@@ -277,6 +290,7 @@ func reviewCommand(opts *options) *cobra.Command {
 					expand:       expand,
 					tokenBudget:  tokenBudget,
 					filterMode:   filterMode,
+					mode:         mode,
 					sarifOut:     sarifOut,
 					noSave:       noSave,
 					progress:     prog,
@@ -368,6 +382,7 @@ func reviewCommand(opts *options) *cobra.Command {
 	f.IntVar(&expand, "expand", 5, "Context lines added above/below each hunk in the new-content window (0 disables)")
 	f.IntVar(&tokenBudget, "token-budget", defaultTokenBudget, "Approximate token budget; over budget degrades context (0 disables)")
 	f.StringVar(&filterMode, "filter-mode", "diff_context", "Inline-eligibility filter on --pr: added|diff_context|file|nofilter (default diff_context; file/nofilter route off-diff findings to the summary/SARIF/local output, never inline)")
+	f.StringVar(&mode, "mode", "review", "GitHub reporter on --pr --post: review (inline comments + summary, default) | checks (a GitHub CheckRun with annotations — survives force-push, works on fork PRs, can be a required check)")
 	f.StringVar(&sarifOut, "sarif-out", "", "Also write a SARIF 2.1.0 report to this path (in addition to the normal --output/posting), from the same single review run; written only on success (atomic temp+rename, so a failed run leaves no file)")
 	f.StringVar(&pr, "pr", "", "Review a GitHub PR: https://github.com/owner/repo/pull/N or owner/repo#N (no GitHub PAT needed for public repos in dry-run)")
 	f.StringVar(&token, "token", "", "GitHub PAT (overrides GITHUB_TOKEN/GH_TOKEN; required only for --post; never persisted)")
@@ -405,6 +420,7 @@ type prRunArgs struct {
 	expand      int
 	tokenBudget int
 	filterMode  string
+	mode        string
 	sarifOut    string
 	noSave      bool
 	progress    func(string)
@@ -453,6 +469,7 @@ func runPRReview(cmd *cobra.Command, a prRunArgs) error {
 		ExpandWindow: a.expand,
 		TokenBudget:  a.tokenBudget,
 		FilterMode:   a.filterMode,
+		Mode:         a.mode,
 		NoSave:       a.noSave,
 		Progress:     a.progress,
 	})
@@ -515,6 +532,20 @@ func validatePRFlags(post, noPost bool, token string) error {
 // no staged+commit, no range+commit, at least one mode) and an out-of-set --gate.
 func validateReviewFlags(staged bool, from, to, commit, gate string) error {
 	return engine.ValidateInvocation(staged, from, to, commit, gate)
+}
+
+// validateMode rejects an out-of-set --mode; empty defaults to review.
+func validateMode(mode string) error {
+	switch mode {
+	case "", "review", "checks":
+		return nil
+	}
+	return &CLIError{
+		Code:    "flags.invalid_mode",
+		Message: fmt.Sprintf("unknown --mode %q", mode),
+		Hint:    "use review (default) or checks",
+		Exit:    2,
+	}
 }
 
 // validateFilterMode rejects an out-of-set --filter-mode, delegating to the github

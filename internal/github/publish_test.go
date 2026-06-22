@@ -38,6 +38,11 @@ type recordClient struct {
 	createReviewN int
 	createIssueN  int
 	editN         int
+
+	createCheckErr error
+	gotCheck       *gh.CreateCheckRunOptions
+	gotCheckUpd    []*gh.UpdateCheckRunOptions
+	checkRunN      int
 }
 
 func (c *recordClient) GetPR(stdctx.Context, string, string, int) (*gh.PullRequest, error) {
@@ -104,6 +109,22 @@ func (c *recordClient) EditIssueComment(_ stdctx.Context, _, _ string, id int64,
 	c.editedID = id
 	c.editedBody = com.GetBody()
 	return com, c.editErr
+}
+
+func (c *recordClient) CreateCheckRun(_ stdctx.Context, _, _ string, opts gh.CreateCheckRunOptions) (*gh.CheckRun, error) {
+	c.checkRunN++
+	o := opts
+	c.gotCheck = &o
+	if c.createCheckErr != nil {
+		return nil, c.createCheckErr
+	}
+	return &gh.CheckRun{ID: gh.Ptr(int64(42))}, nil
+}
+
+func (c *recordClient) UpdateCheckRun(_ stdctx.Context, _, _ string, _ int64, opts gh.UpdateCheckRunOptions) (*gh.CheckRun, error) {
+	o := opts
+	c.gotCheckUpd = append(c.gotCheckUpd, &o)
+	return &gh.CheckRun{ID: gh.Ptr(int64(42))}, nil
 }
 
 func optPage(opts *gh.PullRequestListCommentsOptions) int {

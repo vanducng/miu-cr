@@ -6,6 +6,8 @@ import (
 	"encoding/hex"
 	"errors"
 	"fmt"
+	"io"
+	"os"
 	"regexp"
 	"sort"
 	"strings"
@@ -320,6 +322,9 @@ type PostReviewOptions struct {
 	GateClean     bool       // caller-computed !engine.GateFailed(findings, Gate)
 	ReviewedFiles int        // count of files actually reviewed; APPROVE requires >0
 	FilterMode    FilterMode // inline-eligibility filter; empty = diff_context (default)
+	// ActionsOut is where the fork-PR 403 fallback writes ::error:: workflow commands
+	// (typically os.Stdout). nil falls back to os.Stdout; only used under Actions.
+	ActionsOut io.Writer
 }
 
 // PostReviewResult reports what PostReview did: inline comments posted, comments
@@ -340,6 +345,10 @@ type PostReviewResult struct {
 	// ACTUALLY-submitted review only — set after a successful submit, never on the
 	// empty-guard / pre-submit path. The store records exactly these as posted.
 	PostedFindings []PostedFinding
+	// Fallback is the count of ::error:: workflow annotations emitted to stdout when
+	// CreateReview 403'd under GitHub Actions (a fork PR without comment-write scope);
+	// 0 on the normal path. When >0 the review did NOT hard-fail.
+	Fallback int
 }
 
 // PostedFinding is the minimal (fingerprint, path) pair the store needs to track a
@@ -442,6 +451,18 @@ func PostReview(ctx stdctx.Context, client Client, info *PRInfo, findings []engi
 	}
 
 	if _, err := client.CreateReview(ctx, info.Owner, info.Repo, info.Number, req); err != nil {
+		// Fork-PR fallback: a 403 under GitHub Actions means the token lacks
+		// comment-write scope (typical for fork PRs). Emit per-finding ::error::
+		// workflow annotations to stdout instead of hard-failing.
+		if is403(err) && inGitHubActions() {
+			out := opts.ActionsOut
+			if out == nil {
+				out = os.Stdout
+			}
+			result.Fallback = emitWorkflowAnnotations(out, toPost)
+			result.Posted, result.Event, result.PostedFindings = 0, "COMMENT", nil
+			return result, nil
+		}
 		if event != "APPROVE" {
 			return PostReviewResult{Omitted: omitted, Event: "COMMENT"}, mapWriteError("github.create_review_failed", "creating review", err)
 		}
@@ -524,6 +545,50 @@ func isSelfApprove422(err error) bool {
 func is422(err error) bool {
 	var er *gh.ErrorResponse
 	return errors.As(err, &er) && er.Response != nil && er.Response.StatusCode == 422
+}
+
+// is403 reports whether err is a GitHub 403 (Forbidden) — typically a fork PR
+// whose Actions token lacks the write scope to post review comments.
+func is403(err error) bool {
+	var er *gh.ErrorResponse
+	return errors.As(err, &er) && er.Response != nil && er.Response.StatusCode == 403
+}
+
+// inGitHubActions reports whether we're running inside a GitHub Actions runner.
+func inGitHubActions() bool { return os.Getenv("GITHUB_ACTIONS") == "true" }
+
+// maxWorkflowAnnotations caps the ::error:: workflow commands emitted on the fork
+// fallback so a large finding set can't flood the Actions log.
+const maxWorkflowAnnotations = 50
+
+// emitWorkflowAnnotations writes per-finding `::error file=...,line=...,endLine=...::message`
+// workflow commands to w (stdout under Actions), capped, so a fork PR that 403s on
+// comment writes still surfaces findings as Actions annotations instead of hard-failing.
+// Messages carry finding text only — never a token. Returns the count emitted.
+func emitWorkflowAnnotations(w io.Writer, findings []engine.Finding) int {
+	n := 0
+	for _, f := range findings {
+		if n >= maxWorkflowAnnotations {
+			break
+		}
+		if f.Line <= 0 {
+			continue
+		}
+		end := f.EndLine
+		if end < f.Line {
+			end = f.Line
+		}
+		fmt.Fprintf(w, "::error file=%s,line=%d,endLine=%d::%s\n", f.File, f.Line, end, escapeWorkflowMessage(f.Rationale))
+		n++
+	}
+	return n
+}
+
+// escapeWorkflowMessage escapes the chars GitHub uses to delimit workflow command
+// data so a multi-line rationale can't break the ::error:: command.
+func escapeWorkflowMessage(s string) string {
+	r := strings.NewReplacer("%", "%25", "\r", "%0D", "\n", "%0A")
+	return r.Replace(strings.TrimSpace(s))
 }
 
 // commentBody renders one inline comment and reports whether it emitted a native

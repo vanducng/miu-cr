@@ -352,6 +352,10 @@ func publishReview(ctx stdctx.Context, client mgithub.Client, runner *gitcmd.Run
 	if err != nil {
 		return err
 	}
+
+	if req.Mode == "checks" {
+		return publishChecks(ctx, client, info, res, diffs, prResult, req)
+	}
 	existing, err := mgithub.ExistingFingerprints(ctx, client, info)
 	if err != nil {
 		return err
@@ -398,11 +402,21 @@ func publishReview(ctx stdctx.Context, client mgithub.Client, runner *gitcmd.Run
 		GateClean:     !engine.GateFailed(res.Findings, req.Gate),
 		ReviewedFiles: reviewedFilesFromStats(res.Stats),
 		FilterMode:    filterModeOf(req.FilterMode),
+		ActionsOut:    os.Stdout,
 	}
 
 	pr, err := mgithub.PostReview(ctx, client, info, res.Findings, diffs, "", skip, opts)
 	if err != nil {
 		return err
+	}
+	prResult.Mode = "review"
+	prResult.FallbackAnnotations = pr.Fallback
+	// Fork-PR 403 fallback fired: findings went to ::error:: workflow annotations,
+	// nothing was posted as comments — skip the summary upsert + store tracking.
+	if pr.Fallback > 0 {
+		prResult.Posted = false
+		prResult.SummaryAction = "fork_fallback"
+		return nil
 	}
 	summary := mgithub.RenderSummaryWithOverflow(info, res.Findings, res.Stats, pr.Omitted, pr.OmittedFindings)
 	action, err := mgithub.UpsertSummaryComment(ctx, client, info, summary)
@@ -429,6 +443,25 @@ func publishReview(ctx stdctx.Context, client mgithub.Client, runner *gitcmd.Run
 	prResult.SuggestionsPosted = pr.Suggestions
 	prResult.ApproveAction = approveActionFor(pr.Event)
 	prResult.ApproveReason = pr.Reason
+	return nil
+}
+
+// publishChecks is the --mode checks reporter: it posts a GitHub CheckRun with
+// annotations from the diff-eligible findings (conclusion from the gate) instead
+// of inline comments + a summary. No fingerprint dedupe / summary upsert: a CheckRun
+// is replaced wholesale each run by the same name, so re-runs are naturally idempotent.
+func publishChecks(ctx stdctx.Context, client mgithub.Client, info *mgithub.PRInfo, res engine.ReviewResult, diffs []diff.Diff, prResult *cli.PRResult, req cli.PRReviewRequest) error {
+	gateClean := !engine.GateFailed(res.Findings, req.Gate)
+	cr, err := mgithub.PostChecks(ctx, client, info, res.Findings, diffs, res.Stats, gateClean, filterModeOf(req.FilterMode))
+	if err != nil {
+		return err
+	}
+	prResult.Posted = true
+	prResult.Mode = "checks"
+	prResult.PostedInline = cr.Annotations
+	prResult.CheckRunID = cr.CheckRunID
+	prResult.CheckConclusion = cr.Conclusion
+	prResult.SummaryAction = "none"
 	return nil
 }
 

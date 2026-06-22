@@ -31,6 +31,8 @@ type fakeGitHub struct {
 	headSHA      string                       // re-fetched head SHA returned by GetPR (defaults to "headsha")
 	reviews      []*gh.PullRequestReview      // existing reviews returned by ListReviews
 	lastReviewed *gh.PullRequestReviewRequest // last CreateReview request, for Event assertions
+	lastCheck    *gh.CreateCheckRunOptions    // last CreateCheckRun opts, for --mode checks assertions
+	checkRunN    int
 }
 
 func (f *fakeGitHub) GetPR(stdctx.Context, string, string, int) (*gh.PullRequest, error) {
@@ -90,6 +92,18 @@ func (f *fakeGitHub) EditIssueComment(_ stdctx.Context, _, _ string, id int64, c
 		}
 	}
 	return com, nil
+}
+
+func (f *fakeGitHub) CreateCheckRun(_ stdctx.Context, _, _ string, opts gh.CreateCheckRunOptions) (*gh.CheckRun, error) {
+	f.order = append(f.order, "create_check")
+	f.checkRunN++
+	o := opts
+	f.lastCheck = &o
+	return &gh.CheckRun{ID: gh.Ptr(int64(7))}, nil
+}
+func (f *fakeGitHub) UpdateCheckRun(stdctx.Context, string, string, int64, gh.UpdateCheckRunOptions) (*gh.CheckRun, error) {
+	f.order = append(f.order, "update_check")
+	return &gh.CheckRun{ID: gh.Ptr(int64(7))}, nil
 }
 
 // setupRepo builds a real two-commit repo (base→head) the publish flow's
@@ -194,6 +208,49 @@ func TestPublishReviewWireFlow(t *testing.T) {
 	}
 	if got := strings.Count(fake.issueComments[0].GetBody(), mgithub.SummarySentinel); got != 1 {
 		t.Errorf("final summary must carry exactly one sentinel, got %d", got)
+	}
+}
+
+func TestPublishChecksWireFlow(t *testing.T) {
+	runner := gitcmd.New()
+	dir, base, head := setupRepo(t, runner)
+
+	fake := &fakeGitHub{}
+	restore := newGitHubClient
+	newGitHubClient = func(string) mgithub.Client { return fake }
+	t.Cleanup(func() { newGitHubClient = restore })
+	client := newGitHubClient("")
+
+	info := &mgithub.PRInfo{Owner: "o", Repo: "r", Number: 7, HeadSHA: head, BaseSHA: base, BaseBranch: "main"}
+	res := engine.ReviewResult{
+		Findings: []engine.Finding{
+			{File: "foo.go", Line: 4, Severity: "high", Category: "bug", Rationale: "boom", QuotedCode: "func B() {}"},
+		},
+		Stats: map[string]any{"truncation_level": "full", "files_reviewed": float64(1)},
+	}
+
+	pr := &cli.PRResult{SummaryAction: "none"}
+	if err := publishReview(stdctx.Background(), client, runner, dir, info, res, pr, cli.PRReviewRequest{Gate: "high", Mode: "checks"}, nil, embedWriter{}); err != nil {
+		t.Fatalf("publishReview (checks): %v", err)
+	}
+	if pr.Mode != "checks" || !pr.Posted {
+		t.Fatalf("want checks mode posted, got mode=%q posted=%v", pr.Mode, pr.Posted)
+	}
+	if pr.CheckConclusion != "failure" {
+		t.Fatalf("a high finding at gate high must conclude failure, got %q", pr.CheckConclusion)
+	}
+	if pr.PostedInline != 1 {
+		t.Fatalf("want 1 annotation, got %d", pr.PostedInline)
+	}
+	if fake.checkRunN != 1 || fake.lastCheck == nil {
+		t.Fatalf("want exactly one CreateCheckRun, got %d", fake.checkRunN)
+	}
+	if fake.lastCheck.HeadSHA != head {
+		t.Fatalf("CheckRun must anchor at head SHA, got %q", fake.lastCheck.HeadSHA)
+	}
+	// checks mode posts no inline review and no summary comment.
+	if fake.createReviewN != 0 || fake.createIssueN != 0 {
+		t.Fatalf("checks mode must not post a review/summary: review=%d issue=%d", fake.createReviewN, fake.createIssueN)
 	}
 }
 
