@@ -15,6 +15,13 @@ var severityOrder = []string{"critical", "high", "medium", "low", "info"}
 // It emits a severity histogram, truncation level, head SHA, files reviewed, an optional
 // omitted-inline note, and a short footer.
 func RenderSummary(info *PRInfo, findings []engine.Finding, stats map[string]any, omittedInline int) string {
+	return RenderSummaryWithOverflow(info, findings, stats, omittedInline, nil)
+}
+
+// RenderSummaryWithOverflow is RenderSummary plus a collapsible <details> block that
+// lists each capped/omitted inline finding (severity, category, file:line, rationale,
+// blob permalink) so nothing is silently dropped.
+func RenderSummaryWithOverflow(info *PRInfo, findings []engine.Finding, stats map[string]any, omittedInline int, omitted []engine.Finding) string {
 	var b strings.Builder
 	b.WriteString("## miu-cr review\n\n")
 
@@ -54,8 +61,38 @@ func RenderSummary(info *PRInfo, findings []engine.Finding, stats map[string]any
 		fmt.Fprintf(&b, "- Omitted inline: %d finding(s) over the %d-comment limit were not posted inline\n", omittedInline, maxInlineComments)
 	}
 
+	if len(omitted) > 0 {
+		renderOverflow(&b, info, omitted)
+	}
+
 	b.WriteString("\n<sub>Posted by miu-cr. Re-runs edit this summary and skip already-posted inline comments.</sub>")
 	return b.String()
+}
+
+// renderOverflow appends a collapsible block listing the omitted inline findings.
+func renderOverflow(b *strings.Builder, info *PRInfo, omitted []engine.Finding) {
+	fmt.Fprintf(b, "\n<details>\n<summary>Omitted inline findings (%d)</summary>\n\n", len(omitted))
+	for _, f := range omitted {
+		sev := strings.ToUpper(strings.TrimSpace(f.Severity))
+		if sev == "" {
+			sev = "NOTE"
+		}
+		loc := fmt.Sprintf("`%s:%d`", f.File, f.Line)
+		if url := blobURL(info, f.File, f.Line, f.EndLine); url != "" {
+			loc = fmt.Sprintf("[`%s:%d`](%s)", f.File, f.Line, url)
+		}
+		cat := f.Category
+		if cat != "" {
+			cat = " (" + cat + ")"
+		}
+		fmt.Fprintf(b, "- **%s**%s %s — %s\n", sev, cat, loc, oneLine(f.Rationale))
+	}
+	b.WriteString("\n</details>\n")
+}
+
+// oneLine collapses rationale newlines so a finding stays a single list item.
+func oneLine(s string) string {
+	return strings.Join(strings.Fields(s), " ")
 }
 
 func known(sev string) bool {

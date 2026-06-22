@@ -29,6 +29,27 @@ type PRInfo struct {
 	// approve resolver treats the untrusted set as a hard block.
 	AuthorAssociation string
 	Files             []string
+	// HTMLBase is the BASE repo's HTML URL (e.g. https://github.com/owner/repo),
+	// used to build repo-relative blob permalinks. Never contains a token.
+	HTMLBase string
+}
+
+// blobURL builds a repo-relative blob permalink at info.HeadSHA for path/line.
+// When endLine>line it emits a #L{line}-L{endLine} range anchor. Returns "" when
+// the HTML base or head SHA is unknown so callers can omit the link rather than
+// emit a broken one. path is repo-relative; the URL never carries a token.
+func blobURL(info *PRInfo, path string, line, endLine int) string {
+	if info == nil || info.HTMLBase == "" || info.HeadSHA == "" || path == "" {
+		return ""
+	}
+	u := fmt.Sprintf("%s/blob/%s/%s", strings.TrimRight(info.HTMLBase, "/"), info.HeadSHA, path)
+	if line > 0 {
+		u += fmt.Sprintf("#L%d", line)
+		if endLine > line {
+			u += fmt.Sprintf("-L%d", endLine)
+		}
+	}
+	return u
 }
 
 // FetchPR resolves a PR's SHAs/fork status and its full changed-file list via a
@@ -55,6 +76,7 @@ func FetchPR(ctx stdctx.Context, client Client, ref PRRef) (*PRInfo, error) {
 		BaseBranch:        pr.Base.GetRef(),
 		IsFork:            isFork(ref, pr),
 		AuthorAssociation: pr.GetAuthorAssociation(),
+		HTMLBase:          pr.GetBase().GetRepo().GetHTMLURL(),
 	}
 
 	opts := &gh.ListOptions{PerPage: 100}

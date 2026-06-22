@@ -359,7 +359,7 @@ func TestCommentBodyEscapesEmbeddedFence(t *testing.T) {
 		SuggestedPatch: "before\n```\nafter",
 	}
 	// Suggest OFF and multi-line patch → plain hint, never a one-click suggestion.
-	body, native := commentBody(f, "", PostReviewOptions{})
+	body, native := commentBody(f, "", PostReviewOptions{}, false)
 	if native {
 		t.Error("Suggest OFF must report native=false")
 	}
@@ -409,12 +409,6 @@ func postedBody(t *testing.T, c *recordClient) string {
 	t.Helper()
 	if c.gotReview == nil || len(c.gotReview.Comments) != 1 {
 		t.Fatalf("want exactly 1 inline comment posted, got review=%+v", c.gotReview)
-	}
-	if c.gotReview.Comments[0].StartLine != nil {
-		t.Fatal("StartLine must never be set (multi-line is out)")
-	}
-	if c.gotReview.Comments[0].StartSide != nil {
-		t.Fatal("StartSide must never be set (multi-line is out)")
 	}
 	return c.gotReview.Comments[0].GetBody()
 }
@@ -730,5 +724,163 @@ func TestFingerprintMarkerRoundTrip(t *testing.T) {
 	}
 	if len(got[1]) != 16 {
 		t.Fatalf("fingerprint width = %d, want 16 hex", len(got[1]))
+	}
+}
+
+// multiLineDiff: a single hunk whose new-side lines 1..4 are all on the RIGHT
+// side, so a finding spanning lines 2..3 is contiguous within ONE hunk.
+func multiLineDiff() []diff.Diff {
+	d := `@@ -1,4 +1,4 @@
+ package p
+-var a = 0
+-var b = 0
++var a = 1
++var b = 2
+ func f() {}
+`
+	return []diff.Diff{{
+		NewPath:        "p.go",
+		Diff:           d,
+		NewFileContent: "package p\nvar a = 1\nvar b = 2\nfunc f() {}\n",
+	}}
+}
+
+func TestPostReviewMultiLineRangeContiguousInOneHunk(t *testing.T) {
+	c := &recordClient{}
+	info := &PRInfo{Owner: "o", Repo: "r", Number: 1, HeadSHA: "h"}
+	f := engine.Finding{File: "p.go", Line: 2, EndLine: 3, Severity: "high", Category: "bug", Rationale: "span"}
+	res, err := PostReview(stdctx.Background(), c, info, []engine.Finding{f}, multiLineDiff(), "", nil, PostReviewOptions{})
+	if err != nil {
+		t.Fatalf("PostReview: %v", err)
+	}
+	if res.Ranges != 1 {
+		t.Fatalf("want 1 multi-line range, got %d", res.Ranges)
+	}
+	dc := c.gotReview.Comments[0]
+	if dc.GetStartLine() != 2 || dc.GetStartSide() != "RIGHT" || dc.GetLine() != 3 || dc.GetSide() != "RIGHT" {
+		t.Fatalf("want RIGHT range StartLine=2..Line=3, got start=%d/%s line=%d/%s",
+			dc.GetStartLine(), dc.GetStartSide(), dc.GetLine(), dc.GetSide())
+	}
+}
+
+func TestPostReviewMultiLineCrossHunkFallsBackToSingleLine(t *testing.T) {
+	// Two separate hunks: line 2 in hunk 1, line 20 in hunk 2. A 2..20 span is NOT
+	// contiguous within one hunk → must fall back to single-line (no GitHub 422).
+	c := &recordClient{}
+	info := &PRInfo{Owner: "o", Repo: "r", Number: 1, HeadSHA: "h"}
+	f := engine.Finding{File: "p.go", Line: 2, EndLine: 20, Severity: "high", Category: "bug", Rationale: "x"}
+	d := `@@ -1,2 +1,2 @@
+ package p
+-var a = 0
++var a = 1
+@@ -19,2 +19,2 @@
+ func g() {}
+-var z = 0
++var z = 1
+`
+	diffs := []diff.Diff{{NewPath: "p.go", Diff: d}}
+	res, err := PostReview(stdctx.Background(), c, info, []engine.Finding{f}, diffs, "", nil, PostReviewOptions{})
+	if err != nil {
+		t.Fatalf("PostReview: %v", err)
+	}
+	if res.Ranges != 0 {
+		t.Fatalf("cross-hunk span must fall back to single-line, got %d ranges", res.Ranges)
+	}
+	dc := c.gotReview.Comments[0]
+	if dc.StartLine != nil || dc.GetLine() != 2 {
+		t.Fatalf("want single-line at Line=2, got start=%v line=%d", dc.StartLine, dc.GetLine())
+	}
+}
+
+func TestPostReviewMultiLineSuggestionForCleanOnDiffSpan(t *testing.T) {
+	c := &recordClient{}
+	info := &PRInfo{Owner: "o", Repo: "r", Number: 1, HeadSHA: "h"}
+	f := engine.Finding{
+		File: "p.go", Line: 2, EndLine: 3, Severity: "high", Category: "bug",
+		Rationale:      "swap both",
+		QuotedCode:     "var a = 1\nvar b = 2",
+		SuggestedPatch: "var a = 2\nvar b = 3",
+	}
+	res, err := PostReview(stdctx.Background(), c, info, []engine.Finding{f}, multiLineDiff(), "", nil, PostReviewOptions{Suggest: true})
+	if err != nil {
+		t.Fatalf("PostReview: %v", err)
+	}
+	if res.Suggestions != 1 || res.Ranges != 1 {
+		t.Fatalf("want a 1 multi-line suggestion on a range, got suggestions=%d ranges=%d", res.Suggestions, res.Ranges)
+	}
+	if !strings.Contains(c.gotReview.Comments[0].GetBody(), "```suggestion\nvar a = 2\nvar b = 3\n```") {
+		t.Errorf("want a native multi-line suggestion:\n%s", c.gotReview.Comments[0].GetBody())
+	}
+}
+
+func TestPostReviewMultiLineSuggestionRejectsMismatchedSpan(t *testing.T) {
+	// QuotedCode does NOT match the raw new-file span → never a one-click apply.
+	c := &recordClient{}
+	info := &PRInfo{Owner: "o", Repo: "r", Number: 1, HeadSHA: "h"}
+	f := engine.Finding{
+		File: "p.go", Line: 2, EndLine: 3, Severity: "high", Category: "bug",
+		Rationale:      "swap",
+		QuotedCode:     "var a = 1\nUNRELATED",
+		SuggestedPatch: "var a = 2\nvar b = 3",
+	}
+	_, err := PostReview(stdctx.Background(), c, info, []engine.Finding{f}, multiLineDiff(), "", nil, PostReviewOptions{Suggest: true})
+	if err != nil {
+		t.Fatalf("PostReview: %v", err)
+	}
+	if strings.Contains(c.gotReview.Comments[0].GetBody(), "suggestion") {
+		t.Errorf("a span mismatch must degrade to a hint, never a one-click suggestion:\n%s", c.gotReview.Comments[0].GetBody())
+	}
+}
+
+// TestPostReviewMultiLineSuggestionRejectsOffRangeSpan covers the decoupled-gate
+// bug: Line is in one hunk, EndLine in a LATER hunk across an unchanged gap, but the
+// QuotedCode DOES match the contiguous raw new-file span. filterToDiffHunks keeps it
+// (only Line must be in a hunk) and cleanMultiLineReplacement passes (new-file lines
+// match), yet rangeInOneHunk(Line,EndLine)=false → the comment is single-line. It
+// MUST NOT carry a multi-line ```suggestion fence: a single-anchored multi-line
+// suggestion inserts the block instead of replacing the span (a broken one-click
+// patch). The same rangeInOneHunk proof must gate the suggestion, not just the range.
+func TestPostReviewMultiLineSuggestionRejectsOffRangeSpan(t *testing.T) {
+	c := &recordClient{}
+	info := &PRInfo{Owner: "o", Repo: "r", Number: 1, HeadSHA: "h"}
+	// Two hunks; new-file line 3 ("mid") is an unchanged gap NOT in any hunk set, so
+	// the 2..4 span is not contiguous-in-one-hunk even though it exists contiguously
+	// in the new file and matches QuotedCode verbatim.
+	d := `@@ -1,2 +1,2 @@
+ package p
+-var a = 0
++var a = 1
+@@ -3,2 +3,2 @@
+ mid
+-var b = 0
++var b = 2
+`
+	diffs := []diff.Diff{{
+		NewPath:        "p.go",
+		Diff:           d,
+		NewFileContent: "package p\nvar a = 1\nmid\nvar b = 2\n",
+	}}
+	f := engine.Finding{
+		File: "p.go", Line: 2, EndLine: 4, Severity: "high", Category: "bug",
+		Rationale:      "off-range span",
+		QuotedCode:     "var a = 1\nmid\nvar b = 2",
+		SuggestedPatch: "var a = 2\nmid2\nvar b = 3",
+	}
+	res, err := PostReview(stdctx.Background(), c, info, []engine.Finding{f}, diffs, "", nil, PostReviewOptions{Suggest: true})
+	if err != nil {
+		t.Fatalf("PostReview: %v", err)
+	}
+	if res.Ranges != 0 {
+		t.Fatalf("off-range span must fall back to single-line, got %d ranges", res.Ranges)
+	}
+	if res.Suggestions != 0 {
+		t.Fatalf("off-range span must NOT emit a native suggestion, got %d", res.Suggestions)
+	}
+	dc := c.gotReview.Comments[0]
+	if dc.StartLine != nil {
+		t.Fatalf("want single-line comment (no StartLine), got start=%d", dc.GetStartLine())
+	}
+	if strings.Contains(dc.GetBody(), "```suggestion") {
+		t.Errorf("a single-line comment must NOT carry a multi-line one-click suggestion:\n%s", dc.GetBody())
 	}
 }
