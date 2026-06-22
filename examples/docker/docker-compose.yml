@@ -1,0 +1,37 @@
+# docker-compose.yml — local development stand-in for the server deploy.
+# Production: replace the env block with a secrets manager or .env injection.
+#
+# Usage:
+#   docker compose up --build
+
+services:
+  miucr-server:
+    build:
+      context: ../..        # repo root (where go.mod lives)
+      dockerfile: examples/docker/Dockerfile
+    image: miucr-server:local
+    ports:
+      - "8080:8080"
+    environment:
+      # Webhook security — must be a random secret shared with GitHub App / webhook config.
+      WEBHOOK_SECRET: "${WEBHOOK_SECRET}"
+      # GitHub auth — PAT with repo scope, or let GitHub App token source handle it.
+      GITHUB_TOKEN: "${GITHUB_TOKEN}"
+      # LLM provider auth — at least one must be set.
+      ANTHROPIC_API_KEY: "${ANTHROPIC_API_KEY}"
+      # OPENAI_API_KEY: "${OPENAI_API_KEY}"
+    command:
+      - serve
+      - --repos
+      - "${MIUCR_REPOS}"   # e.g. "owner/repo,owner/other-repo"
+      - --addr
+      - ":8080"
+      - --gate
+      - "high"
+    restart: unless-stopped
+    healthcheck:
+      test: ["/usr/local/bin/miucr", "version"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 5s

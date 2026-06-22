@@ -9,6 +9,7 @@ import (
 
 	"github.com/spf13/cobra"
 
+	"github.com/vanducng/miu-cr/internal/config"
 	"github.com/vanducng/miu-cr/internal/engine"
 )
 
@@ -155,6 +156,32 @@ func resolveGitHubToken(flag string) string {
 	return ""
 }
 
+// nudgeIfUnconfigured returns a friendly typed nudge to run `miucr init` only
+// when nothing at all provides auth: no config file on disk AND no LLM-credential
+// env var AND no --api-key/--auth-token flag. Soft by design — when a key or flag
+// IS present, this is a no-op and review proceeds (zero-config still works).
+func nudgeIfUnconfigured(apiKey, authToken string) error {
+	if strings.TrimSpace(apiKey) != "" || strings.TrimSpace(authToken) != "" {
+		return nil
+	}
+	for _, k := range []string{"ANTHROPIC_API_KEY", "ANTHROPIC_AUTH_TOKEN", "OPENAI_API_KEY"} {
+		if strings.TrimSpace(os.Getenv(k)) != "" {
+			return nil
+		}
+	}
+	if p := config.FilePathOrEmpty(); p != "" {
+		if _, err := os.Stat(p); err == nil {
+			return nil // user has a config file; let resolve emit any specific error
+		}
+	}
+	return &CLIError{
+		Code:    "provider.unconfigured",
+		Message: "no LLM provider configured: no config, no API-key env var, and no --api-key",
+		Hint:    "run `miucr init` (≈30s) or set ANTHROPIC_API_KEY",
+		Exit:    1,
+	}
+}
+
 func reviewCommand(opts *options) *cobra.Command {
 	var (
 		staged       bool
@@ -216,6 +243,9 @@ func reviewCommand(opts *options) *cobra.Command {
 					expand:       expand,
 					tokenBudget:  tokenBudget,
 				})
+			}
+			if err := nudgeIfUnconfigured(apiKey, authToken); err != nil {
+				return err
 			}
 			if reviewer == nil {
 				return &CLIError{Code: "review.not_wired", Message: "review engine not wired", Exit: 1}

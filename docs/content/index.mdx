@@ -18,6 +18,7 @@ Local review, GitHub PR review, project rules, the serve/poll daemon + GitHub Ac
 ## Start here
 
 <CardGrid>
+  <LinkCard title="Getting started" href="/onboarding/" description="Install → miucr init → first review → use it in your editor and CI." />
   <LinkCard title="Install" href="/install/" description="install.sh, Homebrew, go install, or a Windows zip." />
   <LinkCard title="Usage" href="/usage/" description="Review modes, flags, the severity gate, output formats, and exit codes." />
   <LinkCard title="GitHub PR review" href="/github-pr/" description="Inline comments, an idempotent summary, cross-push dedupe, suggest & approve." />
@@ -49,4 +50,4 @@ miucr review --pr owner/repo#123 --no-post -o json # dry-run a GitHub PR
 miucr mcp                                          # serve the engine over MCP (stdio)
 ```
 
-Every command emits the stable `miucr.cli/v1` JSON envelope by default (`-o pretty` for a human table). It is **Apache-2.0** licensed; the source of truth is the [repository](https://github.com/vanducng/miu-cr).
+Every command emits the stable `miucr.cli/v1` JSON envelope by default (`-o pretty` for a human table). New here? Start with **[Getting started](/onboarding/)**, then browse copy-paste starters (rules, GitHub Action, MCP setup, Docker) in [`examples/`](https://github.com/vanducng/miu-cr/tree/main/examples). It is **Apache-2.0** licensed; the source of truth is the [repository](https://github.com/vanducng/miu-cr).

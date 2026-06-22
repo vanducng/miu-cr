@@ -1,0 +1,13 @@
+# Codex CLI MCP configuration — copy the [mcp_servers.miucr] block into
+# ~/.codex/config.toml (global) or .codex/config.toml (project-scoped, trusted
+# projects only). Both files use the same TOML schema.
+#
+# Prerequisites: miucr must be on $PATH (run `miucr version` to confirm).
+# The API key is read from the environment at server startup — never hard-code it here.
+
+[mcp_servers.miucr]
+command = "miucr"
+args    = ["mcp"]
+
+[mcp_servers.miucr.env]
+ANTHROPIC_API_KEY = "${ANTHROPIC_API_KEY}"

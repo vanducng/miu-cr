@@ -1,0 +1,43 @@
+# Copy this file to .github/workflows/code-review.yml in your repository.
+#
+# Prerequisites:
+#   1. Add ANTHROPIC_API_KEY to your repo secrets (Settings → Secrets → Actions).
+#   2. Optionally set GATE to a severity level (none|low|medium|high|critical).
+#      Default is "high" — the workflow fails only when a "high" or "critical"
+#      finding is detected.
+#
+# Fork PRs: pull_request_target runs in the BASE repo context, so secrets are
+# available. This is safe because miucr fetches the PR diff via the GitHub API
+# and does NOT check out or execute code from the fork. Do NOT add a checkout +
+# build/run of the PR head ref without auditing it first — that is the classic
+# pull_request_target footgun.
+
+name: AI Code Review
+
+on:
+  pull_request_target:
+    types: [opened, synchronize, reopened]
+
+permissions:
+  contents: read        # read the diff
+  pull-requests: write  # post inline comments and a summary
+
+jobs:
+  miucr-review:
+    name: miucr review
+    runs-on: ubuntu-latest
+    # Skip dependabot PRs and any PR with [skip review] in the title.
+    if: |
+      github.actor != 'dependabot[bot]' &&
+      !contains(github.event.pull_request.title, '[skip review]')
+
+    steps:
+      - name: Run miucr PR review
+        uses: vanducng/miu-cr@v0          # pin to a major tag or an exact SHA in production
+        with:
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+          api-key:      ${{ secrets.ANTHROPIC_API_KEY }}
+          gate:         high              # fail the check at this severity or above
+          # version: latest              # pin to a specific release tag if desired
+          # model:   claude-sonnet-4-5   # override the default model
+          # base-url: https://api.z.ai/api/anthropic  # optional gateway

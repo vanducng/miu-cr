@@ -43,7 +43,7 @@ Every command prints **one JSON object** on stdout (default `-o json`). Field or
              "retryable": false, "safe_to_retry": false } }
 ```
 
-`kind` per command: `version`, `review.result`, `rules.check`, `rules.init`, `error`
+`kind` per command: `version`, `review.result`, `rules.check`, `rules.init`, `init.result`, `error`
 (REST: `review.accepted` / `review.result`). **Secrets never appear** in the envelope, logs, or on disk
 (credential-named fields are scrubbed; finding `rationale`/`suggested_patch` prose is exempt).
 
@@ -70,6 +70,36 @@ go install github.com/vanducng/miu-cr/cmd/miucr@latest                          
 Verify: `miucr version` → `{"ok":true,...,"data":{"version":"v0.11.0"}}`.
 Config (optional) at `~/.config/miu/cr/config.toml`; state DB at `~/.config/miu/cr/state.db`.
 Repo rules at `.miu/cr/rules/*.md` — **never a flat `.miucr/`**.
+
+## Onboarding (`miucr init`)
+
+`miucr init` is the fastest path to a working config. It walks **provider →
+API-key source → project rules**, then writes `~/.config/miu/cr/config.toml`
+(dir `0700`, file `0600`, **deltas only** — the chosen provider block, never the
+full built-in defaults) and ends on the literal `miucr review --staged`.
+
+```sh
+miucr init                                  # interactive wizard (idempotent: Overwrite? y/N)
+miucr init --non-interactive --provider anthropic --auth-env ANTHROPIC_API_KEY --yes
+```
+
+- **Default writes no secret** — only the env-var **name** (`auth_env`). A literal
+  `auth_token` lands only on explicit paste-now + confirm (after a plaintext-on-disk warning).
+- Flags: `--provider anthropic|openai`, `--auth-env <NAME>`, `--base-url <gateway>`,
+  `--no-rules`, `--force`, `--yes`, `--non-interactive`. Envelope `kind: init.result`
+  (`data.next` = `miucr review --staged`); errors `init.aborted` / `config.write_failed`.
+- `init` is **optional** — zero-config still works when a provider key is on the env.
+  With no config **and** no key, `review` prints a soft one-line nudge to run `init`.
+
+## Examples (copy-paste starters)
+
+The repo ships an [`examples/`](https://github.com/vanducng/miu-cr/tree/main/examples)
+tree: `rules/{go-api,typescript-node,python-data}.md`,
+`github-action/code-review.yml` (fork-safe `pull_request_target`),
+`mcp-setup/{claude-code,cursor,codex}` + `README-mcp.md`, and
+`docker/{Dockerfile,docker-compose.yml}` (pure-Go `CGO_ENABLED=0` distroless image
+for `miucr serve`). Onboarding walkthrough lives at the docs
+[Getting started](https://miucr.vanducng.dev/onboarding/) page.
 
 ## Commands & exact flags
 
