@@ -5,6 +5,7 @@ import (
 	"bytes"
 	stdctx "context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
@@ -260,7 +261,7 @@ func (a *codexAgent) post(ctx stdctx.Context, body codexReq) (*codexResp, error)
 // event surfaces as a typed error.
 func parseCodexSSE(r io.Reader) (*codexResp, error) {
 	sc := bufio.NewScanner(r)
-	sc.Buffer(make([]byte, 0, 64*1024), 16<<20) // events can be large (encrypted reasoning)
+	sc.Buffer(make([]byte, 0, 64*1024), 32<<20) // events can be large (encrypted reasoning)
 	var done []codexOutItem                     // accumulated from output_item.done events
 	for sc.Scan() {
 		line := sc.Text()
@@ -309,6 +310,9 @@ func parseCodexSSE(r io.Reader) (*codexResp, error) {
 		}
 	}
 	if err := sc.Err(); err != nil {
+		if errors.Is(err, bufio.ErrTooLong) {
+			return nil, fmt.Errorf("agent: codex SSE event exceeded the read buffer (oversized reasoning content): %w", err)
+		}
 		return nil, fmt.Errorf("agent: read codex stream: %w", err)
 	}
 	return nil, fmt.Errorf("agent: codex stream ended without a completed response")
