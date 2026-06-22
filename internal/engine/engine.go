@@ -66,6 +66,7 @@ type AgentContext struct {
 	RepoDir         string
 	Rev             string
 	Runner          *gitcmd.Runner
+	Progress        func(string) // nil = silent; milestone strings only, never secrets
 }
 
 // Retriever is the engine-local seam for M7 semantic recall: wire injects an
@@ -113,6 +114,18 @@ type Request struct {
 	// calls it with the current change's code anchors BEFORE the agent and threads
 	// the returned advisory prose into AgentContext.SemanticContext. nil => M6.
 	Retriever Retriever
+
+	// Progress is the optional milestone sink (stderr); nil = silent. The wire/cli
+	// layer builds it from --verbose/--quiet + a TTY check. Only milestone strings
+	// and file paths/tool names ever reach it — never tokens.
+	Progress func(string)
+}
+
+// progress invokes the sink when set; a nil sink is a silent no-op.
+func (req Request) progress(msg string) {
+	if req.Progress != nil {
+		req.Progress(msg)
+	}
 }
 
 // Engine orchestrates a review with an injectable Agent so the pipeline is
@@ -207,6 +220,11 @@ func (e *Engine) Review(ctx stdctx.Context, req Request) (ReviewResult, error) {
 		ExpandWindow: req.ExpandWindow,
 	})
 
+	req.progress(fmt.Sprintf("reviewing %d files (%d changed)…", len(selected), len(diffs)))
+	if lvl, _ := assembled.Stats["truncation_level"].(string); lvl != "" && lvl != "full" {
+		req.progress("diff compressed: " + lvl)
+	}
+
 	semanticContext, semanticStat := retrieveSemantic(ctx, req.Retriever, selected)
 
 	rev := selected[0].Ref
@@ -217,6 +235,7 @@ func (e *Engine) Review(ctx stdctx.Context, req Request) (ReviewResult, error) {
 		RepoDir:         req.RepoDir,
 		Rev:             rev,
 		Runner:          e.Runner,
+		Progress:        req.Progress,
 	})
 	if err != nil {
 		return ReviewResult{}, err

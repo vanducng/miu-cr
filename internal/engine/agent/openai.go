@@ -113,6 +113,7 @@ func (a *openaiAgent) Review(ctx stdctx.Context, rc Context) ([]engine.Finding, 
 		if err := ctx.Err(); err != nil {
 			return nil, err
 		}
+		rc.progress(fmt.Sprintf("thinking… (turn %d)", turn+1))
 
 		// Final allowed turn: withdraw the tools so the model can no longer keep
 		// exploring and must answer, and append the finalize nudge so a

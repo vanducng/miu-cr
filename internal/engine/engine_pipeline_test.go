@@ -22,12 +22,17 @@ type fakeAgent struct {
 	gotRev      string
 	gotRules    string
 	gotSemantic string
+	gotProgress bool
 }
 
 func (f *fakeAgent) Review(_ stdctx.Context, rc engine.AgentContext) ([]engine.Finding, error) {
 	f.gotRev = rc.Rev
 	f.gotRules = rc.Rules
 	f.gotSemantic = rc.SemanticContext
+	f.gotProgress = rc.Progress != nil
+	if rc.Progress != nil {
+		rc.Progress("agent ran")
+	}
 	out := make([]engine.Finding, len(f.findings))
 	copy(out, f.findings)
 	return out, nil

@@ -34,6 +34,7 @@ type ReviewRequest struct {
 	Timeout      time.Duration
 	ExpandWindow int
 	TokenBudget  int
+	Progress     func(string) // nil = silent; stderr milestones, never the stdout envelope
 }
 
 // ReviewOutcome is the Reviewer's result: anchored findings plus run stats. PR
@@ -115,6 +116,7 @@ type PRReviewRequest struct {
 	Extensions   []string
 	ExpandWindow int
 	TokenBudget  int
+	Progress     func(string) // nil = silent; stderr milestones, never the stdout envelope
 }
 
 // PRReviewer fetches a GitHub PR, runs the engine on a temp clone via ModeRange,
@@ -218,6 +220,8 @@ func reviewCommand(opts *options) *cobra.Command {
 		noPost       bool
 		suggest      bool
 		approveClean bool
+		verbose      bool
+		quiet        bool
 	)
 
 	cmd := &cobra.Command{
@@ -235,6 +239,7 @@ func reviewCommand(opts *options) *cobra.Command {
 			if !cmd.Flags().Changed("timeout") {
 				opts.timeout = 300 * time.Second
 			}
+			prog := newProgress(cmd.ErrOrStderr(), verbose, quiet)
 			if pr != "" {
 				return runPRReview(cmd, prRunArgs{
 					ref:          pr,
@@ -254,6 +259,7 @@ func reviewCommand(opts *options) *cobra.Command {
 					exts:         exts,
 					expand:       expand,
 					tokenBudget:  tokenBudget,
+					progress:     prog,
 				})
 			}
 			if err := nudgeIfUnconfigured(apiKey, authToken); err != nil {
@@ -280,6 +286,7 @@ func reviewCommand(opts *options) *cobra.Command {
 				Timeout:      opts.timeout,
 				ExpandWindow: expand,
 				TokenBudget:  tokenBudget,
+				Progress:     prog,
 			}
 			ctx := cmd.Context()
 			if opts.timeout > 0 {
@@ -290,6 +297,9 @@ func reviewCommand(opts *options) *cobra.Command {
 			out, err := reviewer.Review(ctx, req)
 			if err != nil {
 				return err
+			}
+			if prog != nil {
+				prog(fmt.Sprintf("done: %d findings", len(out.Findings)))
 			}
 			summary := map[string]any{
 				"findings": len(out.Findings),
@@ -341,8 +351,11 @@ func reviewCommand(opts *options) *cobra.Command {
 	f.BoolVar(&noPost, "no-post", false, "Dry-run the PR review without posting (default for --pr)")
 	f.BoolVar(&suggest, "suggest", false, "Emit GitHub native one-click suggestions for proven single-line replacements; author-applied, never pushed. Requires --post (inert in dry-run) (default OFF; else a plain hint)")
 	f.BoolVar(&approveClean, "approve-clean", false, "Submit Event=APPROVE only on a clean, non-fork, trusted-author PR; skipped (→ COMMENT) otherwise, never errors. A PAT APPROVE counts toward required reviews. Requires --post (inert in dry-run) (default OFF)")
+	f.BoolVarP(&verbose, "verbose", "v", false, "Print progress to stderr (default when stderr is a terminal; stdout envelope unchanged)")
+	f.BoolVarP(&quiet, "quiet", "q", false, "Silence progress output (overrides --verbose and TTY auto-detect)")
 
 	cmd.MarkFlagsRequiredTogether("from", "to")
+	cmd.MarkFlagsMutuallyExclusive("verbose", "quiet")
 	return cmd
 }
 
@@ -366,6 +379,7 @@ type prRunArgs struct {
 	exts        []string
 	expand      int
 	tokenBudget int
+	progress    func(string)
 }
 
 // runPRReview drives the --pr path: resolve the GitHub token (empty-tolerant for
@@ -410,9 +424,13 @@ func runPRReview(cmd *cobra.Command, a prRunArgs) error {
 		Extensions:   a.exts,
 		ExpandWindow: a.expand,
 		TokenBudget:  a.tokenBudget,
+		Progress:     a.progress,
 	})
 	if err != nil {
 		return err
+	}
+	if a.progress != nil {
+		a.progress(fmt.Sprintf("done: %d findings", len(out.Findings)))
 	}
 
 	summary := map[string]any{"findings": len(out.Findings), "gate": a.gate}

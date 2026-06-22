@@ -32,6 +32,14 @@ type Context struct {
 	RepoDir         string
 	Rev             string
 	Runner          *gitcmd.Runner
+	Progress        func(string) // nil = silent; milestone/tool strings only, never secrets
+}
+
+// progress invokes the sink when set; a nil sink is a silent no-op.
+func (c Context) progress(msg string) {
+	if c.Progress != nil {
+		c.Progress(msg)
+	}
 }
 
 // Agent runs one review pass over the assembled context and returns findings
@@ -145,6 +153,7 @@ func (a *anthropicAgent) Review(ctx stdctx.Context, rc Context) ([]engine.Findin
 		if err := ctx.Err(); err != nil {
 			return nil, err
 		}
+		rc.progress(fmt.Sprintf("thinking… (turn %d)", turn+1))
 
 		// Final allowed turn: withdraw the tools so the model can no longer keep
 		// exploring and must answer, and fold the finalize nudge into the trailing
@@ -209,6 +218,15 @@ type grepArgs struct {
 	File    string `json:"file"`
 }
 
+// fileReadLabel renders a short "path:start-end" label for the progress sink
+// (range omitted when unset). Paths/line numbers only — never secrets.
+func fileReadLabel(a fileReadArgs) string {
+	if a.Start == 0 && a.End == 0 {
+		return a.File
+	}
+	return fmt.Sprintf("%s:%d-%d", a.File, a.Start, a.End)
+}
+
 // runTool executes one tool against the reviewed revision. Provider-agnostic so
 // both the Anthropic and OpenAI loops share it. Returns (content, isError).
 func runTool(ctx stdctx.Context, rc Context, name string, input json.RawMessage) (string, bool) {
@@ -219,6 +237,7 @@ func runTool(ctx stdctx.Context, rc Context, name string, input json.RawMessage)
 		if strings.TrimSpace(args.File) == "" {
 			return "file_read requires a non-empty \"file\"", true
 		}
+		rc.progress("→ file_read " + fileReadLabel(args))
 		out, err := enginectx.ReadRange(ctx, rc.RepoDir, rc.Rev, args.File, args.Start, args.End, rc.Runner)
 		if err != nil {
 			return fmt.Sprintf("file_read failed: %v", err), true
@@ -233,6 +252,7 @@ func runTool(ctx stdctx.Context, rc Context, name string, input json.RawMessage)
 		if strings.TrimSpace(args.Pattern) == "" {
 			return "grep requires a non-empty \"pattern\"", true
 		}
+		rc.progress("→ grep " + args.Pattern)
 		out, err := enginectx.Grep(ctx, rc.RepoDir, rc.Rev, args.Pattern, rc.Runner)
 		if err != nil {
 			return fmt.Sprintf("grep failed: %v", err), true

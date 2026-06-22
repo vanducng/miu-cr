@@ -163,6 +163,7 @@ func (a *codexAgent) Review(ctx stdctx.Context, rc Context) ([]engine.Finding, e
 		if err := ctx.Err(); err != nil {
 			return nil, err
 		}
+		rc.progress(fmt.Sprintf("thinking… (turn %d)", turn+1))
 		req := codexReq{
 			Model:        a.model,
 			Instructions: systemPrompt,
