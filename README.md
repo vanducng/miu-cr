@@ -11,7 +11,7 @@
 
 **MIU Code Review** — a fast, pure-Go AI code-review CLI with a deterministic + agent engine. Review your own changes locally before you open a PR, gate them in CI, review GitHub PRs with inline comments, or drive the engine from any MCP-capable agent host (Claude Code, Codex, …). One review path, four ways to run it, a stable JSON envelope on stdout.
 
-> **v0.11.0 — feature-complete roadmap (M1–M9).** Local review, GitHub PR review, project rules, the serve/poll daemon + GitHub Action, SQLite/Postgres stores, opt-in semantic code-recall, a REST API + GitHub App auth, and an MCP server all ship today.
+> **v0.11.0.** Local review, GitHub PR review, project rules, the serve/poll daemon + GitHub Action, SQLite/Postgres stores, opt-in semantic code-recall, a REST API + GitHub App auth, and an MCP server all ship today.
 
 ## Why
 
