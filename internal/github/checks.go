@@ -97,6 +97,9 @@ func PostChecks(ctx stdctx.Context, client Client, info *PRInfo, findings []engi
 		return PostChecksResult{}, mapWriteError("github.create_check_run_failed", "creating check run", err)
 	}
 
+	// GitHub APPENDS annotations on each UpdateCheckRun (it does NOT replace the
+	// array), so these batches MUST be disjoint slices — sending cumulative
+	// slices would duplicate. Create carried [0:50]; each update appends the next 50.
 	for start := maxAnnotationsPerBatch; start < len(anns); start += maxAnnotationsPerBatch {
 		end := min(start+maxAnnotationsPerBatch, len(anns))
 		if _, uerr := client.UpdateCheckRun(ctx, info.Owner, info.Repo, run.GetID(), gh.UpdateCheckRunOptions{
