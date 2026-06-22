@@ -260,7 +260,7 @@ Responses protocol) so they run on the user's **ChatGPT Pro/Max subscription**, 
 (`--provider anthropic`/unknown → `login.provider_unsupported`; Anthropic OAuth is ToS-prohibited).
 Loopback binds an allow-listed port (`1455`, then `1457`). Envelope `kind: init.result`-style
 **secret-free** payload: `{provider, oauth_path, expires_at, account_id, has_api_key}` — **no tokens**.
-Errors: `login.provider_unsupported`, `login.browser_open_failed`, `login.exchange_failed`, `login.write_failed`.
+Errors: `login.provider_unsupported`, `login.port_unavailable`, `login.timeout`, `login.exchange_failed`, `login.write_failed`.
 
 **Precedence**: the cached OAuth credential sits **below** an explicit `--api-key` / `OPENAI_API_KEY`
 in OpenAI resolution — an explicit key always wins; OAuth is consulted only when no OpenAI key is set.

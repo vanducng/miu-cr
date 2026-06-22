@@ -11,6 +11,7 @@ import (
 	"fmt"
 	"net/http"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/vanducng/miu-cr/internal/config"
@@ -58,17 +59,22 @@ func Credential(ctx stdctx.Context, meta Meta, httpClient *http.Client, now func
 		return Resolved{}, false, nil
 	}
 	if rec.ExpiringWithin(refreshSkew, now()) {
-		rec, err = refresh(ctx, meta, rec, httpClient)
+		rec, err = refresh(ctx, meta, rec, httpClient, now)
 		if err != nil {
 			return Resolved{}, false, err
 		}
 	}
+	// mu guards rec against concurrent Refresh calls (parallel reviews can hit a
+	// 401 at the same time), which read+reassign the captured record.
+	var mu sync.Mutex
 	return Resolved{
 		AccessToken:    rec.AccessToken,
 		AccountID:      rec.AccountID,
 		BackendBaseURL: meta.BackendBaseURL,
 		Refresh: func(ctx stdctx.Context) (string, error) {
-			refreshed, rerr := refresh(ctx, meta, rec, httpClient)
+			mu.Lock()
+			defer mu.Unlock()
+			refreshed, rerr := refresh(ctx, meta, rec, httpClient, now)
 			if rerr != nil {
 				return "", rerr
 			}
@@ -81,7 +87,7 @@ func Credential(ctx stdctx.Context, meta Meta, httpClient *http.Client, now func
 // refresh runs the hand-rolled JSON-body refresh-token grant (the provider's
 // token endpoint wants JSON, which x/oauth2's form-encoded refresh can't do),
 // then SaveOAuths the merged record. Errors are redacted so no token leaks.
-func refresh(ctx stdctx.Context, meta Meta, rec config.OAuthRecord, httpClient *http.Client) (config.OAuthRecord, error) {
+func refresh(ctx stdctx.Context, meta Meta, rec config.OAuthRecord, httpClient *http.Client, now func() time.Time) (config.OAuthRecord, error) {
 	if strings.TrimSpace(rec.RefreshToken) == "" {
 		return config.OAuthRecord{}, fmt.Errorf("oauth: token expired and no refresh token cached")
 	}
@@ -123,7 +129,7 @@ func refresh(ctx stdctx.Context, meta Meta, rec config.OAuthRecord, httpClient *
 		rec.IDToken = tr.IDToken
 	}
 	if tr.ExpiresIn > 0 {
-		rec.ExpiresAt = time.Now().Add(time.Duration(tr.ExpiresIn) * time.Second)
+		rec.ExpiresAt = now().Add(time.Duration(tr.ExpiresIn) * time.Second)
 	}
 	if err := config.SaveOAuth(rec); err != nil {
 		return config.OAuthRecord{}, fmt.Errorf("oauth: persist refreshed token: %s", config.RedactString(err.Error()))

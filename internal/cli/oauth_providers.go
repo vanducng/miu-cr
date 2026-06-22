@@ -1,6 +1,10 @@
 package cli
 
-import "fmt"
+import (
+	"fmt"
+	"sort"
+	"strings"
+)
 
 // oauthProvider describes one OAuth login target. The registry is the extension
 // point: `openai` is the only entry today; codex is NOT hardcoded into the flow.
@@ -61,6 +65,17 @@ func OAuthBackend(name string) (OAuthBackendMeta, bool) {
 	}, true
 }
 
+// availableProviders renders the registered OAuth provider names (sorted) so user
+// hints stay in sync with the registry as providers are added.
+func availableProviders() string {
+	names := make([]string, 0, len(oauthProviders))
+	for k := range oauthProviders {
+		names = append(names, k)
+	}
+	sort.Strings(names)
+	return "available: " + strings.Join(names, ", ")
+}
+
 // lookupOAuthProvider returns the registered provider or a typed error listing
 // what is available. `anthropic`/unknown are rejected here (ToS).
 func lookupOAuthProvider(name string) (oauthProvider, error) {
@@ -70,7 +85,7 @@ func lookupOAuthProvider(name string) (oauthProvider, error) {
 	return oauthProvider{}, &CLIError{
 		Code:    "login.provider_unsupported",
 		Message: fmt.Sprintf("unsupported provider %q", name),
-		Hint:    "available: openai",
+		Hint:    availableProviders(),
 		Exit:    2,
 	}
 }

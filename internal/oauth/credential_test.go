@@ -7,6 +7,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -123,6 +124,62 @@ func TestCredentialRefreshClosureRotates(t *testing.T) {
 	}
 	if hits != 1 {
 		t.Errorf("Refresh hits = %d", hits)
+	}
+}
+
+// TestCredentialConcurrentRefreshNoRace exercises the Refresh closure from many
+// goroutines; the sync.Mutex must serialize the rec read+reassign (run with -race).
+func TestCredentialConcurrentRefreshNoRace(t *testing.T) {
+	fakeHome(t)
+	_ = config.SaveOAuth(config.OAuthRecord{
+		Provider: "openai", AccessToken: "a0", RefreshToken: "r0",
+		ExpiresAt: time.Now().Add(time.Hour),
+	})
+	hits := 0
+	body, _ := json.Marshal(map[string]any{"access_token": "a1", "refresh_token": "r1", "expires_in": 3600})
+	srv := tokenServer(t, string(body), 200, &hits)
+	defer srv.Close()
+
+	res, ok, err := Credential(stdctx.Background(), metaFor(srv), srv.Client(), nil)
+	if err != nil || !ok {
+		t.Fatalf("Credential: %v", err)
+	}
+
+	var wg sync.WaitGroup
+	for i := 0; i < 8; i++ {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			if tok, e := res.Refresh(stdctx.Background()); e != nil || tok != "a1" {
+				t.Errorf("Refresh = %q err=%v", tok, e)
+			}
+		}()
+	}
+	wg.Wait()
+}
+
+// TestRefreshUsesInjectedNow verifies ExpiresAt is computed from the injected now
+// (deterministic) rather than the wall clock.
+func TestRefreshUsesInjectedNow(t *testing.T) {
+	fakeHome(t)
+	_ = config.SaveOAuth(config.OAuthRecord{
+		Provider: "openai", AccessToken: "old", RefreshToken: "ref",
+		ExpiresAt: time.Now().Add(time.Minute), // within refreshSkew → triggers refresh
+	})
+	hits := 0
+	body, _ := json.Marshal(map[string]any{"access_token": "new", "expires_in": 3600})
+	srv := tokenServer(t, string(body), 200, &hits)
+	defer srv.Close()
+
+	fixed := time.Date(2030, 1, 2, 3, 4, 5, 0, time.UTC)
+	_, ok, err := Credential(stdctx.Background(), metaFor(srv), srv.Client(), func() time.Time { return fixed })
+	if err != nil || !ok {
+		t.Fatalf("Credential: %v", err)
+	}
+	saved, _, _ := config.LoadOAuth()
+	want := fixed.Add(3600 * time.Second)
+	if !saved.ExpiresAt.Equal(want) {
+		t.Errorf("ExpiresAt = %v, want %v (computed from injected now)", saved.ExpiresAt, want)
 	}
 }
 

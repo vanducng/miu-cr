@@ -6,6 +6,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/vanducng/miu-cr/internal/cli/clierr"
 	"github.com/vanducng/miu-cr/internal/config"
 )
 
@@ -102,8 +103,52 @@ func TestResolveOAuthResolverErrorSurfaces(t *testing.T) {
 	if err == nil {
 		t.Fatal("expected error from resolver")
 	}
-	// The resolver error is wrapped + redacted via RedactString.
+	// The rendered envelope message stays RedactString-scrubbed.
 	if strings.Contains(err.Error(), leaked) {
 		t.Errorf("resolver error leaked a token: %v", err)
+	}
+}
+
+// TestResolveOAuthErrorWrapsCause verifies the CLIError preserves the cause chain
+// (errors.Is/As) while exposing a typed code.
+func TestResolveOAuthErrorWrapsCause(t *testing.T) {
+	clearProviderEnv(t)
+	sentinel := errors.New("token endpoint unreachable")
+	boom := func(stdctx.Context) (OAuthCredential, bool, error) {
+		return OAuthCredential{}, false, sentinel
+	}
+	_, err := resolveWith(config.Defaults(), ResolveInput{Provider: "openai", OAuthResolver: boom})
+	if err == nil {
+		t.Fatal("expected error from resolver")
+	}
+	if !errors.Is(err, sentinel) {
+		t.Errorf("cause not wrapped: errors.Is(err, sentinel) = false; err=%v", err)
+	}
+	var cliErr *clierr.CLIError
+	if !errors.As(err, &cliErr) || cliErr.Code != "agent.oauth_unavailable" {
+		t.Errorf("err = %v, want code agent.oauth_unavailable", err)
+	}
+}
+
+// TestResolveThreadsContextToResolver verifies the request context (not Background)
+// reaches the OAuth resolver so refresh respects cancellation.
+func TestResolveThreadsContextToResolver(t *testing.T) {
+	clearProviderEnv(t)
+	ctx, cancel := stdctx.WithCancel(stdctx.Background())
+	cancel()
+	var seen error
+	resolver := func(c stdctx.Context) (OAuthCredential, bool, error) {
+		seen = c.Err()
+		return OAuthCredential{
+			AccessToken:    "tok",
+			BackendBaseURL: "https://backend.example/codex",
+			Refresh:        func(stdctx.Context) (string, error) { return "", nil },
+		}, true, nil
+	}
+	if _, err := resolveWith(config.Defaults(), ResolveInput{Ctx: ctx, Provider: "openai", OAuthResolver: resolver}); err != nil {
+		t.Fatalf("resolve: %v", err)
+	}
+	if seen == nil {
+		t.Error("resolver did not receive the bounded context (got a fresh Background)")
 	}
 }

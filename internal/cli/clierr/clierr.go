@@ -17,6 +17,11 @@ type CLIError struct {
 	// AlreadyWritten signals the command already emitted its own envelope: Execute
 	// carries the exit code but does NOT overwrite stdout with an error-only envelope.
 	AlreadyWritten bool
+	// Cause preserves the wrapped error for errors.Is/As; it is never rendered into
+	// the envelope (only Message is), so an already-redacted cause leaks nothing.
+	Cause error
 }
 
 func (e *CLIError) Error() string { return e.Message }
+
+func (e *CLIError) Unwrap() error { return e.Cause }

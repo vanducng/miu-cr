@@ -24,6 +24,10 @@ import (
 // fails; login continues either way (the URL is always printed).
 var browserOpen = openBrowser
 
+// loginCallbackTimeout bounds the wait for the browser callback. cmd.Context() is
+// context.Background() for cobra, so without this the flow could hang forever.
+const loginCallbackTimeout = 3 * time.Minute
+
 func loginCommand(_ *options) *cobra.Command {
 	var (
 		provider  string
@@ -47,7 +51,7 @@ func loginCommand(_ *options) *cobra.Command {
 		},
 	}
 	f := cmd.Flags()
-	f.StringVar(&provider, "provider", "openai", "OAuth provider (available: openai)")
+	f.StringVar(&provider, "provider", "openai", "OAuth provider ("+availableProviders()+")")
 	f.StringVar(&baseURL, "base-url", "", "Override the authorize/token host (self-hosted gateway)")
 	f.IntVar(&port, "port", 0, "Loopback port (0 = auto-try the provider's allow-listed ports)")
 	f.BoolVar(&noBrowser, "no-browser", false, "Print the authorize URL instead of opening a browser")
@@ -84,12 +88,16 @@ func runLogin(ctx stdctx.Context, stdout, stderr io.Writer, prov oauthProvider, 
 		}
 	}
 
-	code, err := serveCallback(ctx, ln, state)
+	cbCtx, cancel := stdctx.WithTimeout(ctx, loginCallbackTimeout)
+	defer cancel()
+	code, err := serveCallback(cbCtx, ln, state)
 	if err != nil {
 		return err
 	}
 
-	tok, err := conf.Exchange(ctx, code, oauth2.VerifierOption(verifier))
+	exCtx, exCancel := stdctx.WithTimeout(ctx, tokenExchangeTimeout)
+	defer exCancel()
+	tok, err := conf.Exchange(exCtx, code, oauth2.VerifierOption(verifier))
 	if err != nil {
 		return &CLIError{Code: "login.exchange_failed", Message: "token exchange failed: " + config.RedactString(err.Error()), Exit: 1}
 	}
@@ -211,10 +219,10 @@ func bindLoopback(prov oauthProvider, port int) (net.Listener, int, error) {
 		}
 		lastErr = err
 	}
-	hint := fmt.Sprintf("ports %v are reserved for this flow; free one or pass --no-browser to authorize manually", prov.Ports)
+	hint := fmt.Sprintf("free a loopback port %v for this flow, or pass --no-browser to authorize manually", prov.Ports)
 	msg := "could not bind a loopback port"
 	if lastErr != nil {
 		msg += ": " + config.RedactString(lastErr.Error())
 	}
-	return nil, 0, &CLIError{Code: "login.browser_open_failed", Message: msg, Hint: hint, Exit: 1}
+	return nil, 0, &CLIError{Code: "login.port_unavailable", Message: msg, Hint: hint, Exit: 1}
 }

@@ -103,6 +103,7 @@ type engineReviewer struct{}
 
 func (engineReviewer) Review(ctx stdctx.Context, req cli.ReviewRequest) (cli.ReviewOutcome, error) {
 	creds, err := agent.Resolve(agent.ResolveInput{
+		Ctx:           ctx,
 		Provider:      req.Provider,
 		APIKey:        req.APIKey,
 		BaseURL:       req.BaseURL,
@@ -197,6 +198,7 @@ func (prReviewer) ReviewPR(ctx stdctx.Context, req cli.PRReviewRequest) (cli.Rev
 	}
 
 	creds, err := agent.Resolve(agent.ResolveInput{
+		Ctx:           ctx,
 		Provider:      req.Provider,
 		APIKey:        req.APIKey,
 		BaseURL:       req.BaseURL,
@@ -503,7 +505,7 @@ func (mcpServerImpl) Serve(ctx stdctx.Context, req cli.MCPRequest) error {
 type lazyAgent struct{ timeout time.Duration }
 
 func (l lazyAgent) Review(ctx stdctx.Context, rc engine.AgentContext) ([]engine.Finding, error) {
-	creds, err := agent.Resolve(agent.ResolveInput{OAuthResolver: oauthResolver()})
+	creds, err := agent.Resolve(agent.ResolveInput{Ctx: ctx, OAuthResolver: oauthResolver()})
 	if err != nil {
 		return nil, err
 	}

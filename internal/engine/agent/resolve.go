@@ -40,6 +40,10 @@ type Credentials struct {
 
 // ResolveInput carries the CLI flag values (all optional) into resolution.
 type ResolveInput struct {
+	// Ctx bounds the OAuth resolution (which may do a network token refresh) so it
+	// respects cancellation/timeout. nil falls back to context.Background().
+	Ctx stdctx.Context
+
 	Provider  string // profile name: "anthropic" | "openai" | <configured> | "auto" | ""
 	APIKey    string // --api-key
 	BaseURL   string // --base-url
@@ -218,13 +222,18 @@ func resolveOpenAI(in ResolveInput, prof config.Provider) (Credentials, error) {
 // Credentials. The OAuth model uses the OPENAI_MODEL/profile/default chain
 // (the codex backend accepts the same model ids).
 func resolveOAuthCodex(in ResolveInput, prof config.Provider) (Credentials, bool, error) {
-	cred, ok, err := in.OAuthResolver(stdctx.Background())
+	ctx := in.Ctx
+	if ctx == nil {
+		ctx = stdctx.Background()
+	}
+	cred, ok, err := in.OAuthResolver(ctx)
 	if err != nil {
 		return Credentials{}, false, &clierr.CLIError{
 			Code:    "agent.oauth_unavailable",
 			Message: "cached login credential could not be resolved: " + config.RedactString(err.Error()),
 			Hint:    "run `miucr login` again, or set OPENAI_API_KEY / --api-key",
 			Exit:    1,
+			Cause:   err,
 		}
 	}
 	if !ok {

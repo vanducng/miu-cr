@@ -3,16 +3,22 @@ package cli
 import (
 	stdctx "context"
 	"encoding/json"
+	"errors"
 	"net"
 	"net/http"
 	"net/url"
 	"strings"
+	"sync"
 	"time"
 
 	"golang.org/x/oauth2"
 
 	"github.com/vanducng/miu-cr/internal/config"
 )
+
+// tokenExchangeTimeout bounds the best-effort openai-api-key token-exchange grant
+// so a hung endpoint can't stall login.
+const tokenExchangeTimeout = 30 * time.Second
 
 const callbackHTML = `<!doctype html><meta charset=utf-8><title>miu-cr</title>` +
 	`<body style="font-family:system-ui;padding:3rem"><h2>Login complete</h2>` +
@@ -26,6 +32,11 @@ func serveCallback(ctx stdctx.Context, ln net.Listener, wantState string) (strin
 		err  error
 	}
 	done := make(chan result, 1)
+	// Only the first callback result is ever delivered; duplicate callbacks
+	// (favicon refetch, page reload, replayed redirect) are no-ops so the handler
+	// goroutine never blocks on a full channel.
+	var once sync.Once
+	send := func(r result) { once.Do(func() { done <- r }) }
 
 	srv := &http.Server{
 		Handler: http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -36,19 +47,19 @@ func serveCallback(ctx stdctx.Context, ln net.Listener, wantState string) (strin
 			q := r.URL.Query()
 			writeCallbackPage(w)
 			if e := q.Get("error"); e != "" {
-				done <- result{err: &CLIError{Code: "login.exchange_failed", Message: "authorization error: " + sanitizeQuery(e), Exit: 1}}
+				send(result{err: &CLIError{Code: "login.exchange_failed", Message: "authorization error: " + sanitizeQuery(e), Exit: 1}})
 				return
 			}
 			if q.Get("state") != wantState {
-				done <- result{err: &CLIError{Code: "login.state_mismatch", Message: "OAuth state mismatch (possible CSRF); aborting", Exit: 1}}
+				send(result{err: &CLIError{Code: "login.state_mismatch", Message: "OAuth state mismatch (possible CSRF); aborting", Exit: 1}})
 				return
 			}
 			code := q.Get("code")
 			if code == "" {
-				done <- result{err: &CLIError{Code: "login.exchange_failed", Message: "callback missing authorization code", Exit: 1}}
+				send(result{err: &CLIError{Code: "login.exchange_failed", Message: "callback missing authorization code", Exit: 1}})
 				return
 			}
-			done <- result{code: code}
+			send(result{code: code})
 		}),
 	}
 
@@ -57,6 +68,14 @@ func serveCallback(ctx stdctx.Context, ln net.Listener, wantState string) (strin
 
 	select {
 	case <-ctx.Done():
+		if errors.Is(ctx.Err(), stdctx.DeadlineExceeded) {
+			return "", &CLIError{
+				Code:    "login.timeout",
+				Message: "timed out waiting for browser authorization",
+				Hint:    "run `miucr login` again, or use --no-browser to authorize manually",
+				Exit:    1,
+			}
+		}
 		return "", &CLIError{Code: "login.exchange_failed", Message: "login canceled before callback", Exit: 1}
 	case res := <-done:
 		return res.code, res.err
@@ -100,7 +119,8 @@ func bestEffortAPIKey(ctx stdctx.Context, conf *oauth2.Config, prov oauthProvide
 		return ""
 	}
 	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
-	resp, err := http.DefaultClient.Do(req)
+	client := &http.Client{Timeout: tokenExchangeTimeout}
+	resp, err := client.Do(req)
 	if err != nil {
 		return ""
 	}
