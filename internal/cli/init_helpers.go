@@ -98,10 +98,16 @@ func scaffoldDetectedRules(ask func(string, string) string, nonInteractive, forc
 }
 
 // printPayoff renders the success box ending on the literal first-review command.
-func printPayoff(out io.Writer, path, provider string, prof config.Provider, rulePath string) {
-	auth := "env " + prof.AuthEnv
-	if prof.AuthToken != "" {
+func printPayoff(out io.Writer, path, provider string, prof config.Provider, rulePath string, method authMethod) {
+	var auth, note string
+	switch method {
+	case authMethodOAuth:
+		auth = "browser login (OAuth) — reviews run on your ChatGPT plan"
+	case authMethodPaste:
 		auth = "inline auth_token (plaintext on disk)"
+	default:
+		auth = "env " + prof.AuthEnv
+		note = "  Set " + prof.AuthEnv + " in your shell before reviewing."
 	}
 	fmt.Fprintln(out, "")
 	fmt.Fprintf(out, "  ✓ Config written: %s\n", path)
@@ -111,6 +117,9 @@ func printPayoff(out io.Writer, path, provider string, prof config.Provider, rul
 		fmt.Fprintf(out, "  ✓ Rules: %s\n", rulePath)
 	}
 	fmt.Fprintln(out, "")
+	if note != "" {
+		fmt.Fprintln(out, note)
+	}
 	fmt.Fprintln(out, "  ▶ miucr review --staged")
 	fmt.Fprintln(out, "")
 }
