@@ -8,9 +8,9 @@ import Version from '../src/components/Version.astro';
 
 <p><img src="/brand/banner.png" alt="miu-cr" width="840" /></p>
 
-**miu-cr** (MIU Code Review) is a fast, pure-Go AI code-review CLI with a deterministic + agent engine. Review your own changes locally before you open a PR, gate them in CI, review GitHub PRs with inline comments, or drive the engine from any MCP-capable agent host (Claude Code, Codex, …). One review path, four ways to run it, a stable JSON envelope on stdout.
+**miu-cr** (MIU Code Review) is AI code review for the CLI, CI, and MCP hosts, built on a deterministic + agent engine. Review your own changes locally before you open a PR, gate them in CI, review GitHub PRs with inline comments, or drive the engine from any MCP-capable agent host (Claude Code, Codex, …). One review path, four ways to run it, a stable JSON envelope on stdout.
 
-**Latest release: <Version />** — pure-Go single static binary; credentials are passed at runtime and never persisted.
+**Latest release: <Version />** — a single static binary; credentials are passed at runtime and never persisted.
 
 Diff-only review misses cross-file bugs; bare-agent review drifts and burns tokens. miu-cr keeps the **correctness-critical parts deterministic** — file selection, context assembly, line-anchoring, severity gating, dedupe — and uses the LLM only where judgment helps: finding bugs and proposing fixes.
 
@@ -40,7 +40,7 @@ Local review, GitHub PR review, project rules, the serve/poll daemon + GitHub Ac
 - **Semantic code-recall** — opt-in embeddings + pgvector recall prior findings as advisory context; off by default. → [Semantic code-recall](/semantic-recall/)
 - **REST API + GitHub App** — `MIUCR_API_TOKEN` registers `/v1/reviews`; `[github] mode = app` swaps PAT auth for App installation auth. → [REST API & GitHub App](/rest-api-and-github-app/)
 - **MCP server** — `miucr mcp` exposes `review_run` / `review_get` over stdio to any MCP runtime. → [MCP integration](/mcp/)
-- **Pure-Go** (`CGO_ENABLED=0`) single static binary; credentials are passed at runtime and **never persisted**.
+- **Single static binary** — credentials are passed at runtime and **never persisted**.
 
 ## A 30-second tour
 
