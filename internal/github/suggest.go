@@ -50,10 +50,13 @@ func normalizeLine(s string) string {
 //   - the patch is not a no-op (differs from the whitespace-trimmed raw line;
 //     +/- are NOT stripped from the patch, which may be operator-prefixed code)
 func isCleanReplacement(f engine.Finding, newFileContent string) (string, bool) {
-	if f.EndLine != 0 && f.EndLine != f.Line {
+	if f.Line <= 0 {
 		return "", false
 	}
-	if f.Line <= 0 {
+	if f.EndLine > f.Line {
+		return cleanMultiLineReplacement(f, newFileContent)
+	}
+	if f.EndLine != 0 && f.EndLine != f.Line {
 		return "", false
 	}
 
@@ -71,12 +74,56 @@ func isCleanReplacement(f engine.Finding, newFileContent string) (string, bool) 
 	if normalizeLine(rawLine) != normalizeLine(f.QuotedCode) {
 		return "", false
 	}
-	// No-op check compares with whitespace-trim ONLY — never strip +/- from the
-	// patch: SuggestedPatch is replacement CODE that can legitimately begin with
-	// +/- (e.g. an arithmetic `+offset`), so normalizing it would wrongly flag a
-	// real fix as a no-op. QuotedCode anchoring above keeps normalizeLine.
-	if strings.TrimSpace(rawLine) == patch {
+	// No-op check whitespace-trims BOTH sides (consistent with the multi-line path)
+	// but never strips +/-: SuggestedPatch is replacement CODE that can legitimately
+	// begin with +/- (e.g. an arithmetic `+offset`), so normalizing it would wrongly
+	// flag a real fix as a no-op. QuotedCode anchoring above keeps normalizeLine.
+	if strings.TrimSpace(rawLine) == strings.TrimSpace(patch) {
 		return "", false
 	}
 	return patch, true
+}
+
+// cleanMultiLineReplacement proves a multi-line one-click suggestion is safe: the
+// span Line..EndLine must exist in the new file AND its QuotedCode must match those
+// raw lines verbatim (per-line normalized), so the patch replaces EXACTLY the
+// anchored on-diff block. Any mismatch (length, content, no-op) rejects → the
+// caller falls back to a plain fenced hint, never a one-click multi-line apply.
+func cleanMultiLineReplacement(f engine.Finding, newFileContent string) (string, bool) {
+	patch := strings.TrimRight(strings.TrimSpace(f.SuggestedPatch), "\r")
+	if patch == "" {
+		return "", false
+	}
+
+	raw := strings.Split(newFileContent, "\n")
+	if f.EndLine > len(raw) {
+		return "", false
+	}
+	span := make([]string, 0, f.EndLine-f.Line+1)
+	for i := f.Line - 1; i < f.EndLine; i++ {
+		span = append(span, strings.TrimRight(raw[i], "\r"))
+	}
+
+	quoted := strings.Split(strings.ReplaceAll(f.QuotedCode, "\r\n", "\n"), "\n")
+	if len(quoted) != len(span) {
+		return "", false
+	}
+	for i := range span {
+		if normalizeLine(span[i]) != normalizeLine(quoted[i]) {
+			return "", false
+		}
+	}
+	// No-op: the patch reproduces the span verbatim (whitespace-trimmed per line).
+	if strings.Join(trimAll(span), "\n") == strings.Join(trimAll(strings.Split(patch, "\n")), "\n") {
+		return "", false
+	}
+	return patch, true
+}
+
+func trimAll(lines []string) []string {
+	out := make([]string, len(lines))
+	for i, l := range lines {
+		out[i] = strings.TrimSpace(l)
+	}
+	return out
 }

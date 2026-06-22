@@ -403,7 +403,7 @@ func publishReview(ctx stdctx.Context, client mgithub.Client, runner *gitcmd.Run
 	if err != nil {
 		return err
 	}
-	summary := mgithub.RenderSummary(info, res.Findings, res.Stats, pr.Omitted)
+	summary := mgithub.RenderSummaryWithOverflow(info, res.Findings, res.Stats, pr.Omitted, pr.OmittedFindings)
 	action, err := mgithub.UpsertSummaryComment(ctx, client, info, summary)
 	if err != nil {
 		return err

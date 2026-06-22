@@ -86,6 +86,58 @@ func filterToDiffHunks(findings []engine.Finding, diffs []diff.Diff) []engine.Fi
 	return kept
 }
 
+// hunkRightSets returns, per new-path, the RIGHT-side (added+context) line set of
+// EACH hunk separately, so a multi-line range can be proven contiguous WITHIN one
+// hunk (GitHub 422s a range spanning two hunks or off the diff).
+func hunkRightSets(diffs []diff.Diff) map[string][]map[int]bool {
+	out := make(map[string][]map[int]bool, len(diffs))
+	for i := range diffs {
+		d := &diffs[i]
+		path := d.NewPath
+		if path == "" || path == "/dev/null" {
+			continue
+		}
+		for _, h := range diff.ParseHunks(d.Diff) {
+			set := map[int]bool{}
+			newLine := h.NewStart
+			for _, l := range h.Lines {
+				switch l.Type {
+				case diff.HunkContext, diff.HunkAdded:
+					set[newLine] = true
+					newLine++
+				case diff.HunkDeleted:
+				}
+			}
+			if len(set) > 0 {
+				out[path] = append(out[path], set)
+			}
+		}
+	}
+	return out
+}
+
+// rangeInOneHunk reports whether [start,end] is a contiguous RIGHT-side range fully
+// contained in ONE hunk of path (every line start..end present in the same hunk
+// set). It is the GitHub 422 guard for multi-line range comments.
+func rangeInOneHunk(sets map[string][]map[int]bool, path string, start, end int) bool {
+	if start <= 0 || end <= start {
+		return false
+	}
+	for _, set := range sets[path] {
+		all := true
+		for ln := start; ln <= end; ln++ {
+			if !set[ln] {
+				all = false
+				break
+			}
+		}
+		if all {
+			return true
+		}
+	}
+	return false
+}
+
 // normalizeForFingerprint produces the line-free content key fed into
 // fingerprint. It is deliberately LESS lossy than the anchor's splitAndNormalize:
 // per line it strips a single leading diff +/- marker and trailing whitespace and
@@ -199,9 +251,14 @@ type PostReviewOptions struct {
 type PostReviewResult struct {
 	Posted      int
 	Omitted     int
+	Ranges      int // multi-line range comments emitted this run (subset of Posted)
 	Suggestions int // native one-click suggestions emitted this run (subset of Posted)
 	Event       string
 	Reason      string
+	// OmittedFindings are the capped (over-limit) findings NOT posted inline, in
+	// the same severity order they were dropped — surfaced into the summary overflow
+	// block so nothing is silently lost.
+	OmittedFindings []engine.Finding
 	// PostedFindings carries (fingerprint, path) for the inline comments in the
 	// ACTUALLY-submitted review only — set after a successful submit, never on the
 	// empty-guard / pre-submit path. The store records exactly these as posted.
@@ -244,35 +301,53 @@ func PostReview(ctx stdctx.Context, client Client, info *PRInfo, findings []engi
 	}
 
 	omitted := 0
+	var omittedFindings []engine.Finding
 	if len(toPost) > maxInlineComments {
 		sort.SliceStable(toPost, func(i, j int) bool {
 			return severityRank(toPost[i].Severity) < severityRank(toPost[j].Severity)
 		})
 		omitted = len(toPost) - maxInlineComments
+		omittedFindings = append(omittedFindings, toPost[maxInlineComments:]...)
 		toPost = toPost[:maxInlineComments]
 	}
 
+	hunkSets := hunkRightSets(diffs)
 	comments := make([]*gh.DraftReviewComment, 0, len(toPost))
 	submitted := make([]PostedFinding, 0, len(toPost))
-	suggestions := 0
+	suggestions, ranges := 0, 0
 	for _, f := range toPost {
-		rendered, native := commentBody(f, newFileContent[f.File], opts)
+		// Multi-line range ONLY when the anchored EndLine is past Line AND the whole
+		// span is contiguous within one RIGHT-side hunk; otherwise single-line (the
+		// GitHub 422 guard: start<line, same side, both in one hunk). This same proof
+		// gates the native multi-line suggestion below: a multi-line ```suggestion may
+		// be one-clicked only on a verified contiguous-one-hunk RIGHT range, else it
+		// degrades to a plain fenced hint (a single-anchored multi-line suggestion
+		// inserts instead of replaces — a broken patch the spec forbids).
+		isRange := f.EndLine > f.Line && rangeInOneHunk(hunkSets, f.File, f.Line, f.EndLine)
+		rendered, native := commentBody(f, newFileContent[f.File], opts, isRange)
 		if native {
 			suggestions++
 		}
 		fp := fingerprint(f)
 		body := rendered + "\n\n" + fpMarker(fp)
-		comments = append(comments, &gh.DraftReviewComment{
+		c := &gh.DraftReviewComment{
 			Path: gh.Ptr(f.File),
 			Body: gh.Ptr(body),
 			Side: gh.Ptr("RIGHT"),
 			Line: gh.Ptr(f.Line),
-		})
+		}
+		if isRange {
+			c.StartLine = gh.Ptr(f.Line)
+			c.StartSide = gh.Ptr("RIGHT")
+			c.Line = gh.Ptr(f.EndLine)
+			ranges++
+		}
+		comments = append(comments, c)
 		submitted = append(submitted, PostedFinding{Fingerprint: fp, Path: f.File})
 	}
 
 	event, reason := resolveApproveEvent(ctx, client, info, opts)
-	result := PostReviewResult{Posted: len(comments), Omitted: omitted, Suggestions: suggestions, Event: event, Reason: reason}
+	result := PostReviewResult{Posted: len(comments), Omitted: omitted, OmittedFindings: omittedFindings, Ranges: ranges, Suggestions: suggestions, Event: event, Reason: reason}
 
 	// Nothing to say AND not approving: don't create an empty review.
 	if len(comments) == 0 && strings.TrimSpace(summary) == "" && event != "APPROVE" {
@@ -384,7 +459,13 @@ func is422(err error) bool {
 // unverified, possibly multi-line patch. Returning the native flag lets PostReview
 // count suggestions from this single render pass (no second isCleanReplacement /
 // file split per finding).
-func commentBody(f engine.Finding, newFileContent string, opts PostReviewOptions) (string, bool) {
+//
+// isRange MUST be the caller's rangeInOneHunk(Line,EndLine) proof: a native
+// multi-line suggestion (EndLine>Line) is emitted ONLY when isRange is true, so a
+// span that fell back to a single-line comment never carries a one-click multi-line
+// fence (which GitHub would INSERT, not replace — a broken unverified patch). A
+// single-line finding (EndLine<=Line) ignores isRange.
+func commentBody(f engine.Finding, newFileContent string, opts PostReviewOptions, isRange bool) (string, bool) {
 	var b strings.Builder
 	sev := strings.ToUpper(f.Severity)
 	if sev == "" {
@@ -403,7 +484,10 @@ func commentBody(f engine.Finding, newFileContent string, opts PostReviewOptions
 		return b.String(), false
 	}
 
-	if opts.Suggest && meetsSuggestionFloor(f.Severity) {
+	// A multi-line replacement is one-clickable only on a proven on-diff range; a
+	// single-anchored multi-line suggestion would insert lines, not replace the span.
+	multiLine := f.EndLine > f.Line
+	if opts.Suggest && meetsSuggestionFloor(f.Severity) && (!multiLine || isRange) {
 		if sug, ok := isCleanReplacement(f, newFileContent); ok {
 			fmt.Fprintf(&b, "\n\n%ssuggestion\n%s\n%s", fenceFor(sug), sug, fenceFor(sug))
 			return b.String(), true

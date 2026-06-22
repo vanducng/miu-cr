@@ -121,6 +121,9 @@ func TestFetchPR(t *testing.T) {
 		if info.HeadSHA != "headsha" || info.BaseSHA != "basesha" || info.BaseBranch != "main" {
 			t.Fatalf("bad mapping: %+v", info)
 		}
+		if info.HTMLBase != "https://github.com/vanducng/miu-cr" {
+			t.Fatalf("HTMLBase = %q, want the base repo HTML URL", info.HTMLBase)
+		}
 		if info.IsFork {
 			t.Error("same-repo PR must not be a fork")
 		}
@@ -239,8 +242,9 @@ func prFixture(headOwner, headRepo, headSHA, baseSHA, baseRef string) *gh.PullRe
 			},
 		},
 		Base: &gh.PullRequestBranch{
-			SHA: gh.Ptr(baseSHA),
-			Ref: gh.Ptr(baseRef),
+			SHA:  gh.Ptr(baseSHA),
+			Ref:  gh.Ptr(baseRef),
+			Repo: &gh.Repository{HTMLURL: gh.Ptr("https://github.com/vanducng/miu-cr")},
 		},
 	}
 }
