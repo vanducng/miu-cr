@@ -74,11 +74,11 @@ func isCleanReplacement(f engine.Finding, newFileContent string) (string, bool) 
 	if normalizeLine(rawLine) != normalizeLine(f.QuotedCode) {
 		return "", false
 	}
-	// No-op check compares with whitespace-trim ONLY — never strip +/- from the
-	// patch: SuggestedPatch is replacement CODE that can legitimately begin with
-	// +/- (e.g. an arithmetic `+offset`), so normalizing it would wrongly flag a
-	// real fix as a no-op. QuotedCode anchoring above keeps normalizeLine.
-	if strings.TrimSpace(rawLine) == patch {
+	// No-op check whitespace-trims BOTH sides (consistent with the multi-line path)
+	// but never strips +/-: SuggestedPatch is replacement CODE that can legitimately
+	// begin with +/- (e.g. an arithmetic `+offset`), so normalizing it would wrongly
+	// flag a real fix as a no-op. QuotedCode anchoring above keeps normalizeLine.
+	if strings.TrimSpace(rawLine) == strings.TrimSpace(patch) {
 		return "", false
 	}
 	return patch, true

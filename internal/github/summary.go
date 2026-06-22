@@ -77,22 +77,29 @@ func renderOverflow(b *strings.Builder, info *PRInfo, omitted []engine.Finding) 
 		if sev == "" {
 			sev = "NOTE"
 		}
-		loc := fmt.Sprintf("`%s:%d`", f.File, f.Line)
+		file := strings.ReplaceAll(f.File, "`", "'") // a backtick in the path would break the code span
+		loc := fmt.Sprintf("`%s:%d`", file, f.Line)
 		if url := blobURL(info, f.File, f.Line, f.EndLine); url != "" {
-			loc = fmt.Sprintf("[`%s:%d`](%s)", f.File, f.Line, url)
+			loc = fmt.Sprintf("[`%s:%d`](%s)", file, f.Line, url)
 		}
-		cat := f.Category
-		if cat != "" {
-			cat = " (" + cat + ")"
+		cat := ""
+		if c := mdInline(f.Category); c != "" {
+			cat = " (" + c + ")"
 		}
-		fmt.Fprintf(b, "- **%s**%s %s — %s\n", sev, cat, loc, oneLine(f.Rationale))
+		fmt.Fprintf(b, "- **%s**%s %s — %s\n", sev, cat, loc, mdInline(f.Rationale))
 	}
 	b.WriteString("\n</details>\n")
 }
 
-// oneLine collapses rationale newlines so a finding stays a single list item.
-func oneLine(s string) string {
-	return strings.Join(strings.Fields(s), " ")
+// mdInline neutralizes untrusted model text (rationale/category) for a Markdown
+// list item: collapse newlines to one line, HTML-escape <> (so a rationale can't
+// inject markup or break out of the <details> block), and backslash-escape the
+// Markdown breakout chars.
+func mdInline(s string) string {
+	s = strings.Join(strings.Fields(s), " ")
+	return strings.NewReplacer(
+		"<", "&lt;", ">", "&gt;", "`", "\\`", "[", "\\[", "]", "\\]", "*", "\\*", "_", "\\_", "|", "\\|",
+	).Replace(s)
 }
 
 func known(sev string) bool {

@@ -3,6 +3,7 @@ package github
 import (
 	stdctx "context"
 	"fmt"
+	"net/url"
 	"os"
 	"strings"
 
@@ -42,7 +43,12 @@ func blobURL(info *PRInfo, path string, line, endLine int) string {
 	if info == nil || info.HTMLBase == "" || info.HeadSHA == "" || path == "" {
 		return ""
 	}
-	u := fmt.Sprintf("%s/blob/%s/%s", strings.TrimRight(info.HTMLBase, "/"), info.HeadSHA, path)
+	// URL-encode each path segment (spaces/special chars) while keeping the slashes.
+	enc := make([]string, 0)
+	for _, seg := range strings.Split(path, "/") {
+		enc = append(enc, url.PathEscape(seg))
+	}
+	u := fmt.Sprintf("%s/blob/%s/%s", strings.TrimRight(info.HTMLBase, "/"), info.HeadSHA, strings.Join(enc, "/"))
 	if line > 0 {
 		u += fmt.Sprintf("#L%d", line)
 		if endLine > line {
