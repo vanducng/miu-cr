@@ -35,7 +35,7 @@ func initCommand(_ *options) *cobra.Command {
 		RunE: func(cmd *cobra.Command, args []string) error {
 			in := bufio.NewScanner(cmd.InOrStdin())
 			out := cmd.ErrOrStderr() // prompts/payoff on stderr; envelope on stdout
-			ask := func(prompt, def string) string { return askLine(in, out, prompt, def) }
+			ask := func(prompt, def string) string { return askLine(cmd.Context(), in, out, prompt, def) }
 
 			path, err := config.FilePath()
 			if err != nil {
