@@ -52,7 +52,7 @@ func renderFinding(ew *errWriter, color bool, f ReviewFinding) {
 	if sev == "" {
 		sev = "NOTE"
 	}
-	head := fmt.Sprintf("%s %s", severityGlyph(f.Severity), sev)
+	head := fmt.Sprintf("%s %s", severityGlyph(color, f.Severity), sev)
 	if cat := strings.TrimSpace(f.Category); cat != "" {
 		head += " (" + cat + ")"
 	}
@@ -83,11 +83,15 @@ func printIndentedBlock(ew *errWriter, color bool, block string) {
 		lines = lines[:max]
 		truncated = true
 	}
+	bar, ellipsis := "| ", "| ..."
+	if color {
+		bar, ellipsis = "│ ", "│ …"
+	}
 	for _, ln := range lines {
-		ew.printf("    %s\n", paint(color, ansiDim, "│ "+ln))
+		ew.printf("    %s\n", paint(color, ansiDim, bar+ln))
 	}
 	if truncated {
-		ew.printf("    %s\n", paint(color, ansiDim, "│ …"))
+		ew.printf("    %s\n", paint(color, ansiDim, ellipsis))
 	}
 }
 
@@ -98,7 +102,21 @@ func paint(color bool, code, s string) string {
 	return code + s + ansiReset
 }
 
-func severityGlyph(sev string) string {
+// severityGlyph returns a severity marker: Unicode glyphs on a terminal, plain
+// ASCII when not (piped/CI/log stays UTF-8-safe, matching the doc-comment contract).
+func severityGlyph(color bool, sev string) string {
+	if !color {
+		switch strings.ToLower(strings.TrimSpace(sev)) {
+		case "critical", "high":
+			return "x"
+		case "medium":
+			return "!"
+		case "low":
+			return "*"
+		default:
+			return "-"
+		}
+	}
 	switch strings.ToLower(strings.TrimSpace(sev)) {
 	case "critical", "high":
 		return "✖"

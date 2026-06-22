@@ -28,9 +28,19 @@ func TestRenderReviewTableMultiSeverity(t *testing.T) {
 		t.Fatalf("renderReviewTable: %v", err)
 	}
 	s := buf.String()
-	// A bytes.Buffer is not a terminal, so output must be plain ASCII (no ANSI).
+	// A bytes.Buffer is not a terminal, so output must be plain ASCII: no ANSI, no
+	// box-drawing/ellipsis glyphs, no Unicode severity glyphs.
 	if strings.Contains(s, "\033[") {
 		t.Fatalf("color leaked into non-TTY output: %q", s)
+	}
+	for _, glyph := range []string{"│", "…", "✖", "▲", "●", "·"} {
+		if strings.Contains(s, glyph) {
+			t.Fatalf("non-ASCII glyph %q leaked into non-TTY output: %q", glyph, s)
+		}
+	}
+	// The quoted-code block uses an ASCII bar separator off a terminal.
+	if !strings.Contains(s, "| x := 1") {
+		t.Fatalf("expected ASCII bar separator for code block: %q", s)
 	}
 	if !strings.Contains(s, "HIGH") || !strings.Contains(s, "a.go:10") {
 		t.Fatalf("missing finding row: %q", s)
@@ -53,6 +63,28 @@ func TestRenderReviewTableMultiSeverity(t *testing.T) {
 	}
 	if !strings.Contains(s, "high") || !strings.Contains(s, "2") || !strings.Contains(s, "low") {
 		t.Fatalf("severity counts missing: %q", s)
+	}
+}
+
+func TestRenderReviewTableTruncationASCII(t *testing.T) {
+	var sb strings.Builder
+	for i := 0; i < 12; i++ {
+		sb.WriteString("line\n")
+	}
+	out := ReviewOutcome{Findings: []ReviewFinding{
+		{File: "a.go", Line: 1, Severity: "high", Category: "bug", Rationale: "boom", QuotedCode: sb.String()},
+	}}
+	var buf bytes.Buffer
+	if err := renderReviewTable(&buf, out); err != nil {
+		t.Fatalf("renderReviewTable: %v", err)
+	}
+	s := buf.String()
+	// A >8-line block truncates; off a terminal the ellipsis is ASCII "...".
+	if strings.Contains(s, "…") || strings.Contains(s, "│") {
+		t.Fatalf("non-ASCII glyph leaked into truncated non-TTY output: %q", s)
+	}
+	if !strings.Contains(s, "| ...") {
+		t.Fatalf("expected ASCII ellipsis in truncated block: %q", s)
 	}
 }
 

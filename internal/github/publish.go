@@ -85,9 +85,27 @@ func filterFindings(findings []engine.Finding, diffs []diff.Diff, mode FilterMod
 		return out
 	}
 
+	// File mode keys only on file presence — skip the per-line hunk maps entirely.
+	if mode == FilterFile {
+		filesInDiff := make(map[string]bool, len(diffs))
+		for i := range diffs {
+			path := diffs[i].NewPath
+			if path == "" || path == "/dev/null" {
+				continue
+			}
+			filesInDiff[path] = true
+		}
+		kept := make([]engine.Finding, 0, len(findings))
+		for _, f := range findings {
+			if filesInDiff[f.File] {
+				kept = append(kept, f)
+			}
+		}
+		return kept
+	}
+
 	addedLines := make(map[string]map[int]bool, len(diffs))
 	contextLines := make(map[string]map[int]bool, len(diffs))
-	filesInDiff := make(map[string]bool, len(diffs))
 	ensure := func(m map[string]map[int]bool, p string) map[int]bool {
 		if m[p] == nil {
 			m[p] = map[int]bool{}
@@ -100,7 +118,6 @@ func filterFindings(findings []engine.Finding, diffs []diff.Diff, mode FilterMod
 		if path == "" || path == "/dev/null" {
 			continue
 		}
-		filesInDiff[path] = true
 		for _, h := range diff.ParseHunks(d.Diff) {
 			newLine := h.NewStart
 			for _, l := range h.Lines {
@@ -120,10 +137,6 @@ func filterFindings(findings []engine.Finding, diffs []diff.Diff, mode FilterMod
 	kept := make([]engine.Finding, 0, len(findings))
 	for _, f := range findings {
 		switch mode {
-		case FilterFile:
-			if filesInDiff[f.File] {
-				kept = append(kept, f)
-			}
 		case FilterAdded:
 			if f.Line != 0 && addedLines[f.File][f.Line] {
 				kept = append(kept, f)

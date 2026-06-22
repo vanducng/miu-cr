@@ -15,6 +15,10 @@ const (
 	schemaURL = "https://raw.githubusercontent.com/oasis-tcs/sarif-spec/master/Schemata/sarif-schema-2.1.0.json"
 	version   = "2.1.0"
 	toolName  = "miucr"
+	// defaultRuleID is the fallback rule id for a finding with no Category, so
+	// every result keeps a valid rule association (strict SARIF 2.1.0 validators
+	// reject a result with neither ruleId nor ruleIndex).
+	defaultRuleID = "general"
 )
 
 // Finding is the minimal input shape EmitSARIF maps 1:1, decoupled from
@@ -92,20 +96,39 @@ type snippet struct {
 }
 
 type fix struct {
-	Description message `json:"description"`
+	Description     message          `json:"description"`
+	ArtifactChanges []artifactChange `json:"artifactChanges,omitempty"`
+}
+
+type artifactChange struct {
+	ArtifactLocation artifactLocation `json:"artifactLocation"`
+	Replacements     []replacement    `json:"replacements"`
+}
+
+type replacement struct {
+	DeletedRegion   region          `json:"deletedRegion"`
+	InsertedContent insertedContent `json:"insertedContent"`
+}
+
+type insertedContent struct {
+	Text string `json:"text"`
 }
 
 // EmitSARIF writes a schema-pinned SARIF 2.1.0 log mapping each finding 1:1: rule
-// id = Category, result.level from Severity, region from Line/EndLine, snippet =
-// QuotedCode, fix description = SuggestedPatch. The driver rule set is the unique
-// set of Categories. toolVersion is the miucr version (informational; omit if empty).
+// id = Category (defaultRuleID when empty), result.level from Severity, region from
+// Line/EndLine, snippet = QuotedCode, fix description + artifactChanges replacement =
+// SuggestedPatch. The driver rule set is the unique set of resolved rule ids.
+// toolVersion is the miucr version (informational; omit if empty).
 func EmitSARIF(w io.Writer, findings []Finding, toolVersion string) error {
 	results := make([]result, 0, len(findings))
 	ruleSet := map[string]bool{}
 	var rules []rule
 	for _, f := range findings {
 		cat := strings.TrimSpace(f.Category)
-		if cat != "" && !ruleSet[cat] {
+		if cat == "" {
+			cat = defaultRuleID
+		}
+		if !ruleSet[cat] {
 			ruleSet[cat] = true
 			rules = append(rules, rule{ID: cat})
 		}
@@ -153,7 +176,20 @@ func toResult(f Finding, cat string) result {
 		}}},
 	}
 	if patch := strings.TrimSpace(f.SuggestedPatch); patch != "" {
-		r.Fixes = []fix{{Description: message{Text: patch}}}
+		fx := fix{Description: message{Text: patch}}
+		// Only emit a machine-applicable replacement when there's a concrete region
+		// to delete; a region-less (drift, Line<=0) fix stays description-only.
+		if f.Line > 0 {
+			dr := region{StartLine: f.Line}
+			if f.EndLine > f.Line {
+				dr.EndLine = f.EndLine
+			}
+			fx.ArtifactChanges = []artifactChange{{
+				ArtifactLocation: artifactLocation{URI: relURI(f.File)},
+				Replacements:     []replacement{{DeletedRegion: dr, InsertedContent: insertedContent{Text: patch}}},
+			}}
+		}
+		r.Fixes = []fix{fx}
 	}
 	return r
 }
