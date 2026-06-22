@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"net/http"
 	"os"
+	"strconv"
 	"strings"
 	"sync"
 
@@ -231,6 +232,15 @@ func resolveOpenAI(in ResolveInput, prof config.Provider) (Credentials, error) {
 			return apiKeyCreds(k), nil
 		}
 		return noCred("provider auth = \"api_key\" but no key — set OPENAI_API_KEY, a profile auth_env, or pass --api-key")
+	case "":
+		// fall through to the intent-ordered auto-precedence below
+	default:
+		return Credentials{}, &clierr.CLIError{
+			Code:    "config.invalid",
+			Message: "unknown provider auth " + strconv.Quote(authMode) + " — use \"oauth\" or \"api_key\" (or omit for auto)",
+			Hint:    "set auth = \"oauth\" or auth = \"api_key\" in " + config.FilePathOrEmpty(),
+			Exit:    1,
+		}
 	}
 
 	// auth unset: intent-ordered so an ambient OPENAI_API_KEY (often set for other
