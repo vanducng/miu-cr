@@ -1,0 +1,59 @@
+<!doctype html><html><head><meta charset="utf-8"><style>
+  html,body{margin:0;padding:0}
+  *{box-sizing:border-box;font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Inter,sans-serif}
+  .banner{position:relative;width:1280px;height:300px;overflow:hidden;
+    background:radial-gradient(120% 140% at 0% 0%, #1a1230 0%, #0c0a14 55%, #08070d 100%);
+    display:flex;align-items:center;gap:44px;padding:0 64px}
+  /* faint grid */
+  .banner::before{content:"";position:absolute;inset:0;
+    background-image:linear-gradient(#ffffff0a 1px,transparent 1px),linear-gradient(90deg,#ffffff0a 1px,transparent 1px);
+    background-size:34px 34px;
+    -webkit-mask-image:radial-gradient(80% 75% at 30% 45%, #000 40%, transparent 100%);
+    mask-image:radial-gradient(80% 75% at 30% 45%, #000 40%, transparent 100%)}
+  /* violet glow */
+  .banner::after{content:"";position:absolute;width:560px;height:560px;left:-160px;top:-220px;border-radius:50%;
+    background:radial-gradient(circle,#7c3aed55 0%,transparent 62%);filter:blur(8px)}
+  .mark{position:relative;flex:0 0 auto}
+  .copy{position:relative;display:flex;flex-direction:column;gap:14px}
+  .word{font-size:78px;font-weight:800;letter-spacing:-2px;color:#fff;line-height:1;
+    text-shadow:0 2px 30px #7c3aed40}
+  .word .cr{background:linear-gradient(90deg,#a78bfa,#7c3aed);-webkit-background-clip:text;background-clip:text;color:transparent}
+  .tag{font-size:24px;font-weight:500;color:#c4b5fd;letter-spacing:-.2px}
+  .tag b{color:#ede9fe;font-weight:700}
+  .meta{display:flex;gap:10px;margin-top:6px}
+  .chip{font-size:13.5px;font-weight:600;color:#ddd6fe;background:#7c3aed1f;border:1px solid #8b5cf640;
+    border-radius:999px;padding:5px 13px}
+  /* right: a faint review/diff panel */
+  .panel{position:absolute;right:54px;top:50%;transform:translateY(-50%);width:330px;
+    background:#120e20cc;border:1px solid #ffffff14;border-radius:14px;padding:18px 20px;
+    box-shadow:0 24px 60px #00000060;font-family:"SF Mono",ui-monospace,Menlo,monospace;font-size:13.5px;line-height:1.85}
+  .panel .ln{white-space:pre;color:#8b86a3}
+  .add{color:#86efac;background:#22c55e18;display:block;border-radius:5px;padding:0 6px;margin:0 -6px}
+  .del{color:#fca5a5;background:#ef444418;display:block;border-radius:5px;padding:0 6px;margin:0 -6px}
+  .find{display:flex;align-items:center;gap:8px;margin-top:10px;color:#ddd6fe;font-family:-apple-system,sans-serif;font-size:13px;font-weight:600}
+  .dot{width:8px;height:8px;border-radius:50%;background:#a78bfa;box-shadow:0 0 10px #a78bfa}
+</style></head><body>
+<div class="banner">
+  <div class="mark">
+    <svg width="108" height="108" viewBox="0 0 96 96" xmlns="http://www.w3.org/2000/svg">
+      <defs><linearGradient id="g" x1="0" y1="0" x2="96" y2="96" gradientUnits="userSpaceOnUse"><stop stop-color="#8b5cf6"/><stop offset="1" stop-color="#6d28d9"/></linearGradient></defs>
+      <rect x="2" y="2" width="92" height="92" rx="22" fill="url(#g)"/>
+      <path d="M18 48c8.5-13 21-19.5 30-19.5S69.5 35 78 48c-8.5 13-21 19.5-30 19.5S26.5 61 18 48Z" fill="none" stroke="#ede9fe" stroke-width="5" stroke-linejoin="round"/>
+      <path d="M39.5 48.5l6 6 11.5-12.5" fill="none" stroke="#fff" stroke-width="6" stroke-linecap="round" stroke-linejoin="round"/>
+      <rect x="14" y="14" width="11" height="4.5" rx="2.25" fill="#ede9fe" opacity=".9"/>
+      <rect x="71" y="77.5" width="11" height="4.5" rx="2.25" fill="#ede9fe" opacity=".9"/>
+    </svg>
+  </div>
+  <div class="copy">
+    <div class="word">miu<span class="cr">-cr</span></div>
+    <div class="tag">AI code review <b>you own</b> — a pure-Go CLI for agents</div>
+    <div class="meta"><span class="chip">review --pr</span><span class="chip">deterministic engine</span><span class="chip">MCP · serve · App</span></div>
+  </div>
+  <div class="panel">
+    <span class="ln">func DivideTotals(items, count) {</span>
+    <span class="del">-  for i := 0; i &lt;= len(items)…</span>
+    <span class="add">+  for i := 0; i &lt; len(items)…</span>
+    <span class="ln">  return sum / count   }</span>
+    <div class="find"><span class="dot"></span>critical · off-by-one + nil divide</div>
+  </div>
+</div></body></html>
