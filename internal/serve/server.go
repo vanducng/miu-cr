@@ -36,6 +36,10 @@ type Job struct {
 	Ref     string
 	Token   string
 	Timeout time.Duration
+	// ReviewID is the server-generated id of a REST-initiated review (empty on the
+	// webhook/poll paths). reviewFn persists the FINAL record under this id; the
+	// CLI/webhook/poll paths leave it empty and skip that upsert.
+	ReviewID string
 	// OnDone, when non-nil, runs after the review returns: nil on success, the
 	// reviewFn's error (or a recovered panic) on failure. Additive — the webhook Job leaves it nil so the
 	// webhook path is byte-for-byte unchanged; the poller sets it to record its
@@ -102,7 +106,9 @@ func (a repoAllowlist) sorted() []repoRef {
 
 // Server is the webhook daemon seam M8 extends. secret is the []byte HMAC key
 // (never logged); resolveToken yields the GitHub PAT per-request (M8 swaps in an
-// App authenticator at this one call site).
+// App authenticator at this one call site). apiToken (REST bearer, env-only) and
+// reviewStore are set only when the opt-in REST API is enabled; with both unset
+// the /v1 routes are not registered. now is a clock seam for stuck-pending tests.
 type Server struct {
 	addr         string
 	secret       []byte
@@ -111,6 +117,9 @@ type Server struct {
 	dispatcher   Dispatcher
 	log          *slog.Logger
 	reviewTO     time.Duration
+	apiToken     []byte
+	reviewStore  ReviewStore
+	now          func() time.Time
 }
 
 // Config carries the resolved serve options. secret and the token resolver are
@@ -124,12 +133,22 @@ type Config struct {
 	Dispatcher    Dispatcher
 	Logger        *slog.Logger
 	ReviewTimeout time.Duration
+	// APIToken (the REST bearer) and ReviewStore are set only to enable the opt-in
+	// REST API; both empty/nil → the /v1 routes are not registered. Now is an
+	// optional clock seam (defaults to time.Now) for stuck-pending recovery tests.
+	APIToken    []byte
+	ReviewStore ReviewStore
+	Now         func() time.Time
 }
 
 func newServer(cfg Config) *Server {
 	log := cfg.Logger
 	if log == nil {
 		log = slog.Default()
+	}
+	now := cfg.Now
+	if now == nil {
+		now = time.Now
 	}
 	return &Server{
 		addr:         cfg.Addr,
@@ -139,6 +158,9 @@ func newServer(cfg Config) *Server {
 		dispatcher:   cfg.Dispatcher,
 		log:          log,
 		reviewTO:     cfg.ReviewTimeout,
+		apiToken:     cfg.APIToken,
+		reviewStore:  cfg.ReviewStore,
+		now:          now,
 	}
 }
 
@@ -172,10 +194,17 @@ func New(cfg Config, reviewFn func(Job) error) (*Server, *Pool, error) {
 	return newServer(cfg), pool, nil
 }
 
-// handler builds the serve mux: /webhook (POST, HMAC) and /healthz (GET).
+// handler builds the serve mux: /webhook (POST, HMAC) and /healthz (GET). The
+// authenticated REST API (POST/GET /v1/reviews) is registered ONLY when the
+// opt-in API bearer + store are configured; without them no /v1 route exists, so
+// an unconfigured deploy exposes no review-creation surface.
 func (s *Server) handler() http.Handler {
 	mux := http.NewServeMux()
 	mux.HandleFunc("/webhook", s.handleWebhook)
 	mux.HandleFunc("/healthz", s.handleHealthz)
+	if len(s.apiToken) > 0 && s.reviewStore != nil {
+		mux.Handle("POST /v1/reviews", s.requireAPIAuth(http.HandlerFunc(s.handleCreateReview)))
+		mux.Handle("GET /v1/reviews/{id}", s.requireAPIAuth(http.HandlerFunc(s.handleGetReview)))
+	}
 	return mux
 }

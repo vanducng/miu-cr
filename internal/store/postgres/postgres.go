@@ -118,15 +118,60 @@ func (s *Store) Close() error { return s.db.Close() }
 // SaveReview persists rec (assigning an ID and timestamp when absent) and returns
 // the record ID.
 func (s *Store) SaveReview(ctx context.Context, rec store.ReviewRecord) (string, error) {
+	rec, findingsJSON, statsJSON, err := prepReview(rec)
+	if err != nil {
+		return "", err
+	}
+	_, err = s.db.ExecContext(ctx,
+		`INSERT INTO reviews (id, repo_dir, mode, head_sha, status, created_at, findings_json, stats_json)
+		 VALUES ($1, $2, $3, $4, $5, $6, $7, $8)`,
+		rec.ID, rec.RepoDir, rec.Mode, rec.HeadSHA, rec.Status,
+		rec.CreatedAt.UTC().Format(time.RFC3339Nano), findingsJSON, statsJSON,
+	)
+	if err != nil {
+		return "", fmt.Errorf("insert review: %w", err)
+	}
+	return rec.ID, nil
+}
+
+// UpsertReview inserts rec or, on id conflict, updates the existing row (id is
+// the PK). Mirrors the sqlite upsert so the REST pending→done/failed flip works
+// on both backends.
+func (s *Store) UpsertReview(ctx context.Context, rec store.ReviewRecord) (string, error) {
+	rec, findingsJSON, statsJSON, err := prepReview(rec)
+	if err != nil {
+		return "", err
+	}
+	_, err = s.db.ExecContext(ctx,
+		`INSERT INTO reviews (id, repo_dir, mode, head_sha, status, created_at, findings_json, stats_json)
+		 VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
+		 ON CONFLICT(id) DO UPDATE SET
+		   repo_dir=excluded.repo_dir, mode=excluded.mode, head_sha=excluded.head_sha,
+		   status=excluded.status, findings_json=excluded.findings_json, stats_json=excluded.stats_json`,
+		rec.ID, rec.RepoDir, rec.Mode, rec.HeadSHA, rec.Status,
+		rec.CreatedAt.UTC().Format(time.RFC3339Nano), findingsJSON, statsJSON,
+	)
+	if err != nil {
+		return "", fmt.Errorf("upsert review: %w", err)
+	}
+	return rec.ID, nil
+}
+
+// prepReview fills defaults (id, created_at, status=done) and marshals findings +
+// stats, shared by SaveReview and UpsertReview.
+func prepReview(rec store.ReviewRecord) (store.ReviewRecord, string, string, error) {
 	if rec.ID == "" {
 		id, err := newID()
 		if err != nil {
-			return "", err
+			return rec, "", "", err
 		}
 		rec.ID = id
 	}
 	if rec.CreatedAt.IsZero() {
 		rec.CreatedAt = time.Now().UTC()
+	}
+	if rec.Status == "" {
+		rec.Status = "done"
 	}
 	findings := rec.Findings
 	if findings == nil {
@@ -134,7 +179,7 @@ func (s *Store) SaveReview(ctx context.Context, rec store.ReviewRecord) (string,
 	}
 	findingsJSON, err := json.Marshal(findings)
 	if err != nil {
-		return "", fmt.Errorf("marshal findings: %w", err)
+		return rec, "", "", fmt.Errorf("marshal findings: %w", err)
 	}
 	stats := rec.Stats
 	if stats == nil {
@@ -142,18 +187,9 @@ func (s *Store) SaveReview(ctx context.Context, rec store.ReviewRecord) (string,
 	}
 	statsJSON, err := json.Marshal(stats)
 	if err != nil {
-		return "", fmt.Errorf("marshal stats: %w", err)
+		return rec, "", "", fmt.Errorf("marshal stats: %w", err)
 	}
-	_, err = s.db.ExecContext(ctx,
-		`INSERT INTO reviews (id, repo_dir, mode, head_sha, created_at, findings_json, stats_json)
-		 VALUES ($1, $2, $3, $4, $5, $6, $7)`,
-		rec.ID, rec.RepoDir, rec.Mode, rec.HeadSHA,
-		rec.CreatedAt.UTC().Format(time.RFC3339Nano), string(findingsJSON), string(statsJSON),
-	)
-	if err != nil {
-		return "", fmt.Errorf("insert review: %w", err)
-	}
-	return rec.ID, nil
+	return rec, string(findingsJSON), string(statsJSON), nil
 }
 
 // GetReview loads a persisted review by id, returning an error when none exists.
@@ -165,9 +201,9 @@ func (s *Store) GetReview(ctx context.Context, id string) (store.ReviewRecord, e
 		statsJSON    string
 	)
 	row := s.db.QueryRowContext(ctx,
-		`SELECT id, repo_dir, mode, head_sha, created_at, findings_json, stats_json
+		`SELECT id, repo_dir, mode, head_sha, status, created_at, findings_json, stats_json
 		 FROM reviews WHERE id = $1`, id)
-	err := row.Scan(&rec.ID, &rec.RepoDir, &rec.Mode, &rec.HeadSHA, &createdAt, &findingsJSON, &statsJSON)
+	err := row.Scan(&rec.ID, &rec.RepoDir, &rec.Mode, &rec.HeadSHA, &rec.Status, &createdAt, &findingsJSON, &statsJSON)
 	if errors.Is(err, sql.ErrNoRows) {
 		return store.ReviewRecord{}, fmt.Errorf("review %q not found", id)
 	}

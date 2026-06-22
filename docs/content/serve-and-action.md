@@ -13,10 +13,10 @@ there is no second engine and no shelling out.
 - **The composite GitHub Action** — no daemon to host. A workflow in the target
   repo installs the released binary and runs `miucr review --pr --post`.
 
-Both are PAT + webhook-secret only for now. GitHub **App** installation auth and
-a full REST API are deferred to a later milestone; serve's `Server` struct and
-its `func() (string, error)` token resolver are the seam that swaps in App auth
-at one call site.
+By default both are PAT + webhook-secret only. serve can also opt into a GitHub
+**App** installation-auth backend and an authenticated JSON **REST API** for
+queuing/reading reviews — see [REST API & GitHub App auth](/rest-api-and-github-app/).
+Those are opt-in; this page documents the default webhook + Action paths.
 
 ## `miucr serve`
 
