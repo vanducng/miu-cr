@@ -177,6 +177,7 @@ func TestConformanceListReviewsFilterOrderLimit(t *testing.T) {
 	for _, b := range backends(t) {
 		t.Run(b.name, func(t *testing.T) {
 			ctx := context.Background()
+			clearReviews(t, ctx, b.rev) // postgres conformance DB is shared across tests; sqlite is fresh
 			base := time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC)
 			seed := func(id, owner, repo string, num int, at time.Time, fs []engine.Finding) {
 				if _, err := b.rev.SaveReview(ctx, store.ReviewRecord{
@@ -228,6 +229,7 @@ func TestConformancePruneReviews(t *testing.T) {
 	for _, b := range backends(t) {
 		t.Run(b.name, func(t *testing.T) {
 			ctx := context.Background()
+			clearReviews(t, ctx, b.rev) // postgres conformance DB is shared across tests; sqlite is fresh
 			base := time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC)
 			for i := 0; i < 5; i++ {
 				if _, err := b.rev.SaveReview(ctx, store.ReviewRecord{
@@ -342,5 +344,16 @@ func TestConformanceEmptyWrites(t *testing.T) {
 				t.Fatalf("empty writes must record nothing, got %+v", got)
 			}
 		})
+	}
+}
+
+// clearReviews wipes the reviews table so a test is deterministic regardless of
+// rows left by other tests sharing the backend (the postgres conformance DB is
+// shared; sqlite is a fresh in-memory DB per backend). An empty PrunePolicy
+// no-ops by design, so use a far-future OlderThan to delete every row.
+func clearReviews(t *testing.T, ctx context.Context, s store.Store) {
+	t.Helper()
+	if _, err := s.PruneReviews(ctx, store.PrunePolicy{OlderThan: time.Now().AddDate(1, 0, 0)}); err != nil {
+		t.Fatalf("clearReviews: %v", err)
 	}
 }
