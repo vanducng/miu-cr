@@ -120,3 +120,14 @@ The **wire layer** owns discovery and trust-tagging (it knows whether the path i
 | `review --pr` / serve, **fork** | **dropped** | applied |
 
 See [How it works](/how-it-works/) for where rules sit in prompt assembly and [Usage](/usage/) for the review loop.
+
+## Linking findings to your rule docs
+
+You can turn a finding's **Category** into a clickable link to your own standards/docs. Supply a deterministic `category -> URL` map in your **user config** (`~/.config/miu/cr/config.toml`); a finding whose category matches a key (case-insensitively) then renders as a Markdown link in the inline PR comment and the summary overflow block, and sets that rule's `helpUri` in SARIF. Unmapped categories render exactly as before.
+
+```toml
+[review]
+category_urls = { security = "https://docs.example.com/security", style = "https://docs.example.com/style" }
+```
+
+This map is sourced **only** from trusted config (your user file + built-in defaults) — **never** from repo `.miu/cr/rules`, so a fork-PR rule can't inject a link into every comment. Each URL must be an absolute `http://`/`https://` URL within 2048 chars; anything else (e.g. `javascript:`, scheme-relative `//host`) is dropped with a logged warning. With no map configured, output is byte-for-byte unchanged. GitHub Checks annotations stay plain text (no markdown links).

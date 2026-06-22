@@ -15,13 +15,13 @@ var severityOrder = []string{"critical", "high", "medium", "low", "info"}
 // It emits a severity histogram, truncation level, head SHA, files reviewed, an optional
 // omitted-inline note, and a short footer.
 func RenderSummary(info *PRInfo, findings []engine.Finding, stats map[string]any, omittedInline int) string {
-	return RenderSummaryWithOverflow(info, findings, stats, omittedInline, nil)
+	return RenderSummaryWithOverflow(info, findings, stats, omittedInline, nil, nil)
 }
 
 // RenderSummaryWithOverflow is RenderSummary plus a collapsible <details> block that
 // lists each capped/omitted inline finding (severity, category, file:line, rationale,
 // blob permalink) so nothing is silently dropped.
-func RenderSummaryWithOverflow(info *PRInfo, findings []engine.Finding, stats map[string]any, omittedInline int, omitted []engine.Finding) string {
+func RenderSummaryWithOverflow(info *PRInfo, findings []engine.Finding, stats map[string]any, omittedInline int, omitted []engine.Finding, categoryURLs map[string]string) string {
 	var b strings.Builder
 	b.WriteString("## miu-cr review\n\n")
 
@@ -62,7 +62,7 @@ func RenderSummaryWithOverflow(info *PRInfo, findings []engine.Finding, stats ma
 	}
 
 	if len(omitted) > 0 {
-		renderOverflow(&b, info, omitted)
+		renderOverflow(&b, info, omitted, categoryURLs)
 	}
 
 	b.WriteString("\n<sub>Posted by miu-cr. Re-runs edit this summary and skip already-posted inline comments.</sub>")
@@ -70,7 +70,7 @@ func RenderSummaryWithOverflow(info *PRInfo, findings []engine.Finding, stats ma
 }
 
 // renderOverflow appends a collapsible block listing the omitted inline findings.
-func renderOverflow(b *strings.Builder, info *PRInfo, omitted []engine.Finding) {
+func renderOverflow(b *strings.Builder, info *PRInfo, omitted []engine.Finding, categoryURLs map[string]string) {
 	fmt.Fprintf(b, "\n<details>\n<summary>Omitted inline findings (%d)</summary>\n\n", len(omitted))
 	for _, f := range omitted {
 		sev := strings.ToUpper(strings.TrimSpace(f.Severity))
@@ -86,11 +86,35 @@ func renderOverflow(b *strings.Builder, info *PRInfo, omitted []engine.Finding) 
 		}
 		cat := ""
 		if c := mdInline(f.Category); c != "" {
-			cat = " (" + c + ")"
+			cat = " (" + categoryMarkdownText(f.Category, c, categoryURLs) + ")"
 		}
 		fmt.Fprintf(b, "- **%s**%s %s — %s\n", mdInline(sev), cat, loc, mdInline(f.Rationale))
 	}
 	b.WriteString("\n</details>\n")
+}
+
+// categoryMarkdown renders a finding Category for a Markdown context. When
+// categoryURLs holds a validated URL for the lowercased category, it returns a
+// Markdown link `[text](<url>)` with the link TEXT escaped via mdInline (the
+// category is untrusted model text); the URL is from Trusted, scheme-validated
+// config. With no match it returns plainText unchanged so the default render is
+// byte-for-byte preserved. plainText is what the caller renders today (raw in
+// the inline comment, mdInline'd in the summary), passed in to keep each site's
+// existing escaping intact on the unmapped path.
+func categoryMarkdown(cat string, categoryURLs map[string]string) string {
+	return categoryMarkdownText(cat, cat, categoryURLs)
+}
+
+// categoryMarkdownText is categoryMarkdown with an explicit plain fallback so the
+// summary site can pass its already-mdInline'd category while the link text is
+// freshly escaped from the raw category.
+func categoryMarkdownText(cat, plainText string, categoryURLs map[string]string) string {
+	if url, ok := categoryURLs[strings.ToLower(strings.TrimSpace(cat))]; ok && url != "" {
+		// Angle-bracket destination so a ')' or paren in the URL can't close the link
+		// early; the validator already strips whitespace/'<'/'>'/backslash/control chars.
+		return "[" + mdInline(cat) + "](<" + url + ">)"
+	}
+	return plainText
 }
 
 // mdInline neutralizes untrusted model text (rationale/category) for a Markdown

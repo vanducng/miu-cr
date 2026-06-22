@@ -44,7 +44,7 @@ func TestRenderSummaryOverflowListsOmittedWithPermalinks(t *testing.T) {
 		{File: "pkg/a.go", Line: 12, EndLine: 15, Severity: "high", Category: "bug", Rationale: "leak\nhere"},
 		{File: "pkg/b.go", Line: 3, Severity: "medium", Category: "style", Rationale: "rename"},
 	}
-	out := RenderSummaryWithOverflow(info, nil, nil, 2, omitted)
+	out := RenderSummaryWithOverflow(info, nil, nil, 2, omitted, nil)
 	if !strings.Contains(out, "<details>") || !strings.Contains(out, "Omitted inline findings (2)") {
 		t.Fatalf("want a <details> overflow block:\n%s", out)
 	}
@@ -68,7 +68,7 @@ func TestRenderSummaryNoOverflowWhenNoneOmitted(t *testing.T) {
 
 func TestRenderSummaryOverflowOmitsLinkWithoutBase(t *testing.T) {
 	out := RenderSummaryWithOverflow(&PRInfo{HeadSHA: "h"}, nil, nil, 1,
-		[]engine.Finding{{File: "a.go", Line: 4, Severity: "low", Rationale: "x"}})
+		[]engine.Finding{{File: "a.go", Line: 4, Severity: "low", Rationale: "x"}}, nil)
 	if strings.Contains(out, "](http") {
 		t.Fatalf("no HTMLBase must fall back to a plain code-span location:\n%s", out)
 	}

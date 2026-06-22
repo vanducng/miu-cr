@@ -329,7 +329,7 @@ func (prReviewer) ReviewPR(ctx stdctx.Context, req cli.PRReviewRequest) (cli.Rev
 			defer closeStore()
 		}
 		ew := embedWriter{emb: emb, store: embStore, repo: repo}
-		if err := publishReview(ctx, client, runner, dir, info, res, prResult, req, prStore, ew); err != nil {
+		if err := publishReview(ctx, client, runner, dir, info, res, prResult, req, prStore, ew, cfg.Review.CategoryURLMap()); err != nil {
 			return cli.ReviewOutcome{}, err
 		}
 	}
@@ -347,7 +347,7 @@ func (prReviewer) ReviewPR(ctx stdctx.Context, req cli.PRReviewRequest) (cli.Rev
 // last so a partial failure leaves the summary reflecting reality. It computes
 // gateClean via engine.GateFailed + reviewedFiles from stats, threads both opt-in
 // write-actions (default OFF) into PostReviewOptions, and fills the outcome fields.
-func publishReview(ctx stdctx.Context, client mgithub.Client, runner *gitcmd.Runner, dir string, info *mgithub.PRInfo, res engine.ReviewResult, prResult *cli.PRResult, req cli.PRReviewRequest, prStore store.PRThreadStore, ew embedWriter) error {
+func publishReview(ctx stdctx.Context, client mgithub.Client, runner *gitcmd.Runner, dir string, info *mgithub.PRInfo, res engine.ReviewResult, prResult *cli.PRResult, req cli.PRReviewRequest, prStore store.PRThreadStore, ew embedWriter, categoryURLs map[string]string) error {
 	diffs, err := mgithub.DiffsForPR(ctx, runner, dir, info.BaseSHA, info.HeadSHA)
 	if err != nil {
 		return err
@@ -402,6 +402,7 @@ func publishReview(ctx stdctx.Context, client mgithub.Client, runner *gitcmd.Run
 		GateClean:     !engine.GateFailed(res.Findings, req.Gate),
 		ReviewedFiles: reviewedFilesFromStats(res.Stats),
 		FilterMode:    filterModeOf(req.FilterMode),
+		CategoryURLs:  categoryURLs,
 		// Fork-fallback ::error:: commands must share the envelope's stdout stream
 		// (GitHub parses workflow commands only from stdout); the command's writer is
 		// threaded in via req. nil → PostReview falls back to os.Stdout.
@@ -421,7 +422,7 @@ func publishReview(ctx stdctx.Context, client mgithub.Client, runner *gitcmd.Run
 		prResult.SummaryAction = "fork_fallback"
 		return nil
 	}
-	summary := mgithub.RenderSummaryWithOverflow(info, res.Findings, res.Stats, pr.Omitted, pr.OmittedFindings)
+	summary := mgithub.RenderSummaryWithOverflow(info, res.Findings, res.Stats, pr.Omitted, pr.OmittedFindings, categoryURLs)
 	action, err := mgithub.UpsertSummaryComment(ctx, client, info, summary)
 	if err != nil {
 		return err
