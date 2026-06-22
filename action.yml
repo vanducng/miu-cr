@@ -30,6 +30,22 @@ inputs:
     description: Optional model override (else the provider/profile default).
     required: false
     default: ""
+  sarif-file:
+    description: >-
+      Optional path to also write a SARIF 2.1.0 report (e.g. miucr.sarif). When
+      set, the SAME single review run writes the file (via --sarif-out) so a later
+      github/codeql-action/upload-sarif step can publish findings to the Security
+      tab — no second LLM pass. The file is written only on a successful review;
+      a failed review leaves no file. Unset (default) keeps inline-review-only.
+    required: false
+    default: ""
+  filter-mode:
+    description: >-
+      Inline-eligibility filter for the posted review: added|diff_context|file|
+      nofilter (default diff_context). file/nofilter surface off-diff findings in
+      the summary and SARIF but never inline.
+    required: false
+    default: diff_context
 
 runs:
   using: composite
@@ -49,6 +65,10 @@ runs:
         command -v miucr
 
     - name: Review PR
+      # One LLM review run posts the inline review AND (when sarif-file is set)
+      # writes the SARIF report via --sarif-out — no second pass. miucr writes the
+      # file only on a successful review, so a failed review leaves no file and the
+      # caller's `hashFiles(...)`-guarded upload step is skipped (see the example).
       shell: bash
       env:
         GITHUB_TOKEN: ${{ inputs.github-token }}
@@ -56,6 +76,8 @@ runs:
         BASE_URL: ${{ inputs.base-url }}
         MODEL: ${{ inputs.model }}
         GATE: ${{ inputs.gate }}
+        FILTER_MODE: ${{ inputs.filter-mode }}
+        SARIF_FILE: ${{ inputs.sarif-file }}
         PR_NUMBER: ${{ github.event.pull_request.number }}
       run: |
         set -euo pipefail
@@ -70,4 +92,6 @@ runs:
         if [ -n "$MODEL" ]; then export ANTHROPIC_MODEL="$MODEL"; fi
         REF="${GITHUB_REPOSITORY}#${PR_NUMBER}"
         # A real LLM PR review exceeds the 30s default; give it room.
-        miucr review --pr "$REF" --post --gate "$GATE" --timeout 300s
+        ARGS=(review --pr "$REF" --post --gate "$GATE" --filter-mode "$FILTER_MODE" --timeout 300s)
+        if [ -n "$SARIF_FILE" ]; then ARGS+=(--sarif-out "$SARIF_FILE"); fi
+        miucr "${ARGS[@]}"

@@ -11,6 +11,7 @@ import (
 
 type fakeReviewer struct {
 	outcome ReviewOutcome
+	err     error
 	gotCtx  stdctx.Context
 	gotReq  ReviewRequest
 }
@@ -18,6 +19,9 @@ type fakeReviewer struct {
 func (f *fakeReviewer) Review(ctx stdctx.Context, req ReviewRequest) (ReviewOutcome, error) {
 	f.gotCtx = ctx
 	f.gotReq = req
+	if f.err != nil {
+		return ReviewOutcome{}, f.err
+	}
 	return f.outcome, nil
 }
 
@@ -41,7 +45,10 @@ func runReview(t *testing.T, r Reviewer, args ...string) (string, error) {
 	prev := reviewer
 	SetReviewer(r)
 	t.Cleanup(func() { SetReviewer(prev) })
+	prevFmt := outputFormat
+	t.Cleanup(func() { outputFormat = prevFmt })
 	prettyOutput = false
+	outputFormat = "json"
 
 	opts := &options{output: "json"}
 	cmd := reviewCommand(opts)

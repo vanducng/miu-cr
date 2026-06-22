@@ -9,6 +9,7 @@ self-contained — read its header comment, copy it into your repo, and adjust.
 | [`rules/typescript-node.md`](rules/typescript-node.md) | Review context for TypeScript/Node services — async safety, type hygiene. |
 | [`rules/python-data.md`](rules/python-data.md) | Review context for Python data/ML pipelines — correctness, reproducibility. |
 | [`github-action/code-review.yml`](github-action/code-review.yml) | Reusable workflow that reviews every PR via the composite action (fork-safe). |
+| [`github-action/code-review-sarif.yml`](github-action/code-review-sarif.yml) | Inline review **plus** a SARIF 2.1.0 upload to the code-scanning Security tab. |
 | [`mcp-setup/`](mcp-setup/README-mcp.md) | Wire `miucr mcp` into Claude Code, Cursor, or Codex CLI. |
 | [`docker/Dockerfile`](docker/Dockerfile) | Multi-stage, pure-Go (`CGO_ENABLED=0`) distroless image for `miucr serve`. |
 | [`docker/docker-compose.yml`](docker/docker-compose.yml) | Local stand-in for a server deploy (webhook or poll mode). |

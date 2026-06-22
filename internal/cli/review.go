@@ -3,7 +3,9 @@ package cli
 import (
 	stdctx "context"
 	"fmt"
+	"io"
 	"os"
+	"path/filepath"
 	"strings"
 	"time"
 
@@ -11,6 +13,8 @@ import (
 
 	"github.com/vanducng/miu-cr/internal/config"
 	"github.com/vanducng/miu-cr/internal/engine"
+	ghub "github.com/vanducng/miu-cr/internal/github"
+	"github.com/vanducng/miu-cr/internal/sarif"
 )
 
 // ReviewRequest is the mode-agnostic review invocation passed to the injected
@@ -34,6 +38,7 @@ type ReviewRequest struct {
 	Timeout      time.Duration
 	ExpandWindow int
 	TokenBudget  int
+	FilterMode   string       // added|diff_context|file|nofilter (default diff_context)
 	NoSave       bool         // opt out of persisting this run to the local history store
 	Progress     func(string) // nil = silent; stderr milestones, never the stdout envelope
 }
@@ -120,6 +125,7 @@ type PRReviewRequest struct {
 	Extensions   []string
 	ExpandWindow int
 	TokenBudget  int
+	FilterMode   string       // added|diff_context|file|nofilter (default diff_context)
 	NoSave       bool         // opt out of persisting this run to the local history store
 	Progress     func(string) // nil = silent; stderr milestones, never the stdout envelope
 }
@@ -219,6 +225,8 @@ func reviewCommand(opts *options) *cobra.Command {
 		model        string
 		expand       int
 		tokenBudget  int
+		filterMode   string
+		sarifOut     string
 		pr           string
 		token        string
 		post         bool
@@ -234,6 +242,9 @@ func reviewCommand(opts *options) *cobra.Command {
 		Use:   "review",
 		Short: "Review local git changes and emit gated findings",
 		PreRunE: func(cmd *cobra.Command, args []string) error {
+			if err := validateFilterMode(filterMode); err != nil {
+				return err
+			}
 			if pr != "" {
 				return validatePRFlags(post, noPost, token)
 			}
@@ -265,6 +276,8 @@ func reviewCommand(opts *options) *cobra.Command {
 					exts:         exts,
 					expand:       expand,
 					tokenBudget:  tokenBudget,
+					filterMode:   filterMode,
+					sarifOut:     sarifOut,
 					noSave:       noSave,
 					progress:     prog,
 				})
@@ -293,6 +306,7 @@ func reviewCommand(opts *options) *cobra.Command {
 				Timeout:      opts.timeout,
 				ExpandWindow: expand,
 				TokenBudget:  tokenBudget,
+				FilterMode:   filterMode,
 				NoSave:       noSave,
 				Progress:     prog,
 			}
@@ -309,6 +323,9 @@ func reviewCommand(opts *options) *cobra.Command {
 			if prog != nil {
 				prog(fmt.Sprintf("done: %d findings", len(out.Findings)))
 			}
+			if err := writeSARIFOut(sarifOut, out.Findings); err != nil {
+				return err
+			}
 			summary := map[string]any{
 				"findings": len(out.Findings),
 				"gate":     gate,
@@ -318,11 +335,7 @@ func reviewCommand(opts *options) *cobra.Command {
 				"stats":     out.Stats,
 				"review_id": out.ReviewID,
 			}
-			if prettyOutput {
-				if err := renderReviewTable(cmd.OutOrStdout(), out); err != nil {
-					return err
-				}
-			} else if err := writeSuccess(cmd.OutOrStdout(), "review", "review.result", data, summary); err != nil {
+			if err := emitReview(cmd.OutOrStdout(), out, data, summary); err != nil {
 				return err
 			}
 			if reviewer.GateFailed(out.Findings, gate) {
@@ -354,6 +367,8 @@ func reviewCommand(opts *options) *cobra.Command {
 	f.StringVar(&model, "model", "", "Override the review model (else ANTHROPIC_MODEL/OPENAI_MODEL or pinned default)")
 	f.IntVar(&expand, "expand", 5, "Context lines added above/below each hunk in the new-content window (0 disables)")
 	f.IntVar(&tokenBudget, "token-budget", defaultTokenBudget, "Approximate token budget; over budget degrades context (0 disables)")
+	f.StringVar(&filterMode, "filter-mode", "diff_context", "Inline-eligibility filter on --pr: added|diff_context|file|nofilter (default diff_context; file/nofilter route off-diff findings to the summary/SARIF/local output, never inline)")
+	f.StringVar(&sarifOut, "sarif-out", "", "Also write a SARIF 2.1.0 report to this path (in addition to the normal --output/posting), from the same single review run; written only on success (atomic temp+rename, so a failed run leaves no file)")
 	f.StringVar(&pr, "pr", "", "Review a GitHub PR: https://github.com/owner/repo/pull/N or owner/repo#N (no GitHub PAT needed for public repos in dry-run)")
 	f.StringVar(&token, "token", "", "GitHub PAT (overrides GITHUB_TOKEN/GH_TOKEN; required only for --post; never persisted)")
 	f.BoolVar(&post, "post", false, "Publish inline comments + a summary to the PR (requires a token)")
@@ -389,6 +404,8 @@ type prRunArgs struct {
 	exts        []string
 	expand      int
 	tokenBudget int
+	filterMode  string
+	sarifOut    string
 	noSave      bool
 	progress    func(string)
 }
@@ -435,6 +452,7 @@ func runPRReview(cmd *cobra.Command, a prRunArgs) error {
 		Extensions:   a.exts,
 		ExpandWindow: a.expand,
 		TokenBudget:  a.tokenBudget,
+		FilterMode:   a.filterMode,
 		NoSave:       a.noSave,
 		Progress:     a.progress,
 	})
@@ -444,17 +462,16 @@ func runPRReview(cmd *cobra.Command, a prRunArgs) error {
 	if a.progress != nil {
 		a.progress(fmt.Sprintf("done: %d findings", len(out.Findings)))
 	}
+	if err := writeSARIFOut(a.sarifOut, out.Findings); err != nil {
+		return err
+	}
 
 	summary := map[string]any{"findings": len(out.Findings), "gate": a.gate}
 	data := map[string]any{"findings": out.Findings, "stats": out.Stats, "review_id": out.ReviewID}
 	if out.PR != nil {
 		data["pr"] = out.PR
 	}
-	if prettyOutput {
-		if err := renderReviewTable(cmd.OutOrStdout(), out); err != nil {
-			return err
-		}
-	} else if err := writeSuccess(cmd.OutOrStdout(), "review", "review.result", data, summary); err != nil {
+	if err := emitReview(cmd.OutOrStdout(), out, data, summary); err != nil {
 		return err
 	}
 	if prReviewer.GateFailed(out.Findings, a.gate) {
@@ -498,4 +515,83 @@ func validatePRFlags(post, noPost bool, token string) error {
 // no staged+commit, no range+commit, at least one mode) and an out-of-set --gate.
 func validateReviewFlags(staged bool, from, to, commit, gate string) error {
 	return engine.ValidateInvocation(staged, from, to, commit, gate)
+}
+
+// validateFilterMode rejects an out-of-set --filter-mode, delegating to the github
+// enum so the CLI and the publish path enforce one source of truth.
+func validateFilterMode(mode string) error {
+	if mode == "" || ghub.ValidFilterMode(mode) {
+		return nil
+	}
+	return &CLIError{
+		Code:    "flags.invalid_filter_mode",
+		Message: fmt.Sprintf("unknown --filter-mode %q", mode),
+		Hint:    "use added, diff_context, file, or nofilter",
+		Exit:    2,
+	}
+}
+
+// emitReview writes the review result in the resolved --output format: json (the
+// miucr.cli/v1 envelope, default + unchanged), pretty (the local terminal
+// reporter), or sarif (a SARIF 2.1.0 document). SARIF/pretty are review-only
+// formats; the JSON envelope stays the primary, byte-for-byte-stable contract.
+func emitReview(w io.Writer, out ReviewOutcome, data, summary map[string]any) error {
+	switch outputFormat {
+	case "sarif":
+		return sarif.EmitSARIF(w, toSARIFFindings(out.Findings), versionString())
+	case "pretty":
+		return renderReviewTable(w, out)
+	default:
+		return writeSuccess(w, "review", "review.result", data, summary)
+	}
+}
+
+// writeSARIFOut atomically writes findings as a SARIF 2.1.0 document to path so a
+// caller can upload it (e.g. github/codeql-action/upload-sarif) alongside the
+// normal --output/posting from the SAME single review run. Empty path is a no-op
+// (the default). It writes to a temp file in the target dir and renames on
+// success, so a failed/partial write never leaves a broken file — and callers
+// invoke it only after the review succeeded, so a review error leaves no file.
+func writeSARIFOut(path string, findings []ReviewFinding) error {
+	if strings.TrimSpace(path) == "" {
+		return nil
+	}
+	fail := func(err error) error {
+		return &CLIError{Code: "sarif.write_failed", Message: fmt.Sprintf("write SARIF to %q: %v", path, err), Exit: 1}
+	}
+	tmp, err := os.CreateTemp(filepath.Dir(path), ".miucr-sarif-*.tmp")
+	if err != nil {
+		return fail(err)
+	}
+	tmpName := tmp.Name()
+	defer os.Remove(tmpName) // no-op once renamed; cleans up on any error path
+	if err := sarif.EmitSARIF(tmp, toSARIFFindings(findings), versionString()); err != nil {
+		tmp.Close()
+		return fail(err)
+	}
+	if err := tmp.Close(); err != nil {
+		return fail(err)
+	}
+	if err := os.Rename(tmpName, path); err != nil {
+		return fail(err)
+	}
+	return nil
+}
+
+// toSARIFFindings maps cli findings to the sarif leaf-package input shape.
+func toSARIFFindings(in []ReviewFinding) []sarif.Finding {
+	out := make([]sarif.Finding, 0, len(in))
+	for _, f := range in {
+		out = append(out, sarif.Finding{
+			File:           f.File,
+			Line:           f.Line,
+			EndLine:        f.EndLine,
+			Severity:       f.Severity,
+			Category:       f.Category,
+			Rationale:      f.Rationale,
+			SuggestedPatch: f.SuggestedPatch,
+			QuotedCode:     f.QuotedCode,
+		})
+	}
+	return out
 }

@@ -18,6 +18,11 @@ const apiVersion = "miucr.cli/v1"
 // prettyOutput indents envelope JSON when --output pretty is set.
 var prettyOutput bool
 
+// outputFormat is the resolved --output value (json|pretty|sarif). json|pretty
+// keep prettyOutput in lockstep for the envelope; sarif is a review-only format
+// (non-review commands still emit the JSON envelope under -o sarif).
+var outputFormat = "json"
+
 // Envelope is the stable v1 JSON contract every command emits on stdout; ok plus
 // either data or error lets a host agent branch without parsing prose.
 type Envelope struct {
