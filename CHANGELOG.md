@@ -55,6 +55,13 @@ comment with a new marker); subsequent re-runs dedupe normally. On a
 first M5 review **manually** (or off-hours) to absorb the one-time re-post before
 the next scheduled run.
 
+## [0.13.0](https://github.com/vanducng/miu-cr/compare/v0.12.0...v0.13.0) (2026-06-22)
+
+
+### Features
+
+* miucr login (Codex OAuth) + reviews on your ChatGPT plan + README onboarding + auto-versioned docs ([1eb8a3b](https://github.com/vanducng/miu-cr/commit/1eb8a3b1810151000416017742864296c54ec62b))
+
 ## [0.12.0](https://github.com/vanducng/miu-cr/compare/v0.11.0...v0.12.0) (2026-06-22)
 
 
