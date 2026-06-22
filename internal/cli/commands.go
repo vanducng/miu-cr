@@ -9,6 +9,7 @@ import (
 	"os"
 	"os/signal"
 	"runtime/debug"
+	"strconv"
 	"strings"
 	"syscall"
 	"time"
@@ -17,12 +18,27 @@ import (
 	"golang.org/x/sync/errgroup"
 
 	"github.com/vanducng/miu-cr/internal/config"
+	"github.com/vanducng/miu-cr/internal/engine"
+	ghub "github.com/vanducng/miu-cr/internal/github"
 	"github.com/vanducng/miu-cr/internal/serve"
+	"github.com/vanducng/miu-cr/internal/store"
 )
 
 type options struct {
 	output  string
 	timeout time.Duration
+}
+
+// reviewStoreFactory opens the review store for the REST API, returning the store
+// (the serve.ReviewStore subset), a closer, and an error. Injected from the wire
+// package (SetReviewStoreFactory) so cli stays below store in the import graph,
+// mirroring SetReviewer. Nil when no wiring ran (tests) → serve runs without REST.
+var reviewStoreFactory func(ctx stdctx.Context) (serve.ReviewStore, func(), error)
+
+// SetReviewStoreFactory wires the store opener used by `serve` for the opt-in
+// REST API. Called once from wire.init before any command runs.
+func SetReviewStoreFactory(f func(ctx stdctx.Context) (serve.ReviewStore, func(), error)) {
+	reviewStoreFactory = f
 }
 
 var version = "v0.10.0" // x-release-please-version
@@ -109,8 +125,16 @@ func serveCommand(opts *options) *cobra.Command {
 					Exit:    2,
 				}
 			}
+			cfg, cfgErr := config.Load()
+			if cfgErr != nil {
+				// Load() returns Defaults() on error, so we proceed — but log it
+				// (redacted) so a malformed config (e.g. [github] mode=app) isn't
+				// silently degraded to the PAT default with a confusing downstream error.
+				slog.Default().Warn("serve: config load failed; using defaults", "error", config.RedactString(cfgErr.Error()))
+			}
+			appMode := strings.EqualFold(strings.TrimSpace(cfg.Github.Mode), "app")
 			token := resolveGitHubToken("")
-			if token == "" {
+			if token == "" && !appMode {
 				return &CLIError{
 					Code:    "serve.token_required",
 					Message: "a GitHub token is required: set GITHUB_TOKEN or GH_TOKEN",
@@ -141,8 +165,40 @@ func serveCommand(opts *options) *cobra.Command {
 
 			log := slog.New(slog.NewTextHandler(cmd.ErrOrStderr(), &slog.HandlerOptions{Level: slog.LevelInfo}))
 			reviewTO := 15 * time.Minute
-			resolveToken := func() (string, error) { return resolveGitHubToken(""), nil }
-			reviewFn := buildServeReviewFn(log, gate)
+
+			tokenSource, err := buildTokenSource(cfg.Github)
+			if err != nil {
+				return err
+			}
+			// resolveToken keeps func()(string,error): it captures the daemon ctx
+			// (cmd.Context()) and derives a short bounded timeout for the App-token
+			// exchange, so a mint isn't tied to one HTTP request's lifetime. In PAT
+			// mode the static source returns the PAT unchanged (no network).
+			daemonCtx := cmd.Context()
+			resolveToken := func() (string, error) {
+				tctx, cancel := stdctx.WithTimeout(daemonCtx, 30*time.Second)
+				defer cancel()
+				return tokenSource.Token(tctx)
+			}
+
+			// The REST API is opt-in: enabled ONLY when MIUCR_API_TOKEN (env-only,
+			// like WEBHOOK_SECRET — never a flag) is set. When enabled, open the
+			// review store once (shared by the POST pending-persist, the GET read,
+			// and the worker's final-record upsert).
+			apiToken := strings.TrimSpace(os.Getenv("MIUCR_API_TOKEN"))
+			var reviewStore serve.ReviewStore
+			if apiToken != "" {
+				if reviewStoreFactory == nil {
+					return &CLIError{Code: "serve.store_unwired", Message: "MIUCR_API_TOKEN is set but the review store is not wired", Exit: 1}
+				}
+				st, closeStore, err := reviewStoreFactory(cmd.Context())
+				if err != nil {
+					return err
+				}
+				defer closeStore()
+				reviewStore = st
+			}
+			reviewFn := buildServeReviewFn(log, gate, reviewStore)
 
 			pollCfg := func(disp serve.Dispatcher) serve.PollConfig {
 				return serve.PollConfig{
@@ -164,7 +220,8 @@ func serveCommand(opts *options) *cobra.Command {
 				return serve.RunPoll(cmd.Context(), pool, poller)
 			}
 
-			// Webhook (+ optional poll). Server.Run is the SOLE Drainer.
+			// Webhook (+ optional poll). Server.Run is the SOLE Drainer. The REST
+			// /v1 routes are registered only when APIToken + ReviewStore are set.
 			srv, pool, err := serve.New(serve.Config{
 				Addr:          addr,
 				Secret:        []byte(secret),
@@ -172,6 +229,8 @@ func serveCommand(opts *options) *cobra.Command {
 				ResolveToken:  resolveToken,
 				Logger:        log,
 				ReviewTimeout: reviewTO,
+				APIToken:      []byte(apiToken),
+				ReviewStore:   reviewStore,
 			}, reviewFn)
 			if err != nil {
 				return &CLIError{Code: "serve.config_invalid", Message: err.Error(), Exit: 2}
@@ -201,12 +260,57 @@ func serveCommand(opts *options) *cobra.Command {
 	return cmd
 }
 
+// buildTokenSource builds the GitHub TokenSource from [github]. Default (mode=pat
+// or unset) → staticTokenSource carrying the resolved PAT (or "" anonymous), the
+// pre-M8 behavior byte-for-byte. mode=app → appTokenSource (requires app_id, a
+// numeric installation_id, and a readable private_key_path); the key is read,
+// parsed, and zeroed inside the github package.
+func buildTokenSource(g config.Github) (ghub.TokenSource, error) {
+	if !strings.EqualFold(strings.TrimSpace(g.Mode), "app") {
+		return ghub.NewStaticTokenSource(resolveGitHubToken("")), nil
+	}
+	if strings.TrimSpace(g.AppID) == "" || strings.TrimSpace(g.PrivateKeyPath) == "" {
+		return nil, &CLIError{
+			Code:    "serve.app_config_required",
+			Message: "[github] mode=app requires app_id and private_key_path",
+			Hint:    "set app_id, installation_id, and private_key_path under [github] in config.toml",
+			Exit:    2,
+		}
+	}
+	installID, err := strconv.ParseInt(strings.TrimSpace(g.InstallationID), 10, 64)
+	if err != nil || installID <= 0 {
+		return nil, &CLIError{
+			Code:    "serve.app_installation_invalid",
+			Message: fmt.Sprintf("[github] installation_id must be a positive integer, got %q", g.InstallationID),
+			Hint:    "use the numeric installation id from the App's installation URL",
+			Exit:    2,
+		}
+	}
+	key, err := ghub.ReadPrivateKeyFile(strings.TrimSpace(g.PrivateKeyPath))
+	if err != nil {
+		return nil, &CLIError{
+			Code:    "serve.app_key_unreadable",
+			Message: config.RedactString(err.Error()),
+			Hint:    "private_key_path must point to a readable RSA PEM (PKCS#1 or PKCS#8)",
+			Exit:    2,
+		}
+	}
+	return ghub.NewAppTokenSource(strings.TrimSpace(g.AppID), installID, key, ghub.NewAppExchanger(), nil), nil
+}
+
 // buildServeReviewFn returns the reviewFn shared by webhook + poll dispatch. It
 // delegates to the in-process M2 path via ReviewPRForServe (Post:true); all
 // errors are redacted. The job runs detached from cmd.Context() so graceful
 // drain can finish in-flight reviews; j.Timeout still bounds each job. A non-nil
 // return reaches Job.OnDone so the poller leaves a failed head retryable next tick.
-func buildServeReviewFn(log *slog.Logger, gate string) func(serve.Job) error {
+//
+// When j.ReviewID is set (REST-initiated) and st is non-nil, reviewFn persists the
+// FINAL record under that id: done (with the returned outcome's findings/stats/
+// HeadSHA) on success, failed on error. The findings/stats/HeadSHA live in the
+// RETURNED cli.ReviewOutcome — not in Job.OnDone(error) — so the upsert rides here,
+// inside reviewFn, not in OnDone. The webhook/poll paths leave ReviewID empty and
+// skip the upsert (byte-for-byte unchanged).
+func buildServeReviewFn(log *slog.Logger, gate string, st serve.ReviewStore) func(serve.Job) error {
 	return func(j serve.Job) error {
 		jobCtx := stdctx.Background()
 		if j.Timeout > 0 {
@@ -227,6 +331,7 @@ func buildServeReviewFn(log *slog.Logger, gate string) func(serve.Job) error {
 		})
 		if err != nil {
 			log.Error("review failed", "ref", j.Ref, "err", config.RedactString(err.Error()))
+			persistFinalReview(log, st, j.ReviewID, "failed", ReviewOutcome{})
 			return err
 		}
 		posted, action := 0, "none"
@@ -234,8 +339,58 @@ func buildServeReviewFn(log *slog.Logger, gate string) func(serve.Job) error {
 			posted, action = out.PR.PostedInline, out.PR.SummaryAction
 		}
 		log.Info("review done", "ref", j.Ref, "findings", len(out.Findings), "posted_inline", posted, "summary", action)
+		persistFinalReview(log, st, j.ReviewID, "done", out)
 		return nil
 	}
+}
+
+// persistFinalReview upserts the terminal REST record under id. A no-op when id
+// is empty (webhook/poll) or st is nil (REST disabled). Best-effort: a store
+// failure is logged (redacted), never returned, so it can't fail the review.
+//
+// It derives a FRESH bounded context rather than reusing the job's ctx: a review
+// that fails by TIMEOUT (the common case) leaves jobCtx already canceled, so a
+// write on it would fail and strand the record at pending forever. The detached
+// ctx guarantees the terminal status is recorded regardless of why the job ended.
+func persistFinalReview(log *slog.Logger, st serve.ReviewStore, id, status string, out ReviewOutcome) {
+	if id == "" || st == nil {
+		return
+	}
+	ctx, cancel := stdctx.WithTimeout(stdctx.Background(), 10*time.Second)
+	defer cancel()
+	headSHA := ""
+	if out.PR != nil {
+		headSHA = out.PR.HeadSHA
+	}
+	if _, err := st.UpsertReview(ctx, store.ReviewRecord{
+		ID:       id,
+		Mode:     "pr",
+		HeadSHA:  headSHA,
+		Status:   status,
+		Findings: serveFindingsToEngine(out.Findings),
+		Stats:    out.Stats,
+	}); err != nil {
+		log.Error("rest: persist final review failed", "id", id, "status", status, "err", config.RedactString(err.Error()))
+	}
+}
+
+// serveFindingsToEngine maps the cli finding shape to engine.Finding (identical
+// fields) for store persistence.
+func serveFindingsToEngine(in []ReviewFinding) []engine.Finding {
+	out := make([]engine.Finding, 0, len(in))
+	for _, f := range in {
+		out = append(out, engine.Finding{
+			File:           f.File,
+			Line:           f.Line,
+			EndLine:        f.EndLine,
+			Severity:       f.Severity,
+			Category:       f.Category,
+			Rationale:      f.Rationale,
+			SuggestedPatch: f.SuggestedPatch,
+			QuotedCode:     f.QuotedCode,
+		})
+	}
+	return out
 }
 
 // MCPRequest carries the resolved serve options to the injected MCPServer.

@@ -21,6 +21,7 @@ import (
 	mgithub "github.com/vanducng/miu-cr/internal/github"
 	"github.com/vanducng/miu-cr/internal/mcpserver"
 	"github.com/vanducng/miu-cr/internal/rules"
+	"github.com/vanducng/miu-cr/internal/serve"
 	"github.com/vanducng/miu-cr/internal/store"
 )
 
@@ -51,6 +52,22 @@ func init() {
 	cli.SetReviewer(engineReviewer{})
 	cli.SetPRReviewer(prReviewer{})
 	cli.SetMCPServer(mcpServerImpl{})
+	cli.SetReviewStoreFactory(openReviewStore)
+}
+
+// openReviewStore opens the configured backend store for the serve REST API. The
+// concrete *Store satisfies serve.ReviewStore (UpsertReview + GetReview). It
+// reuses the same backend selection as the engine/PR-thread paths.
+func openReviewStore(ctx stdctx.Context) (serve.ReviewStore, func(), error) {
+	cfg, lerr := config.Load()
+	if lerr != nil {
+		return nil, nil, lerr
+	}
+	s, closeStore, err := openStore(ctx, cfg)
+	if err != nil {
+		return nil, nil, err
+	}
+	return s, closeStore, nil
 }
 
 type engineReviewer struct{}

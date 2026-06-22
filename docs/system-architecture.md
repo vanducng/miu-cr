@@ -288,9 +288,67 @@ unchanged via `ReviewPRForServe`. Webhook stays the default; poll is opt-in.
   requirement and drains **exactly once** on ctx cancel. Either way: ticker stops
   → drain once → no double-drain, no goroutine leak.
 
-## Token seam (M3 → M8)
+## REST API + GitHub App auth (M8)
 
-serve resolves the GitHub token through a `func() (string, error)` resolver and
-exposes a `Server` struct as the extension point. M3 is PAT + webhook-secret
-only; **M8** swaps in GitHub App installation auth at that single call site and
-extends `Server` with the full REST API — no change to the review path.
+M8 makes serve a **deployable single-operator service**. Both halves are opt-in;
+the default PAT + webhook + poll path is byte-for-byte unchanged.
+
+**Single-operator scope.** The REST API is gated by **one shared bearer** =
+**one trust boundary**: whoever holds `MIUCR_API_TOKEN` owns every stored review.
+This is deliberately **not** multi-tenant — no per-user isolation, no tenant
+column, no per-review authorization beyond "holds the bearer". The red-team flag
+was that claiming multi-tenant isolation with one bearer + no tenant column is an
+IDOR; we scope to single-operator and remove the *forgeable-id* class with
+`crypto/rand` server-generated ids (a client can never supply an id).
+
+**REST front (P1).** `POST /v1/reviews` + `GET /v1/reviews/{id}` mount on the
+existing serve mux behind a **constant-time bearer middleware** — `len(token)==0
+→ 401` **before** `subtle.ConstantTimeCompare` (empty==empty compares *equal*),
+strict case-insensitive `Bearer ` parse. The bearer is **env-only**
+(`MIUCR_API_TOKEN`, no flag → no `argv`/`ps` leak); with no token the `/v1` routes
+are **not registered**. POST validates + allowlist-checks (explicit **403**
+off-allowlist, not the webhook's silent `200`), generates the id, persists a
+**`pending`** `ReviewRecord`, and enqueues onto the **same** worker pool the
+webhook uses; it returns **202 + id** in a serve-local `miucr.cli/v1` envelope (a
+~30-line writer — cli's helpers are unexported, not exported just for serve). The
+body is `MaxBytesReader`-capped (64 KB) with `errors.As(*http.MaxBytesError)` →
+**413**, copied from the webhook.
+
+**Store persist seam.** The store gains a `Status` field + an **`UpsertReview`**
+(`INSERT … ON CONFLICT(id) DO UPDATE`; `id` is the PK in both schemas) — an
+INSERT-only `SaveReview` would PK-conflict on the pending→done transition. The
+worker persists the **final** record from the `buildServeReviewFn` **closure**
+(which returns `cli.ReviewOutcome` with findings/stats/HeadSHA — HeadSHA is
+unknown at enqueue), keyed by `Job.ReviewID`: success → `UpsertReview(done, …)`,
+a returned error → `UpsertReview(failed)`. The M4 `Job.OnDone(error)` seam is
+**unchanged** (it carries only the error). The `status` column defaults to `done`
+(and `SaveReview` sets it when empty) so existing CLI/conformance INSERTs pass; a
+schema-parity test asserts the column is in the same position in both backends.
+
+**GET whitelist + stuck-pending.** `GET` maps a **whitelist** —
+`id, status, created_at, findings, stats` — to the envelope, **excluding
+`RepoDir`** (the host `/tmp` clone path = info disclosure). A `pending` row older
+than the review timeout is **lazily recovered to `failed`** on GET (clock-seamed
+`now func() time.Time`, `reviewTO` threaded into the handler) so a crashed worker
+leaves no eternal pending.
+
+**App auth (P2/P3).** A pure-Go **RS256** App JWT minter — `crypto/rsa`
+`SignPKCS1v15` + `crypto/sha256` + `crypto/x509` (PKCS#1/PKCS#8) + `base64`
+RawURL; `iat` back-dated ~60 s, `exp` ~9 min (< 10 min); `iss` = app id — with
+**no new module**. A `TokenSource` interface: `staticTokenSource` reproduces the
+pre-M8 PAT/anonymous behavior **byte-for-byte**; `appTokenSource` mints the JWT,
+exchanges it via go-github `Apps.CreateInstallationToken`, and caches the
+installation token in-memory with **refresh-before-expiry** (~5 min margin) +
+**single-flight** (already-vendored `x/sync/singleflight`, keyed by installation
+id — no thundering herd). An installation token is just a bearer → it flows
+through the existing `WithAuthToken`; `NewClient` and `resolveToken`'s signature
+are **untouched** (App mode requires a configured `installation_id`, parsed to
+`int64` with a typed error; no per-`(owner,repo)` widening). The `resolveToken`
+closure captures `cmd.Context()` + a bounded `WithTimeout` for the exchange.
+`[github]` config gains `mode = pat [default] | app`, `app_id`, `installation_id`,
+`private_key_path` (**path-only** — read at startup, parsed, raw PEM bytes
+**zeroed**; never inline/logged/persisted, since `RedactString` cannot mask a
+multi-line PEM).
+
+See [REST API & GitHub App auth](https://miucr.vanducng.dev/rest-api-and-github-app/)
+for the operator-facing reference and the single-operator threat model.

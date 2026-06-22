@@ -81,6 +81,58 @@ func TestConformanceSaveGetRoundTrip(t *testing.T) {
 	}
 }
 
+func TestConformanceSaveDefaultsStatusDone(t *testing.T) {
+	for _, b := range backends(t) {
+		t.Run(b.name, func(t *testing.T) {
+			ctx := context.Background()
+			id, err := b.rev.SaveReview(ctx, store.ReviewRecord{RepoDir: "/r", Mode: "staged", HeadSHA: "h"})
+			if err != nil {
+				t.Fatalf("SaveReview: %v", err)
+			}
+			got, err := b.rev.GetReview(ctx, id)
+			if err != nil {
+				t.Fatalf("GetReview: %v", err)
+			}
+			if got.Status != "done" {
+				t.Fatalf("status = %q, want done (default)", got.Status)
+			}
+		})
+	}
+}
+
+func TestConformanceUpsertPendingToDone(t *testing.T) {
+	for _, b := range backends(t) {
+		t.Run(b.name, func(t *testing.T) {
+			ctx := context.Background()
+			id, err := b.rev.UpsertReview(ctx, store.ReviewRecord{ID: "rev-1", Status: "pending", RepoDir: "/r", Mode: "pr", HeadSHA: ""})
+			if err != nil {
+				t.Fatalf("upsert pending: %v", err)
+			}
+			if id != "rev-1" {
+				t.Fatalf("id = %q, want rev-1", id)
+			}
+			got, _ := b.rev.GetReview(ctx, id)
+			if got.Status != "pending" {
+				t.Fatalf("after pending upsert status = %q", got.Status)
+			}
+			if _, err := b.rev.UpsertReview(ctx, store.ReviewRecord{
+				ID: "rev-1", Status: "done", RepoDir: "/r", Mode: "pr", HeadSHA: "abc",
+				Findings: []engine.Finding{{File: "a.go", Line: 1, Severity: "high", Category: "bug", Rationale: "x"}},
+				Stats:    map[string]any{"files_reviewed": float64(1)},
+			}); err != nil {
+				t.Fatalf("upsert done: %v", err)
+			}
+			got, err = b.rev.GetReview(ctx, id)
+			if err != nil {
+				t.Fatalf("GetReview after done: %v", err)
+			}
+			if got.Status != "done" || got.HeadSHA != "abc" || len(got.Findings) != 1 {
+				t.Fatalf("after done upsert: %+v", got)
+			}
+		})
+	}
+}
+
 func TestConformanceGetMissing(t *testing.T) {
 	for _, b := range backends(t) {
 		t.Run(b.name, func(t *testing.T) {

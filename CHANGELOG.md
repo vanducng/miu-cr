@@ -4,6 +4,24 @@
 
 ### Features
 
+* **REST API + GitHub App auth (M8).** `miucr serve` can run as a deployable
+  **single-operator** service. Setting `MIUCR_API_TOKEN` (env-only, like
+  `WEBHOOK_SECRET`) enables an authenticated JSON REST API: `POST /v1/reviews
+  {owner,repo,number}` returns **202 + a server-generated id** (`crypto/rand`,
+  never client-supplied) and enqueues the review on the same worker pool the
+  webhook uses; `GET /v1/reviews/{id}` reads the persisted record (`pending` →
+  `done`/`failed`) as a **whitelisted** `miucr.cli/v1` envelope (`id, status,
+  created_at, findings, stats` — never the host clone path). One shared bearer =
+  **one trust boundary** (single-operator, **not** multi-tenant); empty-token
+  `401` is checked **before** the constant-time compare; off-allowlist is an
+  explicit `403`; the body is capped (`413`). A new `[github] mode = app` opts
+  into GitHub **App installation auth** (`app_id`, `installation_id`,
+  `private_key_path`): a pure-Go RS256 App JWT (no new module) is exchanged for an
+  installation token that is cached in-memory with refresh-before-expiry +
+  single-flight. PAT mode (default) + webhook + poll are byte-for-byte unchanged;
+  the private key is **path-only** (read, parsed, raw bytes zeroed — never
+  logged/persisted) and installation tokens live in memory only.
+
 * **Poll-mode trigger (M4).** `miucr serve --poll` adds an opt-in trigger that
   periodically asks GitHub which PRs need review on an `--repos` allowlist and
   dispatches each one onto the **same** serve review path — the webhook stays the

@@ -230,3 +230,40 @@ base_url = "https://gw.example/v1"
 		t.Fatalf("embedding not loaded: %+v", cfg.Embedding)
 	}
 }
+
+// No [github] section -> mode defaults to pat with empty App fields.
+func TestGithubDefaultsToPat(t *testing.T) {
+	d := Defaults()
+	if d.Github.Mode != "pat" {
+		t.Fatalf("default github mode: want pat, got %q", d.Github.Mode)
+	}
+	out := Merge(d, Config{}) // file with no [github]
+	if out.Github.Mode != "pat" {
+		t.Fatalf("merge without [github] must keep pat, got %q", out.Github.Mode)
+	}
+	if out.Github.AppID != "" || out.Github.InstallationID != "" || out.Github.PrivateKeyPath != "" {
+		t.Fatalf("default github App fields must be empty: %+v", out.Github)
+	}
+}
+
+// A [github] section overlays mode + App fields; absent mode inherits the default.
+func TestMergeGithubOverlay(t *testing.T) {
+	out := Merge(Defaults(), Config{Github: Github{
+		Mode:           "app",
+		AppID:          "12345",
+		InstallationID: "99",
+		PrivateKeyPath: "/etc/miucr/app.pem",
+	}})
+	if out.Github.Mode != "app" {
+		t.Fatalf("mode overlay: want app, got %q", out.Github.Mode)
+	}
+	if out.Github.AppID != "12345" || out.Github.InstallationID != "99" || out.Github.PrivateKeyPath != "/etc/miucr/app.pem" {
+		t.Fatalf("app fields overlay: %+v", out.Github)
+	}
+
+	// Overlaying only App fields (no mode) inherits the default pat mode.
+	partial := Merge(Defaults(), Config{Github: Github{AppID: "678"}})
+	if partial.Github.Mode != "pat" {
+		t.Fatalf("absent mode must inherit pat, got %q", partial.Github.Mode)
+	}
+}

@@ -70,6 +70,18 @@ type Embedding struct {
 	Dim      int    `toml:"dim,omitempty"`
 }
 
+// Github configures GitHub authentication. Mode defaults to "pat" (the
+// pre-M8 PAT/anonymous behavior). Mode "app" opts into GitHub App installation
+// auth: AppID + InstallationID + PrivateKeyPath. PrivateKeyPath is a PATH to a
+// PEM file (never inline PEM — RedactString cannot mask a multi-line key); the
+// key is read at startup, parsed, and the raw bytes zeroed, and is never logged.
+type Github struct {
+	Mode           string `toml:"mode,omitempty"`             // "pat" (default) | "app"
+	AppID          string `toml:"app_id,omitempty"`           // GitHub App ID (App mode)
+	InstallationID string `toml:"installation_id,omitempty"`  // numeric installation id (App mode)
+	PrivateKeyPath string `toml:"private_key_path,omitempty"` // PATH to the App private-key PEM; never inline PEM
+}
+
 // Config is the layered configuration: a set of named provider profiles plus
 // the profile to use when none is selected on the command line.
 type Config struct {
@@ -77,6 +89,7 @@ type Config struct {
 	Providers       map[string]Provider `toml:"providers"`
 	Store           Store               `toml:"store"`
 	Embedding       Embedding           `toml:"embedding"`
+	Github          Github              `toml:"github"`
 }
 
 // Defaults returns the built-in configuration: the two first-class kinds as
@@ -91,5 +104,6 @@ func Defaults() Config {
 		},
 		Store:     Store{Backend: "sqlite"},
 		Embedding: Embedding{Enabled: false, Model: DefaultEmbeddingModel, Dim: DefaultEmbeddingDim},
+		Github:    Github{Mode: "pat"},
 	}
 }

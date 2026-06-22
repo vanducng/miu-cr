@@ -98,6 +98,27 @@ func Merge(base, file Config) Config {
 	}
 	out.Store = mergeStore(base.Store, file.Store)
 	out.Embedding = mergeEmbedding(base.Embedding, file.Embedding)
+	out.Github = mergeGithub(base.Github, file.Github)
+	return out
+}
+
+// mergeGithub overlays non-empty file [github] fields onto base. An empty file
+// Mode inherits base (default "pat"), so a config.toml without [github] resolves
+// to PAT mode. PrivateKeyPath is a path, never inline PEM.
+func mergeGithub(base, file Github) Github {
+	out := base
+	if file.Mode != "" {
+		out.Mode = file.Mode
+	}
+	if file.AppID != "" {
+		out.AppID = file.AppID
+	}
+	if file.InstallationID != "" {
+		out.InstallationID = file.InstallationID
+	}
+	if file.PrivateKeyPath != "" {
+		out.PrivateKeyPath = file.PrivateKeyPath
+	}
 	return out
 }
 
