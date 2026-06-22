@@ -84,16 +84,20 @@ func rootCommand(opts *options) *cobra.Command {
 		Use:   "miucr",
 		Short: "Owned local AI code-review CLI for agents",
 	}
-	root.PersistentFlags().StringVarP(&opts.output, "output", "o", "json", "Output format: json or pretty")
+	root.PersistentFlags().StringVarP(&opts.output, "output", "o", "json", "Output format: json, pretty, or sarif (sarif is review-only)")
 	root.PersistentFlags().DurationVar(&opts.timeout, "timeout", 30*time.Second, "Operation timeout")
 	root.PersistentPreRunE = func(cmd *cobra.Command, args []string) error {
 		switch opts.output {
 		case "", "json":
-			prettyOutput = false
+			outputFormat, prettyOutput = "json", false
 		case "pretty":
-			prettyOutput = true
+			outputFormat, prettyOutput = "pretty", true
+		case "sarif":
+			// SARIF is its own document handled only by review; prettyOutput stays
+			// off so every non-review command still emits the JSON envelope.
+			outputFormat, prettyOutput = "sarif", false
 		default:
-			return &CLIError{Code: "output.invalid_format", Message: fmt.Sprintf("unknown output format %q", opts.output), Hint: "use json or pretty", Exit: 2}
+			return &CLIError{Code: "output.invalid_format", Message: fmt.Sprintf("unknown output format %q", opts.output), Hint: "use json, pretty, or sarif", Exit: 2}
 		}
 		return nil
 	}

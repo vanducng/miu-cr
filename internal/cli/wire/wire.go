@@ -397,6 +397,7 @@ func publishReview(ctx stdctx.Context, client mgithub.Client, runner *gitcmd.Run
 		Gate:          req.Gate,
 		GateClean:     !engine.GateFailed(res.Findings, req.Gate),
 		ReviewedFiles: reviewedFilesFromStats(res.Stats),
+		FilterMode:    filterModeOf(req.FilterMode),
 	}
 
 	pr, err := mgithub.PostReview(ctx, client, info, res.Findings, diffs, "", skip, opts)
@@ -461,6 +462,15 @@ func trackResolution(ctx stdctx.Context, prStore store.PRThreadStore, key store.
 		}
 	}
 	return prStore.MarkResolved(ctx, key, resolved)
+}
+
+// filterModeOf maps the request's filter-mode string to the github enum; an empty
+// or unrecognized value defaults to diff_context (the validated CLI default).
+func filterModeOf(s string) mgithub.FilterMode {
+	if mgithub.ValidFilterMode(s) {
+		return mgithub.FilterMode(s)
+	}
+	return mgithub.FilterDiffContext
 }
 
 // approveActionFor maps the resolved CreateReview Event to the PRResult action

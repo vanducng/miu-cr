@@ -1,0 +1,54 @@
+# Copy this file to .github/workflows/code-review-sarif.yml in your repository.
+#
+# This variant adds SARIF: alongside the inline review, miucr writes a SARIF 2.1.0
+# report and uploads it to the GitHub code-scanning Security tab. Findings then
+# appear as code-scanning alerts (and as PR annotations on the changed lines) in
+# addition to the inline review comments.
+#
+# Prerequisites:
+#   1. Add ANTHROPIC_API_KEY to your repo secrets (Settings → Secrets → Actions).
+#   2. The `security-events: write` permission below is REQUIRED to upload SARIF.
+#   3. Code scanning must be enabled for private repos (GitHub Advanced Security);
+#      public repos have it for free.
+#
+# Fork PRs: pull_request_target runs in the BASE repo context, so secrets are
+# available. miucr fetches the PR diff via the GitHub API and does NOT check out
+# or execute the fork's code — do NOT add a checkout + build/run of the PR head.
+
+name: AI Code Review (SARIF)
+
+on:
+  pull_request_target:
+    types: [opened, synchronize, reopened]
+
+permissions:
+  contents: read          # read the diff
+  pull-requests: write    # post inline comments and a summary
+  security-events: write  # REQUIRED to upload SARIF to the Security tab
+
+jobs:
+  miucr-review:
+    name: miucr review + SARIF
+    runs-on: ubuntu-latest
+    if: |
+      github.actor != 'dependabot[bot]' &&
+      !contains(github.event.pull_request.title, '[skip review]')
+
+    steps:
+      - name: Run miucr PR review
+        uses: vanducng/miu-cr@v0          # pin to a major tag or an exact SHA in production
+        with:
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+          api-key:      ${{ secrets.ANTHROPIC_API_KEY }}
+          gate:         high              # fail the check at this severity or above
+          sarif-file:   miucr.sarif       # also emit a SARIF 2.1.0 report to this path
+          # filter-mode: diff_context     # added|diff_context|file|nofilter
+
+      - name: Upload SARIF to code scanning
+        # Always run so findings reach the Security tab even when the gate failed
+        # the review step above.
+        if: ${{ always() && hashFiles('miucr.sarif') != '' }}
+        uses: github/codeql-action/upload-sarif@v3
+        with:
+          sarif_file: miucr.sarif
+          category: miucr

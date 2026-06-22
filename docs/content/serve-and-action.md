@@ -214,9 +214,44 @@ jobs:
 | `version`      | no       | `latest`           | miucr release tag to install.                              |
 | `base-url`     | no       | `""`               | Optional Anthropic-compatible gateway base URL.            |
 | `model`        | no       | `""`               | Optional model override.                                   |
+| `sarif-file`   | no       | `""`               | When set, also write a SARIF 2.1.0 report to this path (see below). Unset keeps inline-review-only behavior. |
+| `filter-mode`  | no       | `diff_context`     | Inline-eligibility filter: `added`\|`diff_context`\|`file`\|`nofilter`. |
 
 All credentials are passed to the binary **via environment variables, never on
 the command line**, so they don't appear in process listings or step logs.
+
+### SARIF / code scanning
+
+Set `sarif-file` to also publish findings to the GitHub code-scanning **Security
+tab** (and as PR annotations on changed lines), alongside the inline review. The
+SAME single review run writes the report (the action passes `--sarif-out`), so
+there is **no second LLM pass**. miucr writes the file only on a successful
+review — a failed review leaves no file, so the `hashFiles`-guarded upload below
+is simply skipped. Upload the file yourself with
+`github/codeql-action/upload-sarif`, which needs the `security-events: write`
+permission:
+
+```yaml
+permissions:
+  contents: read
+  pull-requests: write
+  security-events: write   # required to upload SARIF
+steps:
+  - uses: vanducng/miu-cr@vX.Y.Z
+    with:
+      api-key:    ${{ secrets.ANTHROPIC_API_KEY }}
+      gate:       high
+      sarif-file: miucr.sarif
+  - if: ${{ always() && hashFiles('miucr.sarif') != '' }}
+    uses: github/codeql-action/upload-sarif@v3
+    with:
+      sarif_file: miucr.sarif
+      category: miucr
+```
+
+A full copy-paste workflow is in
+[`examples/github-action/code-review-sarif.yml`](https://github.com/vanducng/miu-cr/blob/main/examples/github-action/code-review-sarif.yml).
+Locally, `miucr review --pr <ref> -o sarif > out.sarif` produces the same document.
 
 ### `permissions`
 

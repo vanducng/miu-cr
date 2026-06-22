@@ -155,6 +155,62 @@ func TestFilterToDiffHunks(t *testing.T) {
 	}
 }
 
+func TestFilterFindingsModes(t *testing.T) {
+	diffs := sampleDiffs() // p.go: added 2,3; context 1,4,5
+	findings := []engine.Finding{
+		{File: "p.go", Line: 2},  // added
+		{File: "p.go", Line: 4},  // context
+		{File: "p.go", Line: 99}, // in-file, off-hunk
+		{File: "p.go", Line: 0},  // drift
+		{File: "x.go", Line: 1},  // file not in diff
+	}
+	cases := []struct {
+		mode FilterMode
+		want int
+	}{
+		{FilterAdded, 1},       // only line 2
+		{FilterDiffContext, 2}, // lines 2,4
+		{FilterFile, 4},        // every p.go finding (incl. off-hunk + drift), not x.go
+		{FilterNoFilter, 5},    // all
+	}
+	for _, c := range cases {
+		got := filterFindings(findings, diffs, c.mode)
+		if len(got) != c.want {
+			t.Errorf("mode %s: want %d kept, got %d: %+v", c.mode, c.want, len(got), got)
+		}
+	}
+}
+
+func TestInlineEligibleNeverWidensPastDiffContext(t *testing.T) {
+	diffs := sampleDiffs()
+	findings := []engine.Finding{
+		{File: "p.go", Line: 2},  // added → inline-eligible in every mode
+		{File: "p.go", Line: 4},  // context → eligible except added
+		{File: "p.go", Line: 99}, // off-hunk → NEVER inline-eligible
+	}
+	// file/nofilter must NOT make the off-hunk finding inline-eligible.
+	for _, m := range []FilterMode{FilterFile, FilterNoFilter, FilterDiffContext} {
+		got := inlineEligible(findings, diffs, m)
+		if len(got) != 2 {
+			t.Errorf("mode %s: inline set should be 2 (off-hunk excluded), got %d", m, len(got))
+		}
+	}
+	if got := inlineEligible(findings, diffs, FilterAdded); len(got) != 1 {
+		t.Errorf("added inline set should be 1, got %d", len(got))
+	}
+}
+
+func TestValidFilterMode(t *testing.T) {
+	for _, ok := range []string{"added", "diff_context", "file", "nofilter"} {
+		if !ValidFilterMode(ok) {
+			t.Errorf("%q should be valid", ok)
+		}
+	}
+	if ValidFilterMode("bogus") || ValidFilterMode("") {
+		t.Error("bogus/empty should be invalid")
+	}
+}
+
 func TestFilterToDiffHunksRenamed(t *testing.T) {
 	diffs := []diff.Diff{{OldPath: "old.go", NewPath: "new.go", IsRenamed: true, Diff: sampleFileDiff}}
 	findings := []engine.Finding{

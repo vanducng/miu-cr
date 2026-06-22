@@ -42,31 +42,74 @@ func DiffsForPR(ctx stdctx.Context, runner *gitcmd.Runner, tempDir, baseSHA, hea
 	return diff.GetDiff(ctx, diff.ModeRange, tempDir, baseSHA, headSHA, "", runner)
 }
 
-// filterToDiffHunks keeps only findings whose anchored Line lands on a RIGHT-side
-// (added or context) line inside one of the PR's diff hunks. Line==0 (drift) and
-// out-of-hunk findings are dropped — GitHub 422s on inline comments off the diff.
+// FilterMode controls which findings are eligible for inline posting, mirroring
+// reviewdog's diff knob. DiffContext (default) keeps findings on any RIGHT-side
+// (added or context) diff line; Added keeps only findings on added lines; File
+// keeps findings on any file present in the diff; NoFilter keeps everything.
+// Findings outside the diff (File/NoFilter) are routed to summary/SARIF/local by
+// the caller, never inline (GitHub 422s an off-diff inline comment).
+type FilterMode string
+
+const (
+	FilterAdded       FilterMode = "added"
+	FilterDiffContext FilterMode = "diff_context"
+	FilterFile        FilterMode = "file"
+	FilterNoFilter    FilterMode = "nofilter"
+)
+
+// ValidFilterMode reports whether s is a recognized --filter-mode value.
+func ValidFilterMode(s string) bool {
+	switch FilterMode(s) {
+	case FilterAdded, FilterDiffContext, FilterFile, FilterNoFilter:
+		return true
+	}
+	return false
+}
+
+// filterToDiffHunks keeps only findings inline-eligible under DiffContext: an
+// anchored Line on a RIGHT-side (added or context) line inside one of the PR's
+// diff hunks. It is filterFindings(FilterDiffContext) — kept as a named helper
+// because it is the inline default and is referenced widely.
 func filterToDiffHunks(findings []engine.Finding, diffs []diff.Diff) []engine.Finding {
-	rightLines := make(map[string]map[int]bool, len(diffs))
+	return filterFindings(findings, diffs, FilterDiffContext)
+}
+
+// filterFindings selects findings per mode. For Added/DiffContext a finding must
+// anchor on the corresponding RIGHT-side line; for File the finding's file must be
+// in the diff; for NoFilter all findings pass. Line==0 (drift) findings are kept
+// only by File/NoFilter — they can never be inlined but must still reach SARIF/local.
+func filterFindings(findings []engine.Finding, diffs []diff.Diff, mode FilterMode) []engine.Finding {
+	if mode == FilterNoFilter {
+		out := make([]engine.Finding, len(findings))
+		copy(out, findings)
+		return out
+	}
+
+	addedLines := make(map[string]map[int]bool, len(diffs))
+	contextLines := make(map[string]map[int]bool, len(diffs))
+	filesInDiff := make(map[string]bool, len(diffs))
+	ensure := func(m map[string]map[int]bool, p string) map[int]bool {
+		if m[p] == nil {
+			m[p] = map[int]bool{}
+		}
+		return m[p]
+	}
 	for i := range diffs {
 		d := &diffs[i]
 		path := d.NewPath
 		if path == "" || path == "/dev/null" {
 			continue
 		}
-		lines := rightLines[path]
-		if lines == nil {
-			lines = map[int]bool{}
-			rightLines[path] = lines
-		}
+		filesInDiff[path] = true
 		for _, h := range diff.ParseHunks(d.Diff) {
 			newLine := h.NewStart
 			for _, l := range h.Lines {
 				switch l.Type {
 				case diff.HunkContext:
-					lines[newLine] = true
+					ensure(contextLines, path)[newLine] = true
 					newLine++
 				case diff.HunkAdded:
-					lines[newLine] = true
+					ensure(addedLines, path)[newLine] = true
 					newLine++
 				case diff.HunkDeleted:
 				}
@@ -76,14 +119,34 @@ func filterToDiffHunks(findings []engine.Finding, diffs []diff.Diff) []engine.Fi
 
 	kept := make([]engine.Finding, 0, len(findings))
 	for _, f := range findings {
-		if f.Line == 0 {
-			continue
-		}
-		if rightLines[f.File][f.Line] {
-			kept = append(kept, f)
+		switch mode {
+		case FilterFile:
+			if filesInDiff[f.File] {
+				kept = append(kept, f)
+			}
+		case FilterAdded:
+			if f.Line != 0 && addedLines[f.File][f.Line] {
+				kept = append(kept, f)
+			}
+		default: // FilterDiffContext
+			if f.Line != 0 && (addedLines[f.File][f.Line] || contextLines[f.File][f.Line]) {
+				kept = append(kept, f)
+			}
 		}
 	}
 	return kept
+}
+
+// inlineEligible selects findings postable as inline comments under mode. Added
+// restricts to added lines; every other mode (including file/nofilter) is clamped
+// to diff_context — a finding off a RIGHT-side diff line can never be inlined
+// (GitHub 422), so file/nofilter only ever WIDEN the summary/SARIF/local set, never
+// the inline set.
+func inlineEligible(findings []engine.Finding, diffs []diff.Diff, mode FilterMode) []engine.Finding {
+	if mode == FilterAdded {
+		return filterFindings(findings, diffs, FilterAdded)
+	}
+	return filterFindings(findings, diffs, FilterDiffContext)
 }
 
 // hunkRightSets returns, per new-path, the RIGHT-side (added+context) line set of
@@ -238,11 +301,12 @@ func ExistingFingerprints(ctx stdctx.Context, client Client, info *PRInfo) (map[
 // actions default OFF; with the zero value PostReview behaves exactly as the M2
 // comment-only path (modulo the latent unconditional-suggestion-fence fix).
 type PostReviewOptions struct {
-	Suggest       bool   // emit native single-line suggested-changes when proven clean
-	ApproveClean  bool   // resolve Event=APPROVE when the PR is clean and all safety predicates hold
-	Gate          string // gate severity used by the caller to compute GateClean
-	GateClean     bool   // caller-computed !engine.GateFailed(findings, Gate)
-	ReviewedFiles int    // count of files actually reviewed; APPROVE requires >0
+	Suggest       bool       // emit native single-line suggested-changes when proven clean
+	ApproveClean  bool       // resolve Event=APPROVE when the PR is clean and all safety predicates hold
+	Gate          string     // gate severity used by the caller to compute GateClean
+	GateClean     bool       // caller-computed !engine.GateFailed(findings, Gate)
+	ReviewedFiles int        // count of files actually reviewed; APPROVE requires >0
+	FilterMode    FilterMode // inline-eligibility filter; empty = diff_context (default)
 }
 
 // PostReviewResult reports what PostReview did: inline comments posted, comments
@@ -290,7 +354,7 @@ func PostReview(ctx stdctx.Context, client Client, info *PRInfo, findings []engi
 		}
 	}
 
-	inHunk := filterToDiffHunks(findings, diffs)
+	inHunk := inlineEligible(findings, diffs, opts.FilterMode)
 
 	toPost := make([]engine.Finding, 0, len(inHunk))
 	for _, f := range inHunk {
