@@ -6,6 +6,7 @@ package wire
 import (
 	stdctx "context"
 	"errors"
+	"fmt"
 	"log/slog"
 	"os"
 	"path/filepath"
@@ -138,6 +139,7 @@ func (engineReviewer) Review(ctx stdctx.Context, req cli.ReviewRequest) (cli.Rev
 		Rules:            loadRules(req.RepoDir, true),
 		RulesFork:        false,
 		RulesTokenBudget: defaultRulesTokenBudget,
+		Progress:         req.Progress,
 	})
 	if err != nil {
 		return cli.ReviewOutcome{}, err
@@ -195,6 +197,9 @@ func (prReviewer) ReviewPR(ctx stdctx.Context, req cli.PRReviewRequest) (cli.Rev
 	ref, err := mgithub.ParseRef(req.Ref)
 	if err != nil {
 		return cli.ReviewOutcome{}, err
+	}
+	if req.Progress != nil {
+		req.Progress(fmt.Sprintf("fetching PR %s/%s#%d…", ref.Owner, ref.Repo, ref.Number))
 	}
 
 	creds, err := agent.Resolve(agent.ResolveInput{
@@ -261,6 +266,7 @@ func (prReviewer) ReviewPR(ctx stdctx.Context, req cli.PRReviewRequest) (cli.Rev
 		RulesFork:        info.IsFork,
 		RulesTokenBudget: defaultRulesTokenBudget,
 		Retriever:        retr,
+		Progress:         req.Progress,
 	})
 	if err != nil {
 		return cli.ReviewOutcome{}, err
@@ -448,6 +454,7 @@ func (a agentAdapter) Review(ctx stdctx.Context, rc engine.AgentContext) ([]engi
 		RepoDir:         rc.RepoDir,
 		Rev:             rc.Rev,
 		Runner:          rc.Runner,
+		Progress:        rc.Progress,
 	})
 }
 
