@@ -41,7 +41,7 @@ func SetReviewStoreFactory(f func(ctx stdctx.Context) (serve.ReviewStore, func()
 	reviewStoreFactory = f
 }
 
-var version = "v0.13.0" // x-release-please-version
+var version = "v0.14.0" // x-release-please-version
 
 // Execute runs the miucr root command with args, returning a CLIError whose Exit
 // code the caller (cmd/miucr) maps to the process status.
