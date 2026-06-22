@@ -55,6 +55,13 @@ comment with a new marker); subsequent re-runs dedupe normally. On a
 first M5 review **manually** (or off-hours) to absorb the one-time re-post before
 the next scheduled run.
 
+## [0.14.0](https://github.com/vanducng/miu-cr/compare/v0.13.0...v0.14.0) (2026-06-22)
+
+
+### Features
+
+* miucr upgrade (self-update) + neutral docs + OAuth-path fixes ([e11bd15](https://github.com/vanducng/miu-cr/commit/e11bd1559f9409d25f31ccf8ed9914b292621fb2))
+
 ## [0.13.0](https://github.com/vanducng/miu-cr/compare/v0.12.0...v0.13.0) (2026-06-22)
 
 
