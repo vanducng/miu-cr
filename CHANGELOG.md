@@ -55,6 +55,13 @@ comment with a new marker); subsequent re-runs dedupe normally. On a
 first M5 review **manually** (or off-hours) to absorb the one-time re-post before
 the next scheduled run.
 
+## [0.20.0](https://github.com/vanducng/miu-cr/compare/v0.19.0...v0.20.0) (2026-06-22)
+
+
+### Features
+
+* **pr-review:** link a finding's category to your rule docs (reviewdog [#9](https://github.com/vanducng/miu-cr/issues/9)) ([8484d81](https://github.com/vanducng/miu-cr/commit/8484d81117a52ffc9803480de40ef0fd423040d1))
+
 ## [0.19.0](https://github.com/vanducng/miu-cr/compare/v0.18.0...v0.19.0) (2026-06-22)
 
 
