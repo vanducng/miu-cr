@@ -239,9 +239,10 @@ func resolveOAuthCodex(in ResolveInput, prof config.Provider) (Credentials, bool
 	if !ok {
 		return Credentials{}, false, nil
 	}
-	// The codex allow-list varies by ChatGPT plan; DefaultCodexModel is verified
-	// against a current account but may differ. Allow an override without --model.
-	model := firstNonEmpty(in.Model, os.Getenv("MIUCR_CODEX_MODEL"), prof.Model, config.DefaultCodexModel)
+	// The codex backend only accepts codex models — NOT prof.Model (the openai
+	// profile defaults to gpt-4o, an api.openai.com model the backend rejects).
+	// Override via --model or MIUCR_CODEX_MODEL; the allow-list varies by plan.
+	model := firstNonEmpty(in.Model, os.Getenv("MIUCR_CODEX_MODEL"), config.DefaultCodexModel)
 	return Credentials{
 		Kind:           config.KindOpenAI,
 		Backend:        "codex",

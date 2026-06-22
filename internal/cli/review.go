@@ -187,6 +187,13 @@ func nudgeIfUnconfigured(apiKey, authToken string) error {
 	}
 }
 
+// defaultTokenBudget caps the review input so a large PR (hundreds of files)
+// fits typical model context windows out of the box; the adaptive diff
+// compression only degrades context when the diff exceeds it. Small diffs are
+// unaffected. Pass --token-budget 0 to disable, or a larger value for a
+// big-context model.
+const defaultTokenBudget = 100000
+
 func reviewCommand(opts *options) *cobra.Command {
 	var (
 		staged       bool
@@ -327,7 +334,7 @@ func reviewCommand(opts *options) *cobra.Command {
 	f.StringVar(&authToken, "auth-token", "", "Bearer auth token for Anthropic-compatible gateways, Anthropic only (never persisted)")
 	f.StringVar(&model, "model", "", "Override the review model (else ANTHROPIC_MODEL/OPENAI_MODEL or pinned default)")
 	f.IntVar(&expand, "expand", 5, "Context lines added above/below each hunk in the new-content window (0 disables)")
-	f.IntVar(&tokenBudget, "token-budget", 0, "Approximate token budget; over budget degrades context (0 disables)")
+	f.IntVar(&tokenBudget, "token-budget", defaultTokenBudget, "Approximate token budget; over budget degrades context (0 disables)")
 	f.StringVar(&pr, "pr", "", "Review a GitHub PR: https://github.com/owner/repo/pull/N or owner/repo#N (no GitHub PAT needed for public repos in dry-run)")
 	f.StringVar(&token, "token", "", "GitHub PAT (overrides GITHUB_TOKEN/GH_TOKEN; required only for --post; never persisted)")
 	f.BoolVar(&post, "post", false, "Publish inline comments + a summary to the PR (requires a token)")

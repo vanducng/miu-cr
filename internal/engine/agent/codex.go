@@ -65,8 +65,12 @@ type codexItem struct {
 	Type    string         `json:"type,omitempty"`
 	Role    string         `json:"role,omitempty"`
 	Content []codexContent `json:"content,omitempty"`
+	// function_call echo (store:false ⇒ we resend the assistant's call so the
+	// server has it): needs name + arguments, not just call_id.
+	CallID    string `json:"call_id,omitempty"`
+	Name      string `json:"name,omitempty"`
+	Arguments string `json:"arguments,omitempty"`
 	// function_call_output items:
-	CallID string `json:"call_id,omitempty"`
 	Output string `json:"output,omitempty"`
 }
 
@@ -220,7 +224,7 @@ func (a *codexAgent) dispatch(ctx stdctx.Context, rc Context, resp *codexResp) (
 				out = "ERROR: " + out
 			}
 			items = append(items,
-				codexItem{Type: "function_call", CallID: o.CallID, Output: ""},
+				codexItem{Type: "function_call", CallID: o.CallID, Name: o.Name, Arguments: o.Arguments},
 				codexItem{Type: "function_call_output", CallID: o.CallID, Output: out},
 			)
 		}
