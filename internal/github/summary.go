@@ -95,7 +95,7 @@ func renderOverflow(b *strings.Builder, info *PRInfo, omitted []engine.Finding, 
 
 // categoryMarkdown renders a finding Category for a Markdown context. When
 // categoryURLs holds a validated URL for the lowercased category, it returns a
-// Markdown link `[text](url)` with the link TEXT escaped via mdInline (the
+// Markdown link `[text](<url>)` with the link TEXT escaped via mdInline (the
 // category is untrusted model text); the URL is from Trusted, scheme-validated
 // config. With no match it returns plainText unchanged so the default render is
 // byte-for-byte preserved. plainText is what the caller renders today (raw in
@@ -110,7 +110,9 @@ func categoryMarkdown(cat string, categoryURLs map[string]string) string {
 // freshly escaped from the raw category.
 func categoryMarkdownText(cat, plainText string, categoryURLs map[string]string) string {
 	if url, ok := categoryURLs[strings.ToLower(strings.TrimSpace(cat))]; ok && url != "" {
-		return "[" + mdInline(cat) + "](" + url + ")"
+		// Angle-bracket destination so a ')' or paren in the URL can't close the link
+		// early; the validator already strips whitespace/'<'/'>'/backslash/control chars.
+		return "[" + mdInline(cat) + "](<" + url + ">)"
 	}
 	return plainText
 }

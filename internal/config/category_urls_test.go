@@ -49,6 +49,27 @@ func TestCategoryURLLengthCap(t *testing.T) {
 	}
 }
 
+func TestValidCategoryURLRejectsMarkdownBreakers(t *testing.T) {
+	// Parens are legal in a URL and handled by the [text](<url>) render form.
+	if !validCategoryURL("https://en.wikipedia.org/wiki/SQL_(lang)") {
+		t.Fatal("a URL with parens must be kept (the <url> render form tolerates them)")
+	}
+	bad := map[string]string{
+		"space":     "https://x/a b",
+		"tab":       "https://x/a\tb",
+		"newline":   "https://x/a\nb",
+		"angle-lt":  "https://x/a<b",
+		"angle-gt":  "https://x/a>b",
+		"backslash": "https://x/a\\b",
+		"control":   "https://x/a\x01b",
+	}
+	for name, u := range bad {
+		if validCategoryURL(u) {
+			t.Fatalf("%s: a markdown-breaking char must be rejected: %q", name, u)
+		}
+	}
+}
+
 func TestMergeReviewOverlay(t *testing.T) {
 	base := Defaults()
 	file := Config{Review: Review{CategoryURLs: map[string]string{"security": "https://x/s"}}}

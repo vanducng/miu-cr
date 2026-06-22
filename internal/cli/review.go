@@ -4,6 +4,7 @@ import (
 	stdctx "context"
 	"fmt"
 	"io"
+	"log/slog"
 	"os"
 	"path/filepath"
 	"strings"
@@ -621,7 +622,10 @@ func writeSARIFOut(path string, findings []ReviewFinding) error {
 // (user file + built-in defaults — never repo rules) for the local SARIF emit path.
 // A config-load error degrades to no links (the map is presentation-only).
 func categoryURLs() map[string]string {
-	cfg, _ := config.Load()
+	cfg, err := config.Load()
+	if err != nil {
+		slog.Warn("review: config load failed; category links disabled", "error", config.RedactString(err.Error()))
+	}
 	return cfg.Review.CategoryURLMap()
 }
 

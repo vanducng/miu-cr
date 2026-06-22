@@ -40,8 +40,13 @@ func (r Review) CategoryURLMap() map[string]string {
 // validCategoryURL accepts only an absolute http:// or https:// URL within the
 // length cap. It rejects javascript:, data:, file:, mailto:, scheme-relative
 // "//host", and any other scheme so a non-navigable/dangerous href can't render.
+// It also rejects chars that break a Markdown link destination so the rendered
+// [text](<url>) can't be escaped.
 func validCategoryURL(raw string) bool {
 	if raw == "" || len(raw) > maxCategoryURLLen {
+		return false
+	}
+	if !markdownSafeURL(raw) {
 		return false
 	}
 	u, err := url.Parse(raw)
@@ -52,4 +57,18 @@ func validCategoryURL(raw string) bool {
 		return false
 	}
 	return u.Host != ""
+}
+
+// markdownSafeURL rejects any char that breaks a Markdown link destination even
+// in the angle-bracket form [text](<url>): ASCII whitespace and control chars,
+// '<', '>', and backslash. A real doc URL percent-encodes these, so dropping them
+// is loss-free; parens stay allowed since the <> form tolerates them.
+func markdownSafeURL(raw string) bool {
+	for i := 0; i < len(raw); i++ {
+		switch c := raw[i]; {
+		case c <= 0x20, c == 0x7f, c == '<', c == '>', c == '\\':
+			return false
+		}
+	}
+	return true
 }
