@@ -13,15 +13,21 @@ import (
 // silent no-op downstream. Only milestone strings + file paths/tool names ever
 // reach it — never tokens.
 func newProgress(w io.Writer, verbose, quiet bool) func(string) {
-	if quiet || (!verbose && !stderrIsTerminal()) {
+	if quiet || (!verbose && !isTerminal(w)) {
 		return nil
 	}
 	return func(msg string) { fmt.Fprintln(w, "miu-cr: "+msg) }
 }
 
-// stderrIsTerminal reports whether stderr is a character device (an interactive
-// terminal) using only the stdlib — no new dependency.
-func stderrIsTerminal() bool {
-	fi, _ := os.Stderr.Stat()
+// isTerminal reports whether w is a character device (an interactive terminal),
+// checking the actual writer passed in (not a hardcoded os.Stderr) using only the
+// stdlib — no new dependency. A non-*os.File writer (e.g. a test buffer) is not a
+// terminal, so auto-progress stays off there.
+func isTerminal(w io.Writer) bool {
+	f, ok := w.(*os.File)
+	if !ok {
+		return false
+	}
+	fi, _ := f.Stat()
 	return fi != nil && fi.Mode()&os.ModeCharDevice != 0
 }

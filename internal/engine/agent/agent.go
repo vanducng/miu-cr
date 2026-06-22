@@ -221,8 +221,11 @@ type grepArgs struct {
 // fileReadLabel renders a short "path:start-end" label for the progress sink
 // (range omitted when unset). Paths/line numbers only — never secrets.
 func fileReadLabel(a fileReadArgs) string {
-	if a.Start == 0 && a.End == 0 {
-		return a.File
+	if a.Start <= 0 {
+		return a.File // no usable start (incl. line 0, which doesn't exist) → just the path
+	}
+	if a.End <= 0 {
+		return fmt.Sprintf("%s:%d", a.File, a.Start)
 	}
 	return fmt.Sprintf("%s:%d-%d", a.File, a.Start, a.End)
 }
