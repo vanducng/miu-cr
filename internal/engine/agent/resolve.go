@@ -1,7 +1,9 @@
 package agent
 
 import (
+	stdctx "context"
 	"fmt"
+	"net/http"
 	"os"
 	"strings"
 	"sync"
@@ -24,15 +26,45 @@ type Credentials struct {
 	// (Authorization header) instead of x-api-key. Used by Anthropic-compatible
 	// gateways.
 	AuthToken string
+
+	// Backend, when "codex", routes to the codex Responses backend (the OAuth /
+	// ChatGPT-plan path) instead of the openai-go SDK. The fields below carry the
+	// OAuth credential; they are set ONLY when no explicit key/env/profile key
+	// won. Tokens here are in-memory only.
+	Backend        string // "" (default) | "codex"
+	OAuthToken     string
+	OAuthAccountID string
+	OAuthRefresh   func(ctx stdctx.Context) (string, error)
+	HTTPClient     *http.Client // test seam for the codex backend
 }
 
 // ResolveInput carries the CLI flag values (all optional) into resolution.
 type ResolveInput struct {
+	// Ctx bounds the OAuth resolution (which may do a network token refresh) so it
+	// respects cancellation/timeout. nil falls back to context.Background().
+	Ctx stdctx.Context
+
 	Provider  string // profile name: "anthropic" | "openai" | <configured> | "auto" | ""
 	APIKey    string // --api-key
 	BaseURL   string // --base-url
 	AuthToken string // --auth-token
 	Model     string // --model
+
+	// OAuthResolver, when set, supplies the cached `miucr login` credential for
+	// the OpenAI path. It is injected by the cli/config layer so this package
+	// performs no filesystem access of its own. It is consulted ONLY when no
+	// explicit --api-key / OPENAI_API_KEY / profile key is present, so an explicit
+	// key always wins. ok=false means no usable cached credential.
+	OAuthResolver func(ctx stdctx.Context) (OAuthCredential, bool, error)
+}
+
+// OAuthCredential is the resolved login credential the cli layer passes in,
+// mirroring oauth.Resolved without coupling the resolver signature to that pkg.
+type OAuthCredential struct {
+	AccessToken    string
+	AccountID      string
+	BackendBaseURL string
+	Refresh        func(ctx stdctx.Context) (string, error)
 }
 
 // Resolve loads the layered config and resolves credentials for the selected
@@ -160,10 +192,19 @@ func resolveOpenAI(in ResolveInput, prof config.Provider) (Credentials, error) {
 	}
 	apiKey := firstNonEmpty(in.APIKey, os.Getenv("OPENAI_API_KEY"), profileSecret(prof))
 	if apiKey == "" {
+		// Below explicit key/env/profile: a cached `miucr login` credential routes
+		// to the codex backend (the ChatGPT-plan path).
+		if in.OAuthResolver != nil {
+			if creds, ok, err := resolveOAuthCodex(in, prof); err != nil {
+				return Credentials{}, err
+			} else if ok {
+				return creds, nil
+			}
+		}
 		return Credentials{}, &clierr.CLIError{
 			Code:    "agent.no_credentials",
-			Message: "no OpenAI API key: set OPENAI_API_KEY, configure a provider in " + config.FilePathOrEmpty() + ", or pass --api-key",
-			Hint:    "export OPENAI_API_KEY=... or run with --api-key; see config.example.toml for provider profiles (e.g. a gateway via auth_env)",
+			Message: "no OpenAI API key: set OPENAI_API_KEY, configure a provider in " + config.FilePathOrEmpty() + ", or pass --api-key (or run `miucr login` to use your ChatGPT plan)",
+			Hint:    "export OPENAI_API_KEY=... or run with --api-key; run `miucr login` to review on your ChatGPT plan; see config.example.toml for provider profiles",
 			Exit:    1,
 		}
 	}
@@ -175,6 +216,39 @@ func resolveOpenAI(in ResolveInput, prof config.Provider) (Credentials, error) {
 		BaseURL: baseURL,
 		Model:   model,
 	}, nil
+}
+
+// resolveOAuthCodex turns an injected login credential into codex-backend
+// Credentials. The OAuth model uses the OPENAI_MODEL/profile/default chain
+// (the codex backend accepts the same model ids).
+func resolveOAuthCodex(in ResolveInput, prof config.Provider) (Credentials, bool, error) {
+	ctx := in.Ctx
+	if ctx == nil {
+		ctx = stdctx.Background()
+	}
+	cred, ok, err := in.OAuthResolver(ctx)
+	if err != nil {
+		return Credentials{}, false, &clierr.CLIError{
+			Code:    "agent.oauth_unavailable",
+			Message: "cached login credential could not be resolved: " + config.RedactString(err.Error()),
+			Hint:    "run `miucr login` again, or set OPENAI_API_KEY / --api-key",
+			Exit:    1,
+			Cause:   err,
+		}
+	}
+	if !ok {
+		return Credentials{}, false, nil
+	}
+	model := firstNonEmpty(in.Model, os.Getenv("OPENAI_MODEL"), prof.Model, config.DefaultOpenAIModel)
+	return Credentials{
+		Kind:           config.KindOpenAI,
+		Backend:        "codex",
+		OAuthToken:     cred.AccessToken,
+		OAuthAccountID: cred.AccountID,
+		OAuthRefresh:   cred.Refresh,
+		BaseURL:        cred.BackendBaseURL,
+		Model:          model,
+	}, true, nil
 }
 
 var plaintextAuthTokenWarn sync.Once

@@ -20,6 +20,7 @@ import (
 	"github.com/vanducng/miu-cr/internal/engine/gitcmd"
 	mgithub "github.com/vanducng/miu-cr/internal/github"
 	"github.com/vanducng/miu-cr/internal/mcpserver"
+	"github.com/vanducng/miu-cr/internal/oauth"
 	"github.com/vanducng/miu-cr/internal/rules"
 	"github.com/vanducng/miu-cr/internal/serve"
 	"github.com/vanducng/miu-cr/internal/store"
@@ -70,15 +71,45 @@ func openReviewStore(ctx stdctx.Context) (serve.ReviewStore, func(), error) {
 	return s, closeStore, nil
 }
 
+// oauthResolver bridges the cli OAuth provider registry + the FS-backed oauth
+// package into the agent's resolver hook, keeping the engine/agent resolution
+// free of any direct filesystem read. The default OAuth provider is openai (the
+// only registered one). Returns nil when no provider is registered.
+func oauthResolver() func(stdctx.Context) (agent.OAuthCredential, bool, error) {
+	meta, ok := cli.OAuthBackend("openai")
+	if !ok {
+		return nil
+	}
+	return func(ctx stdctx.Context) (agent.OAuthCredential, bool, error) {
+		res, ok, err := oauth.Credential(ctx, oauth.Meta{
+			Provider:       meta.Provider,
+			TokenURL:       meta.TokenURL,
+			ClientID:       meta.ClientID,
+			BackendBaseURL: meta.BackendBaseURL,
+		}, nil, nil)
+		if err != nil || !ok {
+			return agent.OAuthCredential{}, ok, err
+		}
+		return agent.OAuthCredential{
+			AccessToken:    res.AccessToken,
+			AccountID:      res.AccountID,
+			BackendBaseURL: res.BackendBaseURL,
+			Refresh:        res.Refresh,
+		}, true, nil
+	}
+}
+
 type engineReviewer struct{}
 
 func (engineReviewer) Review(ctx stdctx.Context, req cli.ReviewRequest) (cli.ReviewOutcome, error) {
 	creds, err := agent.Resolve(agent.ResolveInput{
-		Provider:  req.Provider,
-		APIKey:    req.APIKey,
-		BaseURL:   req.BaseURL,
-		AuthToken: req.AuthToken,
-		Model:     req.Model,
+		Ctx:           ctx,
+		Provider:      req.Provider,
+		APIKey:        req.APIKey,
+		BaseURL:       req.BaseURL,
+		AuthToken:     req.AuthToken,
+		Model:         req.Model,
+		OAuthResolver: oauthResolver(),
 	})
 	if err != nil {
 		return cli.ReviewOutcome{}, err
@@ -167,11 +198,13 @@ func (prReviewer) ReviewPR(ctx stdctx.Context, req cli.PRReviewRequest) (cli.Rev
 	}
 
 	creds, err := agent.Resolve(agent.ResolveInput{
-		Provider:  req.Provider,
-		APIKey:    req.APIKey,
-		BaseURL:   req.BaseURL,
-		AuthToken: req.AuthToken,
-		Model:     req.Model,
+		Ctx:           ctx,
+		Provider:      req.Provider,
+		APIKey:        req.APIKey,
+		BaseURL:       req.BaseURL,
+		AuthToken:     req.AuthToken,
+		Model:         req.Model,
+		OAuthResolver: oauthResolver(),
 	})
 	if err != nil {
 		return cli.ReviewOutcome{}, err
@@ -472,7 +505,7 @@ func (mcpServerImpl) Serve(ctx stdctx.Context, req cli.MCPRequest) error {
 type lazyAgent struct{ timeout time.Duration }
 
 func (l lazyAgent) Review(ctx stdctx.Context, rc engine.AgentContext) ([]engine.Finding, error) {
-	creds, err := agent.Resolve(agent.ResolveInput{})
+	creds, err := agent.Resolve(agent.ResolveInput{Ctx: ctx, OAuthResolver: oauthResolver()})
 	if err != nil {
 		return nil, err
 	}

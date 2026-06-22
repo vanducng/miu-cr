@@ -155,7 +155,9 @@ For the full automation story, see [Serve & Action](/serve-and-action/) and
 - [Project rules](/rules/) — give the reviewer deterministic, glob-selected
   context.
 - [Providers](/providers/) and [Credentials](/credentials/) — gateways, models,
-  and how auth is resolved.
+  and how auth is resolved. To review on your **ChatGPT Pro/Max plan** instead of
+  a billed key, run `miucr login` — see
+  [Using your ChatGPT plan](/credentials/#using-openai--your-chatgpt-plan-miucr-login).
 - [How it works](/how-it-works/) — the deterministic engine behind the LLM pass.
 - Browse all copy-paste starters in
   [`examples/`](https://github.com/vanducng/miu-cr/tree/main/examples).
