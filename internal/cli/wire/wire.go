@@ -354,7 +354,7 @@ func publishReview(ctx stdctx.Context, client mgithub.Client, runner *gitcmd.Run
 	}
 
 	if req.Mode == "checks" {
-		return publishChecks(ctx, client, info, res, diffs, prResult, req)
+		return publishChecks(ctx, client, info, res, diffs, prResult, req, ew)
 	}
 	existing, err := mgithub.ExistingFingerprints(ctx, client, info)
 	if err != nil {
@@ -402,7 +402,10 @@ func publishReview(ctx stdctx.Context, client mgithub.Client, runner *gitcmd.Run
 		GateClean:     !engine.GateFailed(res.Findings, req.Gate),
 		ReviewedFiles: reviewedFilesFromStats(res.Stats),
 		FilterMode:    filterModeOf(req.FilterMode),
-		ActionsOut:    os.Stdout,
+		// Fork-fallback ::error:: commands must share the envelope's stdout stream
+		// (GitHub parses workflow commands only from stdout); the command's writer is
+		// threaded in via req. nil → PostReview falls back to os.Stdout.
+		ActionsOut: req.ActionsOut,
 	}
 
 	pr, err := mgithub.PostReview(ctx, client, info, res.Findings, diffs, "", skip, opts)
@@ -450,12 +453,16 @@ func publishReview(ctx stdctx.Context, client mgithub.Client, runner *gitcmd.Run
 // annotations from the diff-eligible findings (conclusion from the gate) instead
 // of inline comments + a summary. No fingerprint dedupe / summary upsert: a CheckRun
 // is replaced wholesale each run by the same name, so re-runs are naturally idempotent.
-func publishChecks(ctx stdctx.Context, client mgithub.Client, info *mgithub.PRInfo, res engine.ReviewResult, diffs []diff.Diff, prResult *cli.PRResult, req cli.PRReviewRequest) error {
+func publishChecks(ctx stdctx.Context, client mgithub.Client, info *mgithub.PRInfo, res engine.ReviewResult, diffs []diff.Diff, prResult *cli.PRResult, req cli.PRReviewRequest, ew embedWriter) error {
 	gateClean := !engine.GateFailed(res.Findings, req.Gate)
 	cr, err := mgithub.PostChecks(ctx, client, info, res.Findings, diffs, res.Stats, gateClean, filterModeOf(req.FilterMode))
 	if err != nil {
 		return err
 	}
+	// M7 write path: embed the annotated findings' scrubbed code anchors so semantic
+	// recall is fed regardless of reporter (review vs checks). Nil-safe + best-effort.
+	ew.write(ctx, cr.Posted, res.Findings, res.Stats)
+
 	prResult.Posted = true
 	prResult.Mode = "checks"
 	prResult.PostedInline = cr.Annotations

@@ -63,6 +63,38 @@ func TestPostChecksGateCleanSuccess(t *testing.T) {
 	}
 }
 
+// The Checks API requires start_line/end_line >= 1; a finding with Line<=0 must NOT
+// become an annotation (it would 422 the whole CheckRun) but must still be counted in
+// the summary histogram. Every emitted annotation must satisfy EndLine>=StartLine>=1.
+func TestPostChecksSkipsNonPositiveLineAnnotations(t *testing.T) {
+	c := &recordClient{}
+	info := &PRInfo{Owner: "o", Repo: "r", Number: 1, HeadSHA: "h"}
+	findings := []engine.Finding{
+		{File: "p.go", Line: 2, EndLine: 3, Severity: "high", Category: "bug", Rationale: "anchored"}, // in hunk → annotation
+		{File: "p.go", Line: 0, Severity: "critical", Category: "x", Rationale: "file-level"},         // Line<=0 → never an annotation
+		{File: "p.go", Line: -5, Severity: "high", Category: "y", Rationale: "negative line"},         // Line<=0 → never an annotation
+	}
+	res, err := PostChecks(stdctx.Background(), c, info, findings, sampleDiffs(), nil, false, FilterDiffContext)
+	if err != nil {
+		t.Fatalf("PostChecks: %v", err)
+	}
+	if res.Annotations != 1 {
+		t.Fatalf("only the anchored finding may be annotated, got %d", res.Annotations)
+	}
+	if len(res.Posted) != 1 {
+		t.Fatalf("Posted must mirror the annotated findings, got %d", len(res.Posted))
+	}
+	for _, a := range c.gotCheck.Output.Annotations {
+		if a.GetStartLine() < 1 || a.GetEndLine() < a.GetStartLine() {
+			t.Fatalf("invalid annotation range start=%d end=%d", a.GetStartLine(), a.GetEndLine())
+		}
+	}
+	// All three findings are still summarized — the histogram keys on every finding.
+	if s := c.gotCheck.Output.GetSummary(); !strings.Contains(s, "3 finding(s)") {
+		t.Fatalf("summary must count unanchored findings too: %q", s)
+	}
+}
+
 func TestPostChecksBatchesAnnotationsOver50(t *testing.T) {
 	// A wide hunk with 120 added lines, one finding per line → 3 batches (50/50/20).
 	var diffLines strings.Builder

@@ -31,6 +31,10 @@ type PostChecksResult struct {
 	Annotations int
 	Omitted     int
 	Conclusion  string
+	// Posted carries (fingerprint, path) for the findings actually turned into
+	// annotations this run, so the caller can feed semantic recall regardless of
+	// reporter (mirrors PostReviewResult.PostedFindings on the inline path).
+	Posted []PostedFinding
 }
 
 // PostChecks creates a GitHub CheckRun at the head SHA carrying annotations built
@@ -41,14 +45,28 @@ type PostChecksResult struct {
 func PostChecks(ctx stdctx.Context, client Client, info *PRInfo, findings []engine.Finding, diffs []diff.Diff, stats map[string]any, gateClean bool, mode FilterMode) (PostChecksResult, error) {
 	eligible := inlineEligible(findings, diffs, mode)
 
-	anns := make([]*gh.CheckRunAnnotation, 0, len(eligible))
+	// Checks API requires start_line/end_line >= 1 and has no file-level annotation;
+	// an unanchored finding (Line<=0) would 422 the whole CheckRun. Drop it from the
+	// annotation list here (defense-in-depth — the diff filter already excludes it);
+	// it still counts in the summary histogram below, which keys on all findings.
+	anchored := make([]engine.Finding, 0, len(eligible))
 	for _, f := range eligible {
+		if f.Line <= 0 {
+			continue
+		}
+		anchored = append(anchored, f)
+	}
+
+	anns := make([]*gh.CheckRunAnnotation, 0, len(anchored))
+	posted := make([]PostedFinding, 0, len(anchored))
+	for _, f := range anchored {
 		if len(anns) >= maxCheckAnnotations {
 			break
 		}
 		anns = append(anns, annotationFor(f))
+		posted = append(posted, PostedFinding{Fingerprint: fingerprint(f), Path: f.File})
 	}
-	omitted := len(eligible) - len(anns)
+	omitted := len(anchored) - len(anns)
 
 	conclusion := "failure"
 	if gateClean {
@@ -93,7 +111,7 @@ func PostChecks(ctx stdctx.Context, client Client, info *PRInfo, findings []engi
 		}
 	}
 
-	return PostChecksResult{CheckRunID: run.GetID(), Annotations: len(anns), Omitted: omitted, Conclusion: conclusion}, nil
+	return PostChecksResult{CheckRunID: run.GetID(), Annotations: len(anns), Omitted: omitted, Conclusion: conclusion, Posted: posted}, nil
 }
 
 // annotationFor maps one finding to a CheckRunAnnotation: repo-relative path,

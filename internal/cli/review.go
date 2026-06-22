@@ -137,6 +137,11 @@ type PRReviewRequest struct {
 	Mode         string       // review (default: inline+summary) | checks (GitHub Checks-API reporter)
 	NoSave       bool         // opt out of persisting this run to the local history store
 	Progress     func(string) // nil = silent; stderr milestones, never the stdout envelope
+	// ActionsOut is the command's stdout writer (cmd.OutOrStdout()), used ONLY by the
+	// fork-PR 403 fallback to emit ::error:: workflow commands on the same stream as
+	// the JSON envelope (GitHub parses workflow commands only from stdout). nil →
+	// PostReview falls back to os.Stdout. Not the Progress stream (that is stderr).
+	ActionsOut io.Writer
 }
 
 // PRReviewer fetches a GitHub PR, runs the engine on a temp clone via ModeRange,
@@ -472,6 +477,7 @@ func runPRReview(cmd *cobra.Command, a prRunArgs) error {
 		Mode:         a.mode,
 		NoSave:       a.noSave,
 		Progress:     a.progress,
+		ActionsOut:   cmd.OutOrStdout(),
 	})
 	if err != nil {
 		return err

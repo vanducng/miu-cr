@@ -254,6 +254,36 @@ func TestPublishChecksWireFlow(t *testing.T) {
 	}
 }
 
+// The checks reporter must feed semantic recall too: the annotated findings' code
+// anchors are embedded + upserted just like the inline path's posted findings.
+func TestPublishChecksFeedsEmbeddingWriter(t *testing.T) {
+	runner := gitcmd.New()
+	dir, base, head := setupRepo(t, runner)
+	_, client := wireFake(t)
+	info := &mgithub.PRInfo{Owner: "o", Repo: "r", Number: 7, HeadSHA: head, BaseSHA: base, BaseBranch: "main"}
+	res := engine.ReviewResult{
+		Findings: []engine.Finding{findingB()}, // anchored at new-side line 4
+		Stats:    map[string]any{"truncation_level": "full", "files_reviewed": float64(1)},
+	}
+	emb := newCaptureEmbedder()
+	st := &fakeEmbeddingStore{}
+	ew := embedWriter{emb: emb, store: st, repo: "o/r"}
+
+	pr := &cli.PRResult{SummaryAction: "none"}
+	if err := publishReview(stdctx.Background(), client, runner, dir, info, res, pr, cli.PRReviewRequest{Gate: "high", Mode: "checks"}, nil, ew); err != nil {
+		t.Fatalf("publishReview (checks): %v", err)
+	}
+	if pr.Mode != "checks" || pr.PostedInline != 1 {
+		t.Fatalf("checks mode must annotate the in-hunk finding, mode=%q inline=%d", pr.Mode, pr.PostedInline)
+	}
+	if len(st.upserted) != 1 {
+		t.Fatalf("checks path must feed the embedding writer, got %d upserts", len(st.upserted))
+	}
+	if v, _ := res.Stats["semantic_write"].(string); v != "upserted=1" {
+		t.Fatalf("semantic_write stat: want upserted=1, got %v", res.Stats["semantic_write"])
+	}
+}
+
 func indexOf(s []string, want string) int {
 	for i, v := range s {
 		if v == want {
