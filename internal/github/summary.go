@@ -77,7 +77,9 @@ func renderOverflow(b *strings.Builder, info *PRInfo, omitted []engine.Finding) 
 		if sev == "" {
 			sev = "NOTE"
 		}
-		file := strings.ReplaceAll(f.File, "`", "'") // a backtick in the path would break the code span
+		// Neutralize the chars that could break the `code-span` or the [link text](url):
+		// a backtick closes the span, brackets break the link text.
+		file := strings.NewReplacer("`", "'", "[", "(", "]", ")").Replace(f.File)
 		loc := fmt.Sprintf("`%s:%d`", file, f.Line)
 		if url := blobURL(info, f.File, f.Line, f.EndLine); url != "" {
 			loc = fmt.Sprintf("[`%s:%d`](%s)", file, f.Line, url)
