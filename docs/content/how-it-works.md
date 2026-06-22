@@ -74,4 +74,4 @@ Finally the gate: severities rank `info(1) < low(2) < medium(3) < high(4) < crit
 
 ## Persistence
 
-When a SQLite store is wired, each review is saved (mode, head SHA, findings, stats) and addressable by id — that id is what the MCP `review_get` tool fetches. The store is pure-Go (`modernc.org/sqlite`, no cgo). It holds **review records only**; credentials are never part of a record. See [Credentials](/credentials/).
+When a SQLite store is wired, each review is saved (mode, head SHA, findings, stats) and addressable by id — that id is what the MCP `review_get` tool fetches. The store is backed by `modernc.org/sqlite`. It holds **review records only**; credentials are never part of a record. See [Credentials](/credentials/).

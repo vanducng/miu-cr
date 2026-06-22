@@ -267,6 +267,24 @@ in OpenAI resolution — an explicit key always wins; OAuth is consulted only wh
 `oauth.json` is gitignored, `0600`, never logged/in-envelope. No `miucr logout` (delete the file by hand).
 **CI uses an `OPENAI_API_KEY` secret, not OAuth** (browser-interactive) — `miucr review --provider openai`.
 
+### `upgrade` (alias `update`) — self-update from GitHub Releases
+
+```sh
+miucr upgrade            # download + verify + atomically replace the running binary
+miucr upgrade --check    # report only whether a newer version exists (no download)
+miucr upgrade --version v0.13.0   # install a specific tag instead of latest
+```
+
+Resolves the latest release tag (honors `GITHUB_TOKEN`/`GH_TOKEN` Bearer to dodge
+rate limits; never logged), downloads the matching `miucr_<os>_<arch>.tar.gz`
+(`.zip` on Windows) asset, **verifies its SHA-256 against `checksums.txt`**, then
+atomically `os.Rename`s the new binary over `os.Executable()` (symlinks resolved).
+Envelope `kind: upgrade.result`, `data`: `{from_version, to_version, asset, path,
+action}` where `action` ∈ `upgraded | already_latest | check_only`. Errors:
+`upgrade.fetch_failed`, `upgrade.no_asset`, `upgrade.checksum_mismatch`,
+`upgrade.not_writable` (re-run with write perms or via the install script),
+`upgrade.extract_failed`.
+
 ### `version`
 
 ```sh

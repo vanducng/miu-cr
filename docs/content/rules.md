@@ -3,7 +3,7 @@ title: Project rules
 description: Markdown rule files that give the reviewer deterministic, glob-selected project context — trust-fenced and dropped on fork PRs.
 ---
 
-`miucr` reviews ship with a built-in baseline, but every project also has conventions a generic reviewer can't know: this service is pure-Go, public functions return typed errors, fixtures live under `testdata/`. **Project rules** are markdown files that feed that context into the reviewer — selected by glob against the changed files and injected (token-capped, trust-fenced) into every review mode.
+`miucr` reviews ship with a built-in baseline, but every project also has conventions a generic reviewer can't know: this service emits structured logs, public functions return typed errors, fixtures live under `testdata/`. **Project rules** are markdown files that feed that context into the reviewer — selected by glob against the changed files and injected (token-capped, trust-fenced) into every review mode.
 
 Rules are review **context only**. They never gate findings or change an exit code; the finding-JSON contract lives in the cached system prompt and injected rule prose can never redefine it.
 

@@ -88,6 +88,7 @@ func rootCommand(opts *options) *cobra.Command {
 	}
 	root.AddCommand(initCommand(opts))
 	root.AddCommand(loginCommand(opts))
+	root.AddCommand(upgradeCommand(opts))
 	root.AddCommand(versionCommand())
 	root.AddCommand(reviewCommand(opts))
 	root.AddCommand(mcpCommand(opts))

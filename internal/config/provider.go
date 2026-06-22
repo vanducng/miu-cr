@@ -16,6 +16,9 @@ const (
 	DefaultAnthropicModel = "claude-sonnet-4-5-20250929"
 	DefaultOpenAIModel    = "gpt-4o"
 	DefaultOpenAIBaseURL  = "https://api.openai.com/v1"
+	// DefaultCodexModel is used for the codex backend (ChatGPT-plan OAuth path);
+	// the codex backend rejects api.openai.com models like gpt-4o.
+	DefaultCodexModel = "gpt-5-codex"
 )
 
 // Provider is one named provider profile. A vendor (z.ai/GLM, DeepSeek, a

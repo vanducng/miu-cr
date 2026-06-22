@@ -150,7 +150,7 @@ private_key_path = "/etc/miucr/app-key.pem"
 
 ### How it works
 
-1. **Mint an App JWT.** miucr signs a short-lived RS256 JWT in pure Go
+1. **Mint an App JWT.** miucr signs a short-lived RS256 JWT
    (`crypto/rsa` `SignPKCS1v15` + `crypto/sha256`; PKCS#1 or PKCS#8 keys via
    `crypto/x509`; `base64` RawURL segments). `iss` is the app id, `iat` is
    back-dated ~60 s for clock skew, and `exp` is ~9 min (GitHub rejects > 10 min).

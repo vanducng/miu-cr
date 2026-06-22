@@ -3,7 +3,7 @@ title: Install
 description: Install the miucr binary via install.sh, Homebrew, go install, or a Windows zip.
 ---
 
-The Go binary is named `miucr`. Releases ship static, **pure-Go** binaries (no cgo) for macOS (amd64 + arm64), Linux (amd64), and Windows (amd64). See [GitHub Releases](https://github.com/vanducng/miu-cr/releases).
+The binary is named `miucr`. Releases ship prebuilt static binaries for macOS (amd64 + arm64), Linux (amd64), and Windows (amd64). See [GitHub Releases](https://github.com/vanducng/miu-cr/releases).
 
 ## Install script (macOS / Linux)
 

@@ -174,6 +174,11 @@ func nudgeIfUnconfigured(apiKey, authToken string) error {
 			return nil // user has a config file; let resolve emit any specific error
 		}
 	}
+	if p, perr := config.OAuthPath(); perr == nil && p != "" {
+		if _, err := os.Stat(p); err == nil {
+			return nil // user has a cached `miucr login` credential; let resolve use it
+		}
+	}
 	return &CLIError{
 		Code:    "provider.unconfigured",
 		Message: "no LLM provider configured: no config, no API-key env var, and no --api-key",

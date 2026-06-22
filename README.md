@@ -4,12 +4,11 @@
   <a href="https://github.com/vanducng/miu-cr/releases"><img src="https://img.shields.io/github/v/release/vanducng/miu-cr?label=release&color=7c3aed" alt="Release"></a>
   <a href="https://go.dev"><img src="https://img.shields.io/badge/Go-1.25-00ADD8?logo=go&logoColor=white" alt="Go 1.25"></a>
   <a href="LICENSE"><img src="https://img.shields.io/badge/license-Apache--2.0-blue" alt="Apache-2.0"></a>
-  <img src="https://img.shields.io/badge/pure--Go-CGO__ENABLED%3D0-00ADD8" alt="pure-Go static binary">
 </p>
 
 # miu-cr
 
-**MIU Code Review** — a fast, pure-Go AI code-review CLI with a deterministic + agent engine. Review your own changes locally before you open a PR, gate them in CI, review GitHub PRs with inline comments, or drive the engine from any MCP-capable agent host (Claude Code, Codex, …). One review path, four ways to run it, a stable JSON envelope on stdout.
+**MIU Code Review** — AI code review for the CLI, CI, and MCP hosts, built on a deterministic + agent engine. Review your own changes locally before you open a PR, gate them in CI, review GitHub PRs with inline comments, or drive the engine from any MCP-capable agent host (Claude Code, Codex, …). One review path, four ways to run it, a stable JSON envelope on stdout.
 
 > **What ships today.** Local review, GitHub PR review, project rules, the serve/poll daemon + GitHub Action, SQLite/Postgres stores, opt-in semantic code-recall, a REST API + GitHub App auth, and an MCP server all ship today.
 
@@ -19,7 +18,7 @@ Diff-only review misses cross-file bugs; bare-agent review drifts and burns toke
 
 ## Install
 
-Releases ship static, **pure-Go** binaries (no cgo) for macOS (amd64 + arm64), Linux (amd64), and Windows (amd64). See [Releases](https://github.com/vanducng/miu-cr/releases) and **[miucr.vanducng.dev](https://miucr.vanducng.dev)**.
+Releases ship prebuilt static binaries for macOS (amd64 + arm64), Linux (amd64), and Windows (amd64). See [Releases](https://github.com/vanducng/miu-cr/releases) and **[miucr.vanducng.dev](https://miucr.vanducng.dev)**.
 
 ```sh
 # Install script (macOS / Linux) — detects OS/arch, verifies the release checksum:
@@ -143,7 +142,7 @@ Concise by area — each links to its full reference on the [docs site](https://
 - **Auto-suggest + auto-approve** — `--suggest` emits GitHub native one-click suggestions for proven single-line fixes (author-applied, never pushed); `--approve-clean` submits `APPROVE` only on a clean, non-fork, trusted-author PR (else degrades to `COMMENT`, never errors). Both opt-in, default OFF. → [GitHub PR review](https://miucr.vanducng.dev/github-pr/)
 - **Project rules** — `rules init` / `rules check`: `.miu/cr/rules/*.md` markdown with YAML frontmatter (`description`, `globs`, `alwaysApply`, `context_files`) selects by glob; the prose body is injected as review **context only** (never gating). Built-in defaults + user + repo layers merge by stem; repo rules are trust-fenced and dropped on fork PRs. → [Project rules](https://miucr.vanducng.dev/rules/)
 - **serve · poll · Action** — `serve` is an HMAC webhook daemon (`--addr`, `--repos` allowlist, publish-only `--gate`); `--poll [--poll-source notifications|pulls]` adds an opt-in trigger for environments that can't receive webhooks; the reusable GitHub Action runs the same `--pr --post` review in CI. All three funnel into one review path. → [Serve daemon & GitHub Action](https://miucr.vanducng.dev/serve-and-action/)
-- **Store backends** — SQLite by default (`~/.config/miu/cr/state.db`); opt into **Postgres** via `[store] backend = "postgres"` + `MIUCR_PG_DSN`. Both are pure-Go; the DSN is never persisted, logged, or placed in the envelope. → [Store backends](https://miucr.vanducng.dev/store-backends/)
+- **Store backends** — SQLite by default (`~/.config/miu/cr/state.db`); opt into **Postgres** via `[store] backend = "postgres"` + `MIUCR_PG_DSN`. The DSN is never persisted, logged, or placed in the envelope. → [Store backends](https://miucr.vanducng.dev/store-backends/)
 - **Semantic code-recall** — opt-in embeddings + **pgvector**: recalls prior findings whose code resembles your current diff and injects them as **advisory** context (never suppresses or mutates a finding). Off by default; needs `[embedding] enabled = true` **and** a Postgres store. → [Semantic code-recall](https://miucr.vanducng.dev/semantic-recall/)
 - **REST API + GitHub App** — set `MIUCR_API_TOKEN` to register `POST /v1/reviews` (202 + server-generated id) and `GET /v1/reviews/{id}` (whitelisted record) on the serve mux — one shared bearer = one trust boundary (single-operator). `[github] mode = "app"` swaps PAT auth for **App installation auth** (RS256 App JWT, in-memory installation token). → [REST API & GitHub App](https://miucr.vanducng.dev/rest-api-and-github-app/)
 - **MCP server** — `miucr mcp` exposes `review_run` / `review_get` over stdio to any MCP runtime; reviews the repo in the current working directory. → [MCP integration](https://miucr.vanducng.dev/mcp/)
@@ -193,7 +192,7 @@ Env keys: `ANTHROPIC_API_KEY` / `ANTHROPIC_BASE_URL` / `ANTHROPIC_AUTH_TOKEN` / 
 
 ## Develop
 
-Pure-Go, `CGO_ENABLED=0` — a single static binary (SQLite is `modernc.org/sqlite`, Postgres is pgx, both cgo-free).
+Builds to a single static binary (SQLite is `modernc.org/sqlite`, Postgres is pgx).
 
 ```sh
 go build ./cmd/miucr        # build

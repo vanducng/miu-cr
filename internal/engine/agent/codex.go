@@ -5,6 +5,7 @@ import (
 	stdctx "context"
 	"encoding/json"
 	"fmt"
+	"io"
 	"net/http"
 	"strings"
 	"time"
@@ -235,7 +236,8 @@ func (a *codexAgent) post(ctx stdctx.Context, body codexReq) (*codexResp, error)
 	}
 	defer resp.Body.Close()
 	if resp.StatusCode != http.StatusOK {
-		return nil, fmt.Errorf("agent: codex backend status %d", resp.StatusCode)
+		b, _ := io.ReadAll(io.LimitReader(resp.Body, 2048))
+		return nil, fmt.Errorf("agent: codex backend status %d: %s", resp.StatusCode, strings.TrimSpace(string(b)))
 	}
 	var out codexResp
 	if err := json.NewDecoder(resp.Body).Decode(&out); err != nil {
@@ -260,5 +262,9 @@ func (a *codexAgent) do(ctx stdctx.Context, body codexReq, token string) (*http.
 	}
 	req.Header.Set("OpenAI-Beta", "responses=experimental")
 	req.Header.Set("Accept", "application/json")
+	// The codex backend gates which models a ChatGPT account may use by the
+	// originator; without it every model is rejected as "not supported".
+	req.Header.Set("originator", "codex_cli_rs")
+	req.Header.Set("User-Agent", "miucr (+https://github.com/vanducng/miu-cr)")
 	return a.httpClient.Do(req)
 }

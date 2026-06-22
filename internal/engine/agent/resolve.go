@@ -219,8 +219,8 @@ func resolveOpenAI(in ResolveInput, prof config.Provider) (Credentials, error) {
 }
 
 // resolveOAuthCodex turns an injected login credential into codex-backend
-// Credentials. The OAuth model uses the OPENAI_MODEL/profile/default chain
-// (the codex backend accepts the same model ids).
+// Credentials. The codex backend rejects api.openai.com models (e.g. gpt-4o),
+// so it defaults to DefaultCodexModel; an explicit --model still wins.
 func resolveOAuthCodex(in ResolveInput, prof config.Provider) (Credentials, bool, error) {
 	ctx := in.Ctx
 	if ctx == nil {
@@ -239,7 +239,7 @@ func resolveOAuthCodex(in ResolveInput, prof config.Provider) (Credentials, bool
 	if !ok {
 		return Credentials{}, false, nil
 	}
-	model := firstNonEmpty(in.Model, os.Getenv("OPENAI_MODEL"), prof.Model, config.DefaultOpenAIModel)
+	model := firstNonEmpty(in.Model, config.DefaultCodexModel)
 	return Credentials{
 		Kind:           config.KindOpenAI,
 		Backend:        "codex",
