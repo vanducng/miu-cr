@@ -11,13 +11,14 @@ import { CardGrid, LinkCard } from '@astrojs/starlight/components';
 
 Diff-only review misses cross-file bugs; bare-agent review drifts and burns tokens. miu-cr keeps the **correctness-critical parts deterministic** — file selection, context assembly, line-anchoring, severity gating, dedupe — and uses the LLM only where judgment helps: finding bugs and proposing fixes.
 
-:::note[v0.11.0 — feature-complete roadmap (M1–M9)]
+:::note[v0.11.0]
 Local review, GitHub PR review, project rules, the serve/poll daemon + GitHub Action, SQLite/Postgres stores, opt-in semantic code-recall, a REST API + GitHub App auth, and an MCP server all ship today.
 :::
 
 ## Start here
 
 <CardGrid>
+  <LinkCard title="Getting started" href="/onboarding/" description="Install → miucr init → first review → use it in your editor and CI." />
   <LinkCard title="Install" href="/install/" description="install.sh, Homebrew, go install, or a Windows zip." />
   <LinkCard title="Usage" href="/usage/" description="Review modes, flags, the severity gate, output formats, and exit codes." />
   <LinkCard title="GitHub PR review" href="/github-pr/" description="Inline comments, an idempotent summary, cross-push dedupe, suggest & approve." />
@@ -49,4 +50,4 @@ miucr review --pr owner/repo#123 --no-post -o json # dry-run a GitHub PR
 miucr mcp                                          # serve the engine over MCP (stdio)
 ```
 
-Every command emits the stable `miucr.cli/v1` JSON envelope by default (`-o pretty` for a human table). It is **Apache-2.0** licensed; the source of truth is the [repository](https://github.com/vanducng/miu-cr).
+Every command emits the stable `miucr.cli/v1` JSON envelope by default (`-o pretty` for a human table). New here? Start with **[Getting started](/onboarding/)**, then browse copy-paste starters (rules, GitHub Action, MCP setup, Docker) in [`examples/`](https://github.com/vanducng/miu-cr/tree/main/examples). It is **Apache-2.0** licensed; the source of truth is the [repository](https://github.com/vanducng/miu-cr).

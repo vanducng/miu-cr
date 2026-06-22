@@ -310,7 +310,7 @@ func TestREST_Auth_WhitespaceTokenRejected(t *testing.T) {
 	body := []byte(`{"owner":"octocat","repo":"hello","number":1}`)
 	for _, auth := range []string{
 		"Bearer " + testAPIToken + " ", // trailing space in credential
-		"Bearer  " + testAPIToken,       // leading space in credential
+		"Bearer  " + testAPIToken,      // leading space in credential
 	} {
 		rec := doREST(t, srv, http.MethodPost, "/v1/reviews", auth, body)
 		if rec.Code != http.StatusUnauthorized {

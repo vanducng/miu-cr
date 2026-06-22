@@ -35,6 +35,7 @@ func (f *fakeReviewer) GateFailed(findings []ReviewFinding, gate string) bool {
 
 func runReview(t *testing.T, r Reviewer, args ...string) (string, error) {
 	t.Helper()
+	t.Setenv("ANTHROPIC_API_KEY", "synthetic-test-key") // satisfy the soft first-run gate
 	prev := reviewer
 	SetReviewer(r)
 	t.Cleanup(func() { SetReviewer(prev) })
@@ -138,6 +139,7 @@ func TestReviewEmptyStaged(t *testing.T) {
 // the context handed to Review carries a deadline so git subprocesses share it.
 func TestReviewAppliesTimeoutToContext(t *testing.T) {
 	r := &fakeReviewer{outcome: ReviewOutcome{Findings: []ReviewFinding{}}}
+	t.Setenv("ANTHROPIC_API_KEY", "synthetic-test-key")
 	prev := reviewer
 	SetReviewer(r)
 	t.Cleanup(func() { SetReviewer(prev) })

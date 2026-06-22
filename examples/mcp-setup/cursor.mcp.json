@@ -1,0 +1,11 @@
+{
+  "mcpServers": {
+    "miucr": {
+      "command": "miucr",
+      "args": ["mcp"],
+      "env": {
+        "ANTHROPIC_API_KEY": "${ANTHROPIC_API_KEY}"
+      }
+    }
+  }
+}

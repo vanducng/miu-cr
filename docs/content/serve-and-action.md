@@ -65,7 +65,7 @@ reaches a log line, because the clone URL embeds the PAT.
    goroutine. A panic in one review is recovered and can't kill a worker.
 7. **Per-PR coalesce** — two rapid events for the same `{owner, repo, number}`
    collapse to a single in-flight review. (Re-runs are also idempotent at the
-   publish layer via the M2 sentinel summary + comment fingerprints.)
+   publish layer via the sentinel summary + comment fingerprints.)
 8. **No silent drop** — if the queue is genuinely full, the drop is loud-logged
    and counted; it is never swallowed silently.
 
