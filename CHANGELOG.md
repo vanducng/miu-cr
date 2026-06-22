@@ -55,6 +55,14 @@ comment with a new marker); subsequent re-runs dedupe normally. On a
 first M5 review **manually** (or off-hours) to absorb the one-time re-post before
 the next scheduled run.
 
+## [0.15.0](https://github.com/vanducng/miu-cr/compare/v0.14.2...v0.15.0) (2026-06-22)
+
+
+### Features
+
+* **auth:** explicit auth=oauth|api_key + OAuth login beats ambient OPENAI_API_KEY ([0b4fc67](https://github.com/vanducng/miu-cr/commit/0b4fc67c41686243b39fdbc824cbd1586275b58b))
+* **review:** --verbose/-v progress logs (auto on a TTY) ([e1d4f87](https://github.com/vanducng/miu-cr/commit/e1d4f87072a3cded56456af32a52f64701f306aa))
+
 ## [0.14.2](https://github.com/vanducng/miu-cr/compare/v0.14.1...v0.14.2) (2026-06-22)
 
 
