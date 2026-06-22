@@ -55,6 +55,13 @@ comment with a new marker); subsequent re-runs dedupe normally. On a
 first M5 review **manually** (or off-hours) to absorb the one-time re-post before
 the next scheduled run.
 
+## [0.14.2](https://github.com/vanducng/miu-cr/compare/v0.14.1...v0.14.2) (2026-06-22)
+
+
+### Bug Fixes
+
+* **codex:** tool-loop function_call echo + default token-budget for large PRs + drop prof.Model ([b1c54bb](https://github.com/vanducng/miu-cr/commit/b1c54bbf561192cf671e04d9c1f4e2327e4a4c1b))
+
 ## [0.14.1](https://github.com/vanducng/miu-cr/compare/v0.14.0...v0.14.1) (2026-06-22)
 
 
