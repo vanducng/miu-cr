@@ -59,7 +59,15 @@ func chooseProvider(ask func(string, string) string, out io.Writer, nonInteracti
 		}
 		return name, prof, nil
 	}
-	if name != "custom" && nonInteractive {
+	if nonInteractive {
+		// No interactive prompts in --non-interactive: custom is flag-driven and
+		// requires --base-url; anything else is an unknown provider.
+		if name == "custom" {
+			if strings.TrimSpace(flagBaseURL) == "" {
+				return "", config.Provider{}, &CLIError{Code: "init.aborted", Message: "--non-interactive with a custom provider requires --base-url", Hint: "pass --base-url <gateway endpoint>", Exit: 2}
+			}
+			return "custom", config.Provider{Kind: config.KindAnthropic, Model: config.DefaultAnthropicModel, BaseURL: flagBaseURL}, nil
+		}
 		return "", config.Provider{}, &CLIError{Code: "init.aborted", Message: "unknown --provider " + name, Hint: "use anthropic, openai, or custom", Exit: 2}
 	}
 	return chooseCustom(ask, out, flagBaseURL)
