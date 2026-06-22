@@ -322,6 +322,10 @@ type PostReviewOptions struct {
 	GateClean     bool       // caller-computed !engine.GateFailed(findings, Gate)
 	ReviewedFiles int        // count of files actually reviewed; APPROVE requires >0
 	FilterMode    FilterMode // inline-eligibility filter; empty = diff_context (default)
+	// CategoryURLs maps a lowercased finding Category to a validated docs URL
+	// (TRUSTED config only — never repo rules). When a finding's category matches,
+	// commentBody renders it as a Markdown link; an empty/nil map = plain category.
+	CategoryURLs map[string]string
 	// ActionsOut is where the fork-PR 403 fallback writes ::error:: workflow commands.
 	// GitHub Actions parses workflow commands ONLY from the step's stdout, so this must
 	// resolve to the same stream as the miucr.cli/v1 envelope (the command's stdout
@@ -643,7 +647,7 @@ func commentBody(f engine.Finding, newFileContent string, opts PostReviewOptions
 	}
 	cat := f.Category
 	if cat != "" {
-		fmt.Fprintf(&b, "**%s** (%s)\n\n", sev, cat)
+		fmt.Fprintf(&b, "**%s** (%s)\n\n", sev, categoryMarkdown(cat, opts.CategoryURLs))
 	} else {
 		fmt.Fprintf(&b, "**%s**\n\n", sev)
 	}

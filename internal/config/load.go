@@ -100,6 +100,18 @@ func Merge(base, file Config) Config {
 	out.Embedding = mergeEmbedding(base.Embedding, file.Embedding)
 	out.Github = mergeGithub(base.Github, file.Github)
 	out.History = mergeHistory(base.History, file.History)
+	out.Review = mergeReview(base.Review, file.Review)
+	return out
+}
+
+// mergeReview overlays the file [review] table onto base. A non-empty file
+// CategoryURLs replaces base wholesale (a user opts into their own link map),
+// otherwise base (the built-in default, currently none) is inherited.
+func mergeReview(base, file Review) Review {
+	out := base
+	if len(file.CategoryURLs) > 0 {
+		out.CategoryURLs = file.CategoryURLs
+	}
 	return out
 }
 

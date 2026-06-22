@@ -57,7 +57,8 @@ type driver struct {
 }
 
 type rule struct {
-	ID string `json:"id"`
+	ID      string `json:"id"`
+	HelpURI string `json:"helpUri,omitempty"`
 }
 
 type result struct {
@@ -120,6 +121,13 @@ type insertedContent struct {
 // SuggestedPatch. The driver rule set is the unique set of resolved rule ids.
 // toolVersion is the miucr version (informational; omit if empty).
 func EmitSARIF(w io.Writer, findings []Finding, toolVersion string) error {
+	return EmitSARIFWithLinks(w, findings, toolVersion, nil)
+}
+
+// EmitSARIFWithLinks is EmitSARIF plus a category->URL map (TRUSTED config only)
+// that sets each matching rule's helpUri. The category match is case-insensitive;
+// a nil/empty map yields byte-for-byte EmitSARIF output (no helpUri keys).
+func EmitSARIFWithLinks(w io.Writer, findings []Finding, toolVersion string, categoryURLs map[string]string) error {
 	results := make([]result, 0, len(findings))
 	ruleSet := map[string]bool{}
 	var rules []rule
@@ -130,7 +138,7 @@ func EmitSARIF(w io.Writer, findings []Finding, toolVersion string) error {
 		}
 		if !ruleSet[cat] {
 			ruleSet[cat] = true
-			rules = append(rules, rule{ID: cat})
+			rules = append(rules, rule{ID: cat, HelpURI: categoryURLs[strings.ToLower(cat)]})
 		}
 		results = append(results, toResult(f, cat))
 	}

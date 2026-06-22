@@ -104,6 +104,15 @@ type History struct {
 // default-on, an explicit false disables it.
 func (h History) On() bool { return h.Enabled == nil || *h.Enabled }
 
+// Review carries presentation-only review options. CategoryURLs maps a finding
+// Category (matched case-insensitively) to a docs URL so a mapped category
+// renders as a clickable link in PR comments/summary and sets the SARIF helpUri.
+// This map is TRUSTED config only (user file + built-in defaults) — never sourced
+// from repo .miu/cr/rules, so a fork-PR rule cannot inject a link into comments.
+type Review struct {
+	CategoryURLs map[string]string `toml:"category_urls,omitempty"`
+}
+
 // Config is the layered configuration: a set of named provider profiles plus
 // the profile to use when none is selected on the command line.
 type Config struct {
@@ -113,6 +122,7 @@ type Config struct {
 	Embedding       Embedding           `toml:"embedding"`
 	Github          Github              `toml:"github"`
 	History         History             `toml:"history"`
+	Review          Review              `toml:"review"`
 }
 
 // Defaults returns the built-in configuration: the two first-class kinds as

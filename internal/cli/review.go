@@ -577,7 +577,7 @@ func validateFilterMode(mode string) error {
 func emitReview(w io.Writer, out ReviewOutcome, data, summary map[string]any) error {
 	switch outputFormat {
 	case "sarif":
-		return sarif.EmitSARIF(w, toSARIFFindings(out.Findings), versionString())
+		return sarif.EmitSARIFWithLinks(w, toSARIFFindings(out.Findings), versionString(), categoryURLs())
 	case "pretty":
 		return renderReviewTable(w, out)
 	default:
@@ -604,7 +604,7 @@ func writeSARIFOut(path string, findings []ReviewFinding) error {
 	}
 	tmpName := tmp.Name()
 	defer os.Remove(tmpName) // no-op once renamed; cleans up on any error path
-	if err := sarif.EmitSARIF(tmp, toSARIFFindings(findings), versionString()); err != nil {
+	if err := sarif.EmitSARIFWithLinks(tmp, toSARIFFindings(findings), versionString(), categoryURLs()); err != nil {
 		tmp.Close()
 		return fail(err)
 	}
@@ -615,6 +615,14 @@ func writeSARIFOut(path string, findings []ReviewFinding) error {
 		return fail(err)
 	}
 	return nil
+}
+
+// categoryURLs loads the validated [review].category_urls map from TRUSTED config
+// (user file + built-in defaults — never repo rules) for the local SARIF emit path.
+// A config-load error degrades to no links (the map is presentation-only).
+func categoryURLs() map[string]string {
+	cfg, _ := config.Load()
+	return cfg.Review.CategoryURLMap()
 }
 
 // toSARIFFindings maps cli findings to the sarif leaf-package input shape.

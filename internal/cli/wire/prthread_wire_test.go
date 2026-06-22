@@ -68,7 +68,7 @@ func TestStoreCrossPush(t *testing.T) {
 	res := engine.ReviewResult{Findings: []engine.Finding{findingB()}, Stats: map[string]any{"truncation_level": "full", "files_reviewed": float64(1)}}
 
 	prA := &cli.PRResult{SummaryAction: "none"}
-	if err := publishReview(stdctx.Background(), client, runner, dir, info, res, prA, cli.PRReviewRequest{Gate: "high"}, st.PRThread(), embedWriter{}); err != nil {
+	if err := publishReview(stdctx.Background(), client, runner, dir, info, res, prA, cli.PRReviewRequest{Gate: "high"}, st.PRThread(), embedWriter{}, nil); err != nil {
 		t.Fatalf("run A: %v", err)
 	}
 	if prA.PostedInline != 1 {
@@ -80,7 +80,7 @@ func TestStoreCrossPush(t *testing.T) {
 	}
 
 	prB := &cli.PRResult{SummaryAction: "none"}
-	if err := publishReview(stdctx.Background(), client, runner, dir, info, res, prB, cli.PRReviewRequest{Gate: "high"}, st.PRThread(), embedWriter{}); err != nil {
+	if err := publishReview(stdctx.Background(), client, runner, dir, info, res, prB, cli.PRReviewRequest{Gate: "high"}, st.PRThread(), embedWriter{}, nil); err != nil {
 		t.Fatalf("run B: %v", err)
 	}
 	if prB.PostedInline != 0 {
@@ -105,12 +105,12 @@ func TestStoreResolution(t *testing.T) {
 	noF := engine.ReviewResult{Findings: nil, Stats: map[string]any{"truncation_level": "full", "files_reviewed": float64(1)}}
 
 	prA := &cli.PRResult{SummaryAction: "none"}
-	if err := publishReview(stdctx.Background(), client, runner, dir, info, withF, prA, cli.PRReviewRequest{Gate: "high"}, st.PRThread(), embedWriter{}); err != nil {
+	if err := publishReview(stdctx.Background(), client, runner, dir, info, withF, prA, cli.PRReviewRequest{Gate: "high"}, st.PRThread(), embedWriter{}, nil); err != nil {
 		t.Fatalf("run A: %v", err)
 	}
 
 	prB := &cli.PRResult{SummaryAction: "none"}
-	if err := publishReview(stdctx.Background(), client, runner, dir, info, noF, prB, cli.PRReviewRequest{Gate: "high"}, st.PRThread(), embedWriter{}); err != nil {
+	if err := publishReview(stdctx.Background(), client, runner, dir, info, noF, prB, cli.PRReviewRequest{Gate: "high"}, st.PRThread(), embedWriter{}, nil); err != nil {
 		t.Fatalf("run B: %v", err)
 	}
 	got, _ := st.PRThread().ListFindings(stdctx.Background(), key)
@@ -119,7 +119,7 @@ func TestStoreResolution(t *testing.T) {
 	}
 
 	prC := &cli.PRResult{SummaryAction: "none"}
-	if err := publishReview(stdctx.Background(), client, runner, dir, info, noF, prC, cli.PRReviewRequest{Gate: "high"}, st.PRThread(), embedWriter{}); err != nil {
+	if err := publishReview(stdctx.Background(), client, runner, dir, info, noF, prC, cli.PRReviewRequest{Gate: "high"}, st.PRThread(), embedWriter{}, nil); err != nil {
 		t.Fatalf("run C: %v", err)
 	}
 	if prC.PostedInline != 0 {
@@ -146,7 +146,7 @@ func TestStoreReopen(t *testing.T) {
 
 	// A: post F.
 	prA := &cli.PRResult{SummaryAction: "none"}
-	if err := publishReview(stdctx.Background(), client, runner, dir, info, withF, prA, cli.PRReviewRequest{Gate: "high"}, st.PRThread(), embedWriter{}); err != nil {
+	if err := publishReview(stdctx.Background(), client, runner, dir, info, withF, prA, cli.PRReviewRequest{Gate: "high"}, st.PRThread(), embedWriter{}, nil); err != nil {
 		t.Fatalf("run A: %v", err)
 	}
 	if prA.PostedInline != 1 {
@@ -161,7 +161,7 @@ func TestStoreReopen(t *testing.T) {
 
 	// B: omit F → resolved.
 	prB := &cli.PRResult{SummaryAction: "none"}
-	if err := publishReview(stdctx.Background(), client, runner, dir, info, noF, prB, cli.PRReviewRequest{Gate: "high"}, st.PRThread(), embedWriter{}); err != nil {
+	if err := publishReview(stdctx.Background(), client, runner, dir, info, noF, prB, cli.PRReviewRequest{Gate: "high"}, st.PRThread(), embedWriter{}, nil); err != nil {
 		t.Fatalf("run B: %v", err)
 	}
 	got, _ := st.PRThread().ListFindings(stdctx.Background(), key)
@@ -172,7 +172,7 @@ func TestStoreReopen(t *testing.T) {
 	// C: re-emit F → must RE-RAISE (set-difference removes the lingering marker).
 	postedBefore := fake.createReviewN
 	prC := &cli.PRResult{SummaryAction: "none"}
-	if err := publishReview(stdctx.Background(), client, runner, dir, info, withF, prC, cli.PRReviewRequest{Gate: "high"}, st.PRThread(), embedWriter{}); err != nil {
+	if err := publishReview(stdctx.Background(), client, runner, dir, info, withF, prC, cli.PRReviewRequest{Gate: "high"}, st.PRThread(), embedWriter{}, nil); err != nil {
 		t.Fatalf("run C: %v", err)
 	}
 	if prC.PostedInline != 1 {
@@ -230,7 +230,7 @@ func TestPublishNoStoreUnchanged(t *testing.T) {
 	res := engine.ReviewResult{Findings: []engine.Finding{findingB()}, Stats: map[string]any{"truncation_level": "full", "files_reviewed": float64(1)}}
 
 	pr := &cli.PRResult{SummaryAction: "none"}
-	if err := publishReview(stdctx.Background(), client, runner, dir, info, res, pr, cli.PRReviewRequest{Gate: "high"}, nil, embedWriter{}); err != nil {
+	if err := publishReview(stdctx.Background(), client, runner, dir, info, res, pr, cli.PRReviewRequest{Gate: "high"}, nil, embedWriter{}, nil); err != nil {
 		t.Fatalf("run 1: %v", err)
 	}
 	wantOrder := []string{"list_review", "create_review", "list_issue", "create_issue"}
@@ -240,7 +240,7 @@ func TestPublishNoStoreUnchanged(t *testing.T) {
 
 	fake.order = nil
 	pr2 := &cli.PRResult{SummaryAction: "none"}
-	if err := publishReview(stdctx.Background(), client, runner, dir, info, res, pr2, cli.PRReviewRequest{Gate: "high"}, nil, embedWriter{}); err != nil {
+	if err := publishReview(stdctx.Background(), client, runner, dir, info, res, pr2, cli.PRReviewRequest{Gate: "high"}, nil, embedWriter{}, nil); err != nil {
 		t.Fatalf("run 2: %v", err)
 	}
 	// Re-run: dedupe skips inline, summary edited; NO extra review.
@@ -264,7 +264,7 @@ func TestStoreListErrorDegrades(t *testing.T) {
 
 	pr := &cli.PRResult{SummaryAction: "none"}
 	st := &fakePRStore{listErr: errors.New("db locked")}
-	if err := publishReview(stdctx.Background(), client, runner, dir, info, res, pr, cli.PRReviewRequest{Gate: "high"}, st, embedWriter{}); err != nil {
+	if err := publishReview(stdctx.Background(), client, runner, dir, info, res, pr, cli.PRReviewRequest{Gate: "high"}, st, embedWriter{}, nil); err != nil {
 		t.Fatalf("ListFindings error must not abort the review: %v", err)
 	}
 	if !pr.Posted || pr.PostedInline != 1 {
@@ -294,7 +294,7 @@ func TestStoreWriteErrorKeepsOutcome(t *testing.T) {
 			res := engine.ReviewResult{Findings: []engine.Finding{findingB()}, Stats: map[string]any{"truncation_level": "full", "files_reviewed": float64(1)}}
 
 			pr := &cli.PRResult{SummaryAction: "none"}
-			if err := publishReview(stdctx.Background(), client, runner, dir, info, res, pr, cli.PRReviewRequest{Gate: "high"}, tc.st, embedWriter{}); err != nil {
+			if err := publishReview(stdctx.Background(), client, runner, dir, info, res, pr, cli.PRReviewRequest{Gate: "high"}, tc.st, embedWriter{}, nil); err != nil {
 				t.Fatalf("store write failure must not discard the successful review: %v", err)
 			}
 			if !pr.Posted || pr.PostedInline != 1 {
