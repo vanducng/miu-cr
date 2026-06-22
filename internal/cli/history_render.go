@@ -25,6 +25,10 @@ func parseSince(s string) (time.Time, error) {
 	return time.Time{}, &CLIError{Code: "history.bad_time", Message: fmt.Sprintf("invalid time %q", s), Hint: "use 7d, 24h, or 2026-06-01", Exit: 2}
 }
 
+// maxSpanDays caps a relative span (~100 years) so the days/hours→nanoseconds
+// conversion can't overflow time.Duration's int64.
+const maxSpanDays = 36500
+
 // relativeSpan parses "Nd" (days) or "Nh" (hours) into a Duration.
 func relativeSpan(s string) (time.Duration, bool) {
 	if len(s) < 2 {
@@ -37,8 +41,14 @@ func relativeSpan(s string) (time.Duration, bool) {
 	}
 	switch unit {
 	case 'd':
+		if n > maxSpanDays {
+			return 0, false
+		}
 		return time.Duration(n) * 24 * time.Hour, true
 	case 'h':
+		if n > maxSpanDays*24 {
+			return 0, false
+		}
 		return time.Duration(n) * time.Hour, true
 	default:
 		return 0, false
@@ -47,8 +57,11 @@ func relativeSpan(s string) (time.Duration, bool) {
 
 // target labels a review by its PR ref (owner/repo#N) or local repo dir.
 func target(owner, repo string, number int, repoDir string) string {
-	if owner != "" && repo != "" && number > 0 {
-		return fmt.Sprintf("%s/%s#%d", owner, repo, number)
+	if owner != "" && repo != "" {
+		if number > 0 {
+			return fmt.Sprintf("%s/%s#%d", owner, repo, number)
+		}
+		return fmt.Sprintf("%s/%s", owner, repo)
 	}
 	if repoDir != "" {
 		return repoDir

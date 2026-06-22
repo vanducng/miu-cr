@@ -43,7 +43,7 @@ type PersistRecord struct {
 }
 
 // TurnRecord is one tool dispatch in the review session (turn index, tool name,
-// raw args). Paths/patterns only — tokens never reach the trace.
+// raw args). Args are paths/patterns — no auth tokens.
 type TurnRecord struct {
 	Turn int    `json:"turn"`
 	Tool string `json:"tool"`
@@ -55,6 +55,10 @@ type TurnRecord struct {
 // agent records into it via nil-safe methods (mirroring the Progress seam); the
 // engine creates it, threads it onto AgentContext, and reads it back after
 // Review. A nil *ReviewTrace makes every recorder a no-op (capture disabled).
+// UserPrompt/FinalResponse (and PersistRecord.RawPrompt/RawResponse) capture the
+// full reviewed diff + model output by design — full capture, stored LOCAL-only
+// in the gitignored state.db; the invariant is no auth tokens (never in the
+// prompt/diff), not "no code".
 type ReviewTrace struct {
 	UserPrompt    string
 	FinalResponse string
@@ -354,7 +358,11 @@ func (e *Engine) Review(ctx stdctx.Context, req Request) (ReviewResult, error) {
 			rec.RawPrompt = trace.UserPrompt
 			rec.RawResponse = trace.FinalResponse
 			if len(trace.Turns) > 0 {
-				rec.Transcript, _ = json.Marshal(trace.Turns)
+				if blob, merr := json.Marshal(trace.Turns); merr != nil {
+					stats["transcript_error"] = merr.Error()
+				} else {
+					rec.Transcript = blob
+				}
 			}
 		}
 		id, serr := e.Store.SaveReview(ctx, rec)

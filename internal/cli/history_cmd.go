@@ -13,7 +13,7 @@ import (
 // historyCommand is the local review-history group: bare `history` lists recent
 // reviews, with `show <id>` and `prune` subcommands. All run over the same store
 // the review path persists to.
-func historyCommand(opts *options) *cobra.Command {
+func historyCommand(_ *options) *cobra.Command {
 	var a historyListArgs
 	cmd := &cobra.Command{
 		Use:   "history",
@@ -27,8 +27,8 @@ func historyCommand(opts *options) *cobra.Command {
 	f.StringVar(&a.pr, "pr", "", "Filter by a PR ref: owner/repo#N")
 	f.StringVar(&a.since, "since", "", "Only reviews newer than this: 7d, 24h, or 2026-06-01")
 	f.IntVar(&a.limit, "limit", 20, "Max rows (0 = no limit)")
-	cmd.AddCommand(historyShowCommand(opts))
-	cmd.AddCommand(historyPruneCommand(opts))
+	cmd.AddCommand(historyShowCommand())
+	cmd.AddCommand(historyPruneCommand())
 	return cmd
 }
 
@@ -63,7 +63,7 @@ func runHistoryList(cmd *cobra.Command, a historyListArgs) error {
 	return writeSuccess(cmd.OutOrStdout(), "history", "history.list", map[string]any{"reviews": items}, map[string]any{"count": len(items)})
 }
 
-func historyShowCommand(_ *options) *cobra.Command {
+func historyShowCommand() *cobra.Command {
 	var raw bool
 	cmd := &cobra.Command{
 		Use:   "show <id>",
@@ -95,7 +95,7 @@ func historyShowCommand(_ *options) *cobra.Command {
 	return cmd
 }
 
-func historyPruneCommand(_ *options) *cobra.Command {
+func historyPruneCommand() *cobra.Command {
 	var (
 		keep      int
 		olderThan string

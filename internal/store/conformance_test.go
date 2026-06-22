@@ -271,6 +271,44 @@ func TestConformancePruneReviews(t *testing.T) {
 	}
 }
 
+// TestConformancePruneReviewsKeepAndOlderThan exercises Keep+OlderThan set
+// together, asserting OR semantics: a row is deleted if it is beyond the
+// newest-Keep OR older than the cutoff; it survives only if in the newest-Keep
+// AND newer than the cutoff (so a row in the newest-Keep but older than the
+// cutoff is still deleted — which is where OR differs from AND).
+func TestConformancePruneReviewsKeepAndOlderThan(t *testing.T) {
+	for _, b := range backends(t) {
+		t.Run(b.name, func(t *testing.T) {
+			ctx := context.Background()
+			clearReviews(t, ctx, b.rev) // postgres conformance DB is shared across tests; sqlite is fresh
+			base := time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC)
+			for i := 0; i < 5; i++ {
+				if _, err := b.rev.SaveReview(ctx, store.ReviewRecord{
+					ID: string(rune('a' + i)), RepoDir: "/r", Mode: "staged",
+					CreatedAt: base.Add(time.Duration(i) * time.Hour),
+				}); err != nil {
+					t.Fatalf("seed: %v", err)
+				}
+			}
+			// Keep=2 alone deletes a,b,c (newest 2 = d,e). OlderThan=base+4h alone
+			// deletes a,b,c,d (e at base+4h is not strictly older). OR union deletes
+			// a,b,c,d; only e (in newest-2 AND newer than the cutoff) survives. Under
+			// AND semantics d would have survived, so n==4 confirms OR.
+			n, err := b.rev.PruneReviews(ctx, store.PrunePolicy{Keep: 2, OlderThan: base.Add(4 * time.Hour)})
+			if err != nil {
+				t.Fatalf("prune combined: %v", err)
+			}
+			if n != 4 {
+				t.Fatalf("Keep=2+OlderThan deleted %d, want 4 (OR semantics)", n)
+			}
+			left, _ := b.rev.ListReviews(ctx, store.ReviewFilter{})
+			if len(left) != 1 || left[0].ID != "e" {
+				t.Fatalf("after combined prune want only e; got %+v", ids(left))
+			}
+		})
+	}
+}
+
 func ids(ss []store.ReviewSummary) []string {
 	out := make([]string, len(ss))
 	for i, s := range ss {
