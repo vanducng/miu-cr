@@ -24,7 +24,7 @@ var (
 	githubDownloadBase = "https://github.com"
 )
 
-const maxDownloadBytes = 256 << 20 // caps a hostile/huge asset
+const maxDownloadBytes = 96 << 20 // caps a hostile/huge asset (binaries are ~20MB)
 
 // ghToken mirrors install.sh: GITHUB_TOKEN then GH_TOKEN. Never logged.
 func ghToken() string {
@@ -50,12 +50,12 @@ func httpGetBytes(ctx stdctx.Context, client *http.Client, target string) ([]byt
 		return nil, err
 	}
 	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		return nil, fmt.Errorf("GET %s: status %d", target, resp.StatusCode)
+	}
 	body, err := io.ReadAll(io.LimitReader(resp.Body, maxDownloadBytes))
 	if err != nil {
 		return nil, err
-	}
-	if resp.StatusCode != http.StatusOK {
-		return nil, fmt.Errorf("GET %s: status %d", target, resp.StatusCode)
 	}
 	return body, nil
 }

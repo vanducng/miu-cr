@@ -5,6 +5,7 @@ import (
 	"archive/zip"
 	"bytes"
 	"compress/gzip"
+	"fmt"
 	"io"
 	"os"
 	"path/filepath"
@@ -118,7 +119,9 @@ func replaceBinary(path string, data []byte) error {
 			return notWritable(path, err)
 		}
 		if err := os.Rename(tmpName, path); err != nil {
-			_ = os.Rename(old, path)
+			if rb := os.Rename(old, path); rb != nil {
+				return &CLIError{Code: "upgrade.not_writable", Message: fmt.Sprintf("upgrade failed and rollback failed; restore the binary from %s manually: %v (rollback: %v)", old, err, rb), Exit: 1}
+			}
 			return notWritable(path, err)
 		}
 		_ = os.Remove(old)
