@@ -169,3 +169,60 @@ func TestResolveThreadsContextToResolver(t *testing.T) {
 		t.Error("resolver did not receive the bounded context (got a fresh Background)")
 	}
 }
+
+func openaiAuth(mode string) config.Config {
+	cfg := config.Defaults()
+	p := cfg.Providers["openai"]
+	p.Auth = mode
+	cfg.Providers["openai"] = p
+	return cfg
+}
+
+func TestResolveAuthOAuthForcesOAuth(t *testing.T) {
+	clearProviderEnv(t)
+	t.Setenv("OPENAI_API_KEY", "sk-env")
+	creds, err := resolveWith(openaiAuth("oauth"), ResolveInput{Provider: "openai", OAuthResolver: codexResolver()})
+	if err != nil {
+		t.Fatalf("resolve: %v", err)
+	}
+	if creds.Backend != "codex" {
+		t.Errorf(`auth="oauth" must use OAuth even with an env key: %+v`, creds)
+	}
+}
+
+func TestResolveAuthOAuthNoSessionErrors(t *testing.T) {
+	clearProviderEnv(t)
+	t.Setenv("OPENAI_API_KEY", "sk-env")
+	noCred := func(stdctx.Context) (OAuthCredential, bool, error) { return OAuthCredential{}, false, nil }
+	if _, err := resolveWith(openaiAuth("oauth"), ResolveInput{Provider: "openai", OAuthResolver: noCred}); err == nil {
+		t.Fatal(`auth="oauth" with no login session must error, not use the env key`)
+	}
+}
+
+func TestResolveAuthAPIKeyIgnoresOAuth(t *testing.T) {
+	clearProviderEnv(t)
+	t.Setenv("OPENAI_API_KEY", "sk-env")
+	creds, err := resolveWith(openaiAuth("api_key"), ResolveInput{Provider: "openai", OAuthResolver: codexResolver()})
+	if err != nil {
+		t.Fatalf("resolve: %v", err)
+	}
+	if creds.Backend == "codex" || creds.APIKey != "sk-env" {
+		t.Errorf(`auth="api_key" must use the key, not OAuth: %+v`, creds)
+	}
+}
+
+func TestResolveOAuthErrorFallsBackToEnvKey(t *testing.T) {
+	// A stale/expired OAuth session must NOT lock out a valid ambient OPENAI_API_KEY.
+	clearProviderEnv(t)
+	t.Setenv("OPENAI_API_KEY", "sk-env")
+	errResolver := func(stdctx.Context) (OAuthCredential, bool, error) {
+		return OAuthCredential{}, false, errors.New("stale session")
+	}
+	creds, err := resolveWith(config.Defaults(), ResolveInput{Provider: "openai", OAuthResolver: errResolver})
+	if err != nil {
+		t.Fatalf("a stale OAuth session should fall back to the env key, got: %v", err)
+	}
+	if creds.Backend == "codex" || creds.APIKey != "sk-env" {
+		t.Errorf("OAuth error should fall back to the ambient env key: %+v", creds)
+	}
+}

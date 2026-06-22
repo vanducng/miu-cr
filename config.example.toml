@@ -4,10 +4,11 @@
 # Copy to the per-user config path (same on macOS and Linux), then edit:
 #   ~/.config/miu/cr/config.toml
 #
-# Precedence, highest wins:  CLI flags  >  this file  >  built-in defaults.
-# For OpenAI specifically: --api-key / a configured profile key  >  `miucr login`
-# (OAuth, your ChatGPT plan)  >  an ambient OPENAI_API_KEY env var. So a stray
-# OPENAI_API_KEY set for another tool never overrides a deliberate `miucr login`.
+# Precedence, highest wins:  CLI flags  >  environment  >  this file  >  built-in defaults.
+# Exception — the OpenAI *credential*: --api-key / a configured profile key  >
+# `miucr login` (OAuth, your ChatGPT plan)  >  an ambient OPENAI_API_KEY. So a
+# stray OPENAI_API_KEY set for another tool never overrides a deliberate login.
+# Pin the method explicitly with `auth = "oauth"` or `auth = "api_key"` (see below).
 # With the recommended `auth_env`, miu-cr never writes credentials to disk and the
 # resolved token lives in memory for one call only. A literal `auth_token` (below) is
 # the exception: it sits in plaintext in this file you author.

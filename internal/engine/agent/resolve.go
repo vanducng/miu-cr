@@ -196,30 +196,62 @@ func resolveOpenAI(in ResolveInput, prof config.Provider) (Credentials, error) {
 		return Credentials{Kind: config.KindOpenAI, APIKey: k, BaseURL: baseURL, Model: model}
 	}
 
-	// Auth precedence is intent-ordered, so an ambient OPENAI_API_KEY (often set
-	// for other tools) never silently overrides a deliberate choice:
-	//   1. explicit --api-key, or a profile-configured key (auth_env/auth_token)
-	//   2. a cached `miucr login` (OAuth) -> the codex/ChatGPT-plan backend
-	//   3. zero-config fallback: an ambient OPENAI_API_KEY env var
-	if k := firstNonEmpty(in.APIKey, profileSecret(prof)); k != "" {
-		return apiKeyCreds(k), nil
-	}
-	if in.OAuthResolver != nil {
-		if creds, ok, err := resolveOAuthCodex(in, prof); err != nil {
-			return Credentials{}, err
-		} else if ok {
-			return creds, nil
+	noCred := func(msg string) (Credentials, error) {
+		return Credentials{}, &clierr.CLIError{
+			Code: "agent.no_credentials", Message: msg,
+			Hint: "run `miucr login` to review on your ChatGPT plan; or export OPENAI_API_KEY=... / pass --api-key; see config.example.toml",
+			Exit: 1,
 		}
 	}
-	if k := strings.TrimSpace(os.Getenv("OPENAI_API_KEY")); k != "" {
+	tryOAuth := func() (Credentials, bool, error) {
+		if in.OAuthResolver == nil {
+			return Credentials{}, false, nil
+		}
+		return resolveOAuthCodex(in, prof)
+	}
+
+	// --api-key is the most explicit (per-call) credential and always wins.
+	if k := strings.TrimSpace(in.APIKey); k != "" {
 		return apiKeyCreds(k), nil
 	}
-	return Credentials{}, &clierr.CLIError{
-		Code:    "agent.no_credentials",
-		Message: "no OpenAI credential: run `miucr login` to use your ChatGPT plan, set OPENAI_API_KEY, configure a provider in " + config.FilePathOrEmpty() + ", or pass --api-key",
-		Hint:    "run `miucr login` to review on your ChatGPT plan; or export OPENAI_API_KEY=... / pass --api-key; see config.example.toml",
-		Exit:    1,
+
+	// `auth` pins the method explicitly when set.
+	switch authMode := strings.ToLower(strings.TrimSpace(prof.Auth)); authMode {
+	case "oauth":
+		creds, ok, err := tryOAuth()
+		if err != nil {
+			return Credentials{}, err
+		}
+		if ok {
+			return creds, nil
+		}
+		return noCred("provider auth = \"oauth\" but no `miucr login` session — run `miucr login --provider openai`")
+	case "api_key", "apikey", "key":
+		if k := firstNonEmpty(profileSecret(prof), os.Getenv("OPENAI_API_KEY")); k != "" {
+			return apiKeyCreds(k), nil
+		}
+		return noCred("provider auth = \"api_key\" but no key — set OPENAI_API_KEY, a profile auth_env, or pass --api-key")
 	}
+
+	// auth unset: intent-ordered so an ambient OPENAI_API_KEY (often set for other
+	// tools) never overrides a deliberate choice:
+	//   1. a profile-configured key (auth_env/auth_token)
+	//   2. a cached `miucr login` (OAuth) -> the codex/ChatGPT-plan backend
+	//   3. zero-config fallback: an ambient OPENAI_API_KEY env var
+	if k := profileSecret(prof); k != "" {
+		return apiKeyCreds(k), nil
+	}
+	creds, ok, oauthErr := tryOAuth()
+	if ok {
+		return creds, nil
+	}
+	if k := strings.TrimSpace(os.Getenv("OPENAI_API_KEY")); k != "" {
+		return apiKeyCreds(k), nil // fall back to the env key even if a stale OAuth session errored
+	}
+	if oauthErr != nil {
+		return Credentials{}, oauthErr
+	}
+	return noCred("no OpenAI credential: run `miucr login` to use your ChatGPT plan, set OPENAI_API_KEY, configure a provider in " + config.FilePathOrEmpty() + ", or pass --api-key")
 }
 
 // resolveOAuthCodex turns an injected login credential into codex-backend

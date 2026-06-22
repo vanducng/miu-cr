@@ -8,5 +8,7 @@ default_provider = "openai"
 
 [providers.openai]
 kind = "openai"
+auth = "oauth"          # explicit: use my ChatGPT plan via `miucr login`, never an API key
 # Auth comes from `miucr login` (OAuth). No key here.
-# An explicit OPENAI_API_KEY / --api-key still wins if you set one.
+# With auth = "oauth", an ambient OPENAI_API_KEY is IGNORED; only an explicit
+# --api-key flag overrides (per call). Drop the auth line for the auto precedence.
