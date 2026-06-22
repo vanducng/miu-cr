@@ -55,6 +55,17 @@ func init() {
 	cli.SetPRReviewer(prReviewer{})
 	cli.SetMCPServer(mcpServerImpl{})
 	cli.SetReviewStoreFactory(openReviewStore)
+	cli.SetHistoryStoreFactory(openHistoryStoreForCmd)
+}
+
+// openHistoryStoreForCmd opens the configured backend store for the `history`
+// command group, reusing the same backend selection as every other store path.
+func openHistoryStoreForCmd(ctx stdctx.Context) (store.Store, func(), error) {
+	cfg, lerr := config.Load()
+	if lerr != nil {
+		return nil, nil, lerr
+	}
+	return openStore(ctx, cfg)
 }
 
 // openReviewStore opens the configured backend store for the serve REST API. The
@@ -122,6 +133,18 @@ func (engineReviewer) Review(ctx stdctx.Context, req cli.ReviewRequest) (cli.Rev
 	runner := gitcmd.New()
 	eng := engine.New(agentAdapter{inner: llm}, runner)
 
+	cfg, lerr := config.Load()
+	if lerr != nil {
+		slog.Warn("config load failed, using built-in defaults: " + config.RedactString(lerr.Error()))
+	}
+	hist, closeHist := openHistoryStore(ctx, cfg, req.NoSave)
+	if closeHist != nil {
+		defer closeHist()
+	}
+	if hist != nil {
+		eng.Store = engineStoreFor(hist)
+	}
+
 	res, err := eng.Review(ctx, engine.Request{
 		Mode:         modeFor(req),
 		Staged:       req.Staged,
@@ -135,6 +158,8 @@ func (engineReviewer) Review(ctx stdctx.Context, req cli.ReviewRequest) (cli.Rev
 		Extensions:   req.Extensions,
 		ExpandWindow: req.ExpandWindow,
 		TokenBudget:  req.TokenBudget,
+		Provider:     string(creds.Kind),
+		Model:        creds.Model,
 
 		Rules:            loadRules(req.RepoDir, true),
 		RulesFork:        false,
@@ -144,7 +169,8 @@ func (engineReviewer) Review(ctx stdctx.Context, req cli.ReviewRequest) (cli.Rev
 	if err != nil {
 		return cli.ReviewOutcome{}, err
 	}
-	return cli.ReviewOutcome{Findings: toCLIFindings(res.Findings), Stats: res.Stats}, nil
+	pruneHistory(ctx, hist, cfg)
+	return cli.ReviewOutcome{Findings: toCLIFindings(res.Findings), Stats: res.Stats, ReviewID: res.ID}, nil
 }
 
 func (engineReviewer) GateFailed(findings []cli.ReviewFinding, gate string) bool {
@@ -250,6 +276,13 @@ func (prReviewer) ReviewPR(ctx stdctx.Context, req cli.PRReviewRequest) (cli.Rev
 	}
 
 	eng := engine.New(agentAdapter{inner: llm}, runner)
+	hist, closeHist := openHistoryStore(ctx, cfg, req.NoSave)
+	if closeHist != nil {
+		defer closeHist()
+	}
+	if hist != nil {
+		eng.Store = engineStoreFor(hist)
+	}
 	res, err := eng.Review(ctx, engine.Request{
 		Mode:         diff.ModeRange,
 		From:         info.BaseSHA,
@@ -261,6 +294,11 @@ func (prReviewer) ReviewPR(ctx stdctx.Context, req cli.PRReviewRequest) (cli.Rev
 		Extensions:   req.Extensions,
 		ExpandWindow: req.ExpandWindow,
 		TokenBudget:  req.TokenBudget,
+		Provider:     string(creds.Kind),
+		Model:        creds.Model,
+		Owner:        info.Owner,
+		Repo:         info.Repo,
+		Number:       info.Number,
 
 		Rules:            loadRules(dir, !info.IsFork),
 		RulesFork:        info.IsFork,
@@ -271,6 +309,7 @@ func (prReviewer) ReviewPR(ctx stdctx.Context, req cli.PRReviewRequest) (cli.Rev
 	if err != nil {
 		return cli.ReviewOutcome{}, err
 	}
+	pruneHistory(ctx, hist, cfg)
 
 	prResult := &cli.PRResult{
 		Owner:         info.Owner,
@@ -299,6 +338,7 @@ func (prReviewer) ReviewPR(ctx stdctx.Context, req cli.PRReviewRequest) (cli.Rev
 		Findings: toCLIFindings(res.Findings),
 		Stats:    res.Stats,
 		PR:       prResult,
+		ReviewID: res.ID,
 	}, nil
 }
 
@@ -455,6 +495,7 @@ func (a agentAdapter) Review(ctx stdctx.Context, rc engine.AgentContext) ([]engi
 		Rev:             rc.Rev,
 		Runner:          rc.Runner,
 		Progress:        rc.Progress,
+		Trace:           rc.Trace,
 	})
 }
 

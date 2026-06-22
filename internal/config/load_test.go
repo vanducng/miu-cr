@@ -267,3 +267,48 @@ func TestMergeGithubOverlay(t *testing.T) {
 		t.Fatalf("absent mode must inherit pat, got %q", partial.Github.Mode)
 	}
 }
+
+// History is on by default; an absent [history] section keeps it on with no cap.
+func TestHistoryDefaultsOn(t *testing.T) {
+	d := Defaults()
+	if !d.History.On() {
+		t.Fatal("history must be on by default")
+	}
+	out := Merge(d, Config{}) // file with no [history]
+	if !out.History.On() {
+		t.Fatal("merge without [history] must stay on")
+	}
+	if out.History.MaxRecords != 0 {
+		t.Fatalf("default max_records must be 0 (no cap), got %d", out.History.MaxRecords)
+	}
+}
+
+// An explicit enabled=false disables history; max_records overlays the cap.
+func TestLoadHistoryFromFile(t *testing.T) {
+	dir := t.TempDir()
+	userHomeDir = func() (string, error) { return dir, nil }
+	t.Cleanup(func() { userHomeDir = os.UserHomeDir })
+
+	body := `[history]
+enabled = false
+max_records = 50
+`
+	cfgDir := filepath.Join(dir, ".config", "miu", "cr")
+	if err := os.MkdirAll(cfgDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(cfgDir, "config.toml"), []byte(body), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	cfg, err := Load()
+	if err != nil {
+		t.Fatalf("Load: %v", err)
+	}
+	if cfg.History.On() {
+		t.Fatal("enabled=false must disable history")
+	}
+	if cfg.History.MaxRecords != 50 {
+		t.Fatalf("max_records: want 50, got %d", cfg.History.MaxRecords)
+	}
+}

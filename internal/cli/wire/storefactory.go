@@ -3,6 +3,7 @@ package wire
 import (
 	stdctx "context"
 	"fmt"
+	"log/slog"
 	"os"
 
 	"github.com/vanducng/miu-cr/internal/cli"
@@ -141,6 +142,41 @@ func engineStoreFor(s store.Store) engine.Store {
 		// validateBackend. Panic rather than return nil so a future backend that
 		// forgets its adapter fails here, not on a later nil-deref in the engine.
 		panic(fmt.Sprintf("engineStoreFor: unsupported concrete store type %T", s))
+	}
+}
+
+// newHistoryStore is the review-path history-store seam (overridable in tests to
+// inject a temp store). It returns nil (no save) when history is disabled by
+// config or --no-save. A store-open failure MUST degrade to no-save + a warning,
+// never fail the review.
+var newHistoryStore = func(ctx stdctx.Context, cfg config.Config, noSave bool) (store.Store, func(), error) {
+	if noSave || !cfg.History.On() {
+		return nil, nil, nil
+	}
+	return openStore(ctx, cfg)
+}
+
+// openHistoryStore opens the history store for the review path, degrading to
+// (nil, nil) with a logged, redacted warning on any open failure so the review
+// still emits findings.
+func openHistoryStore(ctx stdctx.Context, cfg config.Config, noSave bool) (store.Store, func()) {
+	s, closeStore, err := newHistoryStore(ctx, cfg, noSave)
+	if err != nil {
+		slog.Warn("history store disabled, review not saved: " + config.RedactString(err.Error()))
+		return nil, nil
+	}
+	return s, closeStore
+}
+
+// pruneHistory trims the history store to cfg.History.MaxRecords (oldest dropped)
+// after a save. Best-effort: a nil store, no cap, or a prune error is logged and
+// never affects the review outcome.
+func pruneHistory(ctx stdctx.Context, s store.Store, cfg config.Config) {
+	if s == nil || cfg.History.MaxRecords <= 0 {
+		return
+	}
+	if _, err := s.PruneReviews(ctx, store.PrunePolicy{Keep: cfg.History.MaxRecords}); err != nil {
+		slog.Warn("history prune failed: " + config.RedactString(err.Error()))
 	}
 }
 

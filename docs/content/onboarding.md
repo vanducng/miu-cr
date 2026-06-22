@@ -158,6 +158,7 @@ For the full automation story, see [Serve & Action](/serve-and-action/) and
   and how auth is resolved. To review on your **ChatGPT Pro/Max plan** instead of
   a billed key, run `miucr login` — see
   [Using your ChatGPT plan](/credentials/#using-openai--your-chatgpt-plan-miucr-login).
+- [Review history](/history/) — every review auto-saves; browse it with `miucr history` list/show/prune.
 - [How it works](/how-it-works/) — the deterministic engine behind the LLM pass.
 - Browse all copy-paste starters in
   [`examples/`](https://github.com/vanducng/miu-cr/tree/main/examples).

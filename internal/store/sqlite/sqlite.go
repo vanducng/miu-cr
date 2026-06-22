@@ -85,35 +85,54 @@ func Open(path string) (*Store, error) {
 		_ = db.Close()
 		return nil, fmt.Errorf("migrate schema: %w", err)
 	}
-	if err := migrateReviewStatus(db); err != nil {
+	if err := migrateReviewColumns(db); err != nil {
 		_ = db.Close()
-		return nil, fmt.Errorf("migrate reviews.status: %w", err)
+		return nil, fmt.Errorf("migrate reviews columns: %w", err)
 	}
 	return &Store{db: db}, nil
 }
 
-// migrateReviewStatus backfills the reviews.status column on a DB created before
-// status existed: CREATE TABLE IF NOT EXISTS is a no-op on an existing table, so
-// the column would otherwise be missing and every status-referencing query would
-// fail. Idempotent — a no-op once the column is present.
-func migrateReviewStatus(db *sql.DB) error {
-	has, err := hasReviewStatusColumn(db)
+// reviewColumnMigrations are the idempotent ADD COLUMN DDLs for columns added
+// after the reviews table first shipped. CREATE TABLE IF NOT EXISTS is a no-op on
+// an existing table, so these backfill the columns on a pre-migration DB. Each is
+// pragma-guarded (only run when the column is absent) so re-open is a no-op.
+var reviewColumnMigrations = []struct{ col, ddl string }{
+	{"status", `ALTER TABLE reviews ADD COLUMN status TEXT NOT NULL DEFAULT 'done' CHECK(status IN ('pending','done','failed'))`},
+	{"owner", `ALTER TABLE reviews ADD COLUMN owner TEXT NOT NULL DEFAULT ''`},
+	{"repo", `ALTER TABLE reviews ADD COLUMN repo TEXT NOT NULL DEFAULT ''`},
+	{"number", `ALTER TABLE reviews ADD COLUMN number INTEGER NOT NULL DEFAULT 0`},
+	{"provider", `ALTER TABLE reviews ADD COLUMN provider TEXT NOT NULL DEFAULT ''`},
+	{"model", `ALTER TABLE reviews ADD COLUMN model TEXT NOT NULL DEFAULT ''`},
+	{"transcript_json", `ALTER TABLE reviews ADD COLUMN transcript_json TEXT NOT NULL DEFAULT ''`},
+	{"raw_prompt", `ALTER TABLE reviews ADD COLUMN raw_prompt TEXT NOT NULL DEFAULT ''`},
+	{"raw_response", `ALTER TABLE reviews ADD COLUMN raw_response TEXT NOT NULL DEFAULT ''`},
+}
+
+// migrateReviewColumns backfills any missing reviews column on a DB created
+// before that column existed. Idempotent — a no-op once all columns are present.
+func migrateReviewColumns(db *sql.DB) error {
+	have, err := reviewColumns(db)
 	if err != nil {
 		return err
 	}
-	if has {
-		return nil
+	for _, m := range reviewColumnMigrations {
+		if have[m.col] {
+			continue
+		}
+		if _, err := db.Exec(m.ddl); err != nil {
+			return err
+		}
 	}
-	_, err = db.Exec(`ALTER TABLE reviews ADD COLUMN status TEXT NOT NULL DEFAULT 'done' CHECK(status IN ('pending','done','failed'))`)
-	return err
+	return nil
 }
 
-func hasReviewStatusColumn(db *sql.DB) (bool, error) {
+func reviewColumns(db *sql.DB) (map[string]bool, error) {
 	rows, err := db.Query(`PRAGMA table_info(reviews)`)
 	if err != nil {
-		return false, err
+		return nil, err
 	}
 	defer rows.Close()
+	have := map[string]bool{}
 	for rows.Next() {
 		var (
 			cid     int
@@ -124,13 +143,11 @@ func hasReviewStatusColumn(db *sql.DB) (bool, error) {
 			pk      int
 		)
 		if err := rows.Scan(&cid, &name, &ctype, &notnull, &dflt, &pk); err != nil {
-			return false, err
+			return nil, err
 		}
-		if name == "status" {
-			return true, nil
-		}
+		have[name] = true
 	}
-	return false, rows.Err()
+	return have, rows.Err()
 }
 
 // Close releases the underlying database handle.
@@ -144,10 +161,13 @@ func (s *Store) SaveReview(ctx context.Context, rec store.ReviewRecord) (string,
 		return "", err
 	}
 	_, err = s.db.ExecContext(ctx,
-		`INSERT INTO reviews (id, repo_dir, mode, head_sha, status, created_at, findings_json, stats_json)
-		 VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
+		`INSERT INTO reviews (id, repo_dir, mode, head_sha, status, created_at, findings_json, stats_json,
+		   owner, repo, number, provider, model, transcript_json, raw_prompt, raw_response)
+		 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
 		rec.ID, rec.RepoDir, rec.Mode, rec.HeadSHA, rec.Status,
 		rec.CreatedAt.UTC().Format(time.RFC3339Nano), findingsJSON, statsJSON,
+		rec.Owner, rec.Repo, rec.Number, rec.Provider, rec.Model,
+		string(rec.Transcript), rec.RawPrompt, rec.RawResponse,
 	)
 	if err != nil {
 		return "", fmt.Errorf("insert review: %w", err)
@@ -164,13 +184,19 @@ func (s *Store) UpsertReview(ctx context.Context, rec store.ReviewRecord) (strin
 		return "", err
 	}
 	_, err = s.db.ExecContext(ctx,
-		`INSERT INTO reviews (id, repo_dir, mode, head_sha, status, created_at, findings_json, stats_json)
-		 VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+		`INSERT INTO reviews (id, repo_dir, mode, head_sha, status, created_at, findings_json, stats_json,
+		   owner, repo, number, provider, model, transcript_json, raw_prompt, raw_response)
+		 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
 		 ON CONFLICT(id) DO UPDATE SET
 		   repo_dir=excluded.repo_dir, mode=excluded.mode, head_sha=excluded.head_sha,
-		   status=excluded.status, findings_json=excluded.findings_json, stats_json=excluded.stats_json`,
+		   status=excluded.status, findings_json=excluded.findings_json, stats_json=excluded.stats_json,
+		   owner=excluded.owner, repo=excluded.repo, number=excluded.number,
+		   provider=excluded.provider, model=excluded.model, transcript_json=excluded.transcript_json,
+		   raw_prompt=excluded.raw_prompt, raw_response=excluded.raw_response`,
 		rec.ID, rec.RepoDir, rec.Mode, rec.HeadSHA, rec.Status,
 		rec.CreatedAt.UTC().Format(time.RFC3339Nano), findingsJSON, statsJSON,
+		rec.Owner, rec.Repo, rec.Number, rec.Provider, rec.Model,
+		string(rec.Transcript), rec.RawPrompt, rec.RawResponse,
 	)
 	if err != nil {
 		return "", fmt.Errorf("upsert review: %w", err)
@@ -216,15 +242,18 @@ func prepReview(rec store.ReviewRecord) (store.ReviewRecord, string, string, err
 // GetReview loads a persisted review by id, returning an error when none exists.
 func (s *Store) GetReview(ctx context.Context, id string) (store.ReviewRecord, error) {
 	var (
-		rec          store.ReviewRecord
-		createdAt    string
-		findingsJSON string
-		statsJSON    string
+		rec            store.ReviewRecord
+		createdAt      string
+		findingsJSON   string
+		statsJSON      string
+		transcriptJSON string
 	)
 	row := s.db.QueryRowContext(ctx,
-		`SELECT id, repo_dir, mode, head_sha, status, created_at, findings_json, stats_json
+		`SELECT id, repo_dir, mode, head_sha, status, created_at, findings_json, stats_json,
+		   owner, repo, number, provider, model, transcript_json, raw_prompt, raw_response
 		 FROM reviews WHERE id = ?`, id)
-	err := row.Scan(&rec.ID, &rec.RepoDir, &rec.Mode, &rec.HeadSHA, &rec.Status, &createdAt, &findingsJSON, &statsJSON)
+	err := row.Scan(&rec.ID, &rec.RepoDir, &rec.Mode, &rec.HeadSHA, &rec.Status, &createdAt, &findingsJSON, &statsJSON,
+		&rec.Owner, &rec.Repo, &rec.Number, &rec.Provider, &rec.Model, &transcriptJSON, &rec.RawPrompt, &rec.RawResponse)
 	if errors.Is(err, sql.ErrNoRows) {
 		return store.ReviewRecord{}, fmt.Errorf("review %q not found", id)
 	}
@@ -240,7 +269,25 @@ func (s *Store) GetReview(ctx context.Context, id string) (store.ReviewRecord, e
 	if err := json.Unmarshal([]byte(statsJSON), &rec.Stats); err != nil {
 		return store.ReviewRecord{}, fmt.Errorf("unmarshal stats: %w", err)
 	}
+	if transcriptJSON != "" {
+		rec.Transcript = []byte(transcriptJSON)
+	}
 	return rec, nil
+}
+
+// ListReviews returns summary rows matching f, newest first.
+func (s *Store) ListReviews(ctx context.Context, f store.ReviewFilter) ([]store.ReviewSummary, error) {
+	q, args := store.ListReviewsQuery(f, store.SqlitePlaceholder)
+	rows, err := s.db.QueryContext(ctx, q, args...)
+	if err != nil {
+		return nil, fmt.Errorf("list reviews: %w", err)
+	}
+	return store.ScanSummaries(rows)
+}
+
+// PruneReviews deletes records per p and returns the deleted count.
+func (s *Store) PruneReviews(ctx context.Context, p store.PrunePolicy) (int, error) {
+	return store.ExecPruneSqlite(ctx, s.db, p)
 }
 
 // EngineStore adapts this Store to engine.Store (engine.PersistRecord <->
@@ -251,13 +298,21 @@ type EngineStore struct{ S *Store }
 // SaveReview adapts an engine.PersistRecord to the store record and persists it.
 func (e EngineStore) SaveReview(ctx context.Context, rec engine.PersistRecord) (string, error) {
 	return e.S.SaveReview(ctx, store.ReviewRecord{
-		ID:        rec.ID,
-		RepoDir:   rec.RepoDir,
-		Mode:      rec.Mode,
-		HeadSHA:   rec.HeadSHA,
-		CreatedAt: rec.CreatedAt,
-		Findings:  rec.Findings,
-		Stats:     rec.Stats,
+		ID:          rec.ID,
+		RepoDir:     rec.RepoDir,
+		Mode:        rec.Mode,
+		HeadSHA:     rec.HeadSHA,
+		Owner:       rec.Owner,
+		Repo:        rec.Repo,
+		Number:      rec.Number,
+		Provider:    rec.Provider,
+		Model:       rec.Model,
+		CreatedAt:   rec.CreatedAt,
+		Findings:    rec.Findings,
+		Stats:       rec.Stats,
+		Transcript:  rec.Transcript,
+		RawPrompt:   rec.RawPrompt,
+		RawResponse: rec.RawResponse,
 	})
 }
 
@@ -268,13 +323,21 @@ func (e EngineStore) GetReview(ctx context.Context, id string) (engine.PersistRe
 		return engine.PersistRecord{}, err
 	}
 	return engine.PersistRecord{
-		ID:        r.ID,
-		RepoDir:   r.RepoDir,
-		Mode:      r.Mode,
-		HeadSHA:   r.HeadSHA,
-		CreatedAt: r.CreatedAt,
-		Findings:  r.Findings,
-		Stats:     r.Stats,
+		ID:          r.ID,
+		RepoDir:     r.RepoDir,
+		Mode:        r.Mode,
+		HeadSHA:     r.HeadSHA,
+		Owner:       r.Owner,
+		Repo:        r.Repo,
+		Number:      r.Number,
+		Provider:    r.Provider,
+		Model:       r.Model,
+		CreatedAt:   r.CreatedAt,
+		Findings:    r.Findings,
+		Stats:       r.Stats,
+		Transcript:  r.Transcript,
+		RawPrompt:   r.RawPrompt,
+		RawResponse: r.RawResponse,
 	}, nil
 }
 

@@ -90,6 +90,20 @@ type Github struct {
 	PrivateKeyPath string `toml:"private_key_path,omitempty"` // PATH to the App private-key PEM; never inline PEM
 }
 
+// History configures the local review-history store written by every `miucr
+// review` run (on by default). A config `enabled = false` opts out globally (the
+// per-run opt-out is --no-save); Enabled is a *bool so an absent key inherits the
+// default-on, distinct from an explicit false. MaxRecords>0 auto-prunes the
+// oldest records after each save.
+type History struct {
+	Enabled    *bool `toml:"enabled,omitempty"`
+	MaxRecords int   `toml:"max_records,omitempty"`
+}
+
+// On reports whether history persistence is enabled: nil (unset) inherits the
+// default-on, an explicit false disables it.
+func (h History) On() bool { return h.Enabled == nil || *h.Enabled }
+
 // Config is the layered configuration: a set of named provider profiles plus
 // the profile to use when none is selected on the command line.
 type Config struct {
@@ -98,6 +112,7 @@ type Config struct {
 	Store           Store               `toml:"store"`
 	Embedding       Embedding           `toml:"embedding"`
 	Github          Github              `toml:"github"`
+	History         History             `toml:"history"`
 }
 
 // Defaults returns the built-in configuration: the two first-class kinds as
@@ -113,5 +128,6 @@ func Defaults() Config {
 		Store:     Store{Backend: "sqlite"},
 		Embedding: Embedding{Enabled: false, Model: DefaultEmbeddingModel, Dim: DefaultEmbeddingDim},
 		Github:    Github{Mode: "pat"},
+		History:   History{},
 	}
 }

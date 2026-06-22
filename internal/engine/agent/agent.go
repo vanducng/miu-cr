@@ -33,6 +33,9 @@ type Context struct {
 	Rev             string
 	Runner          *gitcmd.Runner
 	Progress        func(string) // nil = silent; milestone/tool strings only, never secrets
+	// Trace, when non-nil, accumulates the raw prompt, per-turn tool calls, and
+	// raw final response for persistence. nil = no capture (mirrors Progress).
+	Trace *engine.ReviewTrace
 }
 
 // progress invokes the sink when set; a nil sink is a silent no-op.
@@ -138,13 +141,15 @@ func (a *anthropicAgent) Review(ctx stdctx.Context, rc Context) ([]engine.Findin
 		rc.Runner = gitcmd.New()
 	}
 
+	userPrompt := BuildUserPrompt(PromptParts{Rules: rc.Rules, SemanticContext: rc.SemanticContext, Diff: rc.Text})
+	rc.Trace.SetPrompt(userPrompt)
 	params := anthropic.MessageNewParams{
 		MaxTokens: maxTokens,
 		Model:     anthropic.Model(a.model),
 		System:    []anthropic.TextBlockParam{{Text: systemPrompt}},
 		Tools:     reviewTools(),
 		Messages: []anthropic.MessageParam{
-			anthropic.NewUserMessage(anthropic.NewTextBlock(BuildUserPrompt(PromptParts{Rules: rc.Rules, SemanticContext: rc.SemanticContext, Diff: rc.Text}))),
+			anthropic.NewUserMessage(anthropic.NewTextBlock(userPrompt)),
 		},
 	}
 
@@ -171,9 +176,10 @@ func (a *anthropicAgent) Review(ctx stdctx.Context, rc Context) ([]engine.Findin
 		}
 		params.Messages = append(params.Messages, msg.ToParam())
 
-		toolResults, finalText := a.dispatch(ctx, rc, msg)
+		toolResults, finalText := a.dispatch(ctx, rc, turn, msg)
 		if len(toolResults) == 0 {
 			if findings, ok := parseFindings(finalText); ok {
+				rc.Trace.SetFinalResponse(finalText)
 				return findings, nil
 			}
 			emptyRounds++
@@ -192,7 +198,7 @@ func (a *anthropicAgent) Review(ctx stdctx.Context, rc Context) ([]engine.Findin
 
 // dispatch executes every tool_use block in msg, returning the tool_result
 // blocks and the concatenated assistant text (the candidate final answer).
-func (a *anthropicAgent) dispatch(ctx stdctx.Context, rc Context, msg *anthropic.Message) ([]anthropic.ContentBlockParamUnion, string) {
+func (a *anthropicAgent) dispatch(ctx stdctx.Context, rc Context, turn int, msg *anthropic.Message) ([]anthropic.ContentBlockParamUnion, string) {
 	var results []anthropic.ContentBlockParamUnion
 	var text strings.Builder
 	for _, block := range msg.Content {
@@ -200,7 +206,7 @@ func (a *anthropicAgent) dispatch(ctx stdctx.Context, rc Context, msg *anthropic
 		case "text":
 			text.WriteString(block.Text)
 		case "tool_use":
-			out, isErr := runTool(ctx, rc, block.Name, block.Input)
+			out, isErr := runTool(ctx, rc, turn, block.Name, block.Input)
 			results = append(results, anthropic.NewToolResultBlock(block.ID, out, isErr))
 		}
 	}
@@ -231,8 +237,9 @@ func fileReadLabel(a fileReadArgs) string {
 }
 
 // runTool executes one tool against the reviewed revision. Provider-agnostic so
-// both the Anthropic and OpenAI loops share it. Returns (content, isError).
-func runTool(ctx stdctx.Context, rc Context, name string, input json.RawMessage) (string, bool) {
+// all agent loops share it (and record the dispatch into the trace). Returns
+// (content, isError).
+func runTool(ctx stdctx.Context, rc Context, turn int, name string, input json.RawMessage) (string, bool) {
 	switch name {
 	case "file_read":
 		var args fileReadArgs
@@ -241,6 +248,7 @@ func runTool(ctx stdctx.Context, rc Context, name string, input json.RawMessage)
 			return "file_read requires a non-empty \"file\"", true
 		}
 		rc.progress("→ file_read " + fileReadLabel(args))
+		rc.Trace.RecordTool(turn, "file_read", fileReadLabel(args))
 		out, err := enginectx.ReadRange(ctx, rc.RepoDir, rc.Rev, args.File, args.Start, args.End, rc.Runner)
 		if err != nil {
 			return fmt.Sprintf("file_read failed: %v", err), true
@@ -256,6 +264,7 @@ func runTool(ctx stdctx.Context, rc Context, name string, input json.RawMessage)
 			return "grep requires a non-empty \"pattern\"", true
 		}
 		rc.progress("→ grep " + args.Pattern)
+		rc.Trace.RecordTool(turn, "grep", args.Pattern)
 		out, err := enginectx.Grep(ctx, rc.RepoDir, rc.Rev, args.Pattern, rc.Runner)
 		if err != nil {
 			return fmt.Sprintf("grep failed: %v", err), true

@@ -41,6 +41,17 @@ func SetReviewStoreFactory(f func(ctx stdctx.Context) (serve.ReviewStore, func()
 	reviewStoreFactory = f
 }
 
+// historyStoreFactory opens the full review store for the `history` command group
+// (list/show/prune). Injected from the wire package so cli stays below store in
+// the import graph; nil when no wiring ran (tests inject their own).
+var historyStoreFactory func(ctx stdctx.Context) (store.Store, func(), error)
+
+// SetHistoryStoreFactory wires the store opener used by `history`. Called once
+// from wire.init before any command runs.
+func SetHistoryStoreFactory(f func(ctx stdctx.Context) (store.Store, func(), error)) {
+	historyStoreFactory = f
+}
+
 var version = "v0.15.0" // x-release-please-version
 
 // Execute runs the miucr root command with args, returning a CLIError whose Exit
@@ -94,6 +105,7 @@ func rootCommand(opts *options) *cobra.Command {
 	root.AddCommand(mcpCommand(opts))
 	root.AddCommand(serveCommand(opts))
 	root.AddCommand(rulesCommand(opts))
+	root.AddCommand(historyCommand(opts))
 	return root
 }
 

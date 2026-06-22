@@ -34,15 +34,19 @@ type ReviewRequest struct {
 	Timeout      time.Duration
 	ExpandWindow int
 	TokenBudget  int
+	NoSave       bool         // opt out of persisting this run to the local history store
 	Progress     func(string) // nil = silent; stderr milestones, never the stdout envelope
 }
 
 // ReviewOutcome is the Reviewer's result: anchored findings plus run stats. PR
 // is non-nil only on the --pr path and drives the data.pr envelope block.
+// ReviewID is the saved record id (empty when not persisted); it surfaces as the
+// additive review_id envelope field.
 type ReviewOutcome struct {
 	Findings []ReviewFinding
 	Stats    map[string]any
 	PR       *PRResult
+	ReviewID string
 }
 
 // PRResult is the typed PR summary for the data.pr envelope block on the --pr
@@ -116,6 +120,7 @@ type PRReviewRequest struct {
 	Extensions   []string
 	ExpandWindow int
 	TokenBudget  int
+	NoSave       bool         // opt out of persisting this run to the local history store
 	Progress     func(string) // nil = silent; stderr milestones, never the stdout envelope
 }
 
@@ -220,6 +225,7 @@ func reviewCommand(opts *options) *cobra.Command {
 		noPost       bool
 		suggest      bool
 		approveClean bool
+		noSave       bool
 		verbose      bool
 		quiet        bool
 	)
@@ -259,6 +265,7 @@ func reviewCommand(opts *options) *cobra.Command {
 					exts:         exts,
 					expand:       expand,
 					tokenBudget:  tokenBudget,
+					noSave:       noSave,
 					progress:     prog,
 				})
 			}
@@ -286,6 +293,7 @@ func reviewCommand(opts *options) *cobra.Command {
 				Timeout:      opts.timeout,
 				ExpandWindow: expand,
 				TokenBudget:  tokenBudget,
+				NoSave:       noSave,
 				Progress:     prog,
 			}
 			ctx := cmd.Context()
@@ -306,8 +314,9 @@ func reviewCommand(opts *options) *cobra.Command {
 				"gate":     gate,
 			}
 			data := map[string]any{
-				"findings": out.Findings,
-				"stats":    out.Stats,
+				"findings":  out.Findings,
+				"stats":     out.Stats,
+				"review_id": out.ReviewID,
 			}
 			if prettyOutput {
 				if err := renderReviewTable(cmd.OutOrStdout(), out); err != nil {
@@ -351,6 +360,7 @@ func reviewCommand(opts *options) *cobra.Command {
 	f.BoolVar(&noPost, "no-post", false, "Dry-run the PR review without posting (default for --pr)")
 	f.BoolVar(&suggest, "suggest", false, "Emit GitHub native one-click suggestions for proven single-line replacements; author-applied, never pushed. Requires --post (inert in dry-run) (default OFF; else a plain hint)")
 	f.BoolVar(&approveClean, "approve-clean", false, "Submit Event=APPROVE only on a clean, non-fork, trusted-author PR; skipped (→ COMMENT) otherwise, never errors. A PAT APPROVE counts toward required reviews. Requires --post (inert in dry-run) (default OFF)")
+	f.BoolVar(&noSave, "no-save", false, "Do not persist this review to the local history store (default: every review is saved to ~/.config/miu/cr/state.db)")
 	f.BoolVarP(&verbose, "verbose", "v", false, "Print progress to stderr (default when stderr is a terminal; stdout envelope unchanged)")
 	f.BoolVarP(&quiet, "quiet", "q", false, "Silence progress output (overrides --verbose and TTY auto-detect)")
 
@@ -379,6 +389,7 @@ type prRunArgs struct {
 	exts        []string
 	expand      int
 	tokenBudget int
+	noSave      bool
 	progress    func(string)
 }
 
@@ -424,6 +435,7 @@ func runPRReview(cmd *cobra.Command, a prRunArgs) error {
 		Extensions:   a.exts,
 		ExpandWindow: a.expand,
 		TokenBudget:  a.tokenBudget,
+		NoSave:       a.noSave,
 		Progress:     a.progress,
 	})
 	if err != nil {
@@ -434,7 +446,7 @@ func runPRReview(cmd *cobra.Command, a prRunArgs) error {
 	}
 
 	summary := map[string]any{"findings": len(out.Findings), "gate": a.gate}
-	data := map[string]any{"findings": out.Findings, "stats": out.Stats}
+	data := map[string]any{"findings": out.Findings, "stats": out.Stats, "review_id": out.ReviewID}
 	if out.PR != nil {
 		data["pr"] = out.PR
 	}

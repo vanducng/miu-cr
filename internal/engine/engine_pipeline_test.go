@@ -2,6 +2,7 @@ package engine_test
 
 import (
 	stdctx "context"
+	"encoding/json"
 	"errors"
 	"os"
 	"os/exec"
@@ -33,6 +34,10 @@ func (f *fakeAgent) Review(_ stdctx.Context, rc engine.AgentContext) ([]engine.F
 	if rc.Progress != nil {
 		rc.Progress("agent ran")
 	}
+	rc.Trace.SetPrompt("fake prompt")
+	rc.Trace.RecordTool(0, "grep", "Risky")
+	rc.Trace.RecordTool(1, "file_read", "app.go:1-5")
+	rc.Trace.SetFinalResponse(`{"findings":[]}`)
 	out := make([]engine.Finding, len(f.findings))
 	copy(out, f.findings)
 	return out, nil
@@ -158,6 +163,86 @@ func TestReviewSurvivesPersistFailure(t *testing.T) {
 	}
 	if res.Stats["persist_error"] != "disk full" {
 		t.Errorf("persist_error: want %q, got %v", "disk full", res.Stats["persist_error"])
+	}
+}
+
+type captureStore struct{ rec engine.PersistRecord }
+
+func (s *captureStore) SaveReview(_ stdctx.Context, rec engine.PersistRecord) (string, error) {
+	s.rec = rec
+	return "rev_1", nil
+}
+func (s *captureStore) GetReview(stdctx.Context, string) (engine.PersistRecord, error) {
+	return s.rec, nil
+}
+
+// With a Store wired, the engine threads a *ReviewTrace into the agent and
+// collects the captured prompt/turns/response into the PersistRecord.
+func TestReviewCollectsTrace(t *testing.T) {
+	dir, findings := semanticDir(t)
+	fa := &fakeAgent{findings: findings}
+	eng := engine.New(fa, gitcmd.New())
+	cs := &captureStore{}
+	eng.Store = cs
+
+	res, err := eng.Review(stdctx.Background(), engine.Request{Mode: 0, RepoDir: dir, Gate: "high", Extensions: []string{"go"}})
+	if err != nil {
+		t.Fatalf("Review: %v", err)
+	}
+	if res.ID != "rev_1" {
+		t.Errorf("review id: want rev_1, got %q", res.ID)
+	}
+	if cs.rec.RawPrompt != "fake prompt" {
+		t.Errorf("raw prompt: want %q, got %q", "fake prompt", cs.rec.RawPrompt)
+	}
+	if cs.rec.RawResponse != `{"findings":[]}` {
+		t.Errorf("raw response not captured, got %q", cs.rec.RawResponse)
+	}
+	var turns []engine.TurnRecord
+	if err := json.Unmarshal(cs.rec.Transcript, &turns); err != nil {
+		t.Fatalf("transcript not valid JSON: %v", err)
+	}
+	if len(turns) != 2 || turns[0].Tool != "grep" || turns[1].Tool != "file_read" {
+		t.Errorf("transcript turns: %+v", turns)
+	}
+}
+
+// Provider/Model/Owner/Repo/Number from the Request flow into the PersistRecord
+// (no secrets — those fields are non-secret context only).
+func TestReviewPersistsRequestContext(t *testing.T) {
+	dir, findings := semanticDir(t)
+	fa := &fakeAgent{findings: findings}
+	eng := engine.New(fa, gitcmd.New())
+	cs := &captureStore{}
+	eng.Store = cs
+
+	_, err := eng.Review(stdctx.Background(), engine.Request{
+		Mode: 0, RepoDir: dir, Gate: "high", Extensions: []string{"go"},
+		Provider: "anthropic", Model: "claude-x", Owner: "acme", Repo: "widget", Number: 7,
+	})
+	if err != nil {
+		t.Fatalf("Review: %v", err)
+	}
+	r := cs.rec
+	if r.Provider != "anthropic" || r.Model != "claude-x" {
+		t.Errorf("provider/model: got %q/%q", r.Provider, r.Model)
+	}
+	if r.Owner != "acme" || r.Repo != "widget" || r.Number != 7 {
+		t.Errorf("PR context: got %q/%q/%d", r.Owner, r.Repo, r.Number)
+	}
+}
+
+// No Store => no trace allocated => the agent's recorders no-op (no panic).
+func TestReviewNoStoreNoTrace(t *testing.T) {
+	dir, findings := semanticDir(t)
+	fa := &fakeAgent{findings: findings}
+	eng := engine.New(fa, gitcmd.New())
+	res, err := eng.Review(stdctx.Background(), engine.Request{Mode: 0, RepoDir: dir, Gate: "high", Extensions: []string{"go"}})
+	if err != nil {
+		t.Fatalf("Review without store: %v", err)
+	}
+	if res.ID != "" {
+		t.Errorf("no store must leave review id empty, got %q", res.ID)
 	}
 }
 

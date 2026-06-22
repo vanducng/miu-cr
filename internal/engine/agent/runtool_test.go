@@ -42,13 +42,13 @@ func TestRunTool_Validation(t *testing.T) {
 	ctx := stdctx.Background()
 	rc := Context{Runner: gitcmd.New()}
 
-	if out, isErr := runTool(ctx, rc, "file_read", json.RawMessage(`{}`)); !isErr || !strings.Contains(out, "non-empty") {
+	if out, isErr := runTool(ctx, rc, 0, "file_read", json.RawMessage(`{}`)); !isErr || !strings.Contains(out, "non-empty") {
 		t.Errorf("empty file_read: got %q isErr=%v", out, isErr)
 	}
-	if out, isErr := runTool(ctx, rc, "grep", json.RawMessage(`{}`)); !isErr || !strings.Contains(out, "non-empty") {
+	if out, isErr := runTool(ctx, rc, 0, "grep", json.RawMessage(`{}`)); !isErr || !strings.Contains(out, "non-empty") {
 		t.Errorf("empty grep: got %q isErr=%v", out, isErr)
 	}
-	if out, isErr := runTool(ctx, rc, "bogus", json.RawMessage(`{}`)); !isErr || !strings.Contains(out, "unknown tool") {
+	if out, isErr := runTool(ctx, rc, 0, "bogus", json.RawMessage(`{}`)); !isErr || !strings.Contains(out, "unknown tool") {
 		t.Errorf("unknown tool: got %q isErr=%v", out, isErr)
 	}
 }
@@ -58,22 +58,22 @@ func TestRunTool_FileReadAndGrep(t *testing.T) {
 	ctx := stdctx.Background()
 	rc := Context{RepoDir: repo, Rev: sha, Runner: gitcmd.New()}
 
-	out, isErr := runTool(ctx, rc, "file_read", json.RawMessage(`{"file":"main.go"}`))
+	out, isErr := runTool(ctx, rc, 0, "file_read", json.RawMessage(`{"file":"main.go"}`))
 	if isErr || !strings.Contains(out, "func Foo()") {
 		t.Errorf("file_read: got %q isErr=%v", out, isErr)
 	}
 
-	out, isErr = runTool(ctx, rc, "grep", json.RawMessage(`{"pattern":"func Bar"}`))
+	out, isErr = runTool(ctx, rc, 0, "grep", json.RawMessage(`{"pattern":"func Bar"}`))
 	if isErr || !strings.Contains(out, "Bar") {
 		t.Errorf("grep match: got %q isErr=%v", out, isErr)
 	}
 
-	out, isErr = runTool(ctx, rc, "grep", json.RawMessage(`{"pattern":"zzz_no_such_symbol"}`))
+	out, isErr = runTool(ctx, rc, 0, "grep", json.RawMessage(`{"pattern":"zzz_no_such_symbol"}`))
 	if isErr || out != "(no matches)" {
 		t.Errorf("grep no-match: got %q isErr=%v", out, isErr)
 	}
 
-	out, isErr = runTool(ctx, rc, "file_read", json.RawMessage(`{"file":"main.go","start":99,"end":100}`))
+	out, isErr = runTool(ctx, rc, 0, "file_read", json.RawMessage(`{"file":"main.go","start":99,"end":100}`))
 	if isErr || out != "(no lines in range)" {
 		t.Errorf("file_read empty range: got %q isErr=%v", out, isErr)
 	}
