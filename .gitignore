@@ -25,3 +25,4 @@ docs/dist/
 # agent-local config / memory (but track the in-repo miucr skill)
 .claude/*
 !.claude/skills/
+!.claude/skills/**
