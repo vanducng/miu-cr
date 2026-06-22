@@ -67,7 +67,10 @@ func TestResolveExplicitKeyBeatsOAuth(t *testing.T) {
 	}
 }
 
-func TestResolveEnvKeyBeatsOAuth(t *testing.T) {
+func TestResolveOAuthBeatsAmbientEnvKey(t *testing.T) {
+	// A deliberate `miucr login` (OAuth) must win over an ambient OPENAI_API_KEY
+	// (commonly set for other tools), so a stray env var can't silently route a
+	// review to the billed API instead of the user's ChatGPT plan.
 	clearProviderEnv(t)
 	t.Setenv("OPENAI_API_KEY", "sk-env")
 	creds, err := resolveWith(config.Defaults(), ResolveInput{
@@ -77,8 +80,22 @@ func TestResolveEnvKeyBeatsOAuth(t *testing.T) {
 	if err != nil {
 		t.Fatalf("resolve: %v", err)
 	}
+	if creds.Backend != "codex" {
+		t.Errorf("OAuth login must beat an ambient OPENAI_API_KEY: %+v", creds)
+	}
+}
+
+func TestResolveAmbientEnvKeyUsedWithoutOAuth(t *testing.T) {
+	// With no login, the ambient OPENAI_API_KEY is still the zero-config fallback.
+	clearProviderEnv(t)
+	t.Setenv("OPENAI_API_KEY", "sk-env")
+	noCred := func(stdctx.Context) (OAuthCredential, bool, error) { return OAuthCredential{}, false, nil }
+	creds, err := resolveWith(config.Defaults(), ResolveInput{Provider: "openai", OAuthResolver: noCred})
+	if err != nil {
+		t.Fatalf("resolve: %v", err)
+	}
 	if creds.Backend == "codex" || creds.APIKey != "sk-env" {
-		t.Errorf("OPENAI_API_KEY must win: %+v", creds)
+		t.Errorf("ambient OPENAI_API_KEY should be the fallback when not logged in: %+v", creds)
 	}
 }
 

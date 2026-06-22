@@ -190,32 +190,36 @@ func resolveOpenAI(in ResolveInput, prof config.Provider) (Credentials, error) {
 			Exit:    1,
 		}
 	}
-	apiKey := firstNonEmpty(in.APIKey, os.Getenv("OPENAI_API_KEY"), profileSecret(prof))
-	if apiKey == "" {
-		// Below explicit key/env/profile: a cached `miucr login` credential routes
-		// to the codex backend (the ChatGPT-plan path).
-		if in.OAuthResolver != nil {
-			if creds, ok, err := resolveOAuthCodex(in, prof); err != nil {
-				return Credentials{}, err
-			} else if ok {
-				return creds, nil
-			}
-		}
-		return Credentials{}, &clierr.CLIError{
-			Code:    "agent.no_credentials",
-			Message: "no OpenAI API key: set OPENAI_API_KEY, configure a provider in " + config.FilePathOrEmpty() + ", or pass --api-key (or run `miucr login` to use your ChatGPT plan)",
-			Hint:    "export OPENAI_API_KEY=... or run with --api-key; run `miucr login` to review on your ChatGPT plan; see config.example.toml for provider profiles",
-			Exit:    1,
-		}
-	}
 	baseURL := firstNonEmpty(in.BaseURL, os.Getenv("OPENAI_BASE_URL"), prof.BaseURL, config.DefaultOpenAIBaseURL)
 	model := firstNonEmpty(in.Model, os.Getenv("OPENAI_MODEL"), prof.Model, config.DefaultOpenAIModel)
-	return Credentials{
-		Kind:    config.KindOpenAI,
-		APIKey:  apiKey,
-		BaseURL: baseURL,
-		Model:   model,
-	}, nil
+	apiKeyCreds := func(k string) Credentials {
+		return Credentials{Kind: config.KindOpenAI, APIKey: k, BaseURL: baseURL, Model: model}
+	}
+
+	// Auth precedence is intent-ordered, so an ambient OPENAI_API_KEY (often set
+	// for other tools) never silently overrides a deliberate choice:
+	//   1. explicit --api-key, or a profile-configured key (auth_env/auth_token)
+	//   2. a cached `miucr login` (OAuth) -> the codex/ChatGPT-plan backend
+	//   3. zero-config fallback: an ambient OPENAI_API_KEY env var
+	if k := firstNonEmpty(in.APIKey, profileSecret(prof)); k != "" {
+		return apiKeyCreds(k), nil
+	}
+	if in.OAuthResolver != nil {
+		if creds, ok, err := resolveOAuthCodex(in, prof); err != nil {
+			return Credentials{}, err
+		} else if ok {
+			return creds, nil
+		}
+	}
+	if k := strings.TrimSpace(os.Getenv("OPENAI_API_KEY")); k != "" {
+		return apiKeyCreds(k), nil
+	}
+	return Credentials{}, &clierr.CLIError{
+		Code:    "agent.no_credentials",
+		Message: "no OpenAI credential: run `miucr login` to use your ChatGPT plan, set OPENAI_API_KEY, configure a provider in " + config.FilePathOrEmpty() + ", or pass --api-key",
+		Hint:    "run `miucr login` to review on your ChatGPT plan; or export OPENAI_API_KEY=... / pass --api-key; see config.example.toml",
+		Exit:    1,
+	}
 }
 
 // resolveOAuthCodex turns an injected login credential into codex-backend
