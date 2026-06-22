@@ -22,5 +22,7 @@ docs/dist/
 *.test
 *.out
 
-# agent-local config / memory
-.claude/
+# agent-local config / memory (but track the in-repo miucr skill)
+.claude/*
+!.claude/skills/
+!.claude/skills/**

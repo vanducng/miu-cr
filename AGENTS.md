@@ -24,11 +24,14 @@ findings into this repository.**
 Before committing, scan the diff for tokens, hostnames, or proprietary source
 that looks real and replace it with synthetic equivalents.
 
-## Keep the downstream skill in sync
+## Keep the skill in sync (in-repo + downstream)
 
-This CLI has a downstream consumer: the **`miucr` skill** at
-`~/skills/skills/miucr/SKILL.md` (Claude Code skill). After landing a change here,
-check whether the skill needs updating and ship it in the `vanducng/skills` repo:
+This CLI ships a Claude Code skill in **two** places that MUST stay identical:
+
+- **In-repo:** `.claude/skills/miucr/SKILL.md` (lives with the code; the source of truth).
+- **Downstream:** `~/skills/skills/miucr/SKILL.md` in the `vanducng/skills` repo.
+
+After landing a change here, update BOTH in the same work session:
 
 - **New/renamed commands, flags, or output shape** → update the skill's command
   examples and the "Output contract" / discovery sections.
@@ -38,9 +41,7 @@ check whether the skill needs updating and ship it in the `vanducng/skills` repo
   MCP section.
 
 Rule of thumb: if a change alters what a user types or sees, the skill is likely
-stale — update it in the same work session, don't defer. There is intentionally
-**no in-repo `.claude` skill**; the skill is maintained out-of-tree and synced
-manually.
+stale — update both copies in the same work session, don't defer.
 
 ## Path namespace — `miu/cr` (never a flat `.miucr/`)
 
