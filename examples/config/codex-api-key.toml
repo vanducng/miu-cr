@@ -1,0 +1,10 @@
+# OpenAI via a platform API key (api.openai.com — billed to your OpenAI account).
+# Copy to ~/.config/miu/cr/config.toml, then:  export OPENAI_API_KEY=sk-...
+# Run:  miucr review --staged --provider openai
+
+default_provider = "openai"
+
+[providers.openai]
+kind     = "openai"
+auth_env = "OPENAI_API_KEY"
+# model  = "gpt-4o"   # optional override

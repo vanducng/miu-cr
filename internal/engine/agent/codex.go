@@ -1,9 +1,11 @@
 package agent
 
 import (
+	"bufio"
 	"bytes"
 	stdctx "context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
@@ -54,6 +56,9 @@ type codexReq struct {
 	Input        []codexItem `json:"input"`
 	Tools        []codexTool `json:"tools,omitempty"`
 	Store        bool        `json:"store"`
+	// The codex backend requires stream:true ("Stream must be set to true"); the
+	// response is an SSE stream parsed in post().
+	Stream bool `json:"stream"`
 }
 
 type codexItem struct {
@@ -79,17 +84,24 @@ type codexTool struct {
 
 // codexResp is the subset of the Responses output we parse: assistant text and
 // function_call items (the tool loop).
+type codexOutItem struct {
+	Type      string `json:"type"`
+	Name      string `json:"name"`
+	CallID    string `json:"call_id"`
+	Arguments string `json:"arguments"`
+	Content   []struct {
+		Type string `json:"type"`
+		Text string `json:"text"`
+	} `json:"content"`
+}
+
 type codexResp struct {
-	Output []struct {
-		Type      string `json:"type"`
-		Name      string `json:"name"`
-		CallID    string `json:"call_id"`
-		Arguments string `json:"arguments"`
-		Content   []struct {
-			Type string `json:"type"`
-			Text string `json:"text"`
-		} `json:"content"`
-	} `json:"output"`
+	Status string `json:"status"`
+	Error  *struct {
+		Message string `json:"message"`
+		Code    string `json:"code"`
+	} `json:"error"`
+	Output []codexOutItem `json:"output"`
 }
 
 func codexTools() []codexTool {
@@ -153,6 +165,7 @@ func (a *codexAgent) Review(ctx stdctx.Context, rc Context) ([]engine.Finding, e
 			Input:        input,
 			Tools:        codexTools(),
 			Store:        false,
+			Stream:       true,
 		}
 		// Final allowed turn: withdraw tools and force a finalize so a
 		// budget-exhausted diff yields a real review, not a hard failure.
@@ -239,11 +252,70 @@ func (a *codexAgent) post(ctx stdctx.Context, body codexReq) (*codexResp, error)
 		b, _ := io.ReadAll(io.LimitReader(resp.Body, 2048))
 		return nil, fmt.Errorf("agent: codex backend status %d: %s", resp.StatusCode, strings.TrimSpace(string(b)))
 	}
-	var out codexResp
-	if err := json.NewDecoder(resp.Body).Decode(&out); err != nil {
-		return nil, fmt.Errorf("agent: decode codex response: %w", err)
+	return parseCodexSSE(resp.Body)
+}
+
+// parseCodexSSE reads the Responses SSE stream and returns the final response
+// object from the response.completed event. Deltas are ignored — only the
+// terminal event carries the full output we parse. response.failed / an error
+// event surfaces as a typed error.
+func parseCodexSSE(r io.Reader) (*codexResp, error) {
+	sc := bufio.NewScanner(r)
+	sc.Buffer(make([]byte, 0, 64*1024), 32<<20) // events can be large (encrypted reasoning)
+	var done []codexOutItem                     // accumulated from output_item.done events
+	for sc.Scan() {
+		line := sc.Text()
+		if !strings.HasPrefix(line, "data:") {
+			continue
+		}
+		data := strings.TrimSpace(line[len("data:"):])
+		if data == "" || data == "[DONE]" {
+			continue
+		}
+		var ev struct {
+			Type     string        `json:"type"`
+			Response *codexResp    `json:"response"`
+			Item     *codexOutItem `json:"item"`
+			Error    *struct {
+				Message string `json:"message"`
+			} `json:"error"`
+		}
+		if err := json.Unmarshal([]byte(data), &ev); err != nil {
+			continue // skip non-JSON keep-alives / partial frames
+		}
+		if ev.Error != nil {
+			return nil, fmt.Errorf("agent: codex stream error: %s", ev.Error.Message)
+		}
+		switch ev.Type {
+		case "response.output_item.done":
+			if ev.Item != nil {
+				done = append(done, *ev.Item)
+			}
+		case "response.completed", "response.incomplete":
+			if ev.Response != nil {
+				if ev.Response.Error != nil {
+					return nil, fmt.Errorf("agent: codex response error: %s", ev.Response.Error.Message)
+				}
+				if len(ev.Response.Output) == 0 {
+					ev.Response.Output = done // some streams deliver items only via output_item.done
+				}
+				return ev.Response, nil
+			}
+			return &codexResp{Output: done}, nil
+		case "response.failed":
+			if ev.Response != nil && ev.Response.Error != nil {
+				return nil, fmt.Errorf("agent: codex response failed: %s", ev.Response.Error.Message)
+			}
+			return nil, fmt.Errorf("agent: codex response failed")
+		}
 	}
-	return &out, nil
+	if err := sc.Err(); err != nil {
+		if errors.Is(err, bufio.ErrTooLong) {
+			return nil, fmt.Errorf("agent: codex SSE event exceeded the read buffer (oversized reasoning content): %w", err)
+		}
+		return nil, fmt.Errorf("agent: read codex stream: %w", err)
+	}
+	return nil, fmt.Errorf("agent: codex stream ended without a completed response")
 }
 
 func (a *codexAgent) do(ctx stdctx.Context, body codexReq, token string) (*http.Response, error) {
@@ -261,7 +333,7 @@ func (a *codexAgent) do(ctx stdctx.Context, body codexReq, token string) (*http.
 		req.Header.Set("ChatGPT-Account-ID", a.accountID)
 	}
 	req.Header.Set("OpenAI-Beta", "responses=experimental")
-	req.Header.Set("Accept", "application/json")
+	req.Header.Set("Accept", "text/event-stream")
 	// The codex backend gates which models a ChatGPT account may use by the
 	// originator; without it every model is rejected as "not supported".
 	req.Header.Set("originator", "codex_cli_rs")

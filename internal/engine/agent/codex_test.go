@@ -14,26 +14,30 @@ import (
 
 // codexMessageResp builds a Responses payload whose single message output_text
 // is the given content (e.g. the findings JSON).
-func codexMessageResp(content string) string {
+// codexSSE wraps a Responses output object as the terminal SSE event the codex
+// backend streams (stream:true). post() parses this.
+func codexSSE(output []map[string]any) string {
 	b, _ := json.Marshal(map[string]any{
-		"output": []map[string]any{{
-			"type":    "message",
-			"content": []map[string]any{{"type": "output_text", "text": content}},
-		}},
+		"type":     "response.completed",
+		"response": map[string]any{"output": output},
 	})
-	return string(b)
+	return "event: response.completed\ndata: " + string(b) + "\n\n"
+}
+
+func codexMessageResp(content string) string {
+	return codexSSE([]map[string]any{{
+		"type":    "message",
+		"content": []map[string]any{{"type": "output_text", "text": content}},
+	}})
 }
 
 func codexFunctionCallResp(callID, name, args string) string {
-	b, _ := json.Marshal(map[string]any{
-		"output": []map[string]any{{
-			"type":      "function_call",
-			"name":      name,
-			"call_id":   callID,
-			"arguments": args,
-		}},
-	})
-	return string(b)
+	return codexSSE([]map[string]any{{
+		"type":      "function_call",
+		"name":      name,
+		"call_id":   callID,
+		"arguments": args,
+	}})
 }
 
 const codexFindingsJSON = `{"findings":[{"file":"pkg/sample.go","severity":"high","category":"bug","existing_code":"return nil","rationale":"swallows the error","suggested_patch":"return err"}]}`

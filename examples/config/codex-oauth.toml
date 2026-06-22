@@ -1,0 +1,12 @@
+# OpenAI / Codex via OAuth — reviews run on your ChatGPT Pro/Max plan (no API key, no API billing).
+# Copy to ~/.config/miu/cr/config.toml, then authenticate once in the browser:
+#   miucr login --provider openai
+# Run:  miucr review --staged
+# The token is cached in ~/.config/miu/cr/oauth.json (0600) — never in this file.
+
+default_provider = "openai"
+
+[providers.openai]
+kind = "openai"
+# Auth comes from `miucr login` (OAuth). No key here.
+# An explicit OPENAI_API_KEY / --api-key still wins if you set one.

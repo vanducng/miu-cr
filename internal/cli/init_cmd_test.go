@@ -2,7 +2,10 @@ package cli
 
 import (
 	"bytes"
+	stdctx "context"
 	"errors"
+	"io"
+	"net/url"
 	"os"
 	"path/filepath"
 	"strings"
@@ -183,6 +186,129 @@ func TestInitDetectionStem(t *testing.T) {
 				t.Fatalf("want scaffolded %s: %v", want, err)
 			}
 		})
+	}
+}
+
+// openai -> env var: default_provider openai + OPENAI_API_KEY, no secret.
+func TestInitOpenAIEnv(t *testing.T) {
+	isolateInitEnv(t)
+	// provider(openai=2), auth method(env=2), env name(blank default), no rules(n)
+	stdout, stderr, err := runInit(t, "2\n2\n\nn\n")
+	if err != nil {
+		t.Fatalf("init: %v\nstderr=%s", err, stderr)
+	}
+	env := decodeEnvelope(t, []byte(stdout))
+	data, _ := env.Data.(map[string]any)
+	if data["auth_method"] != "env" {
+		t.Fatalf("auth_method = %v, want env", data["auth_method"])
+	}
+	if data["default_provider"] != "openai" {
+		t.Fatalf("default_provider = %v, want openai", data["default_provider"])
+	}
+	body := readConfig(t)
+	if !strings.Contains(body, "OPENAI_API_KEY") {
+		t.Fatalf("want OPENAI_API_KEY env recorded:\n%s", body)
+	}
+	if strings.Contains(body, "auth_token =") {
+		t.Fatalf("env init must write no secret:\n%s", body)
+	}
+}
+
+// openai -> paste: literal auth_token only after the plaintext warning + confirm.
+func TestInitOpenAIPaste(t *testing.T) {
+	isolateInitEnv(t)
+	// provider(openai=2), auth method(paste=3), key, confirm-plaintext(y), no rules(n)
+	_, stderr, err := runInit(t, "2\n3\nsk-synthetic-openai\ny\nn\n")
+	if err != nil {
+		t.Fatalf("init: %v\nstderr=%s", err, stderr)
+	}
+	if !strings.Contains(stderr, "plaintext on disk") {
+		t.Fatalf("want plaintext warning:\n%s", stderr)
+	}
+	body := readConfig(t)
+	if !strings.Contains(body, "auth_token") || !strings.Contains(body, "sk-synthetic-openai") {
+		t.Fatalf("paste must write the literal token:\n%s", body)
+	}
+}
+
+// openai -> browser OAuth: token lands in oauth.json (never config), config is
+// just default_provider=openai, envelope reports auth_method=oauth, no secret
+// leaks. Drives the real PKCE flow offline via the httptest auth server + a fake
+// browser-open seam (mirrors login_cmd_test.go).
+func TestInitOpenAIOAuth(t *testing.T) {
+	isolateInitEnv(t)
+	auth := fakeAuthServer(t)
+
+	origLogin := initOAuthLogin
+	initOAuthLogin = func(ctx stdctx.Context, out io.Writer, prov oauthProvider, _ string, _ int, _ bool) (config.OAuthRecord, error) {
+		return runOAuthLogin(ctx, out, prov, auth.URL, 1455, false)
+	}
+	t.Cleanup(func() { initOAuthLogin = origLogin })
+
+	origBrowser := browserOpen
+	browserOpen = func(authURL string) error {
+		u, _ := url.Parse(authURL)
+		return hitCallback(t, u.Query().Get("state"), "fake-code")(authURL)
+	}
+	t.Cleanup(func() { browserOpen = origBrowser })
+
+	// provider(openai=2), auth method(oauth=1), no rules(n)
+	stdout, stderr, err := runInit(t, "2\n1\nn\n")
+	if err != nil {
+		t.Fatalf("init oauth: %v\nstderr=%s", err, stderr)
+	}
+
+	env := decodeEnvelope(t, []byte(stdout))
+	if !env.OK || env.Kind != "init.result" {
+		t.Fatalf("want ok init.result, got %+v", env)
+	}
+	data, _ := env.Data.(map[string]any)
+	if data["auth_method"] != "oauth" {
+		t.Fatalf("auth_method = %v, want oauth", data["auth_method"])
+	}
+	if data["default_provider"] != "openai" {
+		t.Fatalf("default_provider = %v, want openai", data["default_provider"])
+	}
+
+	body := readConfig(t)
+	if !strings.Contains(body, "openai") {
+		t.Fatalf("want default_provider openai in config:\n%s", body)
+	}
+	if strings.Contains(body, "auth_token =") {
+		t.Fatalf("oauth init must write no secret to config:\n%s", body)
+	}
+	for _, secret := range []string{"fake-access-token-SECRET", "sk-exchanged-FAKE"} {
+		if strings.Contains(body, secret) {
+			t.Fatalf("token %q leaked into config", secret)
+		}
+		if strings.Contains(stdout, secret) || strings.Contains(stderr, secret) {
+			t.Fatalf("token %q leaked into output", secret)
+		}
+	}
+
+	oauthPath := filepath.Join(os.Getenv("HOME"), ".config", "miu", "cr", "oauth.json")
+	raw, rerr := os.ReadFile(oauthPath)
+	if rerr != nil {
+		t.Fatalf("read oauth.json: %v", rerr)
+	}
+	if !strings.Contains(string(raw), "fake-access-token-SECRET") {
+		t.Fatalf("oauth.json missing access token")
+	}
+	if !strings.Contains(stderr, "miucr review --staged") {
+		t.Fatalf("payoff must end on the first-review command:\n%s", stderr)
+	}
+}
+
+// --non-interactive --auth oauth has no browser, so it errors toward `miucr login`.
+func TestInitNonInteractiveOAuthErrors(t *testing.T) {
+	isolateInitEnv(t)
+	_, _, err := runInit(t, "",
+		"--non-interactive", "--provider", "openai", "--auth", "oauth", "--yes", "--no-rules")
+	if err == nil {
+		t.Fatal("want error: oauth needs an interactive terminal")
+	}
+	if code := cliErrCode(t, err); code != "init.aborted" {
+		t.Fatalf("want init.aborted, got %s", code)
 	}
 }
 

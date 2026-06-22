@@ -239,7 +239,9 @@ func resolveOAuthCodex(in ResolveInput, prof config.Provider) (Credentials, bool
 	if !ok {
 		return Credentials{}, false, nil
 	}
-	model := firstNonEmpty(in.Model, config.DefaultCodexModel)
+	// The codex allow-list varies by ChatGPT plan; DefaultCodexModel is verified
+	// against a current account but may differ. Allow an override without --model.
+	model := firstNonEmpty(in.Model, os.Getenv("MIUCR_CODEX_MODEL"), prof.Model, config.DefaultCodexModel)
 	return Credentials{
 		Kind:           config.KindOpenAI,
 		Backend:        "codex",

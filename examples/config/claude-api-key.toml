@@ -1,0 +1,10 @@
+# Claude (Anthropic) via API key.
+# Copy to ~/.config/miu/cr/config.toml, then:  export ANTHROPIC_API_KEY=sk-ant-...
+# Run:  miucr review --staged
+
+default_provider = "anthropic"
+
+[providers.anthropic]
+kind     = "anthropic"
+auth_env = "ANTHROPIC_API_KEY"   # NAME of the env var holding the key (never written to disk)
+# model  = "claude-sonnet-4-5-20250929"   # optional override
