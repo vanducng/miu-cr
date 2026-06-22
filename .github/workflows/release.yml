@@ -10,6 +10,7 @@ permissions:
   contents: write
   pull-requests: write
   issues: write
+  actions: write
 
 concurrency:
   group: release-${{ github.ref }}
@@ -64,6 +65,16 @@ jobs:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           HOMEBREW_TAP_GITHUB_TOKEN: ${{ secrets.HOMEBREW_TAP_GITHUB_TOKEN }}
           GORELEASER_CURRENT_TAG: ${{ github.ref_name }}
+
+      # Rebuild the docs on main now the tag exists, so the CI-stamped version is
+      # current. We dispatch on main (not the tag) because the github-pages
+      # environment only allows deploys from main — a tag-triggered Pages deploy
+      # is rejected by the environment protection rule.
+      - name: Refresh docs to the new version
+        if: startsWith(github.ref, 'refs/tags/v')
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: gh workflow run "Deploy Documentation" --ref main
 
   # release-please publishes a bare release body (auto-generated notes only) and goreleaser
   # uploads binaries with mode:keep-existing, so that bare body is never enriched. action.yml
