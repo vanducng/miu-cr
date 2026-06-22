@@ -57,7 +57,10 @@ The body is `{owner, repo, number}` (the PR number). The server:
    client-supplied**.
 4. Persists a **`pending`** record under that id, then enqueues the review onto
    the same bounded worker pool the webhook uses.
-5. Returns **`202`** with the id, in the `miucr.cli/v1` envelope:
+5. **Two branches from the enqueue:**
+   - *Enqueue rejected* (queue full or job coalesced) → the record is flipped to
+     **`failed`** and the endpoint returns **`503`** (`queue.full`) so the client retries.
+   - *Enqueue accepted* → returns **`202`** with the id, in the `miucr.cli/v1` envelope:
 
 ```json
 {
@@ -108,7 +111,7 @@ An unknown id is a **`404`**.
 |------------|-------------------------------------------------------------------------|
 | `pending`  | Queued; the worker has not finished. `findings`/`stats` are empty.      |
 | `done`     | The review finished; `findings`/`stats` are populated.                  |
-| `failed`   | The review errored, **or** a stuck `pending` row aged past the review timeout. |
+| `failed`   | The review errored, **or** a stuck `pending` row aged past the review timeout, **or** the job could not be enqueued at submit time (worker queue full/coalesced → `503`), in which case the record is `failed` at creation, never having been attempted. |
 
 The worker persists the **final** record under the same id when the review
 finishes (`done` with findings/stats, or `failed` on error). **Stuck-pending
@@ -126,6 +129,8 @@ never leaves an eternal `pending`.
 | `404`  | `GET` of an unknown review id.                                      |
 | `405`  | Wrong method on a `/v1` route.                                      |
 | `413`  | Request body over the 64 KB cap.                                    |
+| `500`  | Internal error (e.g. token/store unavailable, id generation failed). |
+| `503`  | Worker queue full or the job was coalesced; the just-persisted record is flipped to `failed` and the client should retry. |
 
 ## GitHub App installation auth (opt-in)
 

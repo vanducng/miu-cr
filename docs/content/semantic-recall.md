@@ -51,16 +51,19 @@ likewise unaffected; recall is scoped to the store-backed `--pr` / serve path.
 
 ### Postgres + the `vector` extension
 
-The semantic table needs the `pgvector` extension. miucr creates the table
-idempotently but does **not** issue `CREATE EXTENSION` for you — install it once
-with a role allowed to:
+The semantic table needs the `pgvector` extension. miucr runs `CREATE EXTENSION IF
+NOT EXISTS vector` as part of the idempotent embedding migration, so it provisions
+pgvector for you **automatically when the connecting role may create extensions**.
+
+If that role **lacks** the `CREATE EXTENSION` privilege and the extension is not
+already installed, the migration fails with a typed `store.unavailable` error (it
+never panics). In that case a superuser/owner must run it once beforehand:
 
 ```sql
 CREATE EXTENSION IF NOT EXISTS vector;
 ```
 
-If the extension is missing, the store returns a typed `store.unavailable` error
-(it never panics). If the configured `dim` does not match an existing column, you
+If the configured `dim` does not match an existing column, you
 get a typed `store.dim_mismatch` — dim is immutable per database; pick one and
 keep it.
 
@@ -71,13 +74,15 @@ keep it.
   privacy trade-off of the feature — it is **off by default** for that reason.
 - **Self-host the embedder** by pointing `base_url` at any OpenAI-compatible
   embedding endpoint inside your network. `base_url` is **non-secret** and is
-  documented/loggable; the embedder API key and the Postgres DSN are **never**
-  logged, persisted to disk, or written to the `miucr.cli/v1` envelope
-  (`config.RedactString` at every edge).
+  documented/loggable. The embedder API key resolves at runtime from
+  `MIUCR_EMBED_API_KEY` (falling back to `OPENAI_API_KEY`), and the Postgres DSN
+  from `MIUCR_PG_DSN` (or `[store].dsn`) — both are **never** logged, persisted to
+  disk, or written to the `miucr.cli/v1` envelope (`config.RedactString` at every
+  edge).
 - **Cost visibility.** Each review records a `semantic_recall`
-  (`injected` / `no_matches` / `error`) and, when findings are posted, a
-  `semantic_write` (`upserted=N` / `error`) stat in the envelope so embed activity
-  and outcome are visible. A slow or hung read embed degrades to empty context
+  (`injected` / `no_matches` / `empty_change` / `error`) and, when findings are
+  posted, a `semantic_write` (`upserted=N` / `error`) stat in the envelope so embed
+  activity and outcome are visible. A slow or hung read embed degrades to empty context
   plus an `error` stat — the review never fails on the semantic path.
 
 ## Retention & purge

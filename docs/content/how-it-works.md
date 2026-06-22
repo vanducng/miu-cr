@@ -19,8 +19,8 @@ Each stage is deterministic except `Agent.Review`. An empty diff set yields an e
 
 One of three modes produces the reviewable diffs:
 
-- `--staged` reads the **index** (what you are about to commit), not `HEAD`.
-- `--from`/`--to` diffs two refs.
+- `--staged` reviews staged changes — diffed against `HEAD` (`git diff --cached`), with the new-side content read from the index blob (exactly what you are about to commit, not your unstaged working tree).
+- `--from`/`--to` diffs `<to>` against the **merge-base** of the two refs (`merge-base(from,to)..to`), matching what a PR introduces.
 - `--commit` diffs a commit against its parent.
 
 The reviewed *revision* travels with the diff so later stages read the exact same content the diff came from.
@@ -74,4 +74,4 @@ Finally the gate: severities rank `info(1) < low(2) < medium(3) < high(4) < crit
 
 ## Persistence
 
-When a SQLite store is wired, each review is saved (mode, head SHA, findings, stats) and addressable by id — that id is what the MCP `review_get` tool fetches. The store is backed by `modernc.org/sqlite`. It holds **review records only**; credentials are never part of a record. See [Credentials](/credentials/).
+Every review is saved to `~/.config/miu/cr/state.db` **by default** (opt out per run with `--no-save`), addressable by id — that id is what the MCP `review_get` tool fetches. Beyond mode, head SHA, findings, and stats, the record also captures provider/model and (on the `--pr` path) the PR owner/repo/number plus an optional transcript. The default store is backed by `modernc.org/sqlite`. It holds **review records only**; credentials are never part of a record. See [Credentials](/credentials/) and [Review history](/history/).

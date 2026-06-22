@@ -48,18 +48,30 @@ miucr review --pr 123
 - The DSN is **never persisted to disk by miucr**, never written to the
   `miucr.cli/v1` JSON envelope, and is **always redacted** (`config.RedactString`)
   in every error and log line, so a password can't leak via a connect failure.
-- A bounded `connect_timeout` makes a bad host fast-fail instead of hanging.
+- A bounded (~10s) connect/ping timeout — a Go-side `context` deadline around the
+  connection ping, **not** a `connect_timeout` DSN parameter — makes a bad host
+  fast-fail instead of hanging.
 
-The schema is created idempotently on open (`CREATE TABLE IF NOT EXISTS`); no
-manual migration step is required. miucr does **not** issue `CREATE EXTENSION`.
+The core schema is created idempotently on open (`CREATE TABLE IF NOT EXISTS`); no
+manual migration step is required. The core `reviews`/`pr_findings` schema issues
+**no** `CREATE EXTENSION`. Only the opt-in semantic-recall layer (when
+`[embedding].enabled = true`) runs `CREATE EXTENSION IF NOT EXISTS vector` to
+provision pgvector — see [Semantic code-recall](/semantic-recall/).
 
 ## Failure behavior
 
 Because Postgres is an **explicit** choice, an open/connect/auth failure with
-`backend = postgres` is **fatal** — a typed `store.unavailable` error (exit 1,
-safe to retry), on both the CLI and the MCP `serve` paths. It never silently
-degrades to a no-op store the way the implicit, opt-in SQLite PR-thread path can.
-A user who selected Postgres is told it failed (with a redacted message).
+`backend = postgres` is **fatal** for the **resolution-tracking and history-read
+paths** — a typed `store.unavailable` error (exit 1, safe to retry): the `miucr
+history` command, the MCP `serve` paths, and the PR-thread store (when
+`MIUCR_PR_STORE` is set). Those never silently degrade to a no-op store the way the
+implicit, opt-in SQLite PR-thread path can; a user who selected Postgres is told it
+failed (with a redacted message).
+
+The one carve-out is the **per-run history save** on `miucr review`: it is
+**best-effort on every backend**. If the store can't be opened (a bad Postgres DSN
+included), the review still runs and emits its findings — the save is skipped with
+a redacted warning and an empty `review_id`, rather than failing the review.
 
 ## Schema
 

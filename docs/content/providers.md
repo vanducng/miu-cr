@@ -36,9 +36,10 @@ base_url   = "https://…"         # optional; gateway/endpoint override
 model      = "…"                 # optional; default model for this profile
 auth_env   = "MY_TOKEN"          # RECOMMENDED; NAME of an env var holding the credential
 auth_token = "…"                 # discouraged literal credential — plaintext on disk
+auth       = "oauth"             # OpenAI only: pin the credential method — "oauth" | "api_key" | omit for auto
 ```
 
-The two built-in profiles `anthropic` and `openai` always exist; you only declare a `[providers.<name>]` block to add a vendor or override a built-in's `model`/`base_url`. A profile's credential (`auth_token` or `auth_env`) is sent as a **Bearer token** on the Anthropic path and as the **API key** on the OpenAI path. Standard env vars and CLI flags still override it.
+The two built-in profiles `anthropic` and `openai` always exist; you only declare a `[providers.<name>]` block to add a vendor or override a built-in's `model`/`base_url`. A profile's credential (`auth_token` or `auth_env`) is sent as a **Bearer token** on the Anthropic path and as the **API key** on the OpenAI path. Standard env vars and CLI flags still override it. `auth` is OpenAI-only and pins the credential method — `"oauth"` (use `miucr login`/the ChatGPT plan, never an API key), `"api_key"` (always a key, never OAuth), or omitted for intent-ordered auto; an unknown value is a `config.invalid` error.
 
 :::caution[Prefer `auth_env` over `auth_token`]
 `auth_env` names an env var; the token is read at run time and never written to the config file. `auth_token` stores the literal token **in plaintext on disk** — use it only when an env var isn't practical. When both are set, `auth_token` wins, and miu-cr prints a one-time warning whenever a plaintext `auth_token` is used.
@@ -121,6 +122,18 @@ Resolution order:
 | Model | `--model` | `OPENAI_MODEL` | `model` | `gpt-4o` |
 
 Requests send `max_tokens` (not `max_completion_tokens`) for the broadest compatibility with OpenAI-compatible gateways. `--auth-token` is **Anthropic-only**; passing it with an OpenAI provider is a typed error.
+
+### OAuth / your ChatGPT plan
+
+The OpenAI provider can also authenticate **without an API key** by reviewing on your ChatGPT plan. `miucr login` caches an OAuth token and subsequent OpenAI reviews talk to the **codex backend** (the ChatGPT-plan Responses protocol). On that path the model defaults to `gpt-5.5` (override with `--model` or `MIUCR_CODEX_MODEL`; the pinned `gpt-4o`/`OPENAI_MODEL` default does not apply because the codex backend rejects api.openai.com models).
+
+When `auth` is unset, the OpenAI credential resolves **intent-ordered** so an ambient `OPENAI_API_KEY` (often set for other tools) never silently overrides a deliberate choice:
+
+1. a profile-configured key (`auth_env` / `auth_token`) — or `--api-key`;
+2. a cached `miucr login` (OAuth → codex / ChatGPT-plan backend);
+3. an ambient `OPENAI_API_KEY` env var.
+
+Pin the method with `auth = "oauth"` or `auth = "api_key"` to skip the auto order. See [Credentials → Using your ChatGPT plan](/credentials/#using-openai--your-chatgpt-plan-miucr-login).
 
 ### Generic OpenAI-compatible gateway — example profile
 

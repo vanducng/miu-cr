@@ -35,10 +35,13 @@ The wizard asks three things:
 
 1. **Provider** — `[1] anthropic  [2] openai  [3] custom`. Custom asks for a
    gateway base URL (e.g. a GLM/z.ai endpoint).
-2. **API-key source** — `[1] env var (recommended)` or `[2] paste now`.
-   The recommended path stores **only the env-var name** (`ANTHROPIC_API_KEY` by
-   default) — **no secret is written to disk**. Paste-now is gated behind an
-   explicit confirm and a plaintext-on-disk warning.
+2. **Auth method** — for `anthropic`/`custom` the menu is `[1] env var` or
+   `[2] paste now`. The env-var path stores **only the env-var name**
+   (`ANTHROPIC_API_KEY` by default) — **no secret is written to disk**. Paste-now
+   is gated behind an explicit confirm and a plaintext-on-disk warning. For
+   `openai` the menu adds a third, default option: **`[1] Browser login (OAuth)`**
+   (review on your ChatGPT/Codex plan, no API key — see `miucr login`), then
+   `[2] env var` and `[3] paste now`.
 3. **Project rules** — `init` detects your stack (`go.mod`, `package.json`,
    `pyproject.toml`, …) and offers to scaffold a starter rule under
    `.miu/cr/rules/`.
@@ -48,13 +51,13 @@ provider block you picked — not the full built-in defaults. It ends on a payof
 box pointing at your first command:
 
 ```
-Provider:  anthropic
-Model:     claude-sonnet-4-5-20250929
-Auth:      env ANTHROPIC_API_KEY
-Rules:     .miu/cr/rules/go.md
-Config:    ~/.config/miu/cr/config.toml
+  ✓ Config written: ~/.config/miu/cr/config.toml
+  ✓ Provider: anthropic
+  ✓ Auth: env ANTHROPIC_API_KEY
+  ✓ Rules: .miu/cr/rules/go.md
 
-▶ miucr review --staged
+  Set ANTHROPIC_API_KEY in your shell before reviewing.
+  ▶ miucr review --staged
 ```
 
 Re-running `init` is idempotent — it asks `Overwrite?` before clobbering an
@@ -92,21 +95,29 @@ human table):
   "api_version": "miucr.cli/v1",
   "ok": true,
   "kind": "review.result",
+  "summary": { "findings": 1, "gate": "high" },
   "data": {
     "findings": [
       {
+        "file": "internal/auth/session.go",
+        "line": 42,
+        "end_line": 42,
         "severity": "high",
         "category": "correctness",
-        "path": "internal/auth/session.go",
-        "line": 42,
-        "title": "Missing return after 401 write",
-        "rationale": "ServeHTTP continues after writing the 401, leaking the handler body to an unauthenticated caller."
+        "rationale": "ServeHTTP continues after writing the 401, leaking the handler body to an unauthenticated caller.",
+        "suggested_patch": "…optional minimal fix…",
+        "quoted_code": "…verbatim source the finding anchors to…"
       }
     ],
-    "stats": { "files_reviewed": 3, "findings": 1 }
+    "stats": { "files_reviewed": 3, "findings_total": 1, "truncation_level": "full" },
+    "review_id": "rev_…"
   }
 }
 ```
+
+The findings **count** lives in the top-level `summary` map; `data.stats` carries
+`files_reviewed` / `findings_total` / `findings_dropped` / `truncation_level`,
+and every saved review returns its `review_id`.
 
 The process exits non-zero when a finding reaches the `--gate` severity (default
 `high`), so the same command works as a pre-push or CI check. Other modes:
@@ -130,9 +141,8 @@ MCP-capable host can run a review without leaving the editor. Two tools:
 
 Copy-paste configs for all three (plus setup notes) live in
 [`examples/mcp-setup/`](https://github.com/vanducng/miu-cr/tree/main/examples/mcp-setup).
-If the `miucr` Claude Code skill is installed, it wraps the same MCP tools with
-slash-command shortcuts (`/miucr:review --staged`). See [MCP
-integration](/mcp/) for details.
+If the `miucr` Claude Code skill is installed, invoke it as `/miucr` — it runs
+the CLI `miucr review --staged` for you. See [MCP integration](/mcp/) for details.
 
 ## 5. Automate it in CI
 
@@ -155,10 +165,10 @@ For the full automation story, see [Serve & Action](/serve-and-action/) and
 - [Project rules](/rules/) — give the reviewer deterministic, glob-selected
   context.
 - [Providers](/providers/) and [Credentials](/credentials/) — gateways, models,
-  and how auth is resolved. To review on your **ChatGPT Pro/Max plan** instead of
+  and how auth is resolved. To review on your **ChatGPT plan** instead of
   a billed key, run `miucr login` — see
   [Using your ChatGPT plan](/credentials/#using-openai--your-chatgpt-plan-miucr-login).
-- [Review history](/history/) — every review auto-saves; browse it with `miucr history` list/show/prune.
+- [Review history](/history/) — every review auto-saves; browse with `miucr history` (list), `miucr history show <id>`, and `miucr history prune`.
 - [How it works](/how-it-works/) — the deterministic engine behind the LLM pass.
 - Browse all copy-paste starters in
   [`examples/`](https://github.com/vanducng/miu-cr/tree/main/examples).

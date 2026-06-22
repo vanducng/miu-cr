@@ -40,12 +40,16 @@ envelope carries `data.findings`, `data.stats`, and a `data.pr` block:
       "owner": "owner", "repo": "repo", "number": 123,
       "head_sha": "deadbeef", "is_fork": false,
       "posted": false, "posted_inline": 0, "summary_action": "none",
-      "approve_action": "commented", "approve_reason": "not_requested",
+      "approve_action": "", "approve_reason": "",
       "suggestions_posted": 0
     }
   }
 }
 ```
+
+On a dry-run, `approve_action` and `approve_reason` are empty strings — they (and
+`posted`/`posted_inline`/`mode`) are only populated on the `--post` path, where you
+would see values like `approve_action: "commented"` / `approve_reason: "not_requested"`.
 
 To publish, add `--post`. This requires a token (see below):
 
