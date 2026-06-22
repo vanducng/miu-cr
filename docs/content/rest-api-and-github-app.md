@@ -56,10 +56,11 @@ The body is `{owner, repo, number}` (the PR number). The server:
 3. Generates the review **id** with `crypto/rand` — the id is **never
    client-supplied**.
 4. Persists a **`pending`** record under that id, then enqueues the review onto
-   the same bounded worker pool the webhook uses. If the queue is full or the job
-   is coalesced, enqueue fails: the record is flipped to **`failed`** and the
-   endpoint returns **`503`** (`queue.full`) so the client retries.
-5. Returns **`202`** with the id, in the `miucr.cli/v1` envelope:
+   the same bounded worker pool the webhook uses.
+5. **Two branches from the enqueue:**
+   - *Enqueue rejected* (queue full or job coalesced) → the record is flipped to
+     **`failed`** and the endpoint returns **`503`** (`queue.full`) so the client retries.
+   - *Enqueue accepted* → returns **`202`** with the id, in the `miucr.cli/v1` envelope:
 
 ```json
 {
