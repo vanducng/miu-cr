@@ -68,8 +68,18 @@ func Open(ctx context.Context, dsn string) (*Store, error) {
 		_ = db.Close()
 		return nil, err
 	}
+	// Backfill reviews.status on a DB created before the column existed: CREATE
+	// TABLE IF NOT EXISTS is a no-op on an existing table, so ADD COLUMN IF NOT
+	// EXISTS is the idempotent step that adds it (no-op once present).
+	if err := migrate(ctx, db, alterAddReviewStatusSQL, "migrate reviews.status"); err != nil {
+		_ = db.Close()
+		return nil, err
+	}
 	return &Store{db: db}, nil
 }
+
+// alterAddReviewStatusSQL idempotently adds reviews.status to a pre-status DB.
+const alterAddReviewStatusSQL = `ALTER TABLE reviews ADD COLUMN IF NOT EXISTS status TEXT NOT NULL DEFAULT 'done' CHECK(status IN ('pending','done','failed'));`
 
 // migrationLockKey is the fixed advisory-lock key serializing schema migrations.
 // CREATE {EXTENSION,TABLE} IF NOT EXISTS is NOT concurrency-safe: two sessions

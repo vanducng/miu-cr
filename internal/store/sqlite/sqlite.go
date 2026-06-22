@@ -85,7 +85,52 @@ func Open(path string) (*Store, error) {
 		_ = db.Close()
 		return nil, fmt.Errorf("migrate schema: %w", err)
 	}
+	if err := migrateReviewStatus(db); err != nil {
+		_ = db.Close()
+		return nil, fmt.Errorf("migrate reviews.status: %w", err)
+	}
 	return &Store{db: db}, nil
+}
+
+// migrateReviewStatus backfills the reviews.status column on a DB created before
+// status existed: CREATE TABLE IF NOT EXISTS is a no-op on an existing table, so
+// the column would otherwise be missing and every status-referencing query would
+// fail. Idempotent — a no-op once the column is present.
+func migrateReviewStatus(db *sql.DB) error {
+	has, err := hasReviewStatusColumn(db)
+	if err != nil {
+		return err
+	}
+	if has {
+		return nil
+	}
+	_, err = db.Exec(`ALTER TABLE reviews ADD COLUMN status TEXT NOT NULL DEFAULT 'done' CHECK(status IN ('pending','done','failed'))`)
+	return err
+}
+
+func hasReviewStatusColumn(db *sql.DB) (bool, error) {
+	rows, err := db.Query(`PRAGMA table_info(reviews)`)
+	if err != nil {
+		return false, err
+	}
+	defer rows.Close()
+	for rows.Next() {
+		var (
+			cid     int
+			name    string
+			ctype   string
+			notnull int
+			dflt    sql.NullString
+			pk      int
+		)
+		if err := rows.Scan(&cid, &name, &ctype, &notnull, &dflt, &pk); err != nil {
+			return false, err
+		}
+		if name == "status" {
+			return true, nil
+		}
+	}
+	return false, rows.Err()
 }
 
 // Close releases the underlying database handle.

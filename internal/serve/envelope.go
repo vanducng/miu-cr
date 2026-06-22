@@ -53,5 +53,7 @@ func writeEnvelope(w http.ResponseWriter, code int, env envelope) {
 	w.WriteHeader(code)
 	enc := json.NewEncoder(w)
 	enc.SetEscapeHTML(false)
+	// Discard intentional: every caller returns immediately after this write, so a
+	// broken connection mid-encode has no actionable downstream handling.
 	_ = enc.Encode(env)
 }

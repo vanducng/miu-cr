@@ -59,12 +59,15 @@ func (s *Server) requireAPIAuth(next http.Handler) http.Handler {
 
 // bearerToken extracts the credential from a strict case-insensitive "Bearer "
 // scheme. A missing/odd scheme yields ok=false (→ 401), never a partial match.
+// The credential is returned VERBATIM — trimming would both alter the secret
+// (" tok " vs "tok") and leak whitespace via the length fed to the constant-time
+// compare; whitespace is part of the token.
 func bearerToken(header string) (string, bool) {
 	const scheme = "bearer "
 	if len(header) < len(scheme) || !strings.EqualFold(header[:len(scheme)], scheme) {
 		return "", false
 	}
-	return strings.TrimSpace(header[len(scheme):]), true
+	return header[len(scheme):], true
 }
 
 // handleCreateReview is POST /v1/reviews. It validates + allowlist-checks the
@@ -107,13 +110,14 @@ func (s *Server) handleCreateReview(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	pk := prKey{Owner: req.Owner, Repo: req.Repo, Number: req.Number}
-	if _, err := s.reviewStore.UpsertReview(r.Context(), store.ReviewRecord{
+	rec := store.ReviewRecord{
 		ID:        id,
 		RepoDir:   "",
 		Mode:      "pr",
 		Status:    "pending",
 		CreatedAt: s.now().UTC(),
-	}); err != nil {
+	}
+	if _, err := s.reviewStore.UpsertReview(r.Context(), rec); err != nil {
 		s.log.Error("rest: persist pending failed", "error", config.RedactString(err.Error()))
 		writeEnvelopeError(w, http.StatusInternalServerError, restCommand, "store.unavailable", "could not persist review")
 		return
@@ -127,9 +131,16 @@ func (s *Server) handleCreateReview(w http.ResponseWriter, r *http.Request) {
 		ReviewID: id,
 	}
 	if !s.dispatcher.Submit(job) {
-		// Queue full or coalesced: the pending row stays — the stuck-pending
-		// recovery flips it to failed past reviewTO. Surface loudly.
+		// Queue full or coalesced: no worker will ever process this id, so a 202
+		// would promise a result that never comes. Flip the record to failed and
+		// return 503 so the client retries instead of polling an eternal pending.
 		s.log.Error("rest: job not enqueued (queue full or coalesced)", "repo", req.Owner+"/"+req.Repo, "number", req.Number)
+		rec.Status = "failed"
+		if _, err := s.reviewStore.UpsertReview(r.Context(), rec); err != nil {
+			s.log.Error("rest: mark rejected review failed", "error", config.RedactString(err.Error()))
+		}
+		writeEnvelopeError(w, http.StatusServiceUnavailable, restCommand, "queue.full", "server is busy, please retry later")
+		return
 	}
 	writeEnvelopeSuccess(w, http.StatusAccepted, restCommand, "review.accepted", map[string]any{
 		"id":     id,

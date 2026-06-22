@@ -276,6 +276,77 @@ func TestREST_BadJSON_400(t *testing.T) {
 	}
 }
 
+// TestREST_QueueFull_503AndFailed proves a rejected Submit (queue full/coalesced)
+// returns 503 and flips the pending record to failed, so the client retries
+// instead of polling an id no worker will ever process.
+func TestREST_QueueFull_503AndFailed(t *testing.T) {
+	st := newMemStore()
+	srv := newRESTServer(t, &fakeDispatcher{accept: false}, st, testAPIToken, nil)
+	rec := doREST(t, srv, http.MethodPost, "/v1/reviews", "Bearer "+testAPIToken,
+		[]byte(`{"owner":"octocat","repo":"hello","number":7}`))
+	if rec.Code != http.StatusServiceUnavailable {
+		t.Fatalf("status = %d, want 503; body=%s", rec.Code, rec.Body.String())
+	}
+	if strings.Contains(rec.Body.String(), `"status":"pending"`) {
+		t.Fatalf("503 body must not promise pending: %s", rec.Body.String())
+	}
+	st.mu.Lock()
+	defer st.mu.Unlock()
+	if len(st.recs) != 1 {
+		t.Fatalf("want exactly 1 persisted record, got %d", len(st.recs))
+	}
+	for _, r := range st.recs {
+		if r.Status != "failed" {
+			t.Fatalf("rejected record status = %q, want failed", r.Status)
+		}
+	}
+}
+
+// TestREST_Auth_WhitespaceTokenRejected proves the credential is compared
+// verbatim: a bearer with surrounding whitespace is NOT accepted as its trimmed
+// form (no TrimSpace before the constant-time compare).
+func TestREST_Auth_WhitespaceTokenRejected(t *testing.T) {
+	srv := newRESTServer(t, &fakeDispatcher{accept: true}, newMemStore(), testAPIToken, nil)
+	body := []byte(`{"owner":"octocat","repo":"hello","number":1}`)
+	for _, auth := range []string{
+		"Bearer " + testAPIToken + " ", // trailing space in credential
+		"Bearer  " + testAPIToken,       // leading space in credential
+	} {
+		rec := doREST(t, srv, http.MethodPost, "/v1/reviews", auth, body)
+		if rec.Code != http.StatusUnauthorized {
+			t.Fatalf("whitespace token %q: status = %d, want 401 (no trim)", auth, rec.Code)
+		}
+	}
+}
+
+// TestNew_APITokenWithoutStore_Error proves a misconfigured deploy (bearer set,
+// no store) fails fast instead of registering /v1 routes that fail every request.
+func TestNew_APITokenWithoutStore_Error(t *testing.T) {
+	_, _, err := New(Config{
+		Secret:       []byte(testSecret),
+		Repos:        []string{"octocat/hello"},
+		ResolveToken: func() (string, error) { return testToken, nil },
+		APIToken:     []byte(testAPIToken),
+		// ReviewStore intentionally nil.
+	}, func(Job) error { return nil })
+	if err == nil {
+		t.Fatal("New must fail when APIToken is set without a ReviewStore")
+	}
+}
+
+func TestNew_APITokenWithStore_OK(t *testing.T) {
+	_, _, err := New(Config{
+		Secret:       []byte(testSecret),
+		Repos:        []string{"octocat/hello"},
+		ResolveToken: func() (string, error) { return testToken, nil },
+		APIToken:     []byte(testAPIToken),
+		ReviewStore:  newMemStore(),
+	}, func(Job) error { return nil })
+	if err != nil {
+		t.Fatalf("New with both APIToken+store should succeed: %v", err)
+	}
+}
+
 // dispatcherFunc adapts a func to Dispatcher.
 type dispatcherFunc func(Job) bool
 

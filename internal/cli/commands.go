@@ -331,7 +331,7 @@ func buildServeReviewFn(log *slog.Logger, gate string, st serve.ReviewStore) fun
 		})
 		if err != nil {
 			log.Error("review failed", "ref", j.Ref, "err", config.RedactString(err.Error()))
-			persistFinalReview(jobCtx, log, st, j.ReviewID, "failed", ReviewOutcome{})
+			persistFinalReview(log, st, j.ReviewID, "failed", ReviewOutcome{})
 			return err
 		}
 		posted, action := 0, "none"
@@ -339,7 +339,7 @@ func buildServeReviewFn(log *slog.Logger, gate string, st serve.ReviewStore) fun
 			posted, action = out.PR.PostedInline, out.PR.SummaryAction
 		}
 		log.Info("review done", "ref", j.Ref, "findings", len(out.Findings), "posted_inline", posted, "summary", action)
-		persistFinalReview(jobCtx, log, st, j.ReviewID, "done", out)
+		persistFinalReview(log, st, j.ReviewID, "done", out)
 		return nil
 	}
 }
@@ -347,10 +347,17 @@ func buildServeReviewFn(log *slog.Logger, gate string, st serve.ReviewStore) fun
 // persistFinalReview upserts the terminal REST record under id. A no-op when id
 // is empty (webhook/poll) or st is nil (REST disabled). Best-effort: a store
 // failure is logged (redacted), never returned, so it can't fail the review.
-func persistFinalReview(ctx stdctx.Context, log *slog.Logger, st serve.ReviewStore, id, status string, out ReviewOutcome) {
+//
+// It derives a FRESH bounded context rather than reusing the job's ctx: a review
+// that fails by TIMEOUT (the common case) leaves jobCtx already canceled, so a
+// write on it would fail and strand the record at pending forever. The detached
+// ctx guarantees the terminal status is recorded regardless of why the job ended.
+func persistFinalReview(log *slog.Logger, st serve.ReviewStore, id, status string, out ReviewOutcome) {
 	if id == "" || st == nil {
 		return
 	}
+	ctx, cancel := stdctx.WithTimeout(stdctx.Background(), 10*time.Second)
+	defer cancel()
 	headSHA := ""
 	if out.PR != nil {
 		headSHA = out.PR.HeadSHA

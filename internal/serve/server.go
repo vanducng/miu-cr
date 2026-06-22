@@ -181,6 +181,12 @@ func New(cfg Config, reviewFn func(Job) error) (*Server, *Pool, error) {
 	if reviewFn == nil {
 		return nil, nil, errors.New("serve: reviewFn must be set")
 	}
+	// The REST API needs BOTH the bearer and a store. An APIToken without a store
+	// would register /v1 routes that fail every request (handler() gates on both),
+	// so fail fast with a clear signal instead of serving broken routes.
+	if len(cfg.APIToken) > 0 && cfg.ReviewStore == nil {
+		return nil, nil, errors.New("serve: APIToken is set but ReviewStore is nil; the REST API requires a store")
+	}
 	log := cfg.Logger
 	if log == nil {
 		log = slog.Default()

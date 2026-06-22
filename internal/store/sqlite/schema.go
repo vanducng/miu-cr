@@ -8,7 +8,7 @@ CREATE TABLE IF NOT EXISTS reviews (
 	repo_dir      TEXT NOT NULL,
 	mode          TEXT NOT NULL,
 	head_sha      TEXT NOT NULL,
-	status        TEXT NOT NULL DEFAULT 'done',
+	status        TEXT NOT NULL DEFAULT 'done' CHECK(status IN ('pending','done','failed')),
 	created_at    TEXT NOT NULL,
 	findings_json TEXT NOT NULL,
 	stats_json    TEXT NOT NULL

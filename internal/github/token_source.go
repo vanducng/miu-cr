@@ -56,8 +56,14 @@ type appExchanger interface {
 }
 
 // installTokenExpiryMargin refreshes ~5min before GitHub's stated expiry so an
-// in-flight review never races the token going stale.
+// in-flight review never races the token going stale. GitHub installation tokens
+// always live ~1h, so a token whose remaining life is below this margin at mint
+// time (the busy-loop edge case) does not occur in practice; no clamp needed.
 const installTokenExpiryMargin = 5 * time.Minute
+
+// installTokenMintTimeout bounds the detached mint inside the singleflight closure
+// so it can't hang forever yet outlives any single caller's request lifetime.
+const installTokenMintTimeout = 30 * time.Second
 
 // appTokenSource mints a GitHub App JWT, exchanges it for an installation token,
 // and caches that token in-memory (refresh-before-expiry + single-flight). The
@@ -85,7 +91,7 @@ func NewAppTokenSource(appID string, installID int64, key *rsa.PrivateKey, apps 
 	return &appTokenSource{appID: appID, installID: installID, key: key, apps: apps, now: now}
 }
 
-func (a *appTokenSource) Token(ctx stdctx.Context) (string, error) {
+func (a *appTokenSource) Token(_ stdctx.Context) (string, error) {
 	if tok, ok := a.cachedToken(); ok {
 		return tok, nil
 	}
@@ -96,7 +102,12 @@ func (a *appTokenSource) Token(ctx stdctx.Context) (string, error) {
 		if tok, ok := a.cachedToken(); ok {
 			return tok, nil
 		}
-		return a.mint(ctx)
+		// Detach from the caller's ctx: the mint is SHARED across all waiters, so
+		// binding it to the first caller's request would let that caller's
+		// cancellation abort the token for everyone. Use a fresh bounded ctx.
+		mintCtx, cancel := stdctx.WithTimeout(stdctx.Background(), installTokenMintTimeout)
+		defer cancel()
+		return a.mint(mintCtx)
 	})
 	if err != nil {
 		return "", err

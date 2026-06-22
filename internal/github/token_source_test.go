@@ -138,6 +138,82 @@ func TestAppTokenSourceSingleFlight(t *testing.T) {
 	}
 }
 
+// ctxAwareExchanger respects the ctx passed to CreateInstallationToken: it blocks
+// until either ctx is canceled (returning ctx.Err()) or release fires (returning
+// the token). It proves the shared mint is NOT bound to a single caller's ctx.
+type ctxAwareExchanger struct {
+	calls     atomic.Int64
+	token     string
+	expiry    time.Time
+	started   chan struct{}
+	release   chan struct{}
+	startOnce sync.Once
+}
+
+func (f *ctxAwareExchanger) CreateInstallationToken(ctx stdctx.Context, _ string, _ int64) (string, time.Time, error) {
+	f.calls.Add(1)
+	f.startOnce.Do(func() { close(f.started) })
+	select {
+	case <-ctx.Done():
+		return "", time.Time{}, ctx.Err()
+	case <-f.release:
+		return f.token, f.expiry, nil
+	}
+}
+
+// TestAppTokenSourceDetachedMintCtx proves a concurrent caller still gets the
+// token when the FIRST caller (the singleflight leader) cancels its ctx mid-mint.
+// The mint runs on a detached bounded ctx, so one request ending can't abort the
+// shared token exchange for the other waiters.
+func TestAppTokenSourceDetachedMintCtx(t *testing.T) {
+	now := time.Date(2026, 6, 22, 12, 0, 0, 0, time.UTC)
+	fx := &ctxAwareExchanger{
+		token:   "ghs_shared",
+		expiry:  now.Add(time.Hour),
+		started: make(chan struct{}),
+		release: make(chan struct{}),
+	}
+	ts := NewAppTokenSource("app", 1, testKey(t), fx, func() time.Time { return now })
+
+	// First caller: cancelable ctx. It becomes the singleflight leader.
+	ctx1, cancel1 := stdctx.WithCancel(stdctx.Background())
+	var tok1 string
+	var err1 error
+	done1 := make(chan struct{})
+	go func() { tok1, err1 = ts.Token(ctx1); close(done1) }()
+
+	// Wait until the mint is in-flight, then cancel the leader's ctx.
+	<-fx.started
+	cancel1()
+
+	// Second caller with a valid ctx joins the same in-flight singleflight.
+	var tok2 string
+	var err2 error
+	done2 := make(chan struct{})
+	go func() { tok2, err2 = ts.Token(stdctx.Background()); close(done2) }()
+
+	// Give the second caller time to attach to the singleflight, then release.
+	time.Sleep(50 * time.Millisecond)
+	close(fx.release)
+	<-done1
+	<-done2
+
+	if err2 != nil {
+		t.Fatalf("concurrent caller got error after leader cancel: %v", err2)
+	}
+	if tok2 != "ghs_shared" {
+		t.Fatalf("concurrent caller token = %q, want ghs_shared", tok2)
+	}
+	// The leader benefits from the shared result too (singleflight returns the
+	// closure's value regardless of the caller's own ctx).
+	if err1 != nil || tok1 != "ghs_shared" {
+		t.Fatalf("leader result = (%q, %v), want (ghs_shared, nil)", tok1, err1)
+	}
+	if got := fx.calls.Load(); got != 1 {
+		t.Fatalf("expected exactly 1 shared mint, got %d", got)
+	}
+}
+
 func TestAppTokenSourceErrorRedaction(t *testing.T) {
 	now := time.Date(2026, 6, 22, 12, 0, 0, 0, time.UTC)
 	// The exchange fails with an error that does NOT contain the secret; assert
