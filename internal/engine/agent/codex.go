@@ -149,12 +149,14 @@ func (a *codexAgent) Review(ctx stdctx.Context, rc Context) ([]engine.Finding, e
 		rc.Runner = gitcmd.New()
 	}
 
+	userPrompt := BuildUserPrompt(PromptParts{Rules: rc.Rules, SemanticContext: rc.SemanticContext, Diff: rc.Text})
+	rc.Trace.SetPrompt(userPrompt)
 	input := []codexItem{{
 		Type: "message",
 		Role: "user",
 		Content: []codexContent{{
 			Type: "input_text",
-			Text: BuildUserPrompt(PromptParts{Rules: rc.Rules, SemanticContext: rc.SemanticContext, Diff: rc.Text}),
+			Text: userPrompt,
 		}},
 	}}
 
@@ -186,9 +188,10 @@ func (a *codexAgent) Review(ctx stdctx.Context, rc Context) ([]engine.Finding, e
 			return nil, err
 		}
 
-		toolItems, finalText := a.dispatch(ctx, rc, resp)
+		toolItems, finalText := a.dispatch(ctx, rc, turn, resp)
 		if len(toolItems) == 0 {
 			if findings, ok := parseFindings(finalText); ok {
+				rc.Trace.SetFinalResponse(finalText)
 				return findings, nil
 			}
 			emptyRounds++
@@ -208,7 +211,7 @@ func (a *codexAgent) Review(ctx stdctx.Context, rc Context) ([]engine.Finding, e
 // dispatch runs every function_call in resp, returning function_call_output
 // items (echoing back the assistant's function_call first, per the Responses
 // protocol) and the concatenated assistant text (candidate final answer).
-func (a *codexAgent) dispatch(ctx stdctx.Context, rc Context, resp *codexResp) ([]codexItem, string) {
+func (a *codexAgent) dispatch(ctx stdctx.Context, rc Context, turn int, resp *codexResp) ([]codexItem, string) {
 	var items []codexItem
 	var text strings.Builder
 	for _, o := range resp.Output {
@@ -220,7 +223,7 @@ func (a *codexAgent) dispatch(ctx stdctx.Context, rc Context, resp *codexResp) (
 				}
 			}
 		case "function_call":
-			out, isErr := runTool(ctx, rc, o.Name, json.RawMessage(o.Arguments))
+			out, isErr := runTool(ctx, rc, turn, o.Name, json.RawMessage(o.Arguments))
 			if isErr {
 				out = "ERROR: " + out
 			}

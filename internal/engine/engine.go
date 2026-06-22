@@ -7,6 +7,7 @@ import (
 	stdctx "context"
 	"crypto/sha256"
 	"encoding/hex"
+	"encoding/json"
 	"fmt"
 	"path/filepath"
 	"sort"
@@ -24,13 +25,68 @@ import (
 // adapts it to its concrete ReviewRecord; defined here so engine sits below
 // store in the import graph (store imports engine.Finding).
 type PersistRecord struct {
-	ID        string
-	RepoDir   string
-	Mode      string
-	HeadSHA   string
-	CreatedAt time.Time
-	Findings  []Finding
-	Stats     map[string]any
+	ID          string
+	RepoDir     string
+	Mode        string
+	HeadSHA     string
+	Owner       string
+	Repo        string
+	Number      int
+	Provider    string
+	Model       string
+	CreatedAt   time.Time
+	Findings    []Finding
+	Stats       map[string]any
+	Transcript  []byte
+	RawPrompt   string
+	RawResponse string
+}
+
+// TurnRecord is one tool dispatch in the review session (turn index, tool name,
+// raw args). Args are paths/patterns — no auth tokens.
+type TurnRecord struct {
+	Turn int    `json:"turn"`
+	Tool string `json:"tool"`
+	Args string `json:"args"`
+}
+
+// ReviewTrace accumulates the session content during a review for persistence:
+// the raw user prompt, the per-turn tool calls, and the raw final response. The
+// agent records into it via nil-safe methods (mirroring the Progress seam); the
+// engine creates it, threads it onto AgentContext, and reads it back after
+// Review. A nil *ReviewTrace makes every recorder a no-op (capture disabled).
+// UserPrompt/FinalResponse (and PersistRecord.RawPrompt/RawResponse) capture the
+// full reviewed diff + model output by design — full capture, stored LOCAL-only
+// in the gitignored state.db; the invariant is no auth tokens (never in the
+// prompt/diff), not "no code".
+type ReviewTrace struct {
+	UserPrompt    string
+	FinalResponse string
+	Turns         []TurnRecord
+}
+
+// SetPrompt records the raw user prompt once (first non-empty wins); nil-safe.
+func (t *ReviewTrace) SetPrompt(p string) {
+	if t == nil || t.UserPrompt != "" {
+		return
+	}
+	t.UserPrompt = p
+}
+
+// SetFinalResponse records the raw final response text; nil-safe.
+func (t *ReviewTrace) SetFinalResponse(r string) {
+	if t == nil {
+		return
+	}
+	t.FinalResponse = r
+}
+
+// RecordTool appends one tool dispatch; nil-safe.
+func (t *ReviewTrace) RecordTool(turn int, tool, args string) {
+	if t == nil {
+		return
+	}
+	t.Turns = append(t.Turns, TurnRecord{Turn: turn, Tool: tool, Args: args})
 }
 
 // Store is the optional persistence seam: when set, Review saves each result and
@@ -67,6 +123,9 @@ type AgentContext struct {
 	Rev             string
 	Runner          *gitcmd.Runner
 	Progress        func(string) // nil = silent; milestone strings only, never secrets
+	// Trace, when non-nil, captures the raw prompt, per-turn tool calls, and raw
+	// final response for persistence. nil = no capture (mirrors Progress).
+	Trace *ReviewTrace
 }
 
 // Retriever is the engine-local seam for M7 semantic recall: wire injects an
@@ -119,6 +178,15 @@ type Request struct {
 	// layer builds it from --verbose/--quiet + a TTY check. Only milestone strings
 	// and file paths/tool names ever reach it — never tokens.
 	Progress func(string)
+
+	// Persist context copied onto the saved PersistRecord (no secrets): the resolved
+	// provider/model and, on the --pr path, the PR owner/repo/number. Local reviews
+	// leave Owner/Repo/Number zero.
+	Provider string
+	Model    string
+	Owner    string
+	Repo     string
+	Number   int
 }
 
 // progress invokes the sink when set; a nil sink is a silent no-op.
@@ -227,6 +295,11 @@ func (e *Engine) Review(ctx stdctx.Context, req Request) (ReviewResult, error) {
 
 	semanticContext, semanticStat := retrieveSemantic(ctx, req.Retriever, selected)
 
+	var trace *ReviewTrace
+	if e.Store != nil {
+		trace = &ReviewTrace{}
+	}
+
 	rev := selected[0].Ref
 	raw, err := e.Agent.Review(ctx, AgentContext{
 		Text:            assembled.Text,
@@ -236,6 +309,7 @@ func (e *Engine) Review(ctx stdctx.Context, req Request) (ReviewResult, error) {
 		Rev:             rev,
 		Runner:          e.Runner,
 		Progress:        req.Progress,
+		Trace:           trace,
 	})
 	if err != nil {
 		return ReviewResult{}, err
@@ -267,14 +341,31 @@ func (e *Engine) Review(ctx stdctx.Context, req Request) (ReviewResult, error) {
 
 	if e.Store != nil {
 		headSHA, _ := e.Runner.HeadSHA(ctx, req.RepoDir)
-		id, serr := e.Store.SaveReview(ctx, PersistRecord{
+		rec := PersistRecord{
 			RepoDir:   req.RepoDir,
 			Mode:      modeName(req.Mode),
 			HeadSHA:   headSHA,
+			Owner:     req.Owner,
+			Repo:      req.Repo,
+			Number:    req.Number,
+			Provider:  req.Provider,
+			Model:     req.Model,
 			CreatedAt: time.Now().UTC(),
 			Findings:  kept,
 			Stats:     stats,
-		})
+		}
+		if trace != nil {
+			rec.RawPrompt = trace.UserPrompt
+			rec.RawResponse = trace.FinalResponse
+			if len(trace.Turns) > 0 {
+				if blob, merr := json.Marshal(trace.Turns); merr != nil {
+					stats["transcript_error"] = merr.Error()
+				} else {
+					rec.Transcript = blob
+				}
+			}
+		}
+		id, serr := e.Store.SaveReview(ctx, rec)
 		if serr != nil {
 			stats["persist_error"] = serr.Error()
 		} else {
@@ -463,6 +554,11 @@ func proseHash(f Finding) string {
 // stats.max_severity field, or "none" when no finding carries a recognized
 // severity (including the empty set). Mirrors the gate's ranking so the reported
 // max and the gate decision never disagree.
+// MaxSeverity returns the worst severity in findings ("none" when empty),
+// exported so the store can project it into a ReviewSummary without redefining
+// the severity ranking.
+func MaxSeverity(findings []Finding) string { return maxSeverity(findings) }
+
 func maxSeverity(findings []Finding) string {
 	maxRank, maxSev := 0, ""
 	for _, f := range findings {

@@ -95,9 +95,11 @@ func (a *openaiAgent) Review(ctx stdctx.Context, rc Context) ([]engine.Finding, 
 		rc.Runner = gitcmd.New()
 	}
 
+	userPrompt := BuildUserPrompt(PromptParts{Rules: rc.Rules, SemanticContext: rc.SemanticContext, Diff: rc.Text})
+	rc.Trace.SetPrompt(userPrompt)
 	messages := []openai.ChatCompletionMessageParamUnion{
 		openai.SystemMessage(systemPrompt),
-		openai.UserMessage(BuildUserPrompt(PromptParts{Rules: rc.Rules, SemanticContext: rc.SemanticContext, Diff: rc.Text})),
+		openai.UserMessage(userPrompt),
 	}
 	params := openai.ChatCompletionNewParams{
 		Model:    shared.ChatModel(a.model),
@@ -135,6 +137,7 @@ func (a *openaiAgent) Review(ctx stdctx.Context, rc Context) ([]engine.Finding, 
 
 		if len(msg.ToolCalls) == 0 {
 			if findings, ok := parseFindings(msg.Content); ok {
+				rc.Trace.SetFinalResponse(msg.Content)
 				return findings, nil
 			}
 			emptyRounds++
@@ -148,7 +151,7 @@ func (a *openaiAgent) Review(ctx stdctx.Context, rc Context) ([]engine.Finding, 
 		emptyRounds = 0
 		for _, tc := range msg.ToolCalls {
 			fn := tc.Function
-			out, isErr := runTool(ctx, rc, fn.Name, json.RawMessage(fn.Arguments))
+			out, isErr := runTool(ctx, rc, turn, fn.Name, json.RawMessage(fn.Arguments))
 			if isErr {
 				out = "ERROR: " + out
 			}

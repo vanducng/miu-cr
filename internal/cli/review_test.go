@@ -12,10 +12,12 @@ import (
 type fakeReviewer struct {
 	outcome ReviewOutcome
 	gotCtx  stdctx.Context
+	gotReq  ReviewRequest
 }
 
-func (f *fakeReviewer) Review(ctx stdctx.Context, _ ReviewRequest) (ReviewOutcome, error) {
+func (f *fakeReviewer) Review(ctx stdctx.Context, req ReviewRequest) (ReviewOutcome, error) {
 	f.gotCtx = ctx
+	f.gotReq = req
 	return f.outcome, nil
 }
 
@@ -77,6 +79,44 @@ func TestReviewGateExitCode(t *testing.T) {
 	}
 	if !strings.Contains(out2, `"ok":true`) {
 		t.Errorf("want success envelope, got %s", out2)
+	}
+}
+
+func TestReviewSurfacesReviewID(t *testing.T) {
+	r := &fakeReviewer{outcome: ReviewOutcome{Findings: []ReviewFinding{}, ReviewID: "rec-123"}}
+	out, err := runReview(t, r, "--staged", "--gate", "high")
+	if err != nil {
+		t.Fatalf("review: %v", err)
+	}
+	var env Envelope
+	if e := json.Unmarshal([]byte(out), &env); e != nil {
+		t.Fatalf("invalid envelope: %v\n%s", e, out)
+	}
+	data, _ := env.Data.(map[string]any)
+	if data["review_id"] != "rec-123" {
+		t.Errorf("want review_id rec-123, got %v", data["review_id"])
+	}
+	if r.gotReq.NoSave {
+		t.Error("default run must not set NoSave")
+	}
+}
+
+func TestReviewNoSaveFlag(t *testing.T) {
+	r := &fakeReviewer{outcome: ReviewOutcome{Findings: []ReviewFinding{}}}
+	out, err := runReview(t, r, "--staged", "--gate", "high", "--no-save")
+	if err != nil {
+		t.Fatalf("review: %v", err)
+	}
+	if !r.gotReq.NoSave {
+		t.Error("--no-save must set NoSave on the request")
+	}
+	var env Envelope
+	if e := json.Unmarshal([]byte(out), &env); e != nil {
+		t.Fatalf("invalid envelope: %v\n%s", e, out)
+	}
+	data, _ := env.Data.(map[string]any)
+	if data["review_id"] != "" {
+		t.Errorf("--no-save: review_id must be empty, got %v", data["review_id"])
 	}
 }
 

@@ -99,6 +99,21 @@ func Merge(base, file Config) Config {
 	out.Store = mergeStore(base.Store, file.Store)
 	out.Embedding = mergeEmbedding(base.Embedding, file.Embedding)
 	out.Github = mergeGithub(base.Github, file.Github)
+	out.History = mergeHistory(base.History, file.History)
+	return out
+}
+
+// mergeHistory overlays non-zero file [history] fields onto base. A nil file
+// Enabled inherits base (default-on); an explicit true/false wins. MaxRecords 0
+// inherits base so a user can flip enabled without restating the cap.
+func mergeHistory(base, file History) History {
+	out := base
+	if file.Enabled != nil {
+		out.Enabled = file.Enabled
+	}
+	if file.MaxRecords != 0 {
+		out.MaxRecords = file.MaxRecords
+	}
 	return out
 }
 
