@@ -70,7 +70,7 @@ func exists(dir, name string) bool {
 func scaffoldDetectedRules(ask func(string, string) string, nonInteractive, force bool) (string, error) {
 	cwd, err := os.Getwd()
 	if err != nil {
-		return "", nil
+		cwd = "." // detect against the relative cwd rather than silently skipping
 	}
 	stem := detectStem(cwd)
 	if stem == "" {

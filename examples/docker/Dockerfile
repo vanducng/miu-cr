@@ -27,6 +27,7 @@
 
 # ── Stage 1: build ───────────────────────────────────────────────────────────
 FROM golang:1.25-bookworm AS build
+ARG TARGETARCH
 
 WORKDIR /src
 COPY go.mod go.sum ./
@@ -34,7 +35,7 @@ RUN go mod download
 
 COPY . .
 
-RUN CGO_ENABLED=0 GOOS=linux GOARCH=amd64 \
+RUN CGO_ENABLED=0 GOOS=linux GOARCH=${TARGETARCH} \
     go build \
       -trimpath \
       -ldflags="-s -w" \
