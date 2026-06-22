@@ -44,7 +44,7 @@ func chooseAuth(ctx stdctx.Context, ask func(string, string) string, out io.Writ
 			{"2", "", "Environment variable — OPENAI_API_KEY"},
 			{"3", "", "Paste API key — stored in config (plaintext)"},
 		})
-		switch ask("  Auth method", "1") {
+		switch askChoice(ask, "  Auth method", "1", "1", "2", "3") {
 		case "2":
 			return authEnv(ask, provider, prof)
 		case "3":
@@ -59,7 +59,7 @@ func chooseAuth(ctx stdctx.Context, ask func(string, string) string, out io.Writ
 		{"1", "", "Environment variable — " + defEnv},
 		{"2", "", "Paste API key — stored in config (plaintext)"},
 	})
-	if ask("  Auth method", "1") == "2" {
+	if askChoice(ask, "  Auth method", "1", "1", "2") == "2" {
 		return authPaste(ask, out, prof)
 	}
 	return authEnv(ask, provider, prof)

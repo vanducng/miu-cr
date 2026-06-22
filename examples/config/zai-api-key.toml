@@ -1,0 +1,11 @@
+# z.ai (GLM) via API key — an Anthropic-compatible gateway. No z.ai-specific code; pure config.
+# Copy to ~/.config/miu/cr/config.toml, then:  export ZAI_API_KEY=...
+# Run:  miucr review --staged
+
+default_provider = "zai"
+
+[providers.zai]
+kind     = "anthropic"                       # the gateway speaks the Anthropic API
+base_url = "https://api.z.ai/api/anthropic"
+model    = "glm-4.6"                          # set to a model your z.ai plan offers
+auth_env = "ZAI_API_KEY"                      # sent as a Bearer token to the gateway

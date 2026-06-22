@@ -40,7 +40,7 @@ func chooseProvider(ask func(string, string) string, out io.Writer, nonInteracti
 			{"2", "openai", "OpenAI / ChatGPT — browser login or API key"},
 			{"3", "custom", "OpenAI-compatible gateway — API key + base URL"},
 		})
-		switch strings.ToLower(ask("  Provider", "1")) {
+		switch askChoice(ask, "  Provider", "1", "1", "2", "3", "anthropic", "openai", "custom") {
 		case "2", "openai":
 			name = "openai"
 		case "3", "custom":
