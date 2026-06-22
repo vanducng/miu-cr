@@ -39,8 +39,8 @@ Earlier builds special-cased a bare `ZAI_API_KEY`. That hardcoding is gone — u
 
 ## Using OpenAI / your ChatGPT plan (`miucr login`)
 
-Instead of a billed platform API key, you can review on your **ChatGPT Pro/Max
-subscription**. `miucr login` runs a standard OpenAI PKCE loopback OAuth flow in
+Instead of a billed platform API key, you can review on your **ChatGPT plan**.
+`miucr login` runs a standard OpenAI PKCE loopback OAuth flow in
 your browser and caches the token at `~/.config/miu/cr/oauth.json` (dir `0700`,
 file `0600`). A subsequent OpenAI review authed by that token talks to the
 **codex backend** (`chatgpt.com/backend-api/codex`, the Responses protocol the
@@ -119,11 +119,13 @@ The SQLite history stores **review records only** — anchored findings and run 
 
 ## Output redaction
 
-Both the CLI envelope and the MCP tool outputs are scrubbed before they leave the process:
+The **CLI envelope** success output is run through a credential scrubber before it leaves the process:
 
 - Credential-named JSON fields (anything matching `password`, `secret`, `token`, `api_key`, `auth_token`, …) are replaced with `***`.
 - Credential-bearing URLs and `key=value` assignments are redacted.
 - **Finding prose is exempt** — `rationale` and `suggested_patch` may legitimately quote token-like example text, so they survive the scrub intact.
+
+On the **MCP path** the redaction is narrower: tool *error* messages are redacted, but the structured success output (the engine's findings + stats) is returned directly, without the `***` field scrubber. That output carries no token-bearing fields by construction, so no credentials flow through it. Errors on both paths are always redacted.
 
 ## Local state
 

@@ -27,7 +27,7 @@ Local review, GitHub PR review, project rules, the serve/poll daemon + GitHub Ac
   <LinkCard title="GitHub PR review" href="/github-pr/" description="Inline comments, an idempotent summary, cross-push dedupe, suggest & approve." />
   <LinkCard title="Serve & Action" href="/serve-and-action/" description="HMAC webhook daemon, opt-in poll trigger, and the reusable GitHub Action." />
   <LinkCard title="MCP integration" href="/mcp/" description="Run review_run / review_get as first-class tools in Claude Code or Codex." />
-  <LinkCard title="Review history" href="/history/" description="Every review auto-saves; browse it with miucr history list / show / prune." />
+  <LinkCard title="Review history" href="/history/" description="Every review auto-saves; browse with miucr history, history show, and history prune." />
   <LinkCard title="How it works" href="/how-it-works/" description="The deterministic engine and drift-reject line-anchoring." />
 </CardGrid>
 
@@ -37,7 +37,7 @@ Local review, GitHub PR review, project rules, the serve/poll daemon + GitHub Ac
 - **GitHub PR review** — `review --pr <url|owner/repo#N>`: head-SHA-anchored inline comments (multi-line range aware) + one idempotent summary, or a required GitHub **Check Run** (`--mode checks`); `--filter-mode` diff control; SARIF export; content-stable cross-push dedupe + resolution; opt-in `--suggest` and `--approve-clean`. → [GitHub PR review](/github-pr/)
 - **Project rules** — `.miu/cr/rules/*.md` markdown with frontmatter selects context by glob; built-in defaults + user + repo layers, trust-fenced on fork PRs. → [Project rules](/rules/)
 - **serve · poll · Action** — an HMAC webhook daemon, an opt-in poll trigger, and a reusable GitHub Action — all funnel into one review path. → [Serve & Action](/serve-and-action/)
-- **Review history** — every review auto-saves a full record (findings + stats + transcript + raw I/O) to the local store; browse with `miucr history` list/show/prune. → [Review history](/history/)
+- **Review history** — every review auto-saves a full record (findings + stats + transcript + raw I/O) to the local store; browse with `miucr history` (list), `miucr history show <id>`, and `miucr history prune`. → [Review history](/history/)
 - **Store backends** — SQLite by default; opt into Postgres via `[store] backend` + `MIUCR_PG_DSN`. → [Store backends](/store-backends/)
 - **Semantic code-recall** — opt-in embeddings + pgvector recall prior findings as advisory context; off by default. → [Semantic code-recall](/semantic-recall/)
 - **REST API + GitHub App** — `MIUCR_API_TOKEN` registers `/v1/reviews`; `[github] mode = app` swaps PAT auth for App installation auth. → [REST API & GitHub App](/rest-api-and-github-app/)
@@ -48,7 +48,7 @@ Local review, GitHub PR review, project rules, the serve/poll daemon + GitHub Ac
 
 ```sh
 export ANTHROPIC_API_KEY=...                       # bring your own key (--provider auto detects OpenAI too)
-miucr login --provider openai                      # or: review on your ChatGPT Pro/Max plan
+miucr login --provider openai                      # or: review on your ChatGPT plan
 miucr review --staged                              # review staged changes
 miucr review --from main --to HEAD -o pretty       # review a range, human-readable
 miucr review --commit HEAD~1 --gate high           # exit 2 if a high+ finding lands

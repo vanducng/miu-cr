@@ -42,15 +42,15 @@ A file with **no leading `---` fence is not a rule** — it is skipped (so a str
 
 ## Three layers
 
-Rules load from three layers, merged by file stem (later layers override earlier ones):
+Rules load from three layers, merged by file **stem**. The two **Trusted** layers (user + built-in defaults) may override each other — a user rule replaces the embedded rule of the same stem. The **Untrusted** repo layer is **additive only**: it may contribute *new* stems, but a repo rule whose stem collides with a Trusted stem is **dropped** with a warning (it can never override a user or built-in rule).
 
 | Layer | Location | Trust | Precedence |
 | --- | --- | --- | --- |
-| Built-in defaults | embedded in the binary | **Trusted** | lowest |
-| User rules | `~/.config/miu/cr/rules/*.md` | **Trusted** | middle |
-| Repo rules | `.miu/cr/rules/*.md` | **Untrusted** | highest |
+| Built-in defaults | embedded in the binary | **Trusted** | base |
+| User rules | `~/.config/miu/cr/rules/*.md` | **Trusted** | overrides defaults (by stem) |
+| Repo rules | `.miu/cr/rules/*.md` | **Untrusted** | additive only — adds new stems, never overrides a Trusted stem |
 
-So `.miu/cr/rules/security.md` overrides a user `security.md`, which overrides the embedded `security.md` — by **stem** (`security`). Every review applies the embedded defaults even when there are no user or repo rules.
+So a user `security.md` overrides the embedded `security.md` (by **stem** `security`), but a repo `.miu/cr/rules/security.md` is **ignored** — the loader logs `rules: ignore repo rule … (stem "security" already provided by trusted layer …)` and the Trusted `security` rule stays in force. A repo rule only takes effect for a stem no Trusted layer defines. Every review applies the embedded defaults even when there are no user or repo rules.
 
 The built-in baseline (correctness, security, reliability, performance, testing) is `alwaysApply` and sourced from a general code-review checklist — a sane default for any language.
 
@@ -84,7 +84,7 @@ This is defense-in-depth, not a guarantee: same-repo contributors author both th
 
 ## Token budget
 
-The rendered rules section has its own cap (a bounded slice of the prompt, currently ~4096 tokens). The cap is **subtracted from the diff budget with a floor**, so a large rules section can never collapse the diff budget to the disabled sentinel. When the section exceeds the cap, the **least-important rules are dropped first** (non-`alwaysApply`, then alphabetical). Two stats expose what happened:
+The rendered rules section has its own cap (a bounded slice of the prompt, currently ~4096 tokens). The cap is **subtracted from the diff budget with a floor**, so a large rules section can never collapse the diff budget to the disabled sentinel. When the section exceeds the cap, the **least-important rules are dropped first** — non-`alwaysApply` first, then Untrusted (repo) before Trusted (user/default), then alphabetical by stem. Two stats expose what happened:
 
 - `rules_applied` — how many rules reached the prompt.
 - `rules_truncated` — whether any selected rule was dropped to fit the cap.

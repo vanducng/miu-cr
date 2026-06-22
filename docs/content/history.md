@@ -21,7 +21,7 @@ never enter the prompt, the diff, or the record.
 | --- | --- |
 | `id`, `created_at` | Record identity + timestamp |
 | `target` | `owner/repo#N` for a PR, else the local repo dir |
-| `mode` | `staged` / range / `commit` / `pr` |
+| `mode` | `staged` / `range` / `commit` (a `--pr` review is stored as `range` — it is identified by `target`, not a distinct `pr` mode) |
 | `provider`, `model` | The LLM profile used |
 | `status`, `max_severity` | Terminal status + worst finding severity |
 | `findings`, `stats` | The full review result |

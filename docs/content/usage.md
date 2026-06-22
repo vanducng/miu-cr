@@ -3,7 +3,7 @@ title: Usage
 description: Review modes, flags, the severity gate, output formats, and exit codes.
 ---
 
-`miucr` has three commands: `review`, `mcp`, and `version`. This page covers `review` — the day-to-day loop. For the MCP server see [MCP integration](/mcp/).
+`miucr` has these commands: `init`, `login`, `review`, `mcp`, `serve`, `rules`, `history`, `upgrade`, and `version`. This page covers `review` — the day-to-day loop. See the dedicated pages for [serve & action](/serve-and-action/), [rules](/rules/), [history](/history/), [providers](/providers/), and [credentials](/credentials/); for the MCP server see [MCP integration](/mcp/).
 
 ## Review modes
 
@@ -15,8 +15,8 @@ miucr review --from main --to HEAD    # a ref range (--from and --to are require
 miucr review --commit HEAD~1          # a single commit vs its parent
 ```
 
-- **`--staged`** reads the **index**, not `HEAD` — it reviews exactly what you are about to commit.
-- **`--from` / `--to`** review the diff between two refs (branches, tags, or SHAs).
+- **`--staged`** reviews staged changes — diffed against `HEAD` (`git diff --cached`) with the new-side content read from the index blob, i.e. exactly what you are about to commit (not your unstaged working tree).
+- **`--from` / `--to`** review `<to>` against the **merge-base** of the two refs (`merge-base(from,to)..to`), matching what a PR introduces.
 - **`--commit`** reviews one commit against its first parent.
 
 ## The severity gate
@@ -44,7 +44,7 @@ miucr review --staged -o sarif        # SARIF 2.1.0 document for code-scanning /
 
 `pretty` is a real local reporter: each finding shows an editor-jumpable `file:line` (or `file:start-end`), a severity glyph + severity/category, the rationale, a quoted-code excerpt, and a suggested-patch preview. ANSI color is emitted only when stdout is a terminal; piped/CI output is plain.
 
-`sarif` emits a schema-pinned **SARIF 2.1.0** document (stdlib JSON; tool driver `miucr`, `ruleId` = category, `level` from severity, `region` from the anchored line range, `snippet` = quoted code, `fixes` from the suggested patch). Paths are repo-relative only — never absolute or secret. It is review-only (other commands keep the JSON envelope). Upload it to the GitHub code-scanning Security tab with `github/codeql-action/upload-sarif` — see [Action: SARIF](/serve-and-action/#sarif-code-scanning).
+`sarif` emits a schema-pinned **SARIF 2.1.0** document (stdlib JSON; tool driver `miucr`, `ruleId` = category, `level` from severity, `region` from the anchored line range, `snippet` = quoted code, `fixes` from the suggested patch). Paths are repo-relative only — never absolute or secret. It is review-only (other commands keep the JSON envelope). Upload it to the GitHub code-scanning Security tab with `github/codeql-action/upload-sarif` — see [Action: SARIF](/serve-and-action/#sarif--code-scanning).
 
 ### `--sarif-out <file>`
 
@@ -55,7 +55,7 @@ miucr review --staged --sarif-out miucr.sarif          # JSON on stdout + SARIF 
 miucr review --pr owner/repo#123 --post --sarif-out miucr.sarif
 ```
 
-It is written **only on a successful review** (atomically: temp file + rename), so a failed run leaves no file. This is what the GitHub Action uses to publish to the Security tab — see [Action: SARIF](/serve-and-action/#sarif-code-scanning).
+It is written **only on a successful review** (atomically: temp file + rename), so a failed run leaves no file. This is what the GitHub Action uses to publish to the Security tab — see [Action: SARIF](/serve-and-action/#sarif--code-scanning).
 
 ### `--filter-mode`
 
@@ -101,12 +101,13 @@ The default JSON is a **stable v1 envelope** (`api_version: "miucr.cli/v1"`) so 
       "max_severity": "high",
       "gate": "high",
       "truncation_level": "full"
-    }
+    },
+    "review_id": "rev_…"
   }
 }
 ```
 
-`findings_dropped` counts findings rejected by line-anchoring drift (see [How it works](/how-it-works/)). `truncation_level` is `full`, `hunks_only`, or `filenames_only` depending on how much context fit the token budget.
+`findings_dropped` counts findings rejected by line-anchoring drift (see [How it works](/how-it-works/)). `truncation_level` is `full`, `hunks_only`, or `filenames_only` depending on how much context fit the token budget. `review_id` is the id of the saved review in the local [history store](/history/) (every review is saved by default; opt out with `--no-save`).
 
 Errors use the same envelope with `ok: false` and an `error` object carrying a stable `code`, a redacted `message`, and a `hint`.
 
@@ -135,7 +136,7 @@ miucr review --staged --exclude '**/*_test.go'          # doublestar globs to dr
 ## Context & budget flags
 
 - `--expand <n>` — context lines added above/below each changed hunk in the new-content window (default `5`; `0` disables).
-- `--token-budget <n>` — approximate token budget; over budget, context degrades through the truncation ladder (default `0`, disabled).
+- `--token-budget <n>` — approximate token budget; over budget, context degrades through the truncation ladder (default `100000`; pass `0` to disable).
 - `--timeout <dur>` — global operation timeout (default `30s`).
 
 ## Provider flags
@@ -149,9 +150,24 @@ miucr review --staged --exclude '**/*_test.go'          # doublestar globs to dr
 
 Every review gets a built-in baseline plus any project rules under `.miu/cr/rules/*.md` (and `~/.config/miu/cr/rules/*.md`) that match the changed files. Rules are review **context only** — they never gate. Scaffold one with `miucr rules init` and inspect selection with `miucr rules check <path>`. See the [Project rules](/rules/) guide for the format, trust model, and how rules flow through local / `--pr` / serve.
 
+## PR review
+
+`review` can review a GitHub pull request directly and (with `--post`) publish results back to it:
+
+- `--pr <url|owner/repo#N>` — review a GitHub PR (no PAT needed for public repos in dry-run).
+- `--post` / `--no-post` — publish inline comments + a summary, or dry-run (`--no-post` is the default for `--pr`).
+- `--token <pat>` — GitHub PAT, required only for `--post`.
+- `--mode review|checks` — inline review comments (default) or a GitHub CheckRun (survives force-push, works on fork PRs).
+- `--suggest` — emit one-click GitHub suggestions for proven single-line fixes.
+- `--approve-clean` — submit `APPROVE` only on a clean, non-fork, trusted-author PR.
+
+These (and `--filter-mode` above) only apply on `--pr`. See [GitHub PR review](/github-pr/) and [Serve & action](/serve-and-action/) for the full workflow.
+
 ## version
 
 ```sh
 miucr version            # {"ok":true,"data":{"version":"v0.x.y"}, ...}
-miucr version -o pretty
+miucr version -o pretty   # the same JSON envelope, indented (not a different format)
 ```
+
+For non-`review` commands, `-o pretty` simply indents the JSON envelope rather than producing a distinct human layout.

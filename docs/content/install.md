@@ -66,6 +66,18 @@ Expand-Archive $asset -DestinationPath ".\miucr" -Force
 
 A Scoop manifest is planned.
 
+## Update
+
+Binaries installed via `install.sh` or the Windows zip self-update from the latest GitHub release:
+
+```sh
+miucr upgrade                  # download + install the latest release
+miucr upgrade --check          # report whether a newer version exists, install nothing
+miucr upgrade --version vX.Y.Z # install a specific release tag
+```
+
+Homebrew users update through Homebrew instead: `brew upgrade miucr`.
+
 ## Verify
 
 ```sh
