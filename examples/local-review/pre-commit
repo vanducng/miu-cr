@@ -17,10 +17,13 @@
 # commit only on a high or critical finding.
 GATE="${MIUCR_GATE:-high}"
 
-# Bound the LLM call so a slow/hung provider can't block your commit forever; on
-# timeout miucr errors (non-zero) and the commit is blocked — bypass with
-# --no-verify. Tune for your provider's latency.
-TIMEOUT="${MIUCR_TIMEOUT:-120s}"
+# Bound the LLM call so a slow/hung provider can't block your commit forever.
+# This is a CEILING, not added latency — a normal review exits the instant it's
+# done; the bound only catches a hung/pathologically-slow provider, in which case
+# miucr errors (non-zero) and the commit is blocked (bypass with --no-verify).
+# Default 300s leaves headroom for a large diff on a reasoning model (e.g. codex
+# gpt-5.5); lower it for a fast model, or prefer a pre-push hook for big reviews.
+TIMEOUT="${MIUCR_TIMEOUT:-300s}"
 
 # Nothing staged → nothing to review.
 if git diff --cached --quiet; then
