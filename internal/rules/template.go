@@ -22,7 +22,7 @@ alwaysApply: false
 # context. Absolute paths and ..-escaping are rejected; missing files are warned
 # and skipped. On fork PRs, repo context_files are dropped entirely.
 context_files:
-  - "docs/architecture.md"
+  - "AGENTS.md"
 ---
 # Project review hints
 
