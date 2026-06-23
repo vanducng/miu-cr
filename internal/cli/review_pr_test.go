@@ -93,6 +93,63 @@ func TestPRDryRunEmitsFindingsAndPRBlock(t *testing.T) {
 	}
 }
 
+func TestPRSkippedUnchangedEnvelope(t *testing.T) {
+	pr := &fakePRReviewer{outcome: ReviewOutcome{
+		SkippedUnchanged: true,
+		PriorReviewID:    "prior-9",
+		PR:               &PRResult{Owner: "o", Repo: "r", Number: 1, HeadSHA: "abc", SummaryAction: "none"},
+	}}
+	out, err := runPR(t, pr, &fakeReviewer{}, "--pr", "o/r#1", "--no-post")
+	if err != nil {
+		t.Fatalf("skip must exit 0: %v", err)
+	}
+	var env Envelope
+	if e := json.Unmarshal([]byte(out), &env); e != nil {
+		t.Fatalf("invalid envelope: %v\n%s", e, out)
+	}
+	data, _ := env.Data.(map[string]any)
+	if data["skipped_unchanged"] != true {
+		t.Fatalf("want data.skipped_unchanged=true, got %v", data["skipped_unchanged"])
+	}
+	if data["prior_review_id"] != "prior-9" {
+		t.Fatalf("want data.prior_review_id=prior-9, got %v", data["prior_review_id"])
+	}
+}
+
+// A normal (non-skipped) review must NOT carry the additive skip fields.
+func TestPRNormalRunOmitsSkipFields(t *testing.T) {
+	pr := &fakePRReviewer{outcome: ReviewOutcome{
+		Findings: []ReviewFinding{},
+		Stats:    map[string]any{},
+		PR:       &PRResult{Owner: "o", Repo: "r", Number: 1, HeadSHA: "abc"},
+	}}
+	out, err := runPR(t, pr, &fakeReviewer{}, "--pr", "o/r#1", "--no-post")
+	if err != nil {
+		t.Fatalf("run: %v", err)
+	}
+	var env Envelope
+	if e := json.Unmarshal([]byte(out), &env); e != nil {
+		t.Fatalf("invalid envelope: %v\n%s", e, out)
+	}
+	data, _ := env.Data.(map[string]any)
+	if _, ok := data["skipped_unchanged"]; ok {
+		t.Fatalf("normal run must omit skipped_unchanged: %v", data)
+	}
+	if _, ok := data["prior_review_id"]; ok {
+		t.Fatalf("normal run must omit prior_review_id: %v", data)
+	}
+}
+
+func TestPRForceFlagThreaded(t *testing.T) {
+	pr := &fakePRReviewer{outcome: ReviewOutcome{PR: &PRResult{Owner: "o", Repo: "r", Number: 1}}}
+	if _, err := runPR(t, pr, &fakeReviewer{}, "--pr", "o/r#1", "--no-post", "--force"); err != nil {
+		t.Fatalf("run: %v", err)
+	}
+	if !pr.gotReq.Force {
+		t.Fatal("--force must thread Force=true into the PR request")
+	}
+}
+
 func TestPRGateUsesPRReviewerNotLocalReviewer(t *testing.T) {
 	pr := &fakePRReviewer{outcome: ReviewOutcome{
 		Findings: []ReviewFinding{{File: "a.go", Line: 1, Severity: "critical"}},

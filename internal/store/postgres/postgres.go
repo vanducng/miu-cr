@@ -272,6 +272,20 @@ func (s *Store) PruneReviews(ctx context.Context, p store.PrunePolicy) (int, err
 	return store.ExecPrunePostgres(ctx, s.db, p)
 }
 
+// LatestReviewForPR returns the newest review's id + head SHA for the PR key, or
+// ok=false when none exists. Over the existing columns — no schema change.
+func (s *Store) LatestReviewForPR(ctx context.Context, key store.PRKey) (store.LatestReview, bool, error) {
+	var lr store.LatestReview
+	row := s.db.QueryRowContext(ctx, store.LatestReviewForPRQuery(store.PostgresPlaceholder), key.Owner, key.Repo, key.Number)
+	switch err := row.Scan(&lr.ID, &lr.HeadSHA); {
+	case errors.Is(err, sql.ErrNoRows):
+		return store.LatestReview{}, false, nil
+	case err != nil:
+		return store.LatestReview{}, false, fmt.Errorf("latest review for pr: %w", err)
+	}
+	return lr, true, nil
+}
+
 // EngineStore adapts this Store to engine.Store (engine.PersistRecord <->
 // store.ReviewRecord), mirroring the sqlite adapter so the engine persists
 // without importing the store package's record type.

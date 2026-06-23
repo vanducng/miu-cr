@@ -309,6 +309,55 @@ func TestConformancePruneReviewsKeepAndOlderThan(t *testing.T) {
 	}
 }
 
+// TestConformanceLatestReviewForPR round-trips the incremental-skip read: no
+// prior → ok=false; after saving, the newest record's id + head SHA come back,
+// and a newer SHA for the same key supersedes the older one.
+func TestConformanceLatestReviewForPR(t *testing.T) {
+	for _, b := range backends(t) {
+		t.Run(b.name, func(t *testing.T) {
+			ctx := context.Background()
+			clearReviews(t, ctx, b.rev) // postgres conformance DB is shared across tests; sqlite is fresh
+			key := store.PRKey{Owner: "acme", Repo: "widget", Number: 42}
+
+			if _, ok, err := b.rev.LatestReviewForPR(ctx, key); err != nil || ok {
+				t.Fatalf("no prior review: want ok=false err=nil, got ok=%v err=%v", ok, err)
+			}
+
+			base := time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC)
+			if _, err := b.rev.SaveReview(ctx, store.ReviewRecord{
+				ID: "old", Mode: "pr", Owner: key.Owner, Repo: key.Repo, Number: key.Number,
+				HeadSHA: "sha-old", CreatedAt: base,
+			}); err != nil {
+				t.Fatalf("seed old: %v", err)
+			}
+			lr, ok, err := b.rev.LatestReviewForPR(ctx, key)
+			if err != nil || !ok {
+				t.Fatalf("after one save: want ok=true err=nil, got ok=%v err=%v", ok, err)
+			}
+			if lr.ID != "old" || lr.HeadSHA != "sha-old" {
+				t.Fatalf("latest = %+v, want id=old sha=sha-old", lr)
+			}
+
+			// A newer review on a new commit supersedes the old one.
+			if _, err := b.rev.SaveReview(ctx, store.ReviewRecord{
+				ID: "new", Mode: "pr", Owner: key.Owner, Repo: key.Repo, Number: key.Number,
+				HeadSHA: "sha-new", CreatedAt: base.Add(time.Hour),
+			}); err != nil {
+				t.Fatalf("seed new: %v", err)
+			}
+			lr, ok, _ = b.rev.LatestReviewForPR(ctx, key)
+			if !ok || lr.ID != "new" || lr.HeadSHA != "sha-new" {
+				t.Fatalf("after newer save: latest = %+v ok=%v, want id=new sha=sha-new", lr, ok)
+			}
+
+			// A different PR key is unaffected.
+			if _, ok, _ := b.rev.LatestReviewForPR(ctx, store.PRKey{Owner: "acme", Repo: "widget", Number: 7}); ok {
+				t.Fatalf("unrelated PR key must have no latest review")
+			}
+		})
+	}
+}
+
 func ids(ss []store.ReviewSummary) []string {
 	out := make([]string, len(ss))
 	for i, s := range ss {

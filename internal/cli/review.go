@@ -53,6 +53,12 @@ type ReviewOutcome struct {
 	Stats    map[string]any
 	PR       *PRResult
 	ReviewID string
+
+	// SkippedUnchanged is set on the --pr incremental-skip path: a prior review of
+	// the same PR + same head SHA exists and --force was not passed, so no LLM pass
+	// ran. PriorReviewID is that prior record's id. Both stay zero on a normal run.
+	SkippedUnchanged bool
+	PriorReviewID    string
 }
 
 // PRResult is the typed PR summary for the data.pr envelope block on the --pr
@@ -137,6 +143,7 @@ type PRReviewRequest struct {
 	FilterMode   string       // added|diff_context|file|nofilter (default diff_context)
 	Mode         string       // review (default: inline+summary) | checks (GitHub Checks-API reporter)
 	NoSave       bool         // opt out of persisting this run to the local history store
+	Force        bool         // re-review even when the head SHA is unchanged since the last review (bypass the incremental skip)
 	Progress     func(string) // nil = silent; stderr milestones, never the stdout envelope
 	// ActionsOut is the command's stdout writer (cmd.OutOrStdout()), used ONLY by the
 	// fork-PR 403 fallback to emit ::error:: workflow commands on the same stream as
@@ -250,6 +257,7 @@ func reviewCommand(opts *options) *cobra.Command {
 		suggest      bool
 		approveClean bool
 		noSave       bool
+		force        bool
 		verbose      bool
 		quiet        bool
 	)
@@ -301,6 +309,7 @@ func reviewCommand(opts *options) *cobra.Command {
 					mode:         mode,
 					sarifOut:     sarifOut,
 					noSave:       noSave,
+					force:        force,
 					progress:     prog,
 				})
 			}
@@ -399,6 +408,7 @@ func reviewCommand(opts *options) *cobra.Command {
 	f.BoolVar(&suggest, "suggest", false, "Emit GitHub native one-click suggestions for proven single-line replacements; author-applied, never pushed. Requires --post (inert in dry-run) (default OFF; else a plain hint)")
 	f.BoolVar(&approveClean, "approve-clean", false, "Submit Event=APPROVE only on a clean, non-fork, trusted-author PR; skipped (→ COMMENT) otherwise, never errors. A PAT APPROVE counts toward required reviews. Requires --post (inert in dry-run) (default OFF)")
 	f.BoolVar(&noSave, "no-save", false, "Do not persist this review to the local history store (default: every review is saved to ~/.config/miu/cr/state.db)")
+	f.BoolVar(&force, "force", false, "On --pr, re-review even when the head SHA is unchanged since the last saved review (default: an unchanged head SHA short-circuits with skipped_unchanged, no LLM pass)")
 	f.BoolVarP(&verbose, "verbose", "v", false, "Print progress to stderr (default when stderr is a terminal; stdout envelope unchanged)")
 	f.BoolVarP(&quiet, "quiet", "q", false, "Silence progress output (overrides --verbose and TTY auto-detect)")
 
@@ -431,6 +441,7 @@ type prRunArgs struct {
 	mode        string
 	sarifOut    string
 	noSave      bool
+	force       bool
 	progress    func(string)
 }
 
@@ -479,6 +490,7 @@ func runPRReview(cmd *cobra.Command, a prRunArgs) error {
 		FilterMode:   a.filterMode,
 		Mode:         a.mode,
 		NoSave:       a.noSave,
+		Force:        a.force,
 		Progress:     a.progress,
 		ActionsOut:   cmd.OutOrStdout(),
 	})
@@ -496,6 +508,12 @@ func runPRReview(cmd *cobra.Command, a prRunArgs) error {
 	data := map[string]any{"findings": out.Findings, "stats": out.Stats, "review_id": out.ReviewID}
 	if out.PR != nil {
 		data["pr"] = out.PR
+	}
+	// Incremental-skip (additive, back-compatible): present only on the --pr path
+	// when an unchanged head SHA short-circuited; absent on a normal review.
+	if out.SkippedUnchanged {
+		data["skipped_unchanged"] = true
+		data["prior_review_id"] = out.PriorReviewID
 	}
 	if err := emitReview(cmd.OutOrStdout(), out, data, summary); err != nil {
 		return err

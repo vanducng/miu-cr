@@ -53,6 +53,15 @@ func ListReviewsQuery(f ReviewFilter, p ph) (string, []any) {
 	return q, args
 }
 
+// LatestReviewForPRQuery selects the newest review's id + head_sha for a PR key
+// over the existing owner/repo/number columns (no new column). Used by the
+// incremental re-review skip; the args are owner, repo, number in order.
+func LatestReviewForPRQuery(p ph) string {
+	return "SELECT id, head_sha FROM reviews WHERE owner = " + p(1) +
+		" AND repo = " + p(2) + " AND number = " + p(3) +
+		" ORDER BY created_at DESC LIMIT 1"
+}
+
 // ScanSummaries reads ListReviews rows, projecting findings_count + max_severity
 // from the decoded findings JSON.
 func ScanSummaries(rows *sql.Rows) ([]ReviewSummary, error) {

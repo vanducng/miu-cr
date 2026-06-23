@@ -228,6 +228,38 @@ func (prReviewer) ReviewPR(ctx stdctx.Context, req cli.PRReviewRequest) (cli.Rev
 		req.Progress(fmt.Sprintf("fetching PR %s/%s#%d…", ref.Owner, ref.Repo, ref.Number))
 	}
 
+	client := newGitHubClient(req.Token)
+	info, err := mgithub.FetchPR(ctx, client, ref)
+	if err != nil {
+		return cli.ReviewOutcome{}, err
+	}
+
+	cfg, lerr := config.Load()
+	if lerr != nil {
+		slog.Warn("config load failed, using built-in defaults: " + config.RedactString(lerr.Error()))
+	}
+	hist, closeHist := openHistoryStore(ctx, cfg, req.NoSave)
+	if closeHist != nil {
+		defer closeHist()
+	}
+
+	// Incremental re-review: an unchanged head SHA since the last saved review (and
+	// not --force) short-circuits before the clone + LLM pass. A store read failure
+	// degrades to always-review (skipUnchanged returns ok=false), never blocks.
+	if prior, ok := skipUnchanged(ctx, hist, info, req.Force); ok {
+		if req.Progress != nil {
+			req.Progress("skipped: head SHA " + info.HeadSHA + " already reviewed (use --force to re-review)")
+		}
+		return cli.ReviewOutcome{
+			SkippedUnchanged: true,
+			PriorReviewID:    prior.ID,
+			PR: &cli.PRResult{
+				Owner: info.Owner, Repo: info.Repo, Number: info.Number,
+				HeadSHA: info.HeadSHA, IsFork: info.IsFork, SummaryAction: "none",
+			},
+		}, nil
+	}
+
 	creds, err := agent.Resolve(agent.ResolveInput{
 		Ctx:           ctx,
 		Provider:      req.Provider,
@@ -245,12 +277,6 @@ func (prReviewer) ReviewPR(ctx stdctx.Context, req cli.PRReviewRequest) (cli.Rev
 		return cli.ReviewOutcome{}, err
 	}
 
-	client := newGitHubClient(req.Token)
-	info, err := mgithub.FetchPR(ctx, client, ref)
-	if err != nil {
-		return cli.ReviewOutcome{}, err
-	}
-
 	runner := gitcmd.New()
 	dir, cleanup, err := mgithub.FetchIntoTempClone(ctx, runner, info, req.Token)
 	if err != nil {
@@ -261,10 +287,6 @@ func (prReviewer) ReviewPR(ctx stdctx.Context, req cli.PRReviewRequest) (cli.Rev
 	// M7 semantic layer (opt-in: [embedding].enabled AND backend=postgres). Built
 	// here so the Retriever can be injected into the --pr engine.Request and the
 	// embedder reused on the post-publish write path. Off => nils => byte-for-byte M6.
-	cfg, lerr := config.Load()
-	if lerr != nil {
-		slog.Warn("config load failed, using built-in defaults: " + config.RedactString(lerr.Error()))
-	}
 	repo := repoKey(info.Owner, info.Repo)
 	emb, embStore, closeEmb := buildSemantic(ctx, cfg)
 	if closeEmb != nil {
@@ -276,10 +298,6 @@ func (prReviewer) ReviewPR(ctx stdctx.Context, req cli.PRReviewRequest) (cli.Rev
 	}
 
 	eng := engine.New(agentAdapter{inner: llm}, runner)
-	hist, closeHist := openHistoryStore(ctx, cfg, req.NoSave)
-	if closeHist != nil {
-		defer closeHist()
-	}
 	if hist != nil {
 		eng.Store = engineStoreFor(hist)
 	}
@@ -340,6 +358,27 @@ func (prReviewer) ReviewPR(ctx stdctx.Context, req cli.PRReviewRequest) (cli.Rev
 		PR:       prResult,
 		ReviewID: res.ID,
 	}, nil
+}
+
+// skipUnchanged reports whether the --pr review can short-circuit: a prior saved
+// review of the same PR key exists, its head SHA equals the current one, and
+// --force was not passed. A nil store (history off / --no-save) or any read
+// failure degrades to ok=false (always review) — never blocks. The returned
+// LatestReview carries the prior review id for the skipped_unchanged envelope.
+func skipUnchanged(ctx stdctx.Context, hist store.Store, info *mgithub.PRInfo, force bool) (store.LatestReview, bool) {
+	if force || hist == nil {
+		return store.LatestReview{}, false
+	}
+	key := store.PRKey{Owner: info.Owner, Repo: info.Repo, Number: info.Number}
+	prior, ok, err := hist.LatestReviewForPR(ctx, key)
+	if err != nil {
+		slog.Warn("incremental re-review check failed, reviewing: " + config.RedactString(err.Error()))
+		return store.LatestReview{}, false
+	}
+	if !ok || prior.HeadSHA == "" || prior.HeadSHA != info.HeadSHA {
+		return store.LatestReview{}, false
+	}
+	return prior, true
 }
 
 // publishReview posts the review THIS run: inline comments first (skipping any
@@ -422,7 +461,7 @@ func publishReview(ctx stdctx.Context, client mgithub.Client, runner *gitcmd.Run
 		prResult.SummaryAction = "fork_fallback"
 		return nil
 	}
-	summary := mgithub.RenderSummaryWithOverflow(info, res.Findings, res.Stats, pr.Omitted, pr.OmittedFindings, categoryURLs)
+	summary := mgithub.RenderSummaryFull(info, res.Findings, res.Stats, pr.Omitted, pr.OmittedFindings, categoryURLs, diffs, res.ID)
 	action, err := mgithub.UpsertSummaryComment(ctx, client, info, summary)
 	if err != nil {
 		return err

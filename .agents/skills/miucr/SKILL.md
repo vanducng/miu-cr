@@ -155,6 +155,7 @@ miucr review --pr owner/repo#123          # a GitHub PR (dry-run by default)
 | `--mode review\|checks` | `review` | GitHub reporter on `--pr --post`. `review` posts inline comments + a summary. `checks` posts a GitHub CheckRun with annotations (survives force-push, works on fork PRs, can be a **required** check); conclusion maps from the gate (gate-clean→`success`, gate-hit→`failure`); needs `checks: write`. |
 | `--sarif-out <path>` | — | Also write a SARIF 2.1.0 report to `<path>` from the SAME single review run (in addition to `--output`/posting). Written only on success (atomic temp+rename); a failed run leaves no file. This is how the Action does single-pass SARIF — no second LLM call. |
 | `--no-save` | off | Skip persisting this run to the local history store (every review is saved by default). |
+| `--force` | off | On `--pr`, re-review even when the head SHA is unchanged since the last saved review. By default an unchanged head SHA short-circuits (`skipped_unchanged`, no LLM pass); a new commit always re-reviews. |
 | `-v, --verbose` / `-q, --quiet` | auto | Progress to **stderr** (stdout envelope unchanged). Auto-on when stderr is a TTY; `-v` forces on, `-q` forces off; mutually exclusive. Piped/CI stays silent. |
 
 **`review.result` data** (local and `--pr`):
@@ -173,6 +174,9 @@ miucr review --pr owner/repo#123          # a GitHub PR (dry-run by default)
              "truncation_level": "full",            // full | hunks_only | filenames_only
              "rules_applied": 5, "rules_truncated": false },
   "review_id": "rev_...",  // additive: the saved history record id ("" with --no-save)
+  // additive, only on --pr when an unchanged head SHA short-circuited (no LLM pass);
+  // both omitted on a normal review:
+  "skipped_unchanged": true, "prior_review_id": "rev_prior",
   "pr": {  // only on --pr
     "owner": "owner", "repo": "repo", "number": 123, "head_sha": "deadbeef",
     "is_fork": false, "posted": false, "posted_inline": 0, "summary_action": "none",
@@ -426,7 +430,8 @@ Runs on same-repo PRs only (fork-safe automated review is the `serve` path's job
 2. **Review a PR (dry-run)** — `env -u GITHUB_TOKEN -u GH_TOKEN miucr review --pr owner/repo#N --no-post -o json`
    (public repo, no PAT). Read `.data.pr` + `.data.findings`.
 3. **Publish** — `miucr review --pr owner/repo#N --post --token <pat>`; idempotent re-runs (`posted_inline:0`,
-   `summary_action:edited`). Add `--suggest`/`--approve-clean` only when you intend write-actions.
+   `summary_action:edited`). Add `--suggest`/`--approve-clean` only when you intend write-actions. A re-review on
+   an **unchanged head SHA** short-circuits (`.data.skipped_unchanged:true`, no LLM pass); pass `--force` to override.
 4. **Re-trigger the Action / dogfood** — push a new commit, or re-run the `PR Review` workflow from the
    Actions tab / `gh workflow run` / `gh run rerun <id>`. Each new head SHA is a fresh review.
 5. **On `ok:false`** — branch on `.error.code` (e.g. `review.gate_failed`, `github.post_requires_token`,
