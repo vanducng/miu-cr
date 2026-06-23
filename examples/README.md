@@ -5,6 +5,7 @@ self-contained — read its header comment, copy it into your repo, and adjust.
 
 | Path | What it is |
 |------|------------|
+| [`local-review/`](local-review/README.md) | Pre-commit git hook, Makefile gate targets, and an agent fix-loop script for reviewing your own changes locally. |
 | [`rules/go-api.md`](rules/go-api.md) | Review context for Go HTTP handlers — auth, validation, error handling. |
 | [`rules/typescript-node.md`](rules/typescript-node.md) | Review context for TypeScript/Node services — async safety, type hygiene. |
 | [`rules/python-data.md`](rules/python-data.md) | Review context for Python data/ML pipelines — correctness, reproducibility. |
@@ -13,6 +14,15 @@ self-contained — read its header comment, copy it into your repo, and adjust.
 | [`mcp-setup/`](mcp-setup/README-mcp.md) | Wire `miucr mcp` into Claude Code, Cursor, or Codex CLI. |
 | [`docker/Dockerfile`](docker/Dockerfile) | Multi-stage, pure-Go (`CGO_ENABLED=0`) distroless image for `miucr serve`. |
 | [`docker/docker-compose.yml`](docker/docker-compose.yml) | Local stand-in for a server deploy (webhook or poll mode). |
+
+## Local review
+
+`local-review/` collects the everyday "review my own changes before they leave
+my machine" workflows: a `pre-commit` git hook that gates the commit, a
+`Makefile` with `review` / `review-range` targets, and an `agent-review.sh`
+showing the AI agent fix-loop shape. See the
+[Use cases & recipes](https://miucr.vanducng.dev/use-cases/) docs page for the
+full prose.
 
 ## Rules
 

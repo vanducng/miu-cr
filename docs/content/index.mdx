@@ -33,7 +33,7 @@ Local review, GitHub PR review, project rules, the serve/poll daemon + GitHub Ac
 
 ## What you get
 
-- **Local review** — `miucr review --staged` / `--from`+`--to` / `--commit`: deterministic select → context → single LLM pass → line-anchor → gate → dedupe. Non-zero exit at/above `--gate` severity (CI-friendly). → [Usage](/usage/)
+- **Local review** — `miucr review --staged` / `--from`+`--to` / `--commit`: deterministic select → context → single LLM pass → line-anchor → gate → dedupe. Non-zero exit at/above `--gate` severity (CI-friendly). → [Usage](/usage/) · copy-paste recipes in [Use cases](/use-cases/)
 - **GitHub PR review** — `review --pr <url|owner/repo#N>`: head-SHA-anchored inline comments (multi-line range aware) + one idempotent summary, or a required GitHub **Check Run** (`--mode checks`); `--filter-mode` diff control; SARIF export; content-stable cross-push dedupe + resolution; opt-in `--suggest` and `--approve-clean`. → [GitHub PR review](/github-pr/)
 - **Project rules** — `.miu/cr/rules/*.md` markdown with frontmatter selects context by glob; built-in defaults + user + repo layers, trust-fenced on fork PRs. → [Project rules](/rules/)
 - **serve · poll · Action** — an HMAC webhook daemon, an opt-in poll trigger, and a reusable GitHub Action — all funnel into one review path. → [Serve & Action](/serve-and-action/)
