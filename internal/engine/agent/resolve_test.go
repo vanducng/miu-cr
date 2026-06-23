@@ -1,6 +1,7 @@
 package agent
 
 import (
+	"context"
 	"errors"
 	"testing"
 
@@ -14,6 +15,7 @@ func clearProviderEnv(t *testing.T) {
 	for _, k := range []string{
 		"ANTHROPIC_API_KEY", "ANTHROPIC_MODEL", "ANTHROPIC_BASE_URL", "ANTHROPIC_AUTH_TOKEN",
 		"OPENAI_API_KEY", "OPENAI_BASE_URL", "OPENAI_MODEL", "ZAI_API_KEY", "GATEWAY_TOKEN",
+		"MIUCR_CODEX_MODEL",
 	} {
 		t.Setenv(k, "")
 	}
@@ -297,6 +299,90 @@ func TestResolveDoesNotEmitPersistableFields(t *testing.T) {
 	}
 	if creds.APIKey != "sekret" {
 		t.Fatalf("expected in-memory key, got %q", creds.APIKey)
+	}
+}
+
+// codexOAuthCfg builds an openai profile pinned to OAuth (so resolution takes the
+// codex backend path) with the given config model.
+func codexOAuthCfg(model string) config.Config {
+	cfg := config.Defaults()
+	op := cfg.Providers["openai"]
+	op.Auth = "oauth"
+	op.Model = model
+	cfg.Providers["openai"] = op
+	return cfg
+}
+
+func fakeOAuthResolver(context.Context) (OAuthCredential, bool, error) {
+	return OAuthCredential{AccessToken: "tok", AccountID: "acct", BackendBaseURL: "https://backend.example/codex"}, true, nil
+}
+
+// codex path: an EXPLICIT non-gpt-4o config model is honored over DefaultCodexModel.
+func TestResolveCodexHonorsExplicitConfigModel(t *testing.T) {
+	clearProviderEnv(t)
+	creds, err := resolveWith(codexOAuthCfg("gpt-5-codex"), ResolveInput{Provider: "openai", OAuthResolver: fakeOAuthResolver})
+	if err != nil {
+		t.Fatalf("resolve: %v", err)
+	}
+	if creds.Backend != "codex" {
+		t.Fatalf("want codex backend, got %q", creds.Backend)
+	}
+	if creds.Model != "gpt-5-codex" {
+		t.Fatalf("explicit config model must win on codex path, got %q", creds.Model)
+	}
+}
+
+// codex path: the merged gpt-4o default must NEVER leak to the codex backend —
+// it is filtered and falls through to DefaultCodexModel (the gpt-4o-rejection bug).
+func TestResolveCodexFiltersGPT4oDefault(t *testing.T) {
+	clearProviderEnv(t)
+	creds, err := resolveWith(codexOAuthCfg(config.DefaultOpenAIModel), ResolveInput{Provider: "openai", OAuthResolver: fakeOAuthResolver})
+	if err != nil {
+		t.Fatalf("resolve: %v", err)
+	}
+	if creds.Model == config.DefaultOpenAIModel {
+		t.Fatalf("gpt-4o must never reach the codex backend, got %q", creds.Model)
+	}
+	if creds.Model != config.DefaultCodexModel {
+		t.Fatalf("codex path must default to %q, got %q", config.DefaultCodexModel, creds.Model)
+	}
+}
+
+// codex path: --model and MIUCR_CODEX_MODEL still win over a config model.
+func TestResolveCodexFlagAndEnvWin(t *testing.T) {
+	clearProviderEnv(t)
+	creds, err := resolveWith(codexOAuthCfg("gpt-5-codex"), ResolveInput{Provider: "openai", Model: "gpt-flag", OAuthResolver: fakeOAuthResolver})
+	if err != nil {
+		t.Fatalf("resolve: %v", err)
+	}
+	if creds.Model != "gpt-flag" {
+		t.Fatalf("--model must win on codex path, got %q", creds.Model)
+	}
+
+	t.Setenv("MIUCR_CODEX_MODEL", "gpt-env")
+	creds, err = resolveWith(codexOAuthCfg("gpt-5-codex"), ResolveInput{Provider: "openai", OAuthResolver: fakeOAuthResolver})
+	if err != nil {
+		t.Fatalf("resolve: %v", err)
+	}
+	if creds.Model != "gpt-env" {
+		t.Fatalf("MIUCR_CODEX_MODEL must win over config model, got %q", creds.Model)
+	}
+}
+
+// The API-KEY openai path is unchanged: it keeps prof.Model + the gpt-4o default
+// (codexConfigModel only narrows the codex backend, not the platform-key path).
+func TestResolveOpenAIAPIKeyModelUnchanged(t *testing.T) {
+	clearProviderEnv(t)
+	t.Setenv("OPENAI_API_KEY", "oai-key")
+	creds, err := resolveWith(config.Defaults(), ResolveInput{Provider: "openai"})
+	if err != nil {
+		t.Fatalf("resolve: %v", err)
+	}
+	if creds.Backend == "codex" {
+		t.Fatalf("API-key path must not use the codex backend: %+v", creds)
+	}
+	if creds.Model != config.DefaultOpenAIModel {
+		t.Fatalf("API-key openai path must keep the gpt-4o default, got %q", creds.Model)
 	}
 }
 

@@ -125,7 +125,7 @@ Requests send `max_tokens` (not `max_completion_tokens`) for the broadest compat
 
 ### OAuth / your ChatGPT plan
 
-The OpenAI provider can also authenticate **without an API key** by reviewing on your ChatGPT plan. `miucr login` caches an OAuth token and subsequent OpenAI reviews talk to the **codex backend** (the ChatGPT-plan Responses protocol). On that path the model defaults to `gpt-5.5` (override with `--model` or `MIUCR_CODEX_MODEL`; the pinned `gpt-4o`/`OPENAI_MODEL` default does not apply because the codex backend rejects api.openai.com models).
+The OpenAI provider can also authenticate **without an API key** by reviewing on your ChatGPT plan. `miucr login` caches an OAuth token and subsequent OpenAI reviews talk to the **codex backend** (the ChatGPT-plan Responses protocol). On that path the model defaults to `gpt-5.5`; precedence is `--model` > `MIUCR_CODEX_MODEL` > an explicit `model` in your `[providers.openai]` profile > `gpt-5.5`. `miucr init` writes `model = "gpt-5.5"` for you on the OAuth path so the codex model is visible and editable. The pinned `gpt-4o`/`OPENAI_MODEL` default never applies here — the codex backend rejects api.openai.com models, so a config `model = "gpt-4o"` is ignored and falls through to `gpt-5.5`.
 
 When `auth` is unset, the OpenAI credential resolves **intent-ordered** so an ambient `OPENAI_API_KEY` (often set for other tools) never silently overrides a deliberate choice:
 

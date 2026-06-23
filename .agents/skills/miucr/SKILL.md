@@ -313,6 +313,9 @@ miucr login --no-browser          # headless/SSH: print the authorize URL instea
 
 Reviews authed by this token route to the **codex backend** (`chatgpt.com/backend-api/codex`,
 Responses protocol) so they run on the user's **ChatGPT Pro/Max subscription**, not a billed key.
+On this path the model defaults to `gpt-5.5` (the codex backend rejects api.openai.com models like
+`gpt-4o`); `miucr init` writes `model = "gpt-5.5"` into `[providers.openai]` so it is visible + editable.
+Precedence: `--model` > `MIUCR_CODEX_MODEL` > the config `model` (if not `gpt-4o`) > `gpt-5.5`.
 `--provider` is an explicit flag backed by a registry — `openai` is the only entry
 (`--provider anthropic`/unknown → `login.provider_unsupported`; Anthropic OAuth is ToS-prohibited).
 Loopback binds an allow-listed port (`1455`, then `1457`). Envelope `kind: init.result`-style

@@ -98,6 +98,9 @@ func authOAuth(ctx stdctx.Context, out io.Writer, prof *config.Provider) (authMe
 	prof.AuthEnv = ""
 	prof.AuthToken = ""
 	prof.Auth = "oauth" // explicit in config: use the ChatGPT plan, never an API key
+	// gpt-5.5 != the gpt-4o openai default, so Save persists it: the codex model
+	// is visible + editable in config, and resolve honors it over DefaultCodexModel.
+	prof.Model = config.DefaultCodexModel
 	return authMethodOAuth, nil
 }
 
