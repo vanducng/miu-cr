@@ -17,6 +17,11 @@
 # commit only on a high or critical finding.
 GATE="${MIUCR_GATE:-high}"
 
+# Bound the LLM call so a slow/hung provider can't block your commit forever; on
+# timeout miucr errors (non-zero) and the commit is blocked — bypass with
+# --no-verify. Tune for your provider's latency.
+TIMEOUT="${MIUCR_TIMEOUT:-120s}"
+
 # Nothing staged → nothing to review.
 if git diff --cached --quiet; then
   exit 0
@@ -24,7 +29,7 @@ fi
 
 # miucr exits 2 when a finding reaches the gate (or on an invalid invocation),
 # 1 on an operational error, 0 when clean. Any non-zero aborts the commit.
-miucr review --staged --gate "$GATE" -o pretty
+miucr review --staged --gate "$GATE" --timeout "$TIMEOUT" -o pretty
 status=$?
 
 if [ "$status" -ne 0 ]; then

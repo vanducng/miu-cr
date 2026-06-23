@@ -45,7 +45,8 @@ while [ "$round" -le "$MAX_ROUNDS" ]; do
   case "$status" in
     0) echo "miucr: clean — no finding reached the gate." >&2; exit 0 ;;
     2) : ;; # gate hit — $out holds a valid envelope with findings, handled below
-    1) echo "$out" | jq -r '.error | "miucr error: \(.code): \(.message)"' >&2; exit 1 ;;
+    1) { echo "$out" | jq -re '.error | "miucr error: \(.code): \(.message)"' 2>/dev/null \
+         || echo "miucr error (exit 1) — no JSON envelope on stdout"; } >&2; exit 1 ;;
     *) echo "miucr: unexpected exit $status (is miucr on PATH?)" >&2; exit "$status" ;;
   esac
 
