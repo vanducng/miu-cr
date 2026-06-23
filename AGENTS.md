@@ -26,9 +26,9 @@ that looks real and replace it with synthetic equivalents.
 
 ## Keep the skill in sync (in-repo + downstream)
 
-This CLI ships a Claude Code skill in **two** places that MUST stay identical:
+This CLI ships an agent skill in **two** places that MUST stay identical:
 
-- **In-repo:** `.claude/skills/miucr/SKILL.md` (lives with the code; the source of truth).
+- **In-repo:** `.agents/skills/miucr/SKILL.md` is the canonical copy (agent-agnostic, so Codex/Cursor/etc. read it); `.claude/skills/miucr` is a **symlink** to it so Claude Code reads the same file. Edit the canonical `.agents/skills/miucr/SKILL.md`.
 - **Downstream:** `~/skills/skills/miucr/SKILL.md` in the `vanducng/skills` repo.
 
 After landing a change here, update BOTH in the same work session:

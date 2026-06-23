@@ -29,3 +29,8 @@ docs/dist/
 .claude/*
 !.claude/skills/
 !.claude/skills/**
+
+# agent skills (canonical; .claude/skills symlinks here)
+.agents/*
+!.agents/skills/
+!.agents/skills/**
