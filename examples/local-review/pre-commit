@@ -1,0 +1,37 @@
+#!/bin/sh
+# miucr pre-commit hook — review staged changes and block the commit on a high+
+# finding.
+#
+# Install:
+#   cp examples/local-review/pre-commit .git/hooks/pre-commit
+#   chmod +x .git/hooks/pre-commit
+#
+# Bypass for one commit (skips ALL pre-commit hooks):
+#   git commit --no-verify
+#
+# Requires: miucr on PATH and a provider key in the environment
+# (ANTHROPIC_API_KEY, or `miucr login` for a ChatGPT plan). See
+# https://miucr.vanducng.dev/credentials/
+#
+# Tune GATE to none|info|low|medium|high|critical. Default "high" fails the
+# commit only on a high or critical finding.
+GATE="${MIUCR_GATE:-high}"
+
+# Nothing staged → nothing to review.
+if git diff --cached --quiet; then
+  exit 0
+fi
+
+# miucr exits 2 when a finding reaches the gate (or on an invalid invocation),
+# 1 on an operational error, 0 when clean. Any non-zero aborts the commit.
+miucr review --staged --gate "$GATE" -o pretty
+status=$?
+
+if [ "$status" -ne 0 ]; then
+  echo >&2
+  echo "miucr: review gate failed (exit $status) — commit blocked." >&2
+  echo "miucr: fix the findings above, or bypass once with: git commit --no-verify" >&2
+  exit "$status"
+fi
+
+exit 0
