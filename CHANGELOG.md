@@ -55,6 +55,13 @@ comment with a new marker); subsequent re-runs dedupe normally. On a
 first M5 review **manually** (or off-hours) to absorb the one-time re-post before
 the next scheduled run.
 
+## [0.20.1](https://github.com/vanducng/miu-cr/compare/v0.20.0...v0.20.1) (2026-06-23)
+
+
+### Bug Fixes
+
+* **examples:** pre-commit review timeout 120s -&gt; 300s ([f40db0e](https://github.com/vanducng/miu-cr/commit/f40db0e916983d88f286be0ddf170d359f968ae6))
+
 ## [0.20.0](https://github.com/vanducng/miu-cr/compare/v0.19.0...v0.20.0) (2026-06-22)
 
 
