@@ -103,6 +103,97 @@ func TestLoadRulesDefaults(t *testing.T) {
 	}
 }
 
+func TestBuiltinStackRules(t *testing.T) {
+	rules, warnings := LoadRules("", "", false)
+	if len(warnings) != 0 {
+		t.Fatalf("unexpected warnings loading defaults only: %v", warnings)
+	}
+	byStem := map[string]Rule{}
+	for _, r := range rules {
+		byStem[r.Stem] = r
+	}
+
+	stackStems := []string{"go", "typescript", "python", "web-frontend", "sql", "dockerfile-ci", "shell"}
+	for _, stem := range stackStems {
+		r, ok := byStem[stem]
+		if !ok {
+			t.Errorf("missing built-in stack rule %q", stem)
+			continue
+		}
+		if r.Provenance != BuiltinDefault || !r.Provenance.Trusted() {
+			t.Errorf("%s should be a Trusted BuiltinDefault, got %v", stem, r.Provenance)
+		}
+		if r.FM.AlwaysApply {
+			t.Errorf("stack rule %s must be glob-scoped, not alwaysApply", stem)
+		}
+		if len(r.FM.Globs) == 0 {
+			t.Errorf("stack rule %s needs globs", stem)
+		}
+		if len(r.FM.ContextFiles) != 0 {
+			t.Errorf("stack rule %s must not declare context_files, got %v", stem, r.FM.ContextFiles)
+		}
+		if lines := strings.Count(r.Body, "\n") + 1; lines >= 100 {
+			t.Errorf("stack rule %s body is %d lines, want <100", stem, lines)
+		}
+	}
+
+	// Cap: 5 concern + 7 stack = 12, within ~8-12.
+	if len(rules) > 12 {
+		t.Errorf("embedded default count = %d, want <= 12 (cap)", len(rules))
+	}
+}
+
+func TestStackRulesAutoAttachByGlob(t *testing.T) {
+	rules, _ := LoadRules("", "", false)
+
+	cases := []struct {
+		path string
+		stem string
+	}{
+		{"internal/foo/bar.go", "go"},
+		{"src/app.ts", "typescript"},
+		{"web/Button.tsx", "web-frontend"},
+		{"pipelines/etl.py", "python"},
+		{"db/migrations/001.sql", "sql"},
+		{"deploy/Dockerfile", "dockerfile-ci"},
+		{"scripts/build.sh", "shell"},
+	}
+	for _, c := range cases {
+		t.Run(c.path, func(t *testing.T) {
+			got := SelectRules(rules, []string{c.path})
+			if !stemSet(got)[c.stem] {
+				t.Errorf("path %q should select stack rule %q, selected %v", c.path, c.stem, stems(got))
+			}
+		})
+	}
+
+	t.Run("untouched stack injects nothing extra", func(t *testing.T) {
+		got := SelectRules(rules, []string{"README.txt"})
+		for _, r := range got {
+			if !r.FM.AlwaysApply {
+				t.Errorf("non-matching change selected glob rule %q", r.Stem)
+			}
+		}
+	})
+}
+
+func TestStackRulesTruncateBeforeConcernBaseline(t *testing.T) {
+	rules, _ := LoadRules("", "", false)
+	// A change touching every stack so all 12 rules select; the 5 concern rules
+	// (alwaysApply) must sort ahead of the 7 stack rules so truncation drops
+	// stack first.
+	selected := SelectRules(rules, []string{"a.go", "b.ts", "c.py", "d.tsx", "e.sql", "Dockerfile", "f.sh"})
+	if len(selected) < 12 {
+		t.Fatalf("expected all 12 defaults selected, got %d: %v", len(selected), stems(selected))
+	}
+	for i := 1; i < len(selected); i++ {
+		// alwaysApply rules must never appear after a non-alwaysApply rule.
+		if !selected[i-1].FM.AlwaysApply && selected[i].FM.AlwaysApply {
+			t.Fatalf("concern rule %q sorted after stack rule %q — truncation would drop the baseline first", selected[i].Stem, selected[i-1].Stem)
+		}
+	}
+}
+
 func TestLoadRulesLayering(t *testing.T) {
 	t.Run("malformed and no-fence files skipped with warnings", func(t *testing.T) {
 		rules, warnings := LoadRules(userDir, "", false)
