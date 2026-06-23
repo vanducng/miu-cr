@@ -46,8 +46,9 @@ type ReviewRequest struct {
 
 // ReviewOutcome is the Reviewer's result: anchored findings plus run stats. PR
 // is non-nil only on the --pr path and drives the data.pr envelope block.
-// ReviewID is the saved record id (empty when not persisted); it surfaces as the
-// additive review_id envelope field.
+// ReviewID is the saved record id; it surfaces as the additive review_id envelope
+// field. Empty only when the review was not persisted (--no-save). On an
+// incremental skip it is the prior review's id (the run reuses that review), not "".
 type ReviewOutcome struct {
 	Findings []ReviewFinding
 	Stats    map[string]any

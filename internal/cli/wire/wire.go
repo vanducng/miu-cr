@@ -248,11 +248,17 @@ func (prReviewer) ReviewPR(ctx stdctx.Context, req cli.PRReviewRequest) (cli.Rev
 	// perf optimization, so it only fires when the desired end-state already holds —
 	// never on --post, which must publish (see skipUnchanged). A store read failure
 	// degrades to always-review (skipUnchanged returns ok=false), never blocks.
+	// Ordering note: the skip runs after the post intent is resolved (skipUnchanged
+	// takes req.Post) but before --post token validation — safe because skipUnchanged
+	// returns ok=false whenever req.Post is set, so a --post run never reaches here.
 	if prior, ok := skipUnchanged(ctx, hist, info, req.Force, req.Post); ok {
 		if req.Progress != nil {
 			req.Progress("skipped: head SHA " + info.HeadSHA + " already reviewed (use --force to re-review)")
 		}
 		return cli.ReviewOutcome{
+			// review_id resolves to the prior review this run reuses (not "" — that
+			// would wrongly read as --no-save); PriorReviewID keeps it explicit.
+			ReviewID:         prior.ID,
 			SkippedUnchanged: true,
 			PriorReviewID:    prior.ID,
 			PR: &cli.PRResult{

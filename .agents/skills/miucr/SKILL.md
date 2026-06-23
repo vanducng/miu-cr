@@ -173,7 +173,7 @@ miucr review --pr owner/repo#123          # a GitHub PR (dry-run by default)
              "findings_dropped": 1, "max_severity": "high", "gate": "high",
              "truncation_level": "full",            // full | hunks_only | filenames_only
              "rules_applied": 5, "rules_truncated": false },
-  "review_id": "rev_...",  // additive: the saved history record id ("" with --no-save)
+  "review_id": "rev_...",  // additive: the saved history record id ("" only with --no-save; on an incremental skip it is the prior review id)
   // additive, only on a --pr DRY-RUN when an unchanged head SHA short-circuited (no
   // LLM pass); both omitted on a normal review. --post never short-circuits (it must
   // publish). On the skip path findings is [] and stats is {} (never null):
