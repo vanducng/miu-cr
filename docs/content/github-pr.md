@@ -114,6 +114,19 @@ A single summary comment is posted last. Its first line is a hidden sentinel:
 Inline comments are posted **before** the summary so that if posting partially
 fails, the summary always reflects the latest successful run.
 
+## Incremental re-review (unchanged head SHA)
+
+When the local history store has a prior review of the **same PR** at the **same
+head SHA**, a re-review **short-circuits before the LLM pass**: the envelope
+carries `data.skipped_unchanged: true` and `data.prior_review_id`, and exits `0`
+without a second model call. Any **new commit** (a changed head SHA) always
+re-reviews. Pass `--force` to re-review an unchanged head SHA anyway.
+
+This is keyed strictly on the head SHA, so a rare content change with no new
+commit is not detected — use `--force` for that. If the history store is off
+(`--no-save` or disabled) or unreadable, the check degrades to always-review and
+never blocks.
+
 ## Cross-push dedupe
 
 The inline fingerprint is **line-free**: `path | category |

@@ -285,10 +285,12 @@ func resolveOAuthCodex(in ResolveInput, prof config.Provider) (Credentials, bool
 	if !ok {
 		return Credentials{}, false, nil
 	}
-	// The codex backend only accepts codex models — NOT prof.Model (the openai
-	// profile defaults to gpt-4o, an api.openai.com model the backend rejects).
-	// Override via --model or MIUCR_CODEX_MODEL; the allow-list varies by plan.
-	model := firstNonEmpty(in.Model, os.Getenv("MIUCR_CODEX_MODEL"), config.DefaultCodexModel)
+	// The codex backend only accepts codex models — never the merged gpt-4o
+	// default (an api.openai.com model it rejects). codexConfigModel honors an
+	// EXPLICIT non-gpt-4o config model while filtering that leaked default.
+	// Precedence: --model > MIUCR_CODEX_MODEL > explicit config model (not gpt-4o)
+	// > DefaultCodexModel (gpt-5.5). The allow-list varies by plan.
+	model := firstNonEmpty(in.Model, os.Getenv("MIUCR_CODEX_MODEL"), codexConfigModel(prof.Model), config.DefaultCodexModel)
 	return Credentials{
 		Kind:           config.KindOpenAI,
 		Backend:        "codex",
@@ -314,6 +316,15 @@ func profileSecret(prof config.Provider) string {
 	}
 	if prof.AuthEnv != "" {
 		return strings.TrimSpace(os.Getenv(prof.AuthEnv))
+	}
+	return ""
+}
+
+// codexConfigModel returns an explicitly-configured codex model, dropping the
+// merged gpt-4o default (== DefaultOpenAIModel) which the codex backend rejects.
+func codexConfigModel(m string) string {
+	if m != "" && m != config.DefaultOpenAIModel {
+		return m
 	}
 	return ""
 }

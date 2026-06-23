@@ -164,6 +164,7 @@ Every review gets a built-in baseline plus any project rules under `.miu/cr/rule
 - `--mode review|checks` — inline review comments (default) or a GitHub CheckRun (survives force-push, works on fork PRs).
 - `--suggest` — emit one-click GitHub suggestions for proven single-line fixes.
 - `--approve-clean` — submit `APPROVE` only on a clean, non-fork, trusted-author PR.
+- `--force` — re-review even when the head SHA is unchanged since the last saved review. By default an unchanged head SHA short-circuits (`skipped_unchanged`, no LLM pass); a new commit always re-reviews. See [GitHub PR review](/github-pr/).
 
 These (and `--filter-mode` above) only apply on `--pr`. See [GitHub PR review](/github-pr/) and [Serve & action](/serve-and-action/) for the full workflow.
 

@@ -33,6 +33,12 @@ default_provider = "anthropic"
 # base_url = "https://api.openai.com/v1"
 # model    = "gpt-4o"
 # # API key comes from OPENAI_API_KEY (or --api-key).
+# #
+# # ChatGPT-plan (codex) path: when you authenticate with `miucr login` (OAuth),
+# # reviews run on the codex backend, which REJECTS api.openai.com models like
+# # gpt-4o. Set `model = "gpt-5.5"` to pin the codex model (miucr init writes this
+# # for you on the OAuth path). Precedence: --model > MIUCR_CODEX_MODEL > this
+# # config model > gpt-5.5 (the built-in codex default).
 
 # ── Example: GLM via z.ai (an Anthropic-compatible gateway) ──
 # A named profile of kind "anthropic" pointed at the gateway; the credential is

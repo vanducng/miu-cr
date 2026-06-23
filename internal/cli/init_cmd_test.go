@@ -277,6 +277,18 @@ func TestInitOpenAIOAuth(t *testing.T) {
 	if strings.Contains(body, "auth_token =") {
 		t.Fatalf("oauth init must write no secret to config:\n%s", body)
 	}
+	// The codex model is persisted (gpt-5.5 != the stripped gpt-4o default) so it is
+	// visible + editable, and round-trips through Save->Load for the codex path.
+	if !strings.Contains(body, "model = '"+config.DefaultCodexModel+"'") {
+		t.Fatalf("oauth init must write the codex model %q:\n%s", config.DefaultCodexModel, body)
+	}
+	loaded, lerr := config.Load()
+	if lerr != nil {
+		t.Fatalf("load round-trip: %v", lerr)
+	}
+	if op := loaded.Providers["openai"]; op.Model != config.DefaultCodexModel {
+		t.Fatalf("codex model must round-trip through Save->Load: got %q", op.Model)
+	}
 	for _, secret := range []string{"fake-access-token-SECRET", "sk-exchanged-FAKE"} {
 		if strings.Contains(body, secret) {
 			t.Fatalf("token %q leaked into config", secret)

@@ -52,7 +52,7 @@ Rules load from three layers, merged by file **stem**. The two **Trusted** layer
 
 So a user `security.md` overrides the embedded `security.md` (by **stem** `security`), but a repo `.miu/cr/rules/security.md` is **ignored** — the loader logs `rules: ignore repo rule … (stem "security" already provided by trusted layer …)` and the Trusted `security` rule stays in force. A repo rule only takes effect for a stem no Trusted layer defines. Every review applies the embedded defaults even when there are no user or repo rules.
 
-The built-in baseline (correctness, security, reliability, performance, testing) is `alwaysApply` and sourced from a general code-review checklist — a sane default for any language.
+The built-in baseline has two tiers. The **concern tier** (correctness, security, reliability, performance, testing) is `alwaysApply` and sourced from a general code-review checklist — a sane default for any language. The **stack tier** (go, typescript, python, web-frontend, sql, dockerfile-ci, shell) is `alwaysApply: false` and **glob-scoped**: each attaches only when a changed file matches its language/stack (e.g. `go` on `**/*.go`, `sql` on `**/*.sql`), so a stack you don't touch injects nothing. Stack rules are deliberately broad-but-shallow (one language, evidence-gated anti-patterns) — not a per-framework rule zoo; deep, framework-specific context belongs in the user/repo tiers. A user or repo rule with the same **stem** (e.g. a user `go.md`) overrides the built-in stack rule, per the layering rules above. Under token-cap truncation the stack tier (non-`alwaysApply`) is dropped before the concern baseline.
 
 ## Selection
 

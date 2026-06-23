@@ -85,7 +85,13 @@ Full walkthrough — editor (MCP) + CI wiring: **[Getting started](https://miucr
 
 ## Quickstart
 
-Bring your own key — passed at runtime via env or flag, never persisted:
+**No API key? Use your ChatGPT plan.** A browser login caches a token and reviews on your existing ChatGPT/Codex subscription — co-equal to bringing your own key:
+
+```sh
+miucr login --provider openai && miucr review --staged   # review on your ChatGPT plan, no API key
+```
+
+**Bring your own key** — passed at runtime via env or flag, never persisted:
 
 ```sh
 export ANTHROPIC_API_KEY=...                        # or OPENAI_API_KEY (--provider auto detects)
@@ -132,6 +138,14 @@ Review a GitHub PR (public-repo dry-run needs **no** PAT — just an LLM key):
 env -u GITHUB_TOKEN -u GH_TOKEN miucr review --pr owner/repo#123 --no-post -o json   # dry-run
 miucr review --pr https://github.com/owner/repo/pull/123 --post                      # publish inline + summary
 ```
+
+PR comments are polished, not raw findings — see [GitHub PR review](https://miucr.vanducng.dev/github-pr/):
+
+- **Head-SHA-anchored inline comments** with multi-line ranges, dropped (not mis-posted) on position drift.
+- **One-click suggestions** — GitHub-native suggested edits for proven single-line fixes (`--suggest`, author-applied).
+- **One idempotent summary** — a single sentinel comment, updated in place; content-stable dedupe across re-runs and re-pushes so nothing double-posts.
+- **Optional auto-approve** — `--approve-clean` submits `APPROVE` only on a clean, non-fork, trusted-author PR (else degrades to `COMMENT`).
+- **Fork-safe** — repo rules are trust-fenced and dropped on fork PRs; the engine still reviews.
 
 ## Features
 

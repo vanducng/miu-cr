@@ -80,4 +80,13 @@ type Store interface {
 	UpsertReview(ctx context.Context, rec ReviewRecord) (string, error)
 	ListReviews(ctx context.Context, f ReviewFilter) ([]ReviewSummary, error)
 	PruneReviews(ctx context.Context, p PrunePolicy) (int, error)
+	LatestReviewForPR(ctx context.Context, key PRKey) (LatestReview, bool, error)
+}
+
+// LatestReview is the minimal projection of the most-recent review for a PR key,
+// over the existing reviews columns (no schema change): the saved record id and
+// the head SHA it reviewed. It backs the incremental re-review skip.
+type LatestReview struct {
+	ID      string
+	HeadSHA string
 }

@@ -5,6 +5,7 @@ import (
 	"strings"
 
 	"github.com/vanducng/miu-cr/internal/engine"
+	"github.com/vanducng/miu-cr/internal/engine/diff"
 )
 
 // severityOrder ranks severities high→low for a stable histogram.
@@ -22,6 +23,15 @@ func RenderSummary(info *PRInfo, findings []engine.Finding, stats map[string]any
 // lists each capped/omitted inline finding (severity, category, file:line, rationale,
 // blob permalink) so nothing is silently dropped.
 func RenderSummaryWithOverflow(info *PRInfo, findings []engine.Finding, stats map[string]any, omittedInline int, omitted []engine.Finding, categoryURLs map[string]string) string {
+	return RenderSummaryFull(info, findings, stats, omittedInline, omitted, categoryURLs, nil, "")
+}
+
+// RenderSummaryFull is RenderSummaryWithOverflow plus the LLM-free reviewer-trust
+// blocks (effort badge, per-file changes table, agent-handoff) derived from the
+// diff list + the review_id. All three blocks are additive markdown and degrade
+// cleanly (nil diffs skip table/badge, empty reviewID skips handoff), so the
+// summary stays idempotent + back-compatible; no extra model call is made.
+func RenderSummaryFull(info *PRInfo, findings []engine.Finding, stats map[string]any, omittedInline int, omitted []engine.Finding, categoryURLs map[string]string, diffs []diff.Diff, reviewID string) string {
 	var b strings.Builder
 	b.WriteString("## miu-cr review\n\n")
 
@@ -64,6 +74,8 @@ func RenderSummaryWithOverflow(info *PRInfo, findings []engine.Finding, stats ma
 	if len(omitted) > 0 {
 		renderOverflow(&b, info, omitted, categoryURLs)
 	}
+
+	renderPresentation(&b, info, findings, diffs, reviewID)
 
 	b.WriteString("\n<sub>Posted by miu-cr. Re-runs edit this summary and skip already-posted inline comments.</sub>")
 	return b.String()
