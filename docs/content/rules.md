@@ -19,7 +19,7 @@ globs:
   - "internal/**/*.go"
 alwaysApply: false
 context_files:
-  - "docs/architecture.md"
+  - "AGENTS.md"
 ---
 # Project review hints
 

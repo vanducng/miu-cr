@@ -2,6 +2,7 @@
 import { defineConfig } from 'astro/config';
 import starlight from '@astrojs/starlight';
 import react from '@astrojs/react';
+import mermaid from 'astro-mermaid';
 import starlightLlmsTxt from 'starlight-llms-txt';
 import remarkGfm from 'remark-gfm';
 
@@ -11,6 +12,10 @@ export default defineConfig({
   // NOTE: markdown.remarkPlugins is deprecated in Astro 6; migrate when bumping major.
   markdown: { remarkPlugins: [remarkGfm] },
   integrations: [
+    // Must precede starlight() so fenced ```mermaid blocks are transformed
+    // before Starlight's markdown pipeline runs. autoTheme follows the site's
+    // data-theme: 'default' (light) / 'dark' (dark) to track the catppuccin pair.
+    mermaid({ theme: 'default', autoTheme: true, mermaidConfig: { flowchart: { curve: 'basis' } } }),
     starlight({
       title: 'miu-cr',
       logo: { src: './src/assets/logo.svg' },
@@ -40,7 +45,7 @@ export default defineConfig({
         { label: 'Guides', items: ['install', 'usage', 'rules'] },
         { label: 'Providers', items: ['providers', 'credentials'] },
         { label: 'Integration', items: ['mcp', 'github-pr', 'serve-and-action', 'rest-api-and-github-app'] },
-        { label: 'Internals', items: ['how-it-works', 'store-backends', 'semantic-recall'] },
+        { label: 'Internals', items: ['architecture', 'how-it-works', 'store-backends', 'semantic-recall'] },
         {
           label: 'Related docs',
           items: [
