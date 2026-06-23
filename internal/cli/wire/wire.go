@@ -244,9 +244,11 @@ func (prReviewer) ReviewPR(ctx stdctx.Context, req cli.PRReviewRequest) (cli.Rev
 	}
 
 	// Incremental re-review: an unchanged head SHA since the last saved review (and
-	// not --force) short-circuits before the clone + LLM pass. A store read failure
+	// not --force) short-circuits before the clone + LLM pass. The skip is a pure
+	// perf optimization, so it only fires when the desired end-state already holds —
+	// never on --post, which must publish (see skipUnchanged). A store read failure
 	// degrades to always-review (skipUnchanged returns ok=false), never blocks.
-	if prior, ok := skipUnchanged(ctx, hist, info, req.Force); ok {
+	if prior, ok := skipUnchanged(ctx, hist, info, req.Force, req.Post); ok {
 		if req.Progress != nil {
 			req.Progress("skipped: head SHA " + info.HeadSHA + " already reviewed (use --force to re-review)")
 		}
@@ -362,11 +364,17 @@ func (prReviewer) ReviewPR(ctx stdctx.Context, req cli.PRReviewRequest) (cli.Rev
 
 // skipUnchanged reports whether the --pr review can short-circuit: a prior saved
 // review of the same PR key exists, its head SHA equals the current one, and
-// --force was not passed. A nil store (history off / --no-save) or any read
-// failure degrades to ok=false (always review) — never blocks. The returned
-// LatestReview carries the prior review id for the skipped_unchanged envelope.
-func skipUnchanged(ctx stdctx.Context, hist store.Store, info *mgithub.PRInfo, force bool) (store.LatestReview, bool) {
-	if force || hist == nil {
+// --force was not passed. The skip is a perf optimization to avoid re-running the
+// LLM on an unchanged PR — it must skip ONLY when the desired end-state already
+// holds. The history store has no "posted" column, so it cannot prove a prior
+// review actually published; therefore --post never skips (proceed with the
+// normal review+publish — the per-comment fingerprint dedupe + idempotent sentinel
+// summary already prevent duplicate comments on an unchanged SHA). A nil store
+// (history off / --no-save) or any read failure degrades to ok=false (always
+// review) — never blocks. The returned LatestReview carries the prior review id
+// for the skipped_unchanged envelope.
+func skipUnchanged(ctx stdctx.Context, hist store.Store, info *mgithub.PRInfo, force, post bool) (store.LatestReview, bool) {
+	if force || post || hist == nil {
 		return store.LatestReview{}, false
 	}
 	key := store.PRKey{Owner: info.Owner, Repo: info.Repo, Number: info.Number}

@@ -156,6 +156,9 @@ func TestStackRulesAutoAttachByGlob(t *testing.T) {
 		{"pipelines/etl.py", "python"},
 		{"db/migrations/001.sql", "sql"},
 		{"deploy/Dockerfile", "dockerfile-ci"},
+		{".github/workflows/ci.yml", "dockerfile-ci"},
+		{".github/workflows/release.yaml", "dockerfile-ci"},
+		{"sub/.github/workflows/deploy.yml", "dockerfile-ci"},
 		{"scripts/build.sh", "shell"},
 	}
 	for _, c := range cases {

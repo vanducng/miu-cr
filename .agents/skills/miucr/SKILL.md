@@ -174,8 +174,9 @@ miucr review --pr owner/repo#123          # a GitHub PR (dry-run by default)
              "truncation_level": "full",            // full | hunks_only | filenames_only
              "rules_applied": 5, "rules_truncated": false },
   "review_id": "rev_...",  // additive: the saved history record id ("" with --no-save)
-  // additive, only on --pr when an unchanged head SHA short-circuited (no LLM pass);
-  // both omitted on a normal review:
+  // additive, only on a --pr DRY-RUN when an unchanged head SHA short-circuited (no
+  // LLM pass); both omitted on a normal review. --post never short-circuits (it must
+  // publish). On the skip path findings is [] and stats is {} (never null):
   "skipped_unchanged": true, "prior_review_id": "rev_prior",
   "pr": {  // only on --pr
     "owner": "owner", "repo": "repo", "number": 123, "head_sha": "deadbeef",
@@ -433,8 +434,9 @@ Runs on same-repo PRs only (fork-safe automated review is the `serve` path's job
 2. **Review a PR (dry-run)** — `env -u GITHUB_TOKEN -u GH_TOKEN miucr review --pr owner/repo#N --no-post -o json`
    (public repo, no PAT). Read `.data.pr` + `.data.findings`.
 3. **Publish** — `miucr review --pr owner/repo#N --post --token <pat>`; idempotent re-runs (`posted_inline:0`,
-   `summary_action:edited`). Add `--suggest`/`--approve-clean` only when you intend write-actions. A re-review on
-   an **unchanged head SHA** short-circuits (`.data.skipped_unchanged:true`, no LLM pass); pass `--force` to override.
+   `summary_action:edited`). Add `--suggest`/`--approve-clean` only when you intend write-actions. `--post`
+   always publishes — it never short-circuits. Only a **dry-run** (`--no-post`) on an **unchanged head SHA**
+   short-circuits (`.data.skipped_unchanged:true`, no LLM pass); pass `--force` to override.
 4. **Re-trigger the Action / dogfood** — push a new commit, or re-run the `PR Review` workflow from the
    Actions tab / `gh workflow run` / `gh run rerun <id>`. Each new head SHA is a fresh review.
 5. **On `ok:false`** — branch on `.error.code` (e.g. `review.gate_failed`, `github.post_requires_token`,

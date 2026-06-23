@@ -4,9 +4,12 @@ globs:
   - "**/Dockerfile"
   - "**/Dockerfile.*"
   - "**/*.Dockerfile"
+  - ".github/workflows/*.yml"
+  - ".github/workflows/*.yaml"
   - "**/.github/workflows/*.yml"
   - "**/.github/workflows/*.yaml"
   - "**/.gitlab-ci.yml"
+  - "**/.gitlab-ci.yaml"
 alwaysApply: false
 ---
 # Dockerfile / CI review context

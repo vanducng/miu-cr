@@ -497,6 +497,31 @@ func runPRReview(cmd *cobra.Command, a prRunArgs) error {
 	if err != nil {
 		return err
 	}
+
+	// Incremental-skip path (additive, back-compatible): an unchanged head SHA
+	// short-circuited with no LLM pass. Emit a coherent envelope — findings as an
+	// empty array (never null) + an empty stats object, so a consumer expecting an
+	// array/object shape doesn't break — and surface skipped_unchanged +
+	// prior_review_id. Do NOT write SARIF: a zero-finding write would clobber a
+	// prior good report. No gate evaluation (no findings ran this pass).
+	if out.SkippedUnchanged {
+		if a.progress != nil {
+			a.progress("skipped: unchanged head SHA already reviewed")
+		}
+		data := map[string]any{
+			"findings":          []ReviewFinding{},
+			"stats":             map[string]any{},
+			"review_id":         out.ReviewID,
+			"skipped_unchanged": true,
+			"prior_review_id":   out.PriorReviewID,
+		}
+		if out.PR != nil {
+			data["pr"] = out.PR
+		}
+		summary := map[string]any{"findings": 0, "gate": a.gate, "skipped_unchanged": true}
+		return emitReview(cmd.OutOrStdout(), out, data, summary)
+	}
+
 	if a.progress != nil {
 		a.progress(fmt.Sprintf("done: %d findings", len(out.Findings)))
 	}
@@ -508,12 +533,6 @@ func runPRReview(cmd *cobra.Command, a prRunArgs) error {
 	data := map[string]any{"findings": out.Findings, "stats": out.Stats, "review_id": out.ReviewID}
 	if out.PR != nil {
 		data["pr"] = out.PR
-	}
-	// Incremental-skip (additive, back-compatible): present only on the --pr path
-	// when an unchanged head SHA short-circuited; absent on a normal review.
-	if out.SkippedUnchanged {
-		data["skipped_unchanged"] = true
-		data["prior_review_id"] = out.PriorReviewID
 	}
 	if err := emitReview(cmd.OutOrStdout(), out, data, summary); err != nil {
 		return err
