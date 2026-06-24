@@ -55,6 +55,13 @@ comment with a new marker); subsequent re-runs dedupe normally. On a
 first M5 review **manually** (or off-hours) to absorb the one-time re-post before
 the next scheduled run.
 
+## [0.23.1](https://github.com/vanducng/miu-cr/compare/v0.23.0...v0.23.1) (2026-06-24)
+
+
+### Bug Fixes
+
+* **review:** rule-link path must be repo-root-relative (was 404ing) ([adec2c0](https://github.com/vanducng/miu-cr/commit/adec2c05faccca580495c6d53195a0ba7a95d140))
+
 ## [0.23.0](https://github.com/vanducng/miu-cr/compare/v0.22.1...v0.23.0) (2026-06-24)
 
 
