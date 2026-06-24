@@ -164,6 +164,19 @@ func TestPRForceFlagThreaded(t *testing.T) {
 	}
 }
 
+func TestPRMinSeverityAndDiagramThreaded(t *testing.T) {
+	pr := &fakePRReviewer{outcome: ReviewOutcome{PR: &PRResult{Owner: "o", Repo: "r", Number: 1}}}
+	if _, err := runPR(t, pr, &fakeReviewer{}, "--pr", "o/r#1", "--no-post", "--min-severity", "high", "--walkthrough-diagram"); err != nil {
+		t.Fatalf("run: %v", err)
+	}
+	if pr.gotReq.MinSeverity != "high" {
+		t.Fatalf("--min-severity not threaded: %q", pr.gotReq.MinSeverity)
+	}
+	if !pr.gotReq.WantDiagram {
+		t.Fatal("--walkthrough-diagram must thread WantDiagram into the PR request")
+	}
+}
+
 func TestPRGateUsesPRReviewerNotLocalReviewer(t *testing.T) {
 	pr := &fakePRReviewer{outcome: ReviewOutcome{
 		Findings: []ReviewFinding{{File: "a.go", Line: 1, Severity: "critical"}},

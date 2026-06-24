@@ -134,3 +134,36 @@ func TestReviewValidFilterModeThreaded(t *testing.T) {
 		t.Fatalf("filter-mode not threaded into request: %q", r.gotReq.FilterMode)
 	}
 }
+
+func TestReviewInvalidMinSeverity(t *testing.T) {
+	r := &fakeReviewer{outcome: ReviewOutcome{}}
+	_, err := runReviewFmt(t, "json", r, "--staged", "--min-severity", "bogus")
+	if err == nil {
+		t.Fatal("want error for invalid --min-severity")
+	}
+	var ce *CLIError
+	if !asCLIError(err, &ce) || ce.Code != "config.invalid" {
+		t.Fatalf("want config.invalid, got %+v", err)
+	}
+	if ce.Exit != 2 {
+		t.Fatalf("want exit 2 for invalid --min-severity, got %d", ce.Exit)
+	}
+}
+
+func TestReviewWalkthroughDiagramThreaded(t *testing.T) {
+	r := &fakeReviewer{outcome: ReviewOutcome{}}
+	if _, err := runReviewFmt(t, "json", r, "--staged", "--walkthrough-diagram", "--gate", "none"); err != nil {
+		t.Fatalf("--walkthrough-diagram rejected: %v", err)
+	}
+	if !r.gotReq.WantDiagram {
+		t.Fatal("--walkthrough-diagram not threaded into request")
+	}
+	// Default off.
+	r2 := &fakeReviewer{outcome: ReviewOutcome{}}
+	if _, err := runReviewFmt(t, "json", r2, "--staged", "--gate", "none"); err != nil {
+		t.Fatalf("default review rejected: %v", err)
+	}
+	if r2.gotReq.WantDiagram {
+		t.Fatal("WantDiagram must default off")
+	}
+}
