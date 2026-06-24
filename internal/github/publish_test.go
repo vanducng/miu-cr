@@ -643,17 +643,36 @@ func TestSuggestMultiLineDegradesToHint(t *testing.T) {
 	}
 }
 
-func TestSuggestMultiLinePatchDegradesToHint(t *testing.T) {
+func TestSuggestMultiLinePatchOnSingleAnchorEmits(t *testing.T) {
+	// A wrap/guard fix: single-line anchor (QuotedCode-proven), multi-line patch.
+	// GitHub replaces exactly the anchored line with the block, so this is safe.
 	c := &recordClient{}
 	info := &PRInfo{Owner: "o", Repo: "r", Number: 1, HeadSHA: "h"}
 	f := suggestFinding()
-	f.SuggestedPatch = "var a = 2\nvar c = 3" // patch spans 2 lines → not a clean single-line replace
+	f.SuggestedPatch = "if a == nil {\n\tvar a = 2\n}" // wrap the anchored line
+	_, err := PostReview(stdctx.Background(), c, info, []engine.Finding{f}, suggestDiff(), "", nil, PostReviewOptions{Suggest: true})
+	if err != nil {
+		t.Fatalf("PostReview: %v", err)
+	}
+	if !strings.Contains(postedBody(t, c), "```suggestion\nif a == nil {\n\tvar a = 2\n}\n```") {
+		t.Errorf("a multi-line wrap patch on a proven single-line anchor must emit a suggestion:\n%s", postedBody(t, c))
+	}
+}
+
+func TestSuggestMultiLinePatchAnchorMismatchDropped(t *testing.T) {
+	// The safety boundary: a multi-line patch whose anchored line does NOT match
+	// QuotedCode must be dropped — never a wrong-span replace (no data loss).
+	c := &recordClient{}
+	info := &PRInfo{Owner: "o", Repo: "r", Number: 1, HeadSHA: "h"}
+	f := suggestFinding()
+	f.QuotedCode = "var a = 0" // old-side anchor: != raw NewFileContent line 2 ("var a = 1")
+	f.SuggestedPatch = "if a == nil {\n\tvar a = 2\n}"
 	_, err := PostReview(stdctx.Background(), c, info, []engine.Finding{f}, suggestDiff(), "", nil, PostReviewOptions{Suggest: true})
 	if err != nil {
 		t.Fatalf("PostReview: %v", err)
 	}
 	if strings.Contains(postedBody(t, c), "suggestion") {
-		t.Error("a multi-line patch must degrade to a hint")
+		t.Errorf("a multi-line patch on a mismatched anchor must be dropped:\n%s", postedBody(t, c))
 	}
 }
 

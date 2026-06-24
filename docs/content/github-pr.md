@@ -184,7 +184,7 @@ If a review would carry more inline comments than GitHub accepts in one request,
 miu-cr posts the highest-severity findings up to a fixed cap (40), notes the
 omitted count in the summary body, and lists every capped finding in a
 collapsible **`<details>` overflow block** at the end of the summary — each with
-its severity, category, optional bold **title**, optional **`(per <rule>)`** citation, `file:line`, rationale, and a **blob permalink** pinned
+its severity, category, optional bold **title**, optional **`(per <rule>)`** citation, `file:line`, rationale (which may flag a convention inconsistency the model can see — e.g. *"differs from `mapWriteError`"*), and a **blob permalink** pinned
 to the head SHA — so a finding dropped from the inline set is never silently
 lost. The whole review can't 422 on size.
 
@@ -269,18 +269,20 @@ miucr review --pr owner/repo#123 --post --suggest --approve-clean
 ### `--suggest` — native one-click suggestions
 
 Emits a GitHub native `suggestion` block (one-click "Commit suggestion") **only**
-for a **proven verbatim replacement** of the anchored lines: the raw new-file
-line(s) at the anchored position must match the finding's quoted code (so the
-suggestion can't replace an unrelated span), and the finding must reach a severity
-floor (default `medium`). This works for both **single-line** and **multi-line**
-findings — a multi-line suggestion is one-clickable only when its span is the same
-proven contiguous-one-hunk RIGHT-side range used for range comments (a multi-line
-fence on an unproven anchor would *insert* lines instead of replacing the span, a
-broken patch). Everything else — non-verbatim patches, spans that fail the
-contiguity proof, findings below the floor — falls back to a plain fenced hint
-(the safe default). Suggestions are **author-applied**: miu-cr never pushes or
-commits to the branch. The count emitted this run is reported as
-`suggestions_posted`.
+for a **proven** fix of the anchored lines: the raw new-file line(s) at the
+anchored position must match the finding's quoted code (so the suggestion can't
+replace an unrelated span), and the finding must reach a severity floor (default
+`medium`). The patch may be a **single-line replacement** *or* a **wrap/guard/insert
+fix** — a multi-line patch on a single-line anchor (e.g. a nil-check around the
+line, or the line wrapped in `if err != nil { … }`). Because the anchor is proven
+and GitHub replaces exactly that one line with the block, the multi-line patch is a
+safe in-place expansion, not a wrong-span insert. A multi-line *finding* range
+(`EndLine > Line`) is one-clickable only when its span is the same proven
+contiguous-one-hunk RIGHT-side range used for range comments. Everything else —
+patches on a mismatched anchor, finding ranges that fail the contiguity proof,
+findings below the floor — falls back to a plain fenced hint (the safe default).
+Suggestions are **author-applied**: miu-cr never pushes or commits to the branch.
+The count emitted this run is reported as `suggestions_posted`.
 
 ### `--approve-clean` — APPROVE only on a clean, trusted PR
 

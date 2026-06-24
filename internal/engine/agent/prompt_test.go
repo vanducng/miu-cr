@@ -83,6 +83,37 @@ func TestBuildUserPromptDiagramOnInjectsInstruction(t *testing.T) {
 	}
 }
 
+func TestSystemPromptConventionGuidance(t *testing.T) {
+	// The convention cross-reference guidance must live in the cached systemPrompt
+	// (so it's part of the trusted contract, not injectable USER prose).
+	for _, want := range []string{
+		"INCONSISTENT with an established pattern",
+		"differs from <name>",
+		"never invent one",
+	} {
+		if !contains(systemPrompt, want) {
+			t.Fatalf("systemPrompt missing convention guidance %q", want)
+		}
+	}
+}
+
+func TestConventionCitationRidesRationale(t *testing.T) {
+	// A rationale citing a sibling rides the existing rationale field verbatim —
+	// no new finding field, contract unchanged.
+	const cite = `differs from mapWriteError, which sets the wrapped sql code`
+	body := `{"findings":[{"file":"a.go","existing_code":"return err","severity":"low","category":"maintainability","rationale":"` + cite + `"}]}`
+	out, ok := parseFindings(body)
+	if !ok {
+		t.Fatalf("parseFindings failed on convention finding")
+	}
+	if len(out.Findings) != 1 {
+		t.Fatalf("want 1 finding, got %d", len(out.Findings))
+	}
+	if out.Findings[0].Rationale != cite {
+		t.Fatalf("rationale not preserved verbatim:\n got=%q\nwant=%q", out.Findings[0].Rationale, cite)
+	}
+}
+
 func contains(s, sub string) bool { return indexOf(s, sub) >= 0 }
 
 func indexOf(s, sub string) int {

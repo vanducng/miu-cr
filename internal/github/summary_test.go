@@ -348,3 +348,13 @@ func TestRenderSummaryFullDiagramFenceInjectionFallsBack(t *testing.T) {
 		t.Fatalf("a fence-injecting diagram must not open a mermaid block:\n%s", out)
 	}
 }
+
+func TestMdProseEscapesBreakoutKeepsFormatting(t *testing.T) {
+	out := mdProse("see </details> and <!-- x --> but keep `code` and [link](u) and a < b")
+	if strings.Contains(out, "</details>") || strings.Contains(out, "<!--") {
+		t.Fatalf("breakout vectors not escaped: %q", out)
+	}
+	if !strings.Contains(out, "`code`") || !strings.Contains(out, "[link](u)") {
+		t.Fatalf("intentional Markdown was over-escaped: %q", out)
+	}
+}

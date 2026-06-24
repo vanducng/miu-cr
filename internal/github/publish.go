@@ -661,8 +661,9 @@ func escapeWorkflowProperty(s string) string {
 
 // commentBody renders one inline comment and reports whether it emitted a native
 // one-click ```suggestion fence. The fence is emitted ONLY when opts.Suggest AND
-// isCleanReplacement proves a verbatim single-line replacement of the raw new-file
-// line AND the severity meets the floor; otherwise (and whenever there's a patch
+// isCleanReplacement proves a safe replacement (a verbatim single-line replacement,
+// or a multi-line wrap/guard on a QuotedCode-proven single-line anchor) of the raw
+// new-file line AND the severity meets the floor; otherwise (and whenever there's a patch
 // but the gate isn't met) the patch is shown as a plain fenced hint, never a
 // one-click suggestion. This is also the fix for the latent M2 bug where a
 // ```suggestion fence was emitted unconditionally — one-click-applying an
@@ -691,7 +692,7 @@ func commentBody(info *PRInfo, f engine.Finding, newFileContent string, opts Pos
 	if t := mdInline(f.Title); t != "" {
 		fmt.Fprintf(&b, "**%s**\n\n", t)
 	}
-	b.WriteString(f.Rationale)
+	b.WriteString(mdProse(f.Rationale))
 
 	patch := strings.TrimSpace(f.SuggestedPatch)
 	if patch == "" {
