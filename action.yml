@@ -102,5 +102,5 @@ runs:
         # A real LLM PR review exceeds the 30s default; give it room.
         ARGS=(review --pr "$REF" --post --gate "$GATE" --filter-mode "$FILTER_MODE" --timeout 300s)
         if [ -n "$SARIF_FILE" ]; then ARGS+=(--sarif-out "$SARIF_FILE"); fi
-        if [ "$SUGGEST" = "true" ]; then ARGS+=(--suggest); fi
+        if [ "${SUGGEST:-}" = "true" ]; then ARGS+=(--suggest); fi
         miucr "${ARGS[@]}"
