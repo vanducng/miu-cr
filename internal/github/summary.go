@@ -48,7 +48,7 @@ type SummaryOptions struct {
 // text (walkthrough/fileSummaries) is escaped via mdInline at render.
 func RenderSummaryFull(info *PRInfo, findings []engine.Finding, stats map[string]any, omittedInline int, omitted []engine.Finding, categoryURLs map[string]string, opts SummaryOptions) string {
 	var b strings.Builder
-	b.WriteString("## miu-cr review\n\n")
+	b.WriteString("## Code Review\n\n")
 
 	renderWalkthrough(&b, opts.Walkthrough)
 	renderDiagram(&b, opts.Diagram)
