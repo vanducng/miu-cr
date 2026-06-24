@@ -55,6 +55,18 @@ comment with a new marker); subsequent re-runs dedupe normally. On a
 first M5 review **manually** (or off-hours) to absorb the one-time re-post before
 the next scheduled run.
 
+## [0.22.0](https://github.com/vanducng/miu-cr/compare/v0.21.0...v0.22.0) (2026-06-24)
+
+
+### Features
+
+* **pr-review:** walkthrough + per-file digest + opt-in Mermaid + --min-severity (one pass) ([377efbe](https://github.com/vanducng/miu-cr/commit/377efbe895d1081b1301e0db0462152e469803f2))
+
+
+### Bug Fixes
+
+* **review:** guide suggested_patch toward clean drop-in replacements ([b0331db](https://github.com/vanducng/miu-cr/commit/b0331dbbf00e2022049e08d5a41e1a0915283c13))
+
 ## [0.21.0](https://github.com/vanducng/miu-cr/compare/v0.20.1...v0.21.0) (2026-06-23)
 
 
