@@ -3,6 +3,7 @@ package agent
 import (
 	"context"
 	"errors"
+	"strings"
 	"testing"
 
 	"github.com/vanducng/miu-cr/internal/cli/clierr"
@@ -299,6 +300,85 @@ func TestResolveDoesNotEmitPersistableFields(t *testing.T) {
 	}
 	if creds.APIKey != "sekret" {
 		t.Fatalf("expected in-memory key, got %q", creds.APIKey)
+	}
+}
+
+// Gateway key-leak guard: a custom kind=openai profile WITH a key but NO base_url
+// must fail typed (config.invalid, exit 2) BEFORE the key is shipped to
+// api.openai.com. The secret must never appear in the message or hint.
+func TestResolveOpenAIGatewayKeyRequiresBaseURL(t *testing.T) {
+	clearProviderEnv(t)
+	t.Setenv("GATEWAY_TOKEN", "leak-me")
+	cfg := config.Merge(config.Defaults(), config.Config{
+		Providers: map[string]config.Provider{
+			"badgw": {Kind: config.KindOpenAI, Model: "some-model", AuthEnv: "GATEWAY_TOKEN"},
+		},
+	})
+	_, err := resolveWith(cfg, ResolveInput{Provider: "badgw"})
+	var cerr *clierr.CLIError
+	if !errors.As(err, &cerr) || cerr.Code != "config.invalid" {
+		t.Fatalf("expected config.invalid, got %v", err)
+	}
+	if cerr.Exit != 2 {
+		t.Fatalf("config.invalid must be exit 2, got %d", cerr.Exit)
+	}
+	if cerr.Hint == "" {
+		t.Fatal("gateway guard must carry an actionable hint")
+	}
+	for _, s := range []string{cerr.Message, cerr.Hint} {
+		if strings.Contains(s, "leak-me") {
+			t.Fatalf("secret leaked into error: %q", s)
+		}
+	}
+}
+
+// The same custom profile PASSES once base_url is set — the guard only blocks the
+// no-base_url case, never a legit gateway.
+func TestResolveOpenAIGatewayWithBaseURLPasses(t *testing.T) {
+	clearProviderEnv(t)
+	t.Setenv("GATEWAY_TOKEN", "gw-key")
+	cfg := config.Merge(config.Defaults(), config.Config{
+		Providers: map[string]config.Provider{
+			"gw": {Kind: config.KindOpenAI, BaseURL: "https://gw.example/v1", Model: "m", AuthEnv: "GATEWAY_TOKEN"},
+		},
+	})
+	creds, err := resolveWith(cfg, ResolveInput{Provider: "gw"})
+	if err != nil {
+		t.Fatalf("resolve: %v", err)
+	}
+	if creds.BaseURL != "https://gw.example/v1" || creds.APIKey != "gw-key" {
+		t.Fatalf("legit gateway must resolve: %+v", creds)
+	}
+}
+
+// The built-in openai profile sets prof.BaseURL=DefaultOpenAIBaseURL, so an
+// OPENAI_API_KEY with no explicit base_url still PASSES the gateway guard.
+func TestResolveOpenAIBuiltinKeyPassesGuard(t *testing.T) {
+	clearProviderEnv(t)
+	t.Setenv("OPENAI_API_KEY", "oai-key")
+	creds, err := resolveWith(config.Defaults(), ResolveInput{Provider: "openai"})
+	if err != nil {
+		t.Fatalf("built-in openai+key must pass the guard: %v", err)
+	}
+	if creds.BaseURL != config.DefaultOpenAIBaseURL || creds.APIKey != "oai-key" {
+		t.Fatalf("built-in openai resolve wrong: %+v", creds)
+	}
+}
+
+// An unknown provider `auth` value is config.invalid at exit 2 (was 1).
+func TestResolveOpenAIUnknownAuthExit2(t *testing.T) {
+	clearProviderEnv(t)
+	cfg := config.Defaults()
+	op := cfg.Providers["openai"]
+	op.Auth = "bogus"
+	cfg.Providers["openai"] = op
+	_, err := resolveWith(cfg, ResolveInput{Provider: "openai"})
+	var cerr *clierr.CLIError
+	if !errors.As(err, &cerr) || cerr.Code != "config.invalid" {
+		t.Fatalf("expected config.invalid, got %v", err)
+	}
+	if cerr.Exit != 2 {
+		t.Fatalf("unknown-auth config.invalid must be exit 2, got %d", cerr.Exit)
 	}
 }
 

@@ -7,6 +7,7 @@ package agent
 import (
 	stdctx "context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"sort"
 	"strings"
@@ -19,6 +20,20 @@ import (
 	enginectx "github.com/vanducng/miu-cr/internal/engine/context"
 	"github.com/vanducng/miu-cr/internal/engine/gitcmd"
 )
+
+// classifyAnthropicErr types a proven Anthropic API status into the stable
+// taxonomy; an unrecognized error keeps the bare %w wrap so the ctx error chain
+// (DeadlineExceeded/Canceled) survives to the review-layer errors.Is.
+func classifyAnthropicErr(err error) error {
+	var apiErr *anthropic.Error
+	if errors.As(err, &apiErr) {
+		if c := classifyStatus(apiErr.StatusCode, err.Error(), hintLoginAnthropic, codeAuthFailed); c != nil {
+			c.Cause = err // preserve the SDK error for errors.Is/As
+			return c
+		}
+	}
+	return fmt.Errorf("agent: messages.new: %w", err)
+}
 
 // Context is everything the review pass needs: the assembled prompt text plus
 // the reviewed revision so the tool loop reads the SAME content the diff came
@@ -178,7 +193,7 @@ func (a *anthropicAgent) Review(ctx stdctx.Context, rc Context) (engine.ReviewOu
 
 		msg, err := a.client.newMessage(ctx, params)
 		if err != nil {
-			return engine.ReviewOutput{}, fmt.Errorf("agent: messages.new: %w", err)
+			return engine.ReviewOutput{}, classifyAnthropicErr(err)
 		}
 		params.Messages = append(params.Messages, msg.ToParam())
 

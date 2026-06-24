@@ -40,6 +40,9 @@ func TestOpenRedactsDSN(t *testing.T) {
 			if ce.Exit != 1 || !ce.SafeRetry {
 				t.Fatalf("want Exit=1 SafeRetry=true, got Exit=%d SafeRetry=%v", ce.Exit, ce.SafeRetry)
 			}
+			if ce.Hint == "" {
+				t.Fatal("store.unavailable must carry an actionable hint")
+			}
 			if strings.Contains(ce.Message, "secret") {
 				t.Fatalf("redaction failed, message leaks secret: %q", ce.Message)
 			}

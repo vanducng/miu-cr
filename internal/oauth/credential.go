@@ -14,6 +14,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/vanducng/miu-cr/internal/cli/clierr"
 	"github.com/vanducng/miu-cr/internal/config"
 )
 
@@ -103,10 +104,29 @@ func refresh(ctx stdctx.Context, meta Meta, rec config.OAuthRecord, httpClient *
 	req.Header.Set("Content-Type", "application/json")
 	resp, err := httpClient.Do(req)
 	if err != nil {
-		return config.OAuthRecord{}, fmt.Errorf("oauth: refresh request failed: %s", config.RedactString(err.Error()))
+		// Network/DNS failure reaching the token endpoint — transient: the cached
+		// credential may still be valid once connectivity returns. Retry-typed so the
+		// review layer surfaces it as retryable, not as a stale-credential re-login.
+		return config.OAuthRecord{}, &clierr.CLIError{
+			Code:    "oauth.refresh_unavailable",
+			Message: config.RedactString("oauth: refresh request failed: " + err.Error()),
+			Exit:    1,
+			Retry:   true,
+			Cause:   err,
+		}
 	}
 	defer resp.Body.Close()
 	if resp.StatusCode != http.StatusOK {
+		// 5xx/429 from the token endpoint is transient; a 4xx (invalid/expired refresh
+		// token) is a real rejection that needs a fresh `miucr login`.
+		if resp.StatusCode == http.StatusTooManyRequests || (resp.StatusCode >= 500 && resp.StatusCode <= 599) {
+			return config.OAuthRecord{}, &clierr.CLIError{
+				Code:    "oauth.refresh_unavailable",
+				Message: fmt.Sprintf("oauth: refresh rejected (status %d)", resp.StatusCode),
+				Exit:    1,
+				Retry:   true,
+			}
+		}
 		return config.OAuthRecord{}, fmt.Errorf("oauth: refresh rejected (status %d)", resp.StatusCode)
 	}
 	var tr struct {

@@ -252,7 +252,7 @@ func serveCommand(opts *options) *cobra.Command {
 				ReviewStore:   reviewStore,
 			}, reviewFn)
 			if err != nil {
-				return &CLIError{Code: "serve.config_invalid", Message: err.Error(), Exit: 2}
+				return &CLIError{Code: "config.invalid", Message: err.Error(), Hint: "check the serve configuration (secret, token, repos)", Exit: 2}
 			}
 			if !poll {
 				return srv.Run(cmd.Context(), pool)

@@ -127,6 +127,7 @@ func unavailable(op string, err error) error {
 	return &clierr.CLIError{
 		Code:      "store.unavailable",
 		Message:   config.RedactString(fmt.Sprintf("%s: %v", op, err)),
+		Hint:      "check the postgres backend is reachable and MIUCR_PG_DSN / [store] dsn is correct",
 		Exit:      1,
 		SafeRetry: true,
 	}

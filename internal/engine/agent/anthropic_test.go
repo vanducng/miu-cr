@@ -10,6 +10,7 @@ import (
 
 	"github.com/anthropics/anthropic-sdk-go"
 
+	"github.com/vanducng/miu-cr/internal/cli/clierr"
 	"github.com/vanducng/miu-cr/internal/engine"
 )
 
@@ -230,6 +231,24 @@ func TestAnthropicAgentClientErrorWrapped(t *testing.T) {
 		t.Fatalf("expected wrapped messages.new error, got %v", err)
 	}
 	_ = engine.Finding{}
+}
+
+// A proven 401 from the SDK surfaces the typed auth_failed code through Review,
+// with a login hint and no leaked token.
+func TestAnthropicAgentClassifies401(t *testing.T) {
+	req, resp := fakeReqResp(401)
+	a := &anthropicAgent{
+		client: &fakeAnthropic{err: &anthropic.Error{StatusCode: 401, Request: req, Response: resp}},
+		model:  "claude-test",
+	}
+	_, err := a.Review(stdctx.Background(), Context{Text: "ctx", RepoDir: t.TempDir()})
+	ce, ok := err.(*clierr.CLIError)
+	if !ok {
+		t.Fatalf("want *clierr.CLIError, got %T: %v", err, err)
+	}
+	if ce.Code != "agent.auth_failed" || ce.Hint == "" {
+		t.Fatalf("got %+v, want auth_failed+hint", ce)
+	}
 }
 
 // A wall-clock deadline already in the past must abort before any API call.

@@ -115,6 +115,23 @@ The default JSON is a **stable v1 envelope** (`api_version: "miucr.cli/v1"`) so 
 
 Errors use the same envelope with `ok: false` and an `error` object carrying a stable `code`, a redacted `message`, and a `hint`.
 
+The day-1 provider/auth/timeout failures classify into a **stable taxonomy** — the same `code` regardless of backend (anthropic/openai/codex) — each with an actionable `hint` and a correct `retryable`:
+
+| `error.code` | When | `retryable` |
+| ------------ | ---- | ----------- |
+| `agent.auth_failed` | bad/invalid API key (401/403) | `false` |
+| `agent.auth_expired` | expired OAuth token (401/403, incl. codex still-401-after-refresh) | `false` |
+| `provider.rate_limited` | provider returned 429 | `true` |
+| `agent.unavailable` | provider returned 5xx / 529 | `true` |
+| `review.timeout` | the review exceeded `--timeout` | `true` |
+| `review.canceled` | interrupted (Ctrl-C / SIGINT), exit `130` | `false` |
+| `config.invalid` | malformed `config.toml`, a bad enum/`auth` value, or an `openai`-kind gateway profile with an api key but no `base_url` (which would leak the key to api.openai.com); exit `2`, consistent across review/history/serve | `false` |
+| `internal.error` | any unclassified failure (the conservative default) | `false` |
+
+An unrecognized failure stays `internal.error` — it is never mislabeled as `retryable`. Classified messages are redacted: no token fragment ever appears.
+
+The codex backend retries `429`/`502`/`503`/`504` (and a `response.failed` stream event) with bounded, jittered exponential backoff like the SDK backends — honoring `Retry-After`/`resets_in_seconds` and aborting promptly on cancel/timeout. On a persistent rate limit it returns `provider.rate_limited` carrying the usage-cap reset window in `error.details.resets_in_seconds` (or `retry_after_seconds`) with a hint like `usage cap reached — resets in ~2h`.
+
 ## Exit codes
 
 | Code | Meaning |

@@ -76,6 +76,7 @@ func dimMismatch(want, got int) error {
 	return &clierr.CLIError{
 		Code:    "store.dim_mismatch",
 		Message: fmt.Sprintf("embedding dimension mismatch: configured %d but finding_embeddings stores %d", want, got),
+		Hint:    fmt.Sprintf("set [embedding] dim back to %d, or migrate to a fresh DB to change the vector space", got),
 		Exit:    1,
 	}
 }

@@ -4,6 +4,7 @@ import (
 	"bytes"
 	stdctx "context"
 	"encoding/json"
+	"fmt"
 	"strings"
 	"testing"
 	"time"
@@ -86,6 +87,58 @@ func TestReviewGateExitCode(t *testing.T) {
 	}
 	if !strings.Contains(out2, `"ok":true`) {
 		t.Errorf("want success envelope, got %s", out2)
+	}
+}
+
+func TestReviewClassifiesTimeout(t *testing.T) {
+	// Mimic the engine pass-through: a DeadlineExceeded wrapped with %w must still
+	// be reachable via errors.Is at the RunE boundary (the %w chain survives).
+	r := &fakeReviewer{err: fmt.Errorf("agent: messages.new: %w", stdctx.DeadlineExceeded)}
+	_, err := runReview(t, r, "--staged", "--gate", "high")
+	var ce *CLIError
+	if !asCLIError(err, &ce) || ce.Code != "review.timeout" {
+		t.Fatalf("want review.timeout, got %+v", err)
+	}
+	if !ce.Retry || ce.Hint == "" {
+		t.Fatalf("review.timeout must be retryable with a hint, got %+v", ce)
+	}
+	// Envelope honesty: retryable surfaces as true.
+	var buf bytes.Buffer
+	_ = writeError(&buf, "review", ce)
+	var env Envelope
+	if e := json.Unmarshal(buf.Bytes(), &env); e != nil {
+		t.Fatalf("invalid envelope: %v\n%s", e, buf.String())
+	}
+	if env.Error == nil || !env.Error.Retryable || env.Error.Code != "review.timeout" {
+		t.Fatalf("envelope did not reflect a retryable review.timeout: %+v", env.Error)
+	}
+}
+
+func TestReviewClassifiesCanceled(t *testing.T) {
+	r := &fakeReviewer{err: fmt.Errorf("agent: chat.completions: %w", stdctx.Canceled)}
+	_, err := runReview(t, r, "--staged", "--gate", "high")
+	var ce *CLIError
+	if !asCLIError(err, &ce) || ce.Code != "review.canceled" {
+		t.Fatalf("want review.canceled, got %+v", err)
+	}
+	if ce.Exit != 130 {
+		t.Fatalf("review.canceled exit = %d, want 130", ce.Exit)
+	}
+}
+
+// An unrecognized error stays internal.error (the bare-%w default), proving we
+// don't over-classify.
+func TestReviewUnknownErrorStaysInternal(t *testing.T) {
+	r := &fakeReviewer{err: fmt.Errorf("agent: model produced no parseable findings")}
+	_, err := runReview(t, r, "--staged", "--gate", "high")
+	var ce *CLIError
+	if asCLIError(err, &ce) {
+		t.Fatalf("unknown error wrongly typed: %+v", ce)
+	}
+	var buf bytes.Buffer
+	_ = writeError(&buf, "review", err)
+	if !strings.Contains(buf.String(), `"internal.error"`) {
+		t.Fatalf("want internal.error envelope, got %s", buf.String())
 	}
 }
 

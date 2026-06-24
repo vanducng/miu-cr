@@ -12,6 +12,8 @@ import (
 	"strings"
 	"time"
 
+	"github.com/vanducng/miu-cr/internal/cli/clierr"
+	"github.com/vanducng/miu-cr/internal/config"
 	"github.com/vanducng/miu-cr/internal/engine"
 	"github.com/vanducng/miu-cr/internal/engine/gitcmd"
 )
@@ -30,6 +32,13 @@ type codexAgent struct {
 	model      string
 	timeout    time.Duration
 	refresh    func(ctx stdctx.Context) (string, error) // 401 -> new access token
+}
+
+// classifyCodexStatus types a proven codex backend status into the stable
+// taxonomy (OAuth ⇒ auth_expired on 401/403). Returns nil for an unclassified
+// status so the caller keeps its bare %w error. msg is redacted defensively.
+func classifyCodexStatus(status int, msg string) *clierr.CLIError {
+	return classifyStatus(status, msg, hintLoginOpenAI, codeAuthExpired)
 }
 
 func newCodexAgent(creds Credentials, timeout time.Duration) *codexAgent {
@@ -102,6 +111,7 @@ type codexOutItem struct {
 type codexResp struct {
 	Status string `json:"status"`
 	Error  *struct {
+		Type    string `json:"type"`
 		Message string `json:"message"`
 		Code    string `json:"code"`
 	} `json:"error"`
@@ -236,9 +246,55 @@ func (a *codexAgent) dispatch(ctx stdctx.Context, rc Context, turn int, resp *co
 	return items, text.String()
 }
 
-// post sends one Responses request, retrying once on a 401 after a token
-// refresh. The response body is never logged; errors carry only a status code.
+// post sends one Responses request with bounded jittered backoff on a transient
+// failure (429/502/503/504 or a response.failed SSE event), matching the
+// retry the SDK backends already get. The sleep is always gated on ctx so a
+// cancel/deadline aborts promptly; on give-up a 429 surfaces the usage-cap reset
+// window. The response body is never logged; errors carry only a status code.
 func (a *codexAgent) post(ctx stdctx.Context, body codexReq) (*codexResp, error) {
+	var lastTransient *codexRetryable
+	for attempt := 1; attempt <= codexMaxAttempts; attempt++ {
+		if err := ctx.Err(); err != nil {
+			return nil, err
+		}
+		resp, err := a.postOnce(ctx, body)
+		if err == nil {
+			return resp, nil
+		}
+		var tr *codexRetryable
+		if !errors.As(err, &tr) {
+			return nil, err // ctx error or a terminal typed/bare error
+		}
+		lastTransient = tr
+		if attempt == codexMaxAttempts {
+			break
+		}
+		var suggested time.Duration
+		if tr.retryAfter > 0 {
+			suggested = tr.retryAfter
+		} else if tr.resetsIn > 0 {
+			suggested = tr.resetsIn
+		}
+		if serr := sleepCtx(ctx, codexBackoff(attempt, suggested)); serr != nil {
+			return nil, serr
+		}
+	}
+	if lastTransient.status == http.StatusTooManyRequests {
+		ce := lastTransient.rateLimitError()
+		ce.Cause = lastTransient
+		return nil, ce
+	}
+	if c := classifyCodexStatus(lastTransient.status, lastTransient.msg); c != nil {
+		c.Cause = lastTransient // preserve the transient chain for errors.Is/As
+		return nil, c
+	}
+	return nil, fmt.Errorf("agent: %s", lastTransient.msg)
+}
+
+// postOnce performs a single Responses request, retrying once on a 401 after a
+// token refresh. A transient failure (retryable status or response.failed)
+// returns a *codexRetryable for the post() loop; everything else is terminal.
+func (a *codexAgent) postOnce(ctx stdctx.Context, body codexReq) (*codexResp, error) {
 	resp, err := a.do(ctx, body, a.token)
 	if err != nil {
 		return nil, err
@@ -247,7 +303,28 @@ func (a *codexAgent) post(ctx stdctx.Context, body codexReq) (*codexResp, error)
 		resp.Body.Close()
 		tok, rerr := a.refresh(ctx)
 		if rerr != nil {
-			return nil, fmt.Errorf("agent: codex auth refresh failed: %w", rerr)
+			if isCtxErr(rerr) {
+				return nil, fmt.Errorf("agent: codex auth refresh failed: %w", rerr)
+			}
+			// A transient refresh failure (network/DNS/5xx from the OAuth endpoint,
+			// signaled via clierr.Retry) leaves the credential possibly valid — surface
+			// it as retryable, not as a re-login prompt. A real rejection (invalid /
+			// expired refresh token) stays auth_expired. Either way preserve rerr.
+			var rce *clierr.CLIError
+			if errors.As(rerr, &rce) && rce.Retry {
+				return nil, &clierr.CLIError{
+					Code:      codeUnavailable,
+					Message:   config.RedactString("codex auth refresh failed: " + rerr.Error()),
+					Hint:      "auth refresh temporarily failed — retry shortly",
+					Exit:      1,
+					Retry:     true,
+					SafeRetry: true,
+					Cause:     rerr,
+				}
+			}
+			c := classifyCodexStatus(http.StatusUnauthorized, "codex auth refresh failed: "+rerr.Error())
+			c.Cause = rerr
+			return nil, c
 		}
 		a.token = tok
 		resp, err = a.do(ctx, body, a.token)
@@ -258,7 +335,19 @@ func (a *codexAgent) post(ctx stdctx.Context, body codexReq) (*codexResp, error)
 	defer resp.Body.Close()
 	if resp.StatusCode != http.StatusOK {
 		b, _ := io.ReadAll(io.LimitReader(resp.Body, 2048))
-		return nil, fmt.Errorf("agent: codex backend status %d: %s", resp.StatusCode, strings.TrimSpace(string(b)))
+		msg := config.RedactString(fmt.Sprintf("codex backend status %d: %s", resp.StatusCode, strings.TrimSpace(string(b))))
+		if codexRetryStatus(resp.StatusCode) {
+			return nil, &codexRetryable{
+				status:     resp.StatusCode,
+				resetsIn:   parseResetsIn(string(b)),
+				retryAfter: parseRetryAfter(resp.Header),
+				msg:        msg,
+			}
+		}
+		if c := classifyCodexStatus(resp.StatusCode, msg); c != nil {
+			return nil, c
+		}
+		return nil, fmt.Errorf("agent: %s", msg)
 	}
 	return parseCodexSSE(resp.Body)
 }
@@ -311,10 +400,19 @@ func parseCodexSSE(r io.Reader) (*codexResp, error) {
 			}
 			return &codexResp{Output: done}, nil
 		case "response.failed":
+			msg := "codex response failed"
+			var errType, errCode string
 			if ev.Response != nil && ev.Response.Error != nil {
-				return nil, fmt.Errorf("agent: codex response failed: %s", ev.Response.Error.Message)
+				errType, errCode = ev.Response.Error.Type, ev.Response.Error.Code
+				msg = config.RedactString(fmt.Sprintf("codex response failed: %s", ev.Response.Error.Message))
 			}
-			return nil, fmt.Errorf("agent: codex response failed")
+			// The Responses API emits response.failed for PERMANENT errors too
+			// (invalid_request_error, content policy). Retrying those only wastes
+			// attempts — surface them as terminal; only transient failures retry.
+			if codexFailurePermanent(errType, errCode) {
+				return nil, fmt.Errorf("agent: %s", msg)
+			}
+			return nil, &codexRetryable{failed: true, msg: msg}
 		}
 	}
 	if err := sc.Err(); err != nil {
