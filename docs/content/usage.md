@@ -92,7 +92,7 @@ The default JSON is a **stable v1 envelope** (`api_version: "miucr.cli/v1"`) so 
         "end_line": 42,
         "severity": "high",
         "category": "bug",
-        "rationale": "…why this is a problem…",
+        "rationale": "…why this is a problem (may cite a convention the model can see, e.g. \"differs from mapWriteError\")…",
         "suggested_patch": "…optional minimal fix…",
         "quoted_code": "…verbatim source the finding anchors to…"
       }
@@ -179,7 +179,7 @@ Every review gets a built-in baseline plus any project rules under `.miu/cr/rule
 - `--post` / `--no-post` — publish inline comments + a summary, or dry-run (`--no-post` is the default for `--pr`).
 - `--token <pat>` — GitHub PAT, required only for `--post`.
 - `--mode review|checks` — inline review comments (default) or a GitHub CheckRun (survives force-push, works on fork PRs).
-- `--suggest` — emit one-click GitHub suggestions for proven single-line fixes.
+- `--suggest` — emit one-click GitHub suggestions for proven fixes: single-line replacements and wrap/guard/insert fixes (a multi-line patch on a QuotedCode-proven single-line anchor).
 - `--approve-clean` — submit `APPROVE` only on a clean, non-fork, trusted-author PR.
 - `--force` — re-review even when the head SHA is unchanged since the last saved review. By default an unchanged head SHA short-circuits (`skipped_unchanged`, no LLM pass); a new commit always re-reviews. See [GitHub PR review](/github-pr/).
 

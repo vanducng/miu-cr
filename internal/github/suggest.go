@@ -33,15 +33,17 @@ func normalizeLine(s string) string {
 	return strings.TrimSpace(s)
 }
 
-// isCleanReplacement decides whether f.SuggestedPatch is a safe verbatim
-// single-line replacement of the raw new-file line at f.Line, returning the
-// suggestion text to emit and ok=true only then.
+// isCleanReplacement decides whether f.SuggestedPatch is a safe replacement of the
+// raw new-file line at f.Line, returning the suggestion text to emit and ok=true
+// only then. The patch MAY span multiple lines (a wrap/guard/insert fix): GitHub
+// replaces exactly the single anchored line f.Line with the whole block, so once the
+// anchor is QuotedCode-proven a multi-line patch is a safe in-place expansion.
 //
 // Best-effort: the engine offers NO guarantee that SuggestedPatch corresponds to
 // the anchored range — it is a free-form model field. The safe fallback for every
 // rejected case is the plain fenced hint. ok is true ONLY when ALL hold:
-//   - single-line: EndLine==0 || EndLine==Line
-//   - SuggestedPatch is a single (non-empty) line
+//   - single-line anchor: EndLine==0 || EndLine==Line
+//   - SuggestedPatch is non-empty (it may be a single line OR a multi-line block)
 //   - the raw NewFileContent line at f.Line exists (1-based)
 //   - normalizeLine(rawLine) == normalizeLine(f.QuotedCode): proves the raw line
 //     at f.Line IS the anchored line. f.Line can be an OLD-file number when the
@@ -61,7 +63,7 @@ func isCleanReplacement(f engine.Finding, newFileContent string) (string, bool) 
 	}
 
 	patch := strings.TrimRight(strings.TrimSpace(f.SuggestedPatch), "\r")
-	if patch == "" || strings.Contains(patch, "\n") {
+	if patch == "" {
 		return "", false
 	}
 

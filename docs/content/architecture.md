@@ -297,13 +297,19 @@ flowchart TD
     Pre -->|"all hold"| Approve["Event = APPROVE"]
 ```
 
-**`--suggest`** emits a GitHub native single-line suggested change only when *all*
-hold (`isCleanReplacement`): the finding is **single-line**
-(`EndLine == 0 || EndLine == Line` — a wrong multi-line range 422s the whole
-review); `SuggestedPatch` is a single non-empty line; the raw new-file line at
-`Line` exists and `normalizeLine(rawLine) == normalizeLine(QuotedCode)` (proving
-`Line` is the anchored line, since the resolver can fall back to an old-file
-number); the patch is not a no-op; and severity is ≥ the floor (default `medium`).
+**`--suggest`** emits a GitHub native suggested change only when *all* hold
+(`isCleanReplacement`): the finding is **single-line**
+(`EndLine == 0 || EndLine == Line` — a wrong multi-line *finding* range 422s the
+whole review); the raw new-file line at `Line` exists and
+`normalizeLine(rawLine) == normalizeLine(QuotedCode)` (proving `Line` is the
+anchored line, since the resolver can fall back to an old-file number); the patch
+is not a no-op; and severity is ≥ the floor (default `medium`). `SuggestedPatch`
+may be a single line **or** a multi-line block — a wrap/guard/insert fix (e.g. a
+nil-check around the line, or the line wrapped in `if err != nil { … }`): once the
+anchor is QuotedCode-proven, GitHub replaces exactly that single line with the
+block, so the multi-line patch is a safe in-place expansion. A multi-line patch on
+a *mismatched* anchor is dropped (never a wrong-span replace). Multi-line *finding*
+ranges (`EndLine > Line`) still require a proven contiguous one-hunk RIGHT range.
 Anything else degrades to the safe plain hint. Suggestions are **author-applied** —
 miucr never pushes or commits to the PR branch.
 

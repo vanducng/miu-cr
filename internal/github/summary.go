@@ -200,6 +200,16 @@ func mdInline(s string) string {
 	).Replace(s)
 }
 
+// mdProse escapes the structural breakout vectors in untrusted model prose (a
+// finding's rationale): the HTML/comment vectors (< >, neutralizing </details>,
+// the <!-- miucr:fp --> sentinel, <script>) AND backticks (so a ``` fence in the
+// rationale can't open a code block that swallows the suggestion/patch fence
+// rendered right after it). It does NOT collapse whitespace or escape brackets/
+// links, so prose stays readable. GitHub renders &lt;/&gt; back to </>.
+func mdProse(s string) string {
+	return strings.NewReplacer("<", "&lt;", ">", "&gt;", "`", "\\`").Replace(s)
+}
+
 func known(sev string) bool {
 	for _, s := range severityOrder {
 		if s == sev {
