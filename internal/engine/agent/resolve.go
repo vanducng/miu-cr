@@ -269,7 +269,19 @@ func resolveOpenAI(in ResolveInput, prof config.Provider) (Credentials, error) {
 		return creds, nil
 	}
 	if k := strings.TrimSpace(os.Getenv("OPENAI_API_KEY")); k != "" {
-		return apiKeyCreds(k) // fall back to the env key even if a stale OAuth session errored
+		creds, kerr := apiKeyCreds(k) // fall back to the env key even if a stale OAuth session errored
+		if kerr == nil {
+			return creds, nil
+		}
+		// The env-key fallback itself failed (e.g. gatewayBaseRequired). Surface that
+		// (it is the more actionable failure) but preserve any prior OAuth error as the
+		// cause so a stale-session failure isn't silently dropped.
+		if oauthErr != nil {
+			if ce, ok := kerr.(*clierr.CLIError); ok && ce.Cause == nil {
+				ce.Cause = oauthErr
+			}
+		}
+		return Credentials{}, kerr
 	}
 	if oauthErr != nil {
 		return Credentials{}, oauthErr

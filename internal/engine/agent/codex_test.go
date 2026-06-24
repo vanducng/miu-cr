@@ -43,6 +43,18 @@ func codexFunctionCallResp(callID, name, args string) string {
 	}})
 }
 
+// codexFailedSSE emits a response.failed event carrying the given error
+// type/code/message (post() inspects type/code to decide retry vs terminal).
+func codexFailedSSE(errType, code, message string) string {
+	b, _ := json.Marshal(map[string]any{
+		"type": "response.failed",
+		"response": map[string]any{
+			"error": map[string]any{"type": errType, "code": code, "message": message},
+		},
+	})
+	return "event: response.failed\ndata: " + string(b) + "\n\n"
+}
+
 const codexFindingsJSON = `{"findings":[{"file":"pkg/sample.go","severity":"high","category":"bug","existing_code":"return nil","rationale":"swallows the error","suggested_patch":"return err"}]}`
 
 func newTestCodexAgent(t *testing.T, srv *httptest.Server) *codexAgent {
@@ -217,6 +229,7 @@ func TestCodexAgentBackendErrorRedactsToken(t *testing.T) {
 }
 
 func TestCodexAgentClassifiesStatus(t *testing.T) {
+	shrinkCodexBackoff(t) // 429/5xx are retryable — don't sleep through real backoff
 	tests := []struct {
 		name      string
 		status    int
@@ -416,4 +429,84 @@ func TestCodexAgentRefreshFailedIsAuthExpired(t *testing.T) {
 	if ce.Code != "agent.auth_expired" || ce.Hint == "" {
 		t.Fatalf("got %+v, want auth_expired+hint", ce)
 	}
+}
+
+// TestCodexAgentRefreshTransientIsRetryable proves a transient refresh failure
+// (Retry-typed clierr from the OAuth endpoint) surfaces as retryable
+// agent.unavailable — not a misleading re-login prompt — preserving the cause.
+func TestCodexAgentRefreshTransientIsRetryable(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusUnauthorized)
+	}))
+	defer srv.Close()
+
+	refreshErr := &clierr.CLIError{Code: "oauth.refresh_unavailable", Message: "network down", Retry: true}
+	creds := Credentials{
+		Kind: config.KindOpenAI, Backend: "codex",
+		OAuthToken: "stale-tok", OAuthAccountID: "acct", BaseURL: srv.URL,
+		Model: "gpt-test", HTTPClient: srv.Client(),
+		OAuthRefresh: func(stdctx.Context) (string, error) { return "", refreshErr },
+	}
+	a, ok := newCodexAgentFromNew(t, creds)
+	if !ok {
+		t.Fatal("expected codexAgent")
+	}
+	_, err := a.Review(stdctx.Background(), Context{Text: "diff"})
+	ce, ok := err.(*clierr.CLIError)
+	if !ok {
+		t.Fatalf("want *clierr.CLIError, got %T: %v", err, err)
+	}
+	if ce.Code != "agent.unavailable" || !ce.Retry {
+		t.Fatalf("got %+v, want agent.unavailable + Retry", ce)
+	}
+	if !errors.Is(err, refreshErr) {
+		t.Fatalf("refresh error not preserved as cause: %v", err)
+	}
+}
+
+// TestCodexAgentResponseFailedRetryPath exercises response.failed both ways: a
+// transient code retries to give-up (a bare, untyped error), a permanent code
+// (invalid_request/content-policy) is terminal on the first attempt.
+func TestCodexAgentResponseFailedRetryPath(t *testing.T) {
+	t.Run("transient retries then gives up", func(t *testing.T) {
+		shrinkCodexBackoff(t)
+		var calls int
+		srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			calls++
+			io.WriteString(w, codexFailedSSE("server_error", "", "upstream hiccup"))
+		}))
+		defer srv.Close()
+
+		a := newTestCodexAgent(t, srv)
+		_, err := a.Review(stdctx.Background(), Context{Text: "diff"})
+		if err == nil {
+			t.Fatal("expected error after retries exhausted")
+		}
+		if calls != codexMaxAttempts {
+			t.Fatalf("calls = %d, want %d (transient response.failed must retry)", calls, codexMaxAttempts)
+		}
+		// status 0 ⇒ classifyCodexStatus returns nil ⇒ bare untyped error
+		if ce, ok := err.(*clierr.CLIError); ok {
+			t.Fatalf("transient give-up should be a bare error, got typed %+v", ce)
+		}
+	})
+
+	t.Run("permanent is terminal without retry", func(t *testing.T) {
+		shrinkCodexBackoff(t)
+		var calls int
+		srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			calls++
+			io.WriteString(w, codexFailedSSE("invalid_request_error", "content_policy_violation", "blocked"))
+		}))
+		defer srv.Close()
+
+		a := newTestCodexAgent(t, srv)
+		_, err := a.Review(stdctx.Background(), Context{Text: "diff"})
+		if err == nil {
+			t.Fatal("expected terminal error")
+		}
+		if calls != 1 {
+			t.Fatalf("calls = %d, want 1 (permanent response.failed must not retry)", calls)
+		}
+	})
 }

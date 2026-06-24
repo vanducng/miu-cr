@@ -64,27 +64,51 @@ func (e *codexRetryable) rateLimitError() *clierr.CLIError {
 	return ce
 }
 
+// humanizeDuration renders a wait as the largest whole unit plus its remainder
+// (e.g. "1h30m", "1m30s"), rounding DOWN so a rate-limit wait is never overstated.
 func humanizeDuration(d time.Duration) string {
 	switch {
 	case d >= time.Hour:
-		return fmt.Sprintf("%.0fh", d.Hours())
+		h := int(d / time.Hour)
+		if m := int((d % time.Hour) / time.Minute); m > 0 {
+			return fmt.Sprintf("%dh%dm", h, m)
+		}
+		return fmt.Sprintf("%dh", h)
 	case d >= time.Minute:
-		return fmt.Sprintf("%.0fm", d.Minutes())
+		m := int(d / time.Minute)
+		if s := int((d % time.Minute) / time.Second); s > 0 {
+			return fmt.Sprintf("%dm%ds", m, s)
+		}
+		return fmt.Sprintf("%dm", m)
 	default:
-		return fmt.Sprintf("%.0fs", d.Seconds())
+		return fmt.Sprintf("%ds", int(d/time.Second))
 	}
 }
 
 // codexRetryStatus reports whether an HTTP status is a transient codex failure
-// the loop retries. 401 is handled by the single-refresh path; other 4xx are
-// terminal (typed by classifyStatus).
+// the loop retries. It mirrors classifyStatus's retryable set (429 + any 5xx) so
+// every status flagged Retry:true is actually retried before give-up. 401 is
+// handled by the single-refresh path; other 4xx are terminal (typed by
+// classifyStatus).
 func codexRetryStatus(status int) bool {
-	switch status {
-	case http.StatusTooManyRequests, // 429
-		http.StatusBadGateway,         // 502
-		http.StatusServiceUnavailable, // 503
-		http.StatusGatewayTimeout:     // 504
-		return true
+	return status == http.StatusTooManyRequests || (status >= 500 && status <= 599)
+}
+
+// codexFailurePermanent reports whether a response.failed SSE error is permanent
+// (retrying is futile) based on the Responses API error type/code. Invalid
+// requests and content-policy/filter rejections fail identically on every retry;
+// an unknown/empty code stays retryable to preserve transient handling.
+func codexFailurePermanent(errType, code string) bool {
+	for _, s := range []string{strings.ToLower(errType), strings.ToLower(code)} {
+		switch {
+		case strings.Contains(s, "invalid_request"),
+			strings.Contains(s, "invalid_prompt"),
+			strings.Contains(s, "content_policy"),
+			strings.Contains(s, "content_filter"),
+			strings.Contains(s, "context_length"),
+			strings.Contains(s, "unsupported"):
+			return true
+		}
 	}
 	return false
 }

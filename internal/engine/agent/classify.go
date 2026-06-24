@@ -39,7 +39,7 @@ func classifyStatus(status int, msg, loginHint, authCode string) *clierr.CLIErro
 			Exit:    1,
 			Retry:   true,
 		}
-	case status == 529 || (status >= 500 && status <= 599):
+	case status >= 500 && status <= 599:
 		return &clierr.CLIError{
 			Code:    codeUnavailable,
 			Message: config.RedactString(msg),

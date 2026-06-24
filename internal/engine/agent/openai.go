@@ -24,6 +24,7 @@ func classifyOpenAIErr(err error) error {
 	var apiErr *openai.Error
 	if errors.As(err, &apiErr) {
 		if c := classifyStatus(apiErr.StatusCode, err.Error(), hintLoginOpenAI, codeAuthFailed); c != nil {
+			c.Cause = err // preserve the SDK error for errors.Is/As
 			return c
 		}
 	}

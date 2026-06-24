@@ -194,6 +194,32 @@ func fetchError(stage string, err error) error {
 func ghAPIError(fallback, stage string, err error) error {
 	msg := config.RedactString(fmt.Sprintf("%s: %v", stage, err))
 
+	// Rate-limit errors arrive as dedicated types that do NOT embed *gh.ErrorResponse,
+	// so errors.As below would miss them; match them first. Reads are idempotent →
+	// SafeRetry (mirrors mapWriteError in publish.go).
+	var rle *gh.RateLimitError
+	if errors.As(err, &rle) {
+		return &clierr.CLIError{
+			Code:      "github.rate_limited",
+			Message:   "GitHub rate limit exceeded",
+			Hint:      "wait for the rate limit to reset, then re-run",
+			Exit:      1,
+			Retry:     true,
+			SafeRetry: true,
+		}
+	}
+	var arle *gh.AbuseRateLimitError
+	if errors.As(err, &arle) {
+		return &clierr.CLIError{
+			Code:      "github.rate_limited",
+			Message:   "GitHub secondary (abuse) rate limit exceeded",
+			Hint:      "wait before retrying",
+			Exit:      1,
+			Retry:     true,
+			SafeRetry: true,
+		}
+	}
+
 	var er *gh.ErrorResponse
 	if errors.As(err, &er) && er.Response != nil {
 		switch status := er.Response.StatusCode; {
@@ -211,13 +237,14 @@ func ghAPIError(fallback, stage string, err error) error {
 				Hint:    "check the PR exists and the token has access",
 				Exit:    1,
 			}
-		case status >= 500 && status <= 599:
+		case status == 429 || (status >= 500 && status <= 599):
 			return &clierr.CLIError{
-				Code:    "github.unavailable",
-				Message: msg,
-				Hint:    "GitHub is unavailable — retry shortly",
-				Exit:    1,
-				Retry:   true,
+				Code:      "github.unavailable",
+				Message:   msg,
+				Hint:      "GitHub is unavailable — retry shortly",
+				Exit:      1,
+				Retry:     true,
+				SafeRetry: true,
 			}
 		}
 	}
@@ -225,11 +252,12 @@ func ghAPIError(fallback, stage string, err error) error {
 	var netErr net.Error
 	if errors.As(err, &netErr) {
 		return &clierr.CLIError{
-			Code:    "github.unavailable",
-			Message: msg,
-			Hint:    "cannot reach GitHub — check your network and retry",
-			Exit:    1,
-			Retry:   true,
+			Code:      "github.unavailable",
+			Message:   msg,
+			Hint:      "cannot reach GitHub — check your network and retry",
+			Exit:      1,
+			Retry:     true,
+			SafeRetry: true,
 		}
 	}
 

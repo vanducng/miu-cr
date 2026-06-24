@@ -28,6 +28,7 @@ func classifyAnthropicErr(err error) error {
 	var apiErr *anthropic.Error
 	if errors.As(err, &apiErr) {
 		if c := classifyStatus(apiErr.StatusCode, err.Error(), hintLoginAnthropic, codeAuthFailed); c != nil {
+			c.Cause = err // preserve the SDK error for errors.Is/As
 			return c
 		}
 	}
