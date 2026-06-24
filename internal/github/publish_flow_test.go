@@ -163,7 +163,7 @@ func TestRenderSummaryShape(t *testing.T) {
 	if strings.Contains(out, SummarySentinel) {
 		t.Fatalf("summary body must NOT include the sentinel (UpsertSummaryComment owns it): %q", out[:min(40, len(out))])
 	}
-	if !strings.HasPrefix(out, "## miu-cr review") {
+	if !strings.HasPrefix(out, "## Code Review") {
 		t.Fatalf("summary must start with the heading: %q", out[:min(40, len(out))])
 	}
 	for _, want := range []string{"high: 2", "low: 1", "info: 1", "deadbeef", "hunks", "Files reviewed: 3", "fork"} {
