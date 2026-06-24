@@ -142,8 +142,8 @@ func TestReviewInvalidMinSeverity(t *testing.T) {
 		t.Fatal("want error for invalid --min-severity")
 	}
 	var ce *CLIError
-	if !asCLIError(err, &ce) || ce.Code != "config.invalid" {
-		t.Fatalf("want config.invalid, got %+v", err)
+	if !asCLIError(err, &ce) || ce.Code != "flags.invalid_min_severity" {
+		t.Fatalf("want flags.invalid_min_severity, got %+v", err)
 	}
 	if ce.Exit != 2 {
 		t.Fatalf("want exit 2 for invalid --min-severity, got %d", ce.Exit)

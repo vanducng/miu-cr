@@ -2,6 +2,9 @@ package agent
 
 import (
 	stdctx "context"
+	"encoding/json"
+	"fmt"
+	"reflect"
 	"strings"
 	"testing"
 
@@ -174,6 +177,37 @@ func TestParseFindingsWalkthroughLengthCaps(t *testing.T) {
 	}
 	if n := len([]rune(out.FileSummaries["a.go"])); n != maxFileSummaryLen {
 		t.Fatalf("file summary not capped: got %d runes, want %d", n, maxFileSummaryLen)
+	}
+}
+
+// Over the maxFileSummaryKeys cap the kept subset is the alphabetically-first N
+// keys, deterministically — Go map iteration order must not leak into the output,
+// or re-reviews of the same diff would render a different per-file digest.
+func TestParseFindingsFileSummariesDeterministicTruncation(t *testing.T) {
+	summaries := make(map[string]string, maxFileSummaryKeys+50)
+	for i := 0; i < maxFileSummaryKeys+50; i++ {
+		summaries[fmt.Sprintf("file-%04d.go", i)] = "note"
+	}
+	body, err := json.Marshal(rawFindings{FileSummaries: summaries})
+	if err != nil {
+		t.Fatal(err)
+	}
+	out, ok := parseFindings(string(body))
+	if !ok {
+		t.Fatal("parse failed")
+	}
+	if len(out.FileSummaries) != maxFileSummaryKeys {
+		t.Fatalf("want %d kept summaries, got %d", maxFileSummaryKeys, len(out.FileSummaries))
+	}
+	if _, ok := out.FileSummaries["file-0000.go"]; !ok {
+		t.Fatal("the alphabetically-first key must be kept")
+	}
+	if _, ok := out.FileSummaries[fmt.Sprintf("file-%04d.go", maxFileSummaryKeys+49)]; ok {
+		t.Fatal("a key past the sorted cap must be dropped")
+	}
+	again, _ := parseFindings(string(body))
+	if !reflect.DeepEqual(out.FileSummaries, again.FileSummaries) {
+		t.Fatal("truncation must be deterministic across runs")
 	}
 }
 

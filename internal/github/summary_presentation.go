@@ -27,7 +27,7 @@ func renderPresentation(b *strings.Builder, info *PRInfo, findings []engine.Find
 // mermaidKeywords are the diagram-type keywords a GitHub-rendered ```mermaid
 // block may legitimately start with. A model diagram that doesn't begin with one
 // degrades to a plain note instead of a broken fenced block.
-var mermaidKeywords = []string{"flowchart", "graph", "sequenceDiagram", "classDiagram", "stateDiagram", "erDiagram", "gitGraph", "mindmap", "journey", "gantt"}
+var mermaidKeywords = []string{"flowchart", "graph", "sequencediagram", "classdiagram", "statediagram", "erdiagram", "gitgraph", "mindmap", "journey", "gantt", "pie"}
 
 // renderDiagram writes the opt-in mermaid change diagram as a fenced ```mermaid
 // block GitHub renders, but ONLY when the model text starts with a known mermaid
@@ -49,14 +49,17 @@ func renderDiagram(b *strings.Builder, diagram string) {
 	b.WriteString("\n```\n\n")
 }
 
-// startsWithMermaidKeyword reports whether the first non-blank line of d begins
-// with a recognized mermaid diagram-type keyword.
+// startsWithMermaidKeyword reports whether the first line of d begins with a
+// recognized mermaid diagram-type keyword. The comparison is case-insensitive —
+// mermaid keywords are (e.g. "Flowchart TD" and "graph LR" both parse) — so the
+// first line is lowercased before the prefix check (mermaidKeywords are stored
+// lowercase to match).
 func startsWithMermaidKeyword(d string) bool {
 	first := d
 	if i := strings.IndexByte(d, '\n'); i >= 0 {
 		first = d[:i]
 	}
-	first = strings.TrimSpace(first)
+	first = strings.ToLower(strings.TrimSpace(first))
 	for _, kw := range mermaidKeywords {
 		if strings.HasPrefix(first, kw) {
 			return true
@@ -200,11 +203,11 @@ func renderChangesTable(b *strings.Builder, info *PRInfo, diffs []diff.Diff, fin
 		}
 	}
 	if overflow > 0 {
+		pipes := " | |"
 		if withSummary {
-			fmt.Fprintf(b, "| _… %d more file(s)_ | | | |\n", overflow)
-		} else {
-			fmt.Fprintf(b, "| _… %d more file(s)_ | | |\n", overflow)
+			pipes += " |"
 		}
+		fmt.Fprintf(b, "| _… %d more file(s)_%s |\n", overflow, pipes)
 	}
 	b.WriteString("\n</details>\n")
 }

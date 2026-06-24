@@ -23,22 +23,35 @@ func RenderSummary(info *PRInfo, findings []engine.Finding, stats map[string]any
 // lists each capped/omitted inline finding (severity, category, file:line, rationale,
 // blob permalink) so nothing is silently dropped.
 func RenderSummaryWithOverflow(info *PRInfo, findings []engine.Finding, stats map[string]any, omittedInline int, omitted []engine.Finding, categoryURLs map[string]string) string {
-	return RenderSummaryFull(info, findings, stats, omittedInline, omitted, categoryURLs, nil, "", "", nil, "")
+	return RenderSummaryFull(info, findings, stats, omittedInline, omitted, categoryURLs, SummaryOptions{})
+}
+
+// SummaryOptions bundles the additive reviewer-trust inputs to RenderSummaryFull:
+// the same review pass's walkthrough/per-file digest/diagram plus local diff +
+// review_id data. Grouping them in a struct keeps the call site readable and makes
+// it hard to transpose the same-typed walkthrough/diagram strings or the
+// diffs/reviewID pair. The zero value reproduces the legacy summary byte-for-byte.
+type SummaryOptions struct {
+	Diffs         []diff.Diff
+	ReviewID      string
+	Walkthrough   string
+	FileSummaries map[string]string
+	Diagram       string
 }
 
 // RenderSummaryFull is RenderSummaryWithOverflow plus the LLM-free reviewer-trust
 // blocks (walkthrough, effort badge, per-file changes table, agent-handoff)
-// derived from the same review pass (walkthrough/fileSummaries) + local data
-// (diffs, review_id). Every block is additive markdown and degrades cleanly
+// derived from the same review pass (opts.Walkthrough/FileSummaries) + local data
+// (opts.Diffs, opts.ReviewID). Every block is additive markdown and degrades cleanly
 // (empty walkthrough/diffs/reviewID skip their block), so the summary stays
 // idempotent + back-compatible; no extra model call is made. Untrusted model
 // text (walkthrough/fileSummaries) is escaped via mdInline at render.
-func RenderSummaryFull(info *PRInfo, findings []engine.Finding, stats map[string]any, omittedInline int, omitted []engine.Finding, categoryURLs map[string]string, diffs []diff.Diff, reviewID, walkthrough string, fileSummaries map[string]string, diagram string) string {
+func RenderSummaryFull(info *PRInfo, findings []engine.Finding, stats map[string]any, omittedInline int, omitted []engine.Finding, categoryURLs map[string]string, opts SummaryOptions) string {
 	var b strings.Builder
 	b.WriteString("## miu-cr review\n\n")
 
-	renderWalkthrough(&b, walkthrough)
-	renderDiagram(&b, diagram)
+	renderWalkthrough(&b, opts.Walkthrough)
+	renderDiagram(&b, opts.Diagram)
 
 	counts := map[string]int{}
 	for _, f := range findings {
@@ -80,7 +93,7 @@ func RenderSummaryFull(info *PRInfo, findings []engine.Finding, stats map[string
 		renderOverflow(&b, info, omitted, categoryURLs)
 	}
 
-	renderPresentation(&b, info, findings, diffs, reviewID, fileSummaries)
+	renderPresentation(&b, info, findings, opts.Diffs, opts.ReviewID, opts.FileSummaries)
 
 	b.WriteString("\n<sub>Posted by miu-cr. Re-runs edit this summary and skip already-posted inline comments.</sub>")
 	return b.String()
@@ -137,11 +150,12 @@ func categoryMarkdownText(cat, plainText string, categoryURLs map[string]string)
 // mdInline neutralizes untrusted model text (rationale/category) for a Markdown
 // list item: collapse newlines to one line, HTML-escape <> (so a rationale can't
 // inject markup or break out of the <details> block), and backslash-escape the
-// Markdown breakout chars.
+// Markdown breakout chars. '#' is escaped too — collapsed text placed at the start
+// of a line (e.g. after "## Walkthrough\n\n") would otherwise inject a heading.
 func mdInline(s string) string {
 	s = strings.Join(strings.Fields(s), " ")
 	return strings.NewReplacer(
-		"<", "&lt;", ">", "&gt;", "`", "\\`", "[", "\\[", "]", "\\]", "*", "\\*", "_", "\\_", "|", "\\|",
+		"<", "&lt;", ">", "&gt;", "`", "\\`", "[", "\\[", "]", "\\]", "*", "\\*", "_", "\\_", "|", "\\|", "#", "\\#",
 	).Replace(s)
 }
 

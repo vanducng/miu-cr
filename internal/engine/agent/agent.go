@@ -8,6 +8,7 @@ import (
 	stdctx "context"
 	"encoding/json"
 	"fmt"
+	"sort"
 	"strings"
 	"time"
 
@@ -313,14 +314,20 @@ func parseFindings(text string) (engine.ReviewOutput, bool) {
 		Diagram:     capRunes(raw.Diagram, maxDiagramLen),
 	}
 	if len(raw.FileSummaries) > 0 {
-		fs := make(map[string]string, len(raw.FileSummaries))
-		n := 0
-		for k, v := range raw.FileSummaries {
-			if n >= maxFileSummaryKeys {
-				break
-			}
-			fs[k] = capRunes(v, maxFileSummaryLen)
-			n++
+		// Sort before truncating: Go map iteration order is randomized, so an
+		// unsorted cap at maxFileSummaryKeys would keep a different subset each
+		// run, breaking idempotent re-reviews.
+		keys := make([]string, 0, len(raw.FileSummaries))
+		for k := range raw.FileSummaries {
+			keys = append(keys, k)
+		}
+		sort.Strings(keys)
+		if len(keys) > maxFileSummaryKeys {
+			keys = keys[:maxFileSummaryKeys]
+		}
+		fs := make(map[string]string, len(keys))
+		for _, k := range keys {
+			fs[k] = capRunes(raw.FileSummaries[k], maxFileSummaryLen)
 		}
 		out.FileSummaries = fs
 	}

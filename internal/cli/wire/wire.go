@@ -478,7 +478,13 @@ func publishReview(ctx stdctx.Context, client mgithub.Client, runner *gitcmd.Run
 		prResult.SummaryAction = "fork_fallback"
 		return nil
 	}
-	summary := mgithub.RenderSummaryFull(info, res.Findings, res.Stats, pr.Omitted, pr.OmittedFindings, categoryURLs, diffs, res.ID, res.Walkthrough, res.FileSummaries, res.Diagram)
+	summary := mgithub.RenderSummaryFull(info, res.Findings, res.Stats, pr.Omitted, pr.OmittedFindings, categoryURLs, mgithub.SummaryOptions{
+		Diffs:         diffs,
+		ReviewID:      res.ID,
+		Walkthrough:   res.Walkthrough,
+		FileSummaries: res.FileSummaries,
+		Diagram:       res.Diagram,
+	})
 	action, err := mgithub.UpsertSummaryComment(ctx, client, info, summary)
 	if err != nil {
 		return err

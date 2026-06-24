@@ -628,13 +628,13 @@ func validateFilterMode(mode string) error {
 
 // validateMinSeverity rejects an out-of-set --min-severity (empty keeps current
 // behavior), delegating to the github enum so the CLI and the publish floor share
-// one source of truth. Mirrors validateFilterMode but emits config.invalid.
+// one source of truth. Mirrors validateFilterMode's flags.* namespace.
 func validateMinSeverity(sev string) error {
 	if sev == "" || ghub.ValidMinSeverity(sev) {
 		return nil
 	}
 	return &CLIError{
-		Code:    "config.invalid",
+		Code:    "flags.invalid_min_severity",
 		Message: fmt.Sprintf("unknown --min-severity %q", sev),
 		Hint:    "use none, info, low, medium, high, or critical",
 		Exit:    2,
