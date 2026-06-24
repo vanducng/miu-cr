@@ -55,6 +55,13 @@ comment with a new marker); subsequent re-runs dedupe normally. On a
 first M5 review **manually** (or off-hours) to absorb the one-time re-post before
 the next scheduled run.
 
+## [0.23.0](https://github.com/vanducng/miu-cr/compare/v0.22.1...v0.23.0) (2026-06-24)
+
+
+### Features
+
+* **review:** codex-grade findings — scannable titles + rule grounding (one pass) ([b6713e0](https://github.com/vanducng/miu-cr/commit/b6713e0fff4177d82f4ed9f19048ace4d0c4e10d))
+
 ## [0.22.1](https://github.com/vanducng/miu-cr/compare/v0.22.0...v0.22.1) (2026-06-24)
 
 
