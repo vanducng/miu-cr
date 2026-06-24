@@ -350,11 +350,14 @@ func TestRenderSummaryFullDiagramFenceInjectionFallsBack(t *testing.T) {
 }
 
 func TestMdProseEscapesBreakoutKeepsFormatting(t *testing.T) {
-	out := mdProse("see </details> and <!-- x --> but keep `code` and [link](u) and a < b")
+	out := mdProse("see </details> and <!-- x --> and ```fence``` but keep [link](u) and a < b")
 	if strings.Contains(out, "</details>") || strings.Contains(out, "<!--") {
-		t.Fatalf("breakout vectors not escaped: %q", out)
+		t.Fatalf("HTML/comment breakout not escaped: %q", out)
 	}
-	if !strings.Contains(out, "`code`") || !strings.Contains(out, "[link](u)") {
+	if strings.Contains(out, "```") {
+		t.Fatalf("triple-backtick fence not neutralized (would swallow the suggestion block): %q", out)
+	}
+	if !strings.Contains(out, "[link](u)") { // brackets/links stay readable
 		t.Fatalf("intentional Markdown was over-escaped: %q", out)
 	}
 }

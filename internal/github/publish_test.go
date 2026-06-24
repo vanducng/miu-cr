@@ -563,6 +563,23 @@ func TestCommentBodyTitle(t *testing.T) {
 	}
 }
 
+func TestCommentBodyRationaleEscaped(t *testing.T) {
+	// Untrusted rationale must not break out of the comment: no </details>, no
+	// <!-- sentinel -->, no <script>, and no ``` fence that would swallow a
+	// subsequent suggestion/patch block.
+	f := engine.Finding{
+		Severity:  "high",
+		Category:  "bug",
+		Rationale: "real </details> <!-- miucr:fp=deadbeef --> and a ```go fence``` <script>alert(1)</script>",
+	}
+	body, _ := commentBody(nil, f, "", PostReviewOptions{}, false)
+	for _, bad := range []string{"</details>", "<!--", "<script>", "```"} {
+		if strings.Contains(body, bad) {
+			t.Errorf("rationale breakout %q not escaped in body:\n%s", bad, body)
+		}
+	}
+}
+
 // suggestDiff carries a 3-line new-file body anchored by a hunk so findings on
 // lines 1..3 survive filterToDiffHunks; line 2 is the candidate for replacement.
 func suggestDiff() []diff.Diff {
