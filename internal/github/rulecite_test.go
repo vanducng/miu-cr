@@ -14,10 +14,10 @@ func citeInfo() *PRInfo {
 // A repo (Linkable) citation renders "(per [stem](<blobURL of repo-relative path>))";
 // the link path is the wire-supplied repo-relative path, never an absolute one.
 func TestRuleCitationRepoLinks(t *testing.T) {
-	cites := map[string]RuleCitation{"go": {RepoRelPath: "go.md", Linkable: true}}
+	cites := map[string]RuleCitation{"go": {RepoRelPath: ".miu/cr/rules/go.md", Linkable: true}}
 	f := engine.Finding{Severity: "high", Category: "bug", Rule: "go", Rationale: "x"}
 	body, _ := commentBody(citeInfo(), f, "", PostReviewOptions{RuleCitations: cites}, false)
-	if !strings.Contains(body, "(per [go](<https://github.com/o/r/blob/abc123/go.md>))") {
+	if !strings.Contains(body, "(per [go](<https://github.com/o/r/blob/abc123/.miu/cr/rules/go.md>))") {
 		t.Fatalf("repo rule must render a repo-relative link:\n%s", body)
 	}
 }
@@ -53,7 +53,7 @@ func TestRuleCitationBuiltinTextOnly(t *testing.T) {
 // A stem matching NO loaded rule is dropped entirely (anti-hallucination): no
 // "(per …)" text, no link.
 func TestRuleCitationUnmatchedDropped(t *testing.T) {
-	cites := map[string]RuleCitation{"go": {RepoRelPath: "go.md", Linkable: true}}
+	cites := map[string]RuleCitation{"go": {RepoRelPath: ".miu/cr/rules/go.md", Linkable: true}}
 	f := engine.Finding{Severity: "low", Category: "bug", Rule: "hallucinated", Rationale: "x"}
 	body, _ := commentBody(citeInfo(), f, "", PostReviewOptions{RuleCitations: cites}, false)
 	if strings.Contains(body, "per ") {
@@ -65,7 +65,7 @@ func TestRuleCitationUnmatchedDropped(t *testing.T) {
 // pre-grounding body byte-for-byte.
 func TestRuleCitationAbsentNoChange(t *testing.T) {
 	f := engine.Finding{Severity: "low", Category: "bug", Rationale: "x"}
-	withMap, _ := commentBody(citeInfo(), f, "", PostReviewOptions{RuleCitations: map[string]RuleCitation{"go": {Linkable: true, RepoRelPath: "go.md"}}}, false)
+	withMap, _ := commentBody(citeInfo(), f, "", PostReviewOptions{RuleCitations: map[string]RuleCitation{"go": {Linkable: true, RepoRelPath: ".miu/cr/rules/go.md"}}}, false)
 	noMap, _ := commentBody(citeInfo(), f, "", PostReviewOptions{}, false)
 	if withMap != noMap {
 		t.Fatalf("absent Rule must not change the body:\nwith=%q\nno=%q", withMap, noMap)
@@ -92,9 +92,9 @@ func TestRuleCitationInOverflow(t *testing.T) {
 	info := citeInfo()
 	omitted := []engine.Finding{{File: "a.go", Line: 5, Severity: "high", Category: "bug", Rule: "go", Rationale: "leak"}}
 	out := RenderSummaryFull(info, nil, nil, 1, omitted, nil, SummaryOptions{
-		RuleCitations: map[string]RuleCitation{"go": {RepoRelPath: "go.md", Linkable: true}},
+		RuleCitations: map[string]RuleCitation{"go": {RepoRelPath: ".miu/cr/rules/go.md", Linkable: true}},
 	})
-	if !strings.Contains(out, "(per [go](<https://github.com/o/r/blob/abc123/go.md>))") {
+	if !strings.Contains(out, "(per [go](<https://github.com/o/r/blob/abc123/.miu/cr/rules/go.md>))") {
 		t.Fatalf("overflow entry must carry the linked citation:\n%s", out)
 	}
 }

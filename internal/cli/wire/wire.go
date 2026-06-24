@@ -53,23 +53,21 @@ func loadRules(repoDir string, allowRepo bool) []rules.Rule {
 // ruleCitations builds the wire-validated stem→citation map from the LOADED
 // (fork-dropped) rule set. Every loaded stem is CITED as text; only a repo
 // (RepoUntrusted) rule is LINKABLE, with its absolute Path converted to a
-// repo-relative path via filepath.Rel(repoRulesDir, Path) for the blob URL. A
-// user rule (absolute home path) and a built-in (defaults/* virtual path) are
-// NEVER given a path — linking either would leak the home dir or point at a
-// non-repo file. A repo rule whose Rel fails is downgraded to cite-only.
+// repo-ROOT-relative path via filepath.Rel(repoDir, Path) for the blob URL
+// (blobURL anchors at the repo root, so a rule at .miu/cr/rules/go.md must link
+// as .miu/cr/rules/go.md, not go.md). A user rule (absolute home path) and a
+// built-in (defaults/* virtual path) are NEVER given a path — linking either
+// would leak the home dir or point at a non-repo file. A repo rule whose Rel
+// fails or escapes the repo (rel starts with "..") is downgraded to cite-only.
 func ruleCitations(loaded []rules.Rule, repoDir string) map[string]mgithub.RuleCitation {
 	if len(loaded) == 0 {
 		return nil
 	}
-	repoRulesDir := ""
-	if repoDir != "" {
-		repoRulesDir = filepath.Join(repoDir, ".miu", "cr", "rules")
-	}
 	cites := make(map[string]mgithub.RuleCitation, len(loaded))
 	for _, r := range loaded {
 		c := mgithub.RuleCitation{}
-		if r.Provenance == rules.RepoUntrusted && repoRulesDir != "" {
-			if rel, err := filepath.Rel(repoRulesDir, r.Path); err == nil && rel != "" && !strings.HasPrefix(rel, "..") {
+		if r.Provenance == rules.RepoUntrusted && repoDir != "" {
+			if rel, err := filepath.Rel(repoDir, r.Path); err == nil && rel != "" && !strings.HasPrefix(rel, "..") {
 				c.RepoRelPath = filepath.ToSlash(rel)
 				c.Linkable = true
 			}
