@@ -23,10 +23,13 @@ func init() { engine.SetAnchorer(anchor.ResolveLineNumbers) }
 // fakeAgent returns canned findings; no network, no API key.
 type fakeAgent struct{ findings []engine.Finding }
 
-func (f *fakeAgent) Review(_ stdctx.Context, _ engine.AgentContext) ([]engine.Finding, error) {
-	out := make([]engine.Finding, len(f.findings))
-	copy(out, f.findings)
-	return out, nil
+func (f *fakeAgent) Review(_ stdctx.Context, _ engine.AgentContext) (engine.ReviewOutput, error) {
+	findings := make([]engine.Finding, len(f.findings))
+	copy(findings, f.findings)
+	return engine.ReviewOutput{
+		Findings:    findings,
+		Walkthrough: "Sample walkthrough: exercises the review path.",
+	}, nil
 }
 
 func git(t *testing.T, dir string, args ...string) {

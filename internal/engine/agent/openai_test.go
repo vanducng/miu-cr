@@ -81,10 +81,11 @@ func TestOpenAIAgentParsesFindings(t *testing.T) {
 		client: &fakeOpenAI{responses: []string{textCompletion(body)}},
 		model:  "gpt-test",
 	}
-	got, err := a.Review(stdctx.Background(), Context{Text: "ctx", RepoDir: t.TempDir()})
+	out, err := a.Review(stdctx.Background(), Context{Text: "ctx", RepoDir: t.TempDir()})
 	if err != nil {
 		t.Fatalf("Review: %v", err)
 	}
+	got := out.Findings
 	if len(got) != 1 {
 		t.Fatalf("want 1 finding, got %d", len(got))
 	}
@@ -127,12 +128,12 @@ func TestOpenAIAgentToolLoopThenFindings(t *testing.T) {
 		textCompletion(`{"findings":[]}`),
 	}}
 	a := &openaiAgent{client: fc, model: "gpt-test"}
-	got, err := a.Review(stdctx.Background(), Context{Text: "ctx", RepoDir: t.TempDir()})
+	out, err := a.Review(stdctx.Background(), Context{Text: "ctx", RepoDir: t.TempDir()})
 	if err != nil {
 		t.Fatalf("Review: %v", err)
 	}
-	if len(got) != 0 {
-		t.Fatalf("want 0 findings, got %d", len(got))
+	if len(out.Findings) != 0 {
+		t.Fatalf("want 0 findings, got %d", len(out.Findings))
 	}
 	if fc.calls != 2 {
 		t.Fatalf("expected 2 completions, got %d", fc.calls)
@@ -192,12 +193,12 @@ var _ openaiClient = (*toolHungryOpenAI)(nil)
 func TestOpenAIAgentForcedFinalizeReturnsFindings(t *testing.T) {
 	fc := &toolHungryOpenAI{findings: `{"findings":[{"file":"a.go","existing_code":"x","severity":"warning","category":"bug","rationale":"r"}]}`}
 	a := &openaiAgent{client: fc, model: "gpt-test"}
-	got, err := a.Review(stdctx.Background(), Context{Text: "ctx", RepoDir: t.TempDir()})
+	out, err := a.Review(stdctx.Background(), Context{Text: "ctx", RepoDir: t.TempDir()})
 	if err != nil {
 		t.Fatalf("Review: %v", err)
 	}
-	if len(got) != 1 {
-		t.Fatalf("want 1 finding from forced finalize, got %d", len(got))
+	if len(out.Findings) != 1 {
+		t.Fatalf("want 1 finding from forced finalize, got %d", len(out.Findings))
 	}
 	if fc.calls != maxToolTurns {
 		t.Fatalf("expected %d calls (explore to budget then finalize), got %d", maxToolTurns, fc.calls)

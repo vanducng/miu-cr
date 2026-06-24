@@ -86,10 +86,11 @@ func TestCodexAgentPostsResponsesAndParses(t *testing.T) {
 	defer srv.Close()
 
 	a := newTestCodexAgent(t, srv)
-	findings, err := a.Review(stdctx.Background(), Context{Text: "diff --git a/x b/x"})
+	out, err := a.Review(stdctx.Background(), Context{Text: "diff --git a/x b/x"})
 	if err != nil {
 		t.Fatalf("Review: %v", err)
 	}
+	findings := out.Findings
 	if len(findings) != 1 || findings[0].File != "pkg/sample.go" || findings[0].QuotedCode != "return nil" {
 		t.Fatalf("unexpected findings: %+v", findings)
 	}
@@ -139,12 +140,12 @@ func TestCodexAgentToolLoopThenFindings(t *testing.T) {
 	defer srv.Close()
 
 	a := newTestCodexAgent(t, srv)
-	findings, err := a.Review(stdctx.Background(), Context{Text: "diff", RepoDir: t.TempDir()})
+	out, err := a.Review(stdctx.Background(), Context{Text: "diff", RepoDir: t.TempDir()})
 	if err != nil {
 		t.Fatalf("Review: %v", err)
 	}
-	if len(findings) != 1 {
-		t.Fatalf("findings = %d, want 1", len(findings))
+	if len(out.Findings) != 1 {
+		t.Fatalf("findings = %d, want 1", len(out.Findings))
 	}
 	if !sawToolOutput {
 		t.Error("second request did not echo a function_call_output item")
@@ -180,7 +181,7 @@ func TestCodexAgentRefreshesOn401(t *testing.T) {
 	if !ok {
 		t.Fatal("expected codexAgent")
 	}
-	findings, err := a.Review(stdctx.Background(), Context{Text: "diff"})
+	out, err := a.Review(stdctx.Background(), Context{Text: "diff"})
 	if err != nil {
 		t.Fatalf("Review: %v", err)
 	}
@@ -190,8 +191,8 @@ func TestCodexAgentRefreshesOn401(t *testing.T) {
 	if lastAuth != "Bearer fresh-tok" {
 		t.Errorf("retry used %q, want Bearer fresh-tok", lastAuth)
 	}
-	if len(findings) != 1 {
-		t.Fatalf("findings = %d", len(findings))
+	if len(out.Findings) != 1 {
+		t.Fatalf("findings = %d", len(out.Findings))
 	}
 }
 

@@ -29,10 +29,14 @@ type Context struct {
 	// it threads engine.AgentContext -> here -> PromptParts -> BuildUserPrompt in
 	// BOTH agent.go and openai.go, or it is silently dropped.
 	SemanticContext string
-	RepoDir         string
-	Rev             string
-	Runner          *gitcmd.Runner
-	Progress        func(string) // nil = silent; milestone/tool strings only, never secrets
+	// WantDiagram opts into the mermaid change diagram (rides the USER turn so OFF
+	// is byte-identical and the prompt cache is preserved). LOCKSTEP: thread it from
+	// engine.AgentContext into BuildUserPrompt in agent.go/openai.go/codex.go.
+	WantDiagram bool
+	RepoDir     string
+	Rev         string
+	Runner      *gitcmd.Runner
+	Progress    func(string) // nil = silent; milestone/tool strings only, never secrets
 	// Trace, when non-nil, accumulates the raw prompt, per-turn tool calls, and
 	// raw final response for persistence. nil = no capture (mirrors Progress).
 	Trace *engine.ReviewTrace
@@ -46,9 +50,10 @@ func (c Context) progress(msg string) {
 }
 
 // Agent runs one review pass over the assembled context and returns findings
-// WITHOUT line numbers (the engine re-anchors from QuotedCode).
+// WITHOUT line numbers (the engine re-anchors from QuotedCode) plus the optional
+// walkthrough/per-file digest the same pass may emit.
 type Agent interface {
-	Review(ctx stdctx.Context, rc Context) ([]engine.Finding, error)
+	Review(ctx stdctx.Context, rc Context) (engine.ReviewOutput, error)
 }
 
 const (
@@ -129,7 +134,7 @@ func reviewTools() []anthropic.ToolUnionParam {
 	return []anthropic.ToolUnionParam{fileRead, grep}
 }
 
-func (a *anthropicAgent) Review(ctx stdctx.Context, rc Context) ([]engine.Finding, error) {
+func (a *anthropicAgent) Review(ctx stdctx.Context, rc Context) (engine.ReviewOutput, error) {
 	// The ctx deadline (below) owns the wall clock; each turn checks ctx.Err()
 	// rather than tracking a parallel manual deadline.
 	if a.timeout > 0 {
@@ -141,7 +146,7 @@ func (a *anthropicAgent) Review(ctx stdctx.Context, rc Context) ([]engine.Findin
 		rc.Runner = gitcmd.New()
 	}
 
-	userPrompt := BuildUserPrompt(PromptParts{Rules: rc.Rules, SemanticContext: rc.SemanticContext, Diff: rc.Text})
+	userPrompt := BuildUserPrompt(PromptParts{Rules: rc.Rules, SemanticContext: rc.SemanticContext, WantDiagram: rc.WantDiagram, Diff: rc.Text})
 	rc.Trace.SetPrompt(userPrompt)
 	params := anthropic.MessageNewParams{
 		MaxTokens: maxTokens,
@@ -156,7 +161,7 @@ func (a *anthropicAgent) Review(ctx stdctx.Context, rc Context) ([]engine.Findin
 	emptyRounds := 0
 	for turn := 0; turn < maxToolTurns; turn++ {
 		if err := ctx.Err(); err != nil {
-			return nil, err
+			return engine.ReviewOutput{}, err
 		}
 		rc.progress(fmt.Sprintf("thinking… (turn %d)", turn+1))
 
@@ -172,19 +177,19 @@ func (a *anthropicAgent) Review(ctx stdctx.Context, rc Context) ([]engine.Findin
 
 		msg, err := a.client.newMessage(ctx, params)
 		if err != nil {
-			return nil, fmt.Errorf("agent: messages.new: %w", err)
+			return engine.ReviewOutput{}, fmt.Errorf("agent: messages.new: %w", err)
 		}
 		params.Messages = append(params.Messages, msg.ToParam())
 
 		toolResults, finalText := a.dispatch(ctx, rc, turn, msg)
 		if len(toolResults) == 0 {
-			if findings, ok := parseFindings(finalText); ok {
+			if out, ok := parseFindings(finalText); ok {
 				rc.Trace.SetFinalResponse(finalText)
-				return findings, nil
+				return out, nil
 			}
 			emptyRounds++
 			if emptyRounds >= maxEmptyRounds {
-				return nil, fmt.Errorf("agent: model produced no tool calls and no parseable findings after %d rounds", emptyRounds)
+				return engine.ReviewOutput{}, fmt.Errorf("agent: model produced no tool calls and no parseable findings after %d rounds", emptyRounds)
 			}
 			params.Messages = append(params.Messages, anthropic.NewUserMessage(anthropic.NewTextBlock(
 				"You did not call a tool and did not return valid findings JSON. Reply with ONLY the JSON object {\"findings\":[...]} as specified, no prose, no markdown fences.")))
@@ -193,7 +198,7 @@ func (a *anthropicAgent) Review(ctx stdctx.Context, rc Context) ([]engine.Findin
 		emptyRounds = 0
 		params.Messages = append(params.Messages, anthropic.NewUserMessage(toolResults...))
 	}
-	return nil, fmt.Errorf("agent: forced finalization produced no parseable findings after %d turns", maxToolTurns)
+	return engine.ReviewOutput{}, fmt.Errorf("agent: forced finalization produced no parseable findings after %d turns", maxToolTurns)
 }
 
 // dispatch executes every tool_use block in msg, returning the tool_result
@@ -278,16 +283,18 @@ func runTool(ctx stdctx.Context, rc Context, turn int, name string, input json.R
 	}
 }
 
-// parseFindings strips markdown fences and unmarshals the model's JSON into
-// engine.Findings carrying severity/category/quoted-code and NO line numbers.
-func parseFindings(text string) ([]engine.Finding, bool) {
+// parseFindings strips markdown fences and unmarshals the model's JSON into a
+// ReviewOutput: findings (carrying severity/category/quoted-code and NO line
+// numbers) plus the optional, length-capped walkthrough/file-digest. Untrusted
+// text is preserved verbatim here; escaping happens at render, not at parse.
+func parseFindings(text string) (engine.ReviewOutput, bool) {
 	body := stripMarkdownFences(text)
 	if body == "" {
-		return nil, false
+		return engine.ReviewOutput{}, false
 	}
 	var raw rawFindings
 	if err := json.Unmarshal([]byte(body), &raw); err != nil {
-		return nil, false
+		return engine.ReviewOutput{}, false
 	}
 	findings := make([]engine.Finding, 0, len(raw.Findings))
 	for _, r := range raw.Findings {
@@ -300,5 +307,22 @@ func parseFindings(text string) ([]engine.Finding, bool) {
 			QuotedCode:     r.ExistingCode,
 		})
 	}
-	return findings, true
+	out := engine.ReviewOutput{
+		Findings:    findings,
+		Walkthrough: capRunes(raw.Walkthrough, maxWalkthroughLen),
+		Diagram:     capRunes(raw.Diagram, maxDiagramLen),
+	}
+	if len(raw.FileSummaries) > 0 {
+		fs := make(map[string]string, len(raw.FileSummaries))
+		n := 0
+		for k, v := range raw.FileSummaries {
+			if n >= maxFileSummaryKeys {
+				break
+			}
+			fs[k] = capRunes(v, maxFileSummaryLen)
+			n++
+		}
+		out.FileSummaries = fs
+	}
+	return out, true
 }

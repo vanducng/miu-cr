@@ -119,10 +119,13 @@ type AgentContext struct {
 	// is cosine-near the current change). Empty => byte-for-byte M6 prompt. LOCKSTEP:
 	// mirror this field everywhere Rules is threaded or it is silently dropped.
 	SemanticContext string
-	RepoDir         string
-	Rev             string
-	Runner          *gitcmd.Runner
-	Progress        func(string) // nil = silent; milestone strings only, never secrets
+	// WantDiagram opts into the mermaid change diagram. LOCKSTEP: mirror this field
+	// everywhere Rules/SemanticContext are threaded or it is silently dropped.
+	WantDiagram bool
+	RepoDir     string
+	Rev         string
+	Runner      *gitcmd.Runner
+	Progress    func(string) // nil = silent; milestone strings only, never secrets
 	// Trace, when non-nil, captures the raw prompt, per-turn tool calls, and raw
 	// final response for persistence. nil = no capture (mirrors Progress).
 	Trace *ReviewTrace
@@ -140,9 +143,10 @@ type Retriever interface {
 }
 
 // Agent runs one review pass over the assembled context and returns findings
-// WITHOUT line numbers (the engine re-anchors from QuotedCode).
+// WITHOUT line numbers (the engine re-anchors from QuotedCode) plus the optional
+// walkthrough/per-file digest the same pass may emit.
 type Agent interface {
-	Review(ctx stdctx.Context, rc AgentContext) ([]Finding, error)
+	Review(ctx stdctx.Context, rc AgentContext) (ReviewOutput, error)
 }
 
 // Request is one review invocation: the diff mode and its operands, the severity
@@ -173,6 +177,10 @@ type Request struct {
 	// calls it with the current change's code anchors BEFORE the agent and threads
 	// the returned advisory prose into AgentContext.SemanticContext. nil => M6.
 	Retriever Retriever
+
+	// WantDiagram opts into the mermaid change diagram (default OFF). Threaded onto
+	// AgentContext so the diagram instruction rides the USER turn; OFF is byte-identical.
+	WantDiagram bool
 
 	// Progress is the optional milestone sink (stderr); nil = silent. The wire/cli
 	// layer builds it from --verbose/--quiet + a TTY check. Only milestone strings
@@ -301,10 +309,11 @@ func (e *Engine) Review(ctx stdctx.Context, req Request) (ReviewResult, error) {
 	}
 
 	rev := selected[0].Ref
-	raw, err := e.Agent.Review(ctx, AgentContext{
+	out, err := e.Agent.Review(ctx, AgentContext{
 		Text:            assembled.Text,
 		Rules:           rulesText,
 		SemanticContext: semanticContext,
+		WantDiagram:     req.WantDiagram,
 		RepoDir:         req.RepoDir,
 		Rev:             rev,
 		Runner:          e.Runner,
@@ -318,7 +327,7 @@ func (e *Engine) Review(ctx stdctx.Context, req Request) (ReviewResult, error) {
 	if anchorLineNumbers == nil {
 		return ReviewResult{}, &clierr.CLIError{Code: "engine.no_anchorer", Message: "anchoring not wired", Exit: 1}
 	}
-	anchored := anchorLineNumbers(raw, selected)
+	anchored := anchorLineNumbers(out.Findings, selected)
 	kept := dropDrift(anchored)
 	kept = dedupe(kept)
 
@@ -337,7 +346,7 @@ func (e *Engine) Review(ctx stdctx.Context, req Request) (ReviewResult, error) {
 		stats["semantic_recall"] = semanticStat
 	}
 
-	result := ReviewResult{Findings: kept, Stats: stats}
+	result := ReviewResult{Findings: kept, Walkthrough: out.Walkthrough, FileSummaries: out.FileSummaries, Diagram: out.Diagram, Stats: stats}
 
 	if e.Store != nil {
 		headSHA, _ := e.Runner.HeadSHA(ctx, req.RepoDir)
