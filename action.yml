@@ -46,6 +46,13 @@ inputs:
       the summary and SARIF but never inline.
     required: false
     default: diff_context
+  suggest:
+    description: >-
+      Emit GitHub native one-click suggested edits for findings with a proven
+      clean single-line/contiguous replacement (author-applied, never pushed).
+      Default true.
+    required: false
+    default: "true"
 
 runs:
   using: composite
@@ -78,6 +85,7 @@ runs:
         GATE: ${{ inputs.gate }}
         FILTER_MODE: ${{ inputs.filter-mode }}
         SARIF_FILE: ${{ inputs.sarif-file }}
+        SUGGEST: ${{ inputs.suggest }}
         PR_NUMBER: ${{ github.event.pull_request.number }}
       run: |
         set -euo pipefail
@@ -94,4 +102,5 @@ runs:
         # A real LLM PR review exceeds the 30s default; give it room.
         ARGS=(review --pr "$REF" --post --gate "$GATE" --filter-mode "$FILTER_MODE" --timeout 300s)
         if [ -n "$SARIF_FILE" ]; then ARGS+=(--sarif-out "$SARIF_FILE"); fi
+        if [ "$SUGGEST" = "true" ]; then ARGS+=(--suggest); fi
         miucr "${ARGS[@]}"
