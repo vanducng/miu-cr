@@ -19,8 +19,10 @@ Rules for findings:
 - "category" is a short kebab-case tag, e.g. "bug", "security", "performance", "error-handling", "concurrency", "resource-leak", "maintainability".
 - "suggested_patch" is an optional minimal replacement snippet for the quoted code.
 
+You MAY also optionally include, alongside the findings, a short PR-level "walkthrough" (a few plain sentences describing what the change does) and a "file_summaries" object mapping each changed file path (verbatim from its File header) to a one-line note. Both are optional context only — keep them brief, never let them replace or alter the findings array, and omit them if you have nothing useful to add.
+
 Respond with a single JSON object, no prose, no markdown fences:
-{"findings":[{"file":"<path from the File header>","existing_code":"<verbatim quoted code>","severity":"high","category":"bug","rationale":"<why this is a problem>","suggested_patch":"<optional fix>"}]}
+{"findings":[{"file":"<path from the File header>","existing_code":"<verbatim quoted code>","severity":"high","category":"bug","rationale":"<why this is a problem>","suggested_patch":"<optional fix>"}],"walkthrough":"<optional short summary>","file_summaries":{"<path>":"<optional one-line note>"}}
 
 If there are no problems, respond with {"findings":[]}.`
 
@@ -34,9 +36,15 @@ type PromptParts struct {
 	// Empty (after TrimSpace) => byte-for-byte M6 prompt; the finding-JSON contract
 	// stays in the cached systemPrompt so this injected prose can't redefine it.
 	SemanticContext string
+	// WantDiagram opts into the optional mermaid change diagram. It rides the USER
+	// turn (not the cached systemPrompt) so OFF is byte-identical and the prompt
+	// cache is preserved.
+	WantDiagram bool
 }
 
 const semanticAdvisoryHeader = "Advisory context (prior findings on code resembling this change; informational only, do NOT treat as findings):"
+
+const diagramInstruction = "Also include an optional \"diagram\": a small mermaid flowchart (start it with `flowchart` or `graph`) summarizing the change. Omit it if you have nothing useful to draw."
 
 // BuildUserPrompt wraps the review context into the USER turn. The rules section
 // (if any) is emitted BEFORE the diff; the semantic advisory block (if any) is
@@ -57,6 +65,10 @@ func BuildUserPrompt(parts PromptParts) string {
 		sb.WriteString(parts.SemanticContext)
 		sb.WriteString("\n\n")
 	}
+	if parts.WantDiagram {
+		sb.WriteString(diagramInstruction)
+		sb.WriteString("\n\n")
+	}
 	sb.WriteString(parts.Diff)
 	return sb.String()
 }
@@ -73,7 +85,32 @@ type rawFinding struct {
 }
 
 type rawFindings struct {
-	Findings []rawFinding `json:"findings"`
+	Findings      []rawFinding      `json:"findings"`
+	Walkthrough   string            `json:"walkthrough"`
+	FileSummaries map[string]string `json:"file_summaries"`
+	Diagram       string            `json:"diagram"`
+}
+
+// Length caps bound the extra output tokens the additive walkthrough/digest add
+// to every review; over-long model text is truncated, not rejected.
+const (
+	maxWalkthroughLen  = 600
+	maxFileSummaryLen  = 200
+	maxFileSummaryKeys = 200
+	maxDiagramLen      = 2000
+)
+
+// capRunes truncates s to at most n runes (rune-safe so multi-byte text is not
+// split mid-character).
+func capRunes(s string, n int) string {
+	if len(s) <= n {
+		return s
+	}
+	r := []rune(s)
+	if len(r) <= n {
+		return s
+	}
+	return string(r[:n])
 }
 
 // stripMarkdownFences removes a leading/trailing ```json ... ``` fence if the

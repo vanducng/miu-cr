@@ -54,6 +54,35 @@ func TestBuildUserPromptRulesAndSemanticOrder(t *testing.T) {
 	}
 }
 
+func TestBuildUserPromptDiagramOffByteIdentical(t *testing.T) {
+	diff := "=== File: a.go ===\n+func boom() {}\n"
+	// WantDiagram off must be byte-identical to the diagram-absent prompt (the
+	// prompt cache hinges on OFF never altering the USER turn).
+	off := BuildUserPrompt(PromptParts{Diff: diff})
+	explicitOff := BuildUserPrompt(PromptParts{Diff: diff, WantDiagram: false})
+	if off != explicitOff {
+		t.Fatalf("WantDiagram=false changed the prompt:\n a=%q\n b=%q", off, explicitOff)
+	}
+	if want := m6Prompt(diff); off != want {
+		t.Fatalf("diagram-off prompt diverged from M6:\n got=%q\nwant=%q", off, want)
+	}
+}
+
+func TestBuildUserPromptDiagramOnInjectsInstruction(t *testing.T) {
+	diff := "=== File: a.go ===\n+func boom() {}\n"
+	got := BuildUserPrompt(PromptParts{Diff: diff, WantDiagram: true})
+	if got == m6Prompt(diff) {
+		t.Fatal("WantDiagram=true did not change the prompt")
+	}
+	if !contains(got, diagramInstruction) {
+		t.Fatalf("diagram instruction missing:\n%s", got)
+	}
+	// The instruction must precede the diff (rides the USER turn before context).
+	if !(indexOf(got, diagramInstruction) < indexOf(got, diff)) {
+		t.Fatalf("diagram instruction must lead the diff:\n%s", got)
+	}
+}
+
 func contains(s, sub string) bool { return indexOf(s, sub) >= 0 }
 
 func indexOf(s, sub string) int {

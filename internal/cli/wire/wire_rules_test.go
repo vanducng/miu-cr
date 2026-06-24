@@ -13,9 +13,9 @@ import (
 // forget and would silently drop all project rules.
 type captureAgent struct{ got agent.Context }
 
-func (c *captureAgent) Review(_ stdctx.Context, rc agent.Context) ([]engine.Finding, error) {
+func (c *captureAgent) Review(_ stdctx.Context, rc agent.Context) (engine.ReviewOutput, error) {
 	c.got = rc
-	return nil, nil
+	return engine.ReviewOutput{}, nil
 }
 
 func TestAgentAdapterForwardsRules(t *testing.T) {

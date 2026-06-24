@@ -164,6 +164,7 @@ func (engineReviewer) Review(ctx stdctx.Context, req cli.ReviewRequest) (cli.Rev
 		Rules:            loadRules(req.RepoDir, true),
 		RulesFork:        false,
 		RulesTokenBudget: defaultRulesTokenBudget,
+		WantDiagram:      req.WantDiagram,
 		Progress:         req.Progress,
 	})
 	if err != nil {
@@ -330,6 +331,7 @@ func (prReviewer) ReviewPR(ctx stdctx.Context, req cli.PRReviewRequest) (cli.Rev
 		RulesFork:        info.IsFork,
 		RulesTokenBudget: defaultRulesTokenBudget,
 		Retriever:        retr,
+		WantDiagram:      req.WantDiagram,
 		Progress:         req.Progress,
 	})
 	if err != nil {
@@ -455,6 +457,7 @@ func publishReview(ctx stdctx.Context, client mgithub.Client, runner *gitcmd.Run
 		GateClean:     !engine.GateFailed(res.Findings, req.Gate),
 		ReviewedFiles: reviewedFilesFromStats(res.Stats),
 		FilterMode:    filterModeOf(req.FilterMode),
+		MinSeverity:   req.MinSeverity,
 		CategoryURLs:  categoryURLs,
 		// Fork-fallback ::error:: commands must share the envelope's stdout stream
 		// (GitHub parses workflow commands only from stdout); the command's writer is
@@ -475,7 +478,13 @@ func publishReview(ctx stdctx.Context, client mgithub.Client, runner *gitcmd.Run
 		prResult.SummaryAction = "fork_fallback"
 		return nil
 	}
-	summary := mgithub.RenderSummaryFull(info, res.Findings, res.Stats, pr.Omitted, pr.OmittedFindings, categoryURLs, diffs, res.ID)
+	summary := mgithub.RenderSummaryFull(info, res.Findings, res.Stats, pr.Omitted, pr.OmittedFindings, categoryURLs, mgithub.SummaryOptions{
+		Diffs:         diffs,
+		ReviewID:      res.ID,
+		Walkthrough:   res.Walkthrough,
+		FileSummaries: res.FileSummaries,
+		Diagram:       res.Diagram,
+	})
 	action, err := mgithub.UpsertSummaryComment(ctx, client, info, summary)
 	if err != nil {
 		return err
@@ -590,11 +599,12 @@ func reviewedFilesFromStats(stats map[string]any) int {
 // agent in the import graph.
 type agentAdapter struct{ inner agent.Agent }
 
-func (a agentAdapter) Review(ctx stdctx.Context, rc engine.AgentContext) ([]engine.Finding, error) {
+func (a agentAdapter) Review(ctx stdctx.Context, rc engine.AgentContext) (engine.ReviewOutput, error) {
 	return a.inner.Review(ctx, agent.Context{
 		Text:            rc.Text,
 		Rules:           rc.Rules,           // lockstep: forgetting this silently drops all rules
 		SemanticContext: rc.SemanticContext, // lockstep: forgetting this silently drops M7 advisory
+		WantDiagram:     rc.WantDiagram,     // lockstep: forgetting this silently drops the diagram opt-in
 		RepoDir:         rc.RepoDir,
 		Rev:             rc.Rev,
 		Runner:          rc.Runner,
@@ -656,14 +666,14 @@ func (mcpServerImpl) Serve(ctx stdctx.Context, req cli.MCPRequest) error {
 // the MCP server can start (and answer initialize/tools-list) without a key.
 type lazyAgent struct{ timeout time.Duration }
 
-func (l lazyAgent) Review(ctx stdctx.Context, rc engine.AgentContext) ([]engine.Finding, error) {
+func (l lazyAgent) Review(ctx stdctx.Context, rc engine.AgentContext) (engine.ReviewOutput, error) {
 	creds, err := agent.Resolve(agent.ResolveInput{Ctx: ctx, OAuthResolver: oauthResolver()})
 	if err != nil {
-		return nil, err
+		return engine.ReviewOutput{}, err
 	}
 	llm, err := agent.New(creds, l.timeout)
 	if err != nil {
-		return nil, err
+		return engine.ReviewOutput{}, err
 	}
 	return agentAdapter{inner: llm}.Review(ctx, rc)
 }

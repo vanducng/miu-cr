@@ -18,10 +18,68 @@ const maxChangesRows = 60
 // derived from local data (diff stats + findings), so it costs zero model calls.
 // All three degrade cleanly: nil diffs skip the table/badge, an empty reviewID
 // skips the handoff.
-func renderPresentation(b *strings.Builder, info *PRInfo, findings []engine.Finding, diffs []diff.Diff, reviewID string) {
+func renderPresentation(b *strings.Builder, info *PRInfo, findings []engine.Finding, diffs []diff.Diff, reviewID string, fileSummaries map[string]string) {
 	renderEffortBadge(b, diffs, findings)
-	renderChangesTable(b, info, diffs, findings)
+	renderChangesTable(b, info, diffs, findings, fileSummaries)
 	renderHandoff(b, info, reviewID)
+}
+
+// mermaidKeywords are the diagram-type keywords a GitHub-rendered ```mermaid
+// block may legitimately start with. A model diagram that doesn't begin with one
+// degrades to a plain note instead of a broken fenced block.
+var mermaidKeywords = []string{"flowchart", "graph", "sequencediagram", "classdiagram", "statediagram", "erdiagram", "gitgraph", "mindmap", "journey", "gantt", "pie"}
+
+// renderDiagram writes the opt-in mermaid change diagram as a fenced ```mermaid
+// block GitHub renders, but ONLY when the model text starts with a known mermaid
+// keyword (a degrade-safe sanity check); otherwise — and on empty — it renders a
+// plain note, never a broken block. The block content is emitted verbatim (mermaid
+// is not markdown; mdInline would corrupt the diagram), so the keyword gate is the
+// guard: a non-diagram payload can never reach the fenced block.
+func renderDiagram(b *strings.Builder, diagram string) {
+	d := strings.TrimSpace(diagram)
+	if d == "" {
+		return
+	}
+	if !startsWithMermaidKeyword(d) || strings.Contains(d, "```") {
+		b.WriteString("> Diagram omitted: the model did not return a valid mermaid diagram.\n\n")
+		return
+	}
+	b.WriteString("```mermaid\n")
+	b.WriteString(d)
+	b.WriteString("\n```\n\n")
+}
+
+// startsWithMermaidKeyword reports whether the first line of d begins with a
+// recognized mermaid diagram-type keyword. The comparison is case-insensitive —
+// mermaid keywords are (e.g. "Flowchart TD" and "graph LR" both parse) — so the
+// first line is lowercased before the prefix check (mermaidKeywords are stored
+// lowercase to match).
+func startsWithMermaidKeyword(d string) bool {
+	first := d
+	if i := strings.IndexByte(d, '\n'); i >= 0 {
+		first = d[:i]
+	}
+	first = strings.ToLower(strings.TrimSpace(first))
+	for _, kw := range mermaidKeywords {
+		if strings.HasPrefix(first, kw) {
+			return true
+		}
+	}
+	return false
+}
+
+// renderWalkthrough writes a leading "## Walkthrough" section from the same
+// review pass's PR-level summary. Empty walkthrough omits the section entirely
+// (byte-for-byte back-compatible with the prior layout). The text is untrusted
+// model output, escaped via mdInline so it can't inject markup or break out.
+func renderWalkthrough(b *strings.Builder, walkthrough string) {
+	w := mdInline(walkthrough)
+	if w == "" {
+		return
+	}
+	b.WriteString("## Walkthrough\n\n")
+	b.WriteString(w)
+	b.WriteString("\n\n")
 }
 
 // renderEffortBadge writes a one-line, deterministic review-effort badge derived
@@ -77,9 +135,11 @@ func maxSeverity(findings []engine.Finding) string {
 }
 
 // renderChangesTable writes a collapsed per-file table (file · +adds/-dels ·
-// findings-by-severity) from the changed-file set + findings already grouped by
-// file. Rows are capped; the file path is escaped via mdInline (table-cell safe).
-func renderChangesTable(b *strings.Builder, info *PRInfo, diffs []diff.Diff, findings []engine.Finding) {
+// findings-by-severity · one-line digest) from the changed-file set + findings
+// grouped by file + the same review pass's per-file summaries. Rows are capped;
+// the file path + digest are escaped via mdInline (table-cell safe). The Summary
+// column is dropped when no file has a digest, keeping the prior 3-column layout.
+func renderChangesTable(b *strings.Builder, info *PRInfo, diffs []diff.Diff, findings []engine.Finding, fileSummaries map[string]string) {
 	if len(diffs) == 0 {
 		return
 	}
@@ -111,24 +171,54 @@ func renderChangesTable(b *strings.Builder, info *PRInfo, diffs []diff.Diff, fin
 		return
 	}
 
-	fmt.Fprintf(b, "\n<details>\n<summary>Changed files (%d)</summary>\n\n", len(rows))
-	b.WriteString("| File | Δ | Findings |\n| --- | --- | --- |\n")
 	overflow := 0
 	if len(rows) > maxChangesRows {
 		overflow = len(rows) - maxChangesRows
 		rows = rows[:maxChangesRows]
+	}
+
+	withSummary := false
+	for _, r := range rows {
+		if mdInline(fileSummaries[r.path]) != "" {
+			withSummary = true
+			break
+		}
+	}
+
+	fmt.Fprintf(b, "\n<details>\n<summary>Changed files (%d)</summary>\n\n", len(rows)+overflow)
+	if withSummary {
+		b.WriteString("| File | Δ | Findings | Summary |\n| --- | --- | --- | --- |\n")
+	} else {
+		b.WriteString("| File | Δ | Findings |\n| --- | --- | --- |\n")
 	}
 	for _, r := range rows {
 		file := mdInline(r.path)
 		if url := blobURL(info, r.path, 0, 0); url != "" {
 			file = "[" + file + "](<" + url + ">)"
 		}
-		fmt.Fprintf(b, "| %s | +%d/-%d | %s |\n", file, r.adds, r.dels, findingCounts(byFile[r.path]))
+		if withSummary {
+			fmt.Fprintf(b, "| %s | +%d/-%d | %s | %s |\n", file, r.adds, r.dels, findingCounts(byFile[r.path]), summaryCell(fileSummaries[r.path]))
+		} else {
+			fmt.Fprintf(b, "| %s | +%d/-%d | %s |\n", file, r.adds, r.dels, findingCounts(byFile[r.path]))
+		}
 	}
 	if overflow > 0 {
-		fmt.Fprintf(b, "| _… %d more file(s)_ | | |\n", overflow)
+		pipes := " | |"
+		if withSummary {
+			pipes += " |"
+		}
+		fmt.Fprintf(b, "| _… %d more file(s)_%s |\n", overflow, pipes)
 	}
 	b.WriteString("\n</details>\n")
+}
+
+// summaryCell renders a file's one-line digest for the changes table, escaped
+// via mdInline (untrusted model text); empty renders an em-dash.
+func summaryCell(s string) string {
+	if v := mdInline(s); v != "" {
+		return v
+	}
+	return "—"
 }
 
 // findingCounts renders a file's finding histogram high→low (e.g. "2 high, 1

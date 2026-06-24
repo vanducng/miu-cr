@@ -139,7 +139,7 @@ func codexTools() []codexTool {
 	}
 }
 
-func (a *codexAgent) Review(ctx stdctx.Context, rc Context) ([]engine.Finding, error) {
+func (a *codexAgent) Review(ctx stdctx.Context, rc Context) (engine.ReviewOutput, error) {
 	if a.timeout > 0 {
 		var cancel stdctx.CancelFunc
 		ctx, cancel = stdctx.WithTimeout(ctx, a.timeout)
@@ -149,7 +149,7 @@ func (a *codexAgent) Review(ctx stdctx.Context, rc Context) ([]engine.Finding, e
 		rc.Runner = gitcmd.New()
 	}
 
-	userPrompt := BuildUserPrompt(PromptParts{Rules: rc.Rules, SemanticContext: rc.SemanticContext, Diff: rc.Text})
+	userPrompt := BuildUserPrompt(PromptParts{Rules: rc.Rules, SemanticContext: rc.SemanticContext, WantDiagram: rc.WantDiagram, Diff: rc.Text})
 	rc.Trace.SetPrompt(userPrompt)
 	input := []codexItem{{
 		Type: "message",
@@ -163,7 +163,7 @@ func (a *codexAgent) Review(ctx stdctx.Context, rc Context) ([]engine.Finding, e
 	emptyRounds := 0
 	for turn := 0; turn < maxToolTurns; turn++ {
 		if err := ctx.Err(); err != nil {
-			return nil, err
+			return engine.ReviewOutput{}, err
 		}
 		rc.progress(fmt.Sprintf("thinking… (turn %d)", turn+1))
 		req := codexReq{
@@ -185,18 +185,18 @@ func (a *codexAgent) Review(ctx stdctx.Context, rc Context) ([]engine.Finding, e
 
 		resp, err := a.post(ctx, req)
 		if err != nil {
-			return nil, err
+			return engine.ReviewOutput{}, err
 		}
 
 		toolItems, finalText := a.dispatch(ctx, rc, turn, resp)
 		if len(toolItems) == 0 {
-			if findings, ok := parseFindings(finalText); ok {
+			if out, ok := parseFindings(finalText); ok {
 				rc.Trace.SetFinalResponse(finalText)
-				return findings, nil
+				return out, nil
 			}
 			emptyRounds++
 			if emptyRounds >= maxEmptyRounds {
-				return nil, fmt.Errorf("agent: model produced no tool calls and no parseable findings after %d rounds", emptyRounds)
+				return engine.ReviewOutput{}, fmt.Errorf("agent: model produced no tool calls and no parseable findings after %d rounds", emptyRounds)
 			}
 			input = append(input, codexItem{Type: "message", Role: "user",
 				Content: []codexContent{{Type: "input_text", Text: "You did not call a tool and did not return valid findings JSON. Reply with ONLY the JSON object {\"findings\":[...]} as specified, no prose, no markdown fences."}}})
@@ -205,7 +205,7 @@ func (a *codexAgent) Review(ctx stdctx.Context, rc Context) ([]engine.Finding, e
 		emptyRounds = 0
 		input = append(input, toolItems...)
 	}
-	return nil, fmt.Errorf("agent: forced finalization produced no parseable findings after %d turns", maxToolTurns)
+	return engine.ReviewOutput{}, fmt.Errorf("agent: forced finalization produced no parseable findings after %d turns", maxToolTurns)
 }
 
 // dispatch runs every function_call in resp, returning function_call_output

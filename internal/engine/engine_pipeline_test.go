@@ -26,7 +26,7 @@ type fakeAgent struct {
 	gotProgress bool
 }
 
-func (f *fakeAgent) Review(_ stdctx.Context, rc engine.AgentContext) ([]engine.Finding, error) {
+func (f *fakeAgent) Review(_ stdctx.Context, rc engine.AgentContext) (engine.ReviewOutput, error) {
 	f.gotRev = rc.Rev
 	f.gotRules = rc.Rules
 	f.gotSemantic = rc.SemanticContext
@@ -38,9 +38,13 @@ func (f *fakeAgent) Review(_ stdctx.Context, rc engine.AgentContext) ([]engine.F
 	rc.Trace.RecordTool(0, "grep", "Risky")
 	rc.Trace.RecordTool(1, "file_read", "app.go:1-5")
 	rc.Trace.SetFinalResponse(`{"findings":[]}`)
-	out := make([]engine.Finding, len(f.findings))
-	copy(out, f.findings)
-	return out, nil
+	findings := make([]engine.Finding, len(f.findings))
+	copy(findings, f.findings)
+	return engine.ReviewOutput{
+		Findings:      findings,
+		Walkthrough:   "Sample walkthrough: this change updates the example handler.",
+		FileSummaries: map[string]string{"app.go": "Adds a sample handler."},
+	}, nil
 }
 
 // fakeRetriever drives the engine's semantic seam without embed/DB/network.

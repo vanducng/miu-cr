@@ -246,6 +246,72 @@ func TestValidFilterMode(t *testing.T) {
 	}
 }
 
+func TestValidMinSeverity(t *testing.T) {
+	for _, ok := range []string{"none", "info", "low", "medium", "high", "critical"} {
+		if !ValidMinSeverity(ok) {
+			t.Errorf("%q should be valid", ok)
+		}
+	}
+	if ValidMinSeverity("bogus") || ValidMinSeverity("") {
+		t.Error("bogus/empty should be invalid")
+	}
+}
+
+func TestMinSeverityFloor(t *testing.T) {
+	findings := []engine.Finding{
+		{File: "p.go", Line: 1, Severity: "info"},
+		{File: "p.go", Line: 2, Severity: "low"},
+		{File: "p.go", Line: 3, Severity: "high"},
+		{File: "p.go", Line: 4, Severity: "critical"},
+		{File: "p.go", Line: 5, Severity: ""}, // ungraded
+	}
+	// Empty/"none" is a no-op.
+	if got := minSeverityFloor(findings, ""); len(got) != 5 {
+		t.Fatalf("empty floor must keep all, got %d", len(got))
+	}
+	if got := minSeverityFloor(findings, "none"); len(got) != 5 {
+		t.Fatalf("none floor must keep all, got %d", len(got))
+	}
+	// high floor keeps high+critical only (info/low/ungraded dropped).
+	got := minSeverityFloor(findings, "high")
+	if len(got) != 2 {
+		t.Fatalf("high floor: want 2 kept, got %d: %+v", len(got), got)
+	}
+	for _, f := range got {
+		if f.Severity != "high" && f.Severity != "critical" {
+			t.Fatalf("high floor leaked %q", f.Severity)
+		}
+	}
+}
+
+func TestPostReviewMinSeverityFloor(t *testing.T) {
+	c := &recordClient{}
+	info := &PRInfo{Owner: "o", Repo: "r", Number: 1, HeadSHA: "h"}
+	// sampleDiffs: added lines 2,3 (inline-eligible). Mix severities on them.
+	findings := []engine.Finding{
+		{File: "p.go", Line: 2, Severity: "low", Category: "x", Rationale: "minor"},
+		{File: "p.go", Line: 3, Severity: "high", Category: "bug", Rationale: "boom"},
+	}
+	res, err := PostReview(stdctx.Background(), c, info, findings, sampleDiffs(), "summary", nil, PostReviewOptions{MinSeverity: "high"})
+	if err != nil {
+		t.Fatalf("PostReview: %v", err)
+	}
+	if res.Posted != 1 {
+		t.Fatalf("min-severity high: want 1 inline posted, got %d", res.Posted)
+	}
+	if c.gotReview == nil || len(c.gotReview.Comments) != 1 {
+		t.Fatalf("want exactly 1 inline comment under the floor")
+	}
+	if c.gotReview.Comments[0].GetLine() != 3 {
+		t.Fatalf("the high finding (line 3) must be the one posted, got line %d", c.gotReview.Comments[0].GetLine())
+	}
+	// The below-threshold finding still reaches the summary histogram.
+	summary := RenderSummary(info, findings, nil, 0)
+	if !strings.Contains(summary, "low: 1") || !strings.Contains(summary, "high: 1") {
+		t.Fatalf("both findings must appear in the summary histogram:\n%s", summary)
+	}
+}
+
 func TestFilterToDiffHunksRenamed(t *testing.T) {
 	diffs := []diff.Diff{{OldPath: "old.go", NewPath: "new.go", IsRenamed: true, Diff: sampleFileDiff}}
 	findings := []engine.Finding{

@@ -68,6 +68,34 @@ func ValidFilterMode(s string) bool {
 	return false
 }
 
+// ValidMinSeverity reports whether s is a recognized --min-severity value
+// (none disables the floor; the rest are the standard severities).
+func ValidMinSeverity(s string) bool {
+	switch s {
+	case "none", "info", "low", "medium", "high", "critical":
+		return true
+	}
+	return false
+}
+
+// minSeverityFloor keeps only findings whose severity reaches min (a high→low
+// rank). An empty/"none" min is a no-op (current behavior). An unknown-severity
+// finding (rank past the table) is dropped only when a real floor is set, so a
+// floor never silently posts an ungraded finding inline.
+func minSeverityFloor(findings []engine.Finding, min string) []engine.Finding {
+	if min == "" || min == "none" {
+		return findings
+	}
+	floor := severityRank(min)
+	kept := make([]engine.Finding, 0, len(findings))
+	for _, f := range findings {
+		if severityRank(f.Severity) <= floor {
+			kept = append(kept, f)
+		}
+	}
+	return kept
+}
+
 // filterToDiffHunks keeps only findings inline-eligible under DiffContext: an
 // anchored Line on a RIGHT-side (added or context) line inside one of the PR's
 // diff hunks. It is filterFindings(FilterDiffContext) — kept as a named helper
@@ -322,6 +350,10 @@ type PostReviewOptions struct {
 	GateClean     bool       // caller-computed !engine.GateFailed(findings, Gate)
 	ReviewedFiles int        // count of files actually reviewed; APPROVE requires >0
 	FilterMode    FilterMode // inline-eligibility filter; empty = diff_context (default)
+	// MinSeverity is the inline-posting floor: none|info|low|medium|high|critical.
+	// Empty/"none" posts everything (current behavior); a real floor drops
+	// below-threshold findings from INLINE only — they still reach the summary/SARIF.
+	MinSeverity string
 	// CategoryURLs maps a lowercased finding Category to a validated docs URL
 	// (TRUSTED config only — never repo rules). When a finding's category matches,
 	// commentBody renders it as a Markdown link; an empty/nil map = plain category.
@@ -386,7 +418,7 @@ func PostReview(ctx stdctx.Context, client Client, info *PRInfo, findings []engi
 		}
 	}
 
-	inHunk := inlineEligible(findings, diffs, opts.FilterMode)
+	inHunk := minSeverityFloor(inlineEligible(findings, diffs, opts.FilterMode), opts.MinSeverity)
 
 	toPost := make([]engine.Finding, 0, len(inHunk))
 	for _, f := range inHunk {

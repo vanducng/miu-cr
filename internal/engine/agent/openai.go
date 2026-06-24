@@ -83,7 +83,7 @@ func openAITools() []openai.ChatCompletionToolUnionParam {
 	}
 }
 
-func (a *openaiAgent) Review(ctx stdctx.Context, rc Context) ([]engine.Finding, error) {
+func (a *openaiAgent) Review(ctx stdctx.Context, rc Context) (engine.ReviewOutput, error) {
 	// The ctx deadline (below) owns the wall clock; each turn checks ctx.Err()
 	// rather than tracking a parallel manual deadline.
 	if a.timeout > 0 {
@@ -95,7 +95,7 @@ func (a *openaiAgent) Review(ctx stdctx.Context, rc Context) ([]engine.Finding, 
 		rc.Runner = gitcmd.New()
 	}
 
-	userPrompt := BuildUserPrompt(PromptParts{Rules: rc.Rules, SemanticContext: rc.SemanticContext, Diff: rc.Text})
+	userPrompt := BuildUserPrompt(PromptParts{Rules: rc.Rules, SemanticContext: rc.SemanticContext, WantDiagram: rc.WantDiagram, Diff: rc.Text})
 	rc.Trace.SetPrompt(userPrompt)
 	messages := []openai.ChatCompletionMessageParamUnion{
 		openai.SystemMessage(systemPrompt),
@@ -113,7 +113,7 @@ func (a *openaiAgent) Review(ctx stdctx.Context, rc Context) ([]engine.Finding, 
 	emptyRounds := 0
 	for turn := 0; turn < maxToolTurns; turn++ {
 		if err := ctx.Err(); err != nil {
-			return nil, err
+			return engine.ReviewOutput{}, err
 		}
 		rc.progress(fmt.Sprintf("thinking… (turn %d)", turn+1))
 
@@ -127,22 +127,22 @@ func (a *openaiAgent) Review(ctx stdctx.Context, rc Context) ([]engine.Finding, 
 
 		resp, err := a.client.create(ctx, params)
 		if err != nil {
-			return nil, fmt.Errorf("agent: chat.completions: %w", err)
+			return engine.ReviewOutput{}, fmt.Errorf("agent: chat.completions: %w", err)
 		}
 		if len(resp.Choices) == 0 {
-			return nil, fmt.Errorf("agent: empty completion (no choices)")
+			return engine.ReviewOutput{}, fmt.Errorf("agent: empty completion (no choices)")
 		}
 		msg := resp.Choices[0].Message
 		params.Messages = append(params.Messages, msg.ToParam())
 
 		if len(msg.ToolCalls) == 0 {
-			if findings, ok := parseFindings(msg.Content); ok {
+			if out, ok := parseFindings(msg.Content); ok {
 				rc.Trace.SetFinalResponse(msg.Content)
-				return findings, nil
+				return out, nil
 			}
 			emptyRounds++
 			if emptyRounds >= maxEmptyRounds {
-				return nil, fmt.Errorf("agent: model produced no tool calls and no parseable findings after %d rounds", emptyRounds)
+				return engine.ReviewOutput{}, fmt.Errorf("agent: model produced no tool calls and no parseable findings after %d rounds", emptyRounds)
 			}
 			params.Messages = append(params.Messages, openai.UserMessage(
 				"You did not call a tool and did not return valid findings JSON. Reply with ONLY the JSON object {\"findings\":[...]} as specified, no prose, no markdown fences."))
@@ -158,5 +158,5 @@ func (a *openaiAgent) Review(ctx stdctx.Context, rc Context) ([]engine.Finding, 
 			params.Messages = append(params.Messages, openai.ToolMessage(out, tc.ID))
 		}
 	}
-	return nil, fmt.Errorf("agent: forced finalization produced no parseable findings after %d turns", maxToolTurns)
+	return engine.ReviewOutput{}, fmt.Errorf("agent: forced finalization produced no parseable findings after %d turns", maxToolTurns)
 }

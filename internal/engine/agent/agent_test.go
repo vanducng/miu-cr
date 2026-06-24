@@ -2,6 +2,9 @@ package agent
 
 import (
 	stdctx "context"
+	"encoding/json"
+	"fmt"
+	"reflect"
 	"strings"
 	"testing"
 
@@ -22,12 +25,16 @@ type fakeAgent struct {
 	bailedOut bool
 }
 
-func (f *fakeAgent) Review(ctx stdctx.Context, rc Context) ([]engine.Finding, error) {
+func (f *fakeAgent) Review(ctx stdctx.Context, rc Context) (engine.ReviewOutput, error) {
 	for f.emptySeen < f.maxEmpty {
 		f.emptySeen++
 	}
 	f.bailedOut = f.emptySeen >= f.maxEmpty
-	return f.findings, nil
+	return engine.ReviewOutput{
+		Findings:      f.findings,
+		Walkthrough:   "Sample walkthrough: bounds-check the loop.",
+		FileSummaries: map[string]string{"app.go": "Tightens the loop bound."},
+	}, nil
 }
 
 var _ Agent = (*fakeAgent)(nil)
@@ -40,10 +47,11 @@ func TestFakeAgentZeroNetwork(t *testing.T) {
 		QuotedCode: "for i := 0; i <= len(s); i++ {",
 	}}
 	fa := &fakeAgent{findings: want, maxEmpty: maxEmptyRounds}
-	got, err := fa.Review(stdctx.Background(), Context{Text: "ctx"})
+	out, err := fa.Review(stdctx.Background(), Context{Text: "ctx"})
 	if err != nil {
 		t.Fatalf("Review: %v", err)
 	}
+	got := out.Findings
 	if len(got) != 1 {
 		t.Fatalf("want 1 finding, got %d", len(got))
 	}
@@ -62,10 +70,11 @@ func TestParseFindingsFenceStripping(t *testing.T) {
 	model := "```json\n" +
 		`{"findings":[{"existing_code":"x := y / 0","severity":"critical","category":"bug","rationale":"division by zero","suggested_patch":"if y != 0 { x = y }"}]}` +
 		"\n```"
-	findings, ok := parseFindings(model)
+	out, ok := parseFindings(model)
 	if !ok {
 		t.Fatal("parse failed")
 	}
+	findings := out.Findings
 	if len(findings) != 1 {
 		t.Fatalf("want 1, got %d", len(findings))
 	}
@@ -96,7 +105,8 @@ func TestParseFindingsPopulatesFileAndAnchors(t *testing.T) {
 
 	model := `{"findings":[{"file":"pkg/example/handler.go","existing_code":"log.Printf(\"handling request: %s\", r.URL.Path)","severity":"low","category":"maintainability","rationale":"r"}]}`
 
-	findings, ok := parseFindings(model)
+	out, ok := parseFindings(model)
+	findings := out.Findings
 	if !ok || len(findings) != 1 {
 		t.Fatalf("parse: ok=%v len=%d", ok, len(findings))
 	}
@@ -113,14 +123,114 @@ func TestParseFindingsPopulatesFileAndAnchors(t *testing.T) {
 }
 
 func TestParseFindingsPlainAndEmpty(t *testing.T) {
-	if findings, ok := parseFindings(`{"findings":[]}`); !ok || len(findings) != 0 {
-		t.Fatalf("empty findings: ok=%v len=%d", ok, len(findings))
+	if out, ok := parseFindings(`{"findings":[]}`); !ok || len(out.Findings) != 0 {
+		t.Fatalf("empty findings: ok=%v len=%d", ok, len(out.Findings))
 	}
 	if _, ok := parseFindings("not json"); ok {
 		t.Fatal("non-JSON must not parse")
 	}
 	if _, ok := parseFindings(""); ok {
 		t.Fatal("empty must not parse")
+	}
+}
+
+// The same review pass may carry an optional walkthrough + per-file digest; both
+// round-trip into ReviewOutput verbatim (escaping happens at render, not parse).
+func TestParseFindingsWalkthroughRoundTrips(t *testing.T) {
+	model := `{"findings":[],"walkthrough":"Adds bounds checks to the loop.","file_summaries":{"app.go":"Tightens the loop bound.","util.go":"Adds a helper."}}`
+	out, ok := parseFindings(model)
+	if !ok {
+		t.Fatal("parse failed")
+	}
+	if out.Walkthrough != "Adds bounds checks to the loop." {
+		t.Fatalf("walkthrough not parsed: %q", out.Walkthrough)
+	}
+	if out.FileSummaries["app.go"] != "Tightens the loop bound." || out.FileSummaries["util.go"] != "Adds a helper." {
+		t.Fatalf("file_summaries not parsed: %+v", out.FileSummaries)
+	}
+}
+
+// A response WITHOUT the new fields yields empty walkthrough/digest — the legacy
+// shape stays back-compatible.
+func TestParseFindingsWalkthroughBackCompat(t *testing.T) {
+	out, ok := parseFindings(`{"findings":[{"file":"a.go","existing_code":"x","severity":"low","category":"bug","rationale":"r"}]}`)
+	if !ok {
+		t.Fatal("parse failed")
+	}
+	if out.Walkthrough != "" || out.FileSummaries != nil {
+		t.Fatalf("absent fields must degrade to empty: walkthrough=%q summaries=%+v", out.Walkthrough, out.FileSummaries)
+	}
+}
+
+// Over-long walkthrough/summary text is truncated (rune-safe) to bound the extra
+// output tokens the additive fields add to every review.
+func TestParseFindingsWalkthroughLengthCaps(t *testing.T) {
+	longWalk := strings.Repeat("é", maxWalkthroughLen+50)
+	longSummary := strings.Repeat("x", maxFileSummaryLen+50)
+	model := `{"findings":[],"walkthrough":"` + longWalk + `","file_summaries":{"a.go":"` + longSummary + `"}}`
+	out, ok := parseFindings(model)
+	if !ok {
+		t.Fatal("parse failed")
+	}
+	if n := len([]rune(out.Walkthrough)); n != maxWalkthroughLen {
+		t.Fatalf("walkthrough not capped: got %d runes, want %d", n, maxWalkthroughLen)
+	}
+	if n := len([]rune(out.FileSummaries["a.go"])); n != maxFileSummaryLen {
+		t.Fatalf("file summary not capped: got %d runes, want %d", n, maxFileSummaryLen)
+	}
+}
+
+// Over the maxFileSummaryKeys cap the kept subset is the alphabetically-first N
+// keys, deterministically — Go map iteration order must not leak into the output,
+// or re-reviews of the same diff would render a different per-file digest.
+func TestParseFindingsFileSummariesDeterministicTruncation(t *testing.T) {
+	summaries := make(map[string]string, maxFileSummaryKeys+50)
+	for i := 0; i < maxFileSummaryKeys+50; i++ {
+		summaries[fmt.Sprintf("file-%04d.go", i)] = "note"
+	}
+	body, err := json.Marshal(rawFindings{FileSummaries: summaries})
+	if err != nil {
+		t.Fatal(err)
+	}
+	out, ok := parseFindings(string(body))
+	if !ok {
+		t.Fatal("parse failed")
+	}
+	if len(out.FileSummaries) != maxFileSummaryKeys {
+		t.Fatalf("want %d kept summaries, got %d", maxFileSummaryKeys, len(out.FileSummaries))
+	}
+	if _, ok := out.FileSummaries["file-0000.go"]; !ok {
+		t.Fatal("the alphabetically-first key must be kept")
+	}
+	if _, ok := out.FileSummaries[fmt.Sprintf("file-%04d.go", maxFileSummaryKeys+49)]; ok {
+		t.Fatal("a key past the sorted cap must be dropped")
+	}
+	again, _ := parseFindings(string(body))
+	if !reflect.DeepEqual(out.FileSummaries, again.FileSummaries) {
+		t.Fatal("truncation must be deterministic across runs")
+	}
+}
+
+// The optional diagram field round-trips verbatim and is rune-capped; an absent
+// field degrades to empty (back-compatible).
+func TestParseFindingsDiagram(t *testing.T) {
+	out, ok := parseFindings(`{"findings":[],"diagram":"flowchart TD\n A-->B"}`)
+	if !ok {
+		t.Fatal("parse failed")
+	}
+	if out.Diagram != "flowchart TD\n A-->B" {
+		t.Fatalf("diagram not parsed: %q", out.Diagram)
+	}
+	// Absent → empty.
+	out2, _ := parseFindings(`{"findings":[]}`)
+	if out2.Diagram != "" {
+		t.Fatalf("absent diagram must be empty, got %q", out2.Diagram)
+	}
+	// Over-long → capped.
+	long := strings.Repeat("x", maxDiagramLen+50)
+	out3, _ := parseFindings(`{"findings":[],"diagram":"` + long + `"}`)
+	if n := len([]rune(out3.Diagram)); n != maxDiagramLen {
+		t.Fatalf("diagram not capped: got %d runes, want %d", n, maxDiagramLen)
 	}
 }
 
@@ -150,11 +260,11 @@ func TestTokenNeverInFindings(t *testing.T) {
 	}
 	want := []engine.Finding{{Severity: "low", Category: "bug", QuotedCode: "z := 1"}}
 	fa := &fakeAgent{findings: want, maxEmpty: 1}
-	got, err := fa.Review(stdctx.Background(), Context{Text: "ctx"})
+	out, err := fa.Review(stdctx.Background(), Context{Text: "ctx"})
 	if err != nil {
 		t.Fatalf("Review: %v", err)
 	}
-	for _, f := range got {
+	for _, f := range out.Findings {
 		if strings.Contains(f.Rationale, secretToken) ||
 			strings.Contains(f.QuotedCode, secretToken) ||
 			strings.Contains(f.SuggestedPatch, secretToken) ||

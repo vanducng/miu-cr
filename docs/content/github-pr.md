@@ -191,6 +191,28 @@ lost. The whole review can't 422 on size.
 an off-diff inline comment) — they route the extra off-diff findings to the
 **summary**, **SARIF**, and **local output** instead, never inline.
 
+## Inline severity floor (`--min-severity`)
+
+`--min-severity none|info|low|medium|high|critical` raises the floor on which
+findings post **inline**. Findings below the threshold are excluded from inline
+comments only — they still appear in the summary histogram and SARIF, so nothing
+is dropped. Omitting the flag (the default) keeps the current behavior (no floor).
+
+```sh
+miucr review --pr owner/repo#123 --post --min-severity high
+```
+
+An out-of-set value is rejected before any work runs.
+
+## Change diagram (`--walkthrough-diagram`)
+
+`--walkthrough-diagram` (opt-in, default off) asks the model to also emit a small
+[Mermaid](https://mermaid.js.org/) change diagram, rendered as a fenced
+` ```mermaid ` block GitHub draws inline in the summary. It rides the same single
+review pass — no extra LLM call. Diagram quality varies, so it's opt-in; a
+malformed or omitted diagram degrades to a short plain note instead of a broken
+block (a start-keyword sanity check gates the fenced render).
+
 ## Check Run reporter
 
 `--mode` selects how findings reach the PR on `--post` (it only steers the PR

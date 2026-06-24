@@ -79,10 +79,11 @@ func TestAnthropicAgentParsesFindings(t *testing.T) {
 		client: &fakeAnthropic{responses: []string{textMessage(body)}},
 		model:  "claude-test",
 	}
-	got, err := a.Review(stdctx.Background(), Context{Text: "ctx", RepoDir: t.TempDir()})
+	out, err := a.Review(stdctx.Background(), Context{Text: "ctx", RepoDir: t.TempDir()})
 	if err != nil {
 		t.Fatalf("Review: %v", err)
 	}
+	got := out.Findings
 	if len(got) != 1 {
 		t.Fatalf("want 1 finding, got %d", len(got))
 	}
@@ -125,12 +126,12 @@ func TestAnthropicAgentToolLoopThenFindings(t *testing.T) {
 		textMessage(`{"findings":[]}`),
 	}}
 	a := &anthropicAgent{client: fc, model: "claude-test"}
-	got, err := a.Review(stdctx.Background(), Context{Text: "ctx", RepoDir: t.TempDir()})
+	out, err := a.Review(stdctx.Background(), Context{Text: "ctx", RepoDir: t.TempDir()})
 	if err != nil {
 		t.Fatalf("Review: %v", err)
 	}
-	if len(got) != 0 {
-		t.Fatalf("want 0 findings, got %d", len(got))
+	if len(out.Findings) != 0 {
+		t.Fatalf("want 0 findings, got %d", len(out.Findings))
 	}
 	if fc.calls != 2 {
 		t.Fatalf("expected 2 messages, got %d", fc.calls)
@@ -192,13 +193,13 @@ var _ anthropicClient = (*toolHungryAnthropic)(nil)
 func TestAnthropicAgentForcedFinalizeReturnsFindings(t *testing.T) {
 	fc := &toolHungryAnthropic{findings: `{"findings":[{"file":"a.go","existing_code":"x","severity":"warning","category":"bug","rationale":"r"}]}`}
 	a := &anthropicAgent{client: fc, model: "claude-test"}
-	got, err := a.Review(stdctx.Background(), Context{Text: "ctx", RepoDir: t.TempDir()})
+	out, err := a.Review(stdctx.Background(), Context{Text: "ctx", RepoDir: t.TempDir()})
 	if err != nil {
 		t.Fatalf("Review: %v", err)
 	}
 	// Findings only come back if the loop withdrew tools on the final turn.
-	if len(got) != 1 {
-		t.Fatalf("want 1 finding from forced finalize, got %d", len(got))
+	if len(out.Findings) != 1 {
+		t.Fatalf("want 1 finding from forced finalize, got %d", len(out.Findings))
 	}
 	if fc.calls != maxToolTurns {
 		t.Fatalf("expected %d calls (explore to budget then finalize), got %d", maxToolTurns, fc.calls)

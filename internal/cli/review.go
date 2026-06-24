@@ -40,6 +40,7 @@ type ReviewRequest struct {
 	ExpandWindow int
 	TokenBudget  int
 	FilterMode   string       // added|diff_context|file|nofilter (default diff_context)
+	WantDiagram  bool         // opt into the mermaid change diagram (default off)
 	NoSave       bool         // opt out of persisting this run to the local history store
 	Progress     func(string) // nil = silent; stderr milestones, never the stdout envelope
 }
@@ -142,6 +143,8 @@ type PRReviewRequest struct {
 	ExpandWindow int
 	TokenBudget  int
 	FilterMode   string       // added|diff_context|file|nofilter (default diff_context)
+	MinSeverity  string       // inline-posting floor: none|info|low|medium|high|critical (default keeps current behavior)
+	WantDiagram  bool         // opt into the mermaid change diagram (default off)
 	Mode         string       // review (default: inline+summary) | checks (GitHub Checks-API reporter)
 	NoSave       bool         // opt out of persisting this run to the local history store
 	Force        bool         // re-review even when the head SHA is unchanged since the last review (bypass the incremental skip)
@@ -249,6 +252,8 @@ func reviewCommand(opts *options) *cobra.Command {
 		expand       int
 		tokenBudget  int
 		filterMode   string
+		minSeverity  string
+		wantDiagram  bool
 		mode         string
 		sarifOut     string
 		pr           string
@@ -268,6 +273,9 @@ func reviewCommand(opts *options) *cobra.Command {
 		Short: "Review local git changes and emit gated findings",
 		PreRunE: func(cmd *cobra.Command, args []string) error {
 			if err := validateFilterMode(filterMode); err != nil {
+				return err
+			}
+			if err := validateMinSeverity(minSeverity); err != nil {
 				return err
 			}
 			// --mode (review|checks) only steers the PR reporter; it's inert for a
@@ -307,6 +315,8 @@ func reviewCommand(opts *options) *cobra.Command {
 					expand:       expand,
 					tokenBudget:  tokenBudget,
 					filterMode:   filterMode,
+					minSeverity:  minSeverity,
+					wantDiagram:  wantDiagram,
 					mode:         mode,
 					sarifOut:     sarifOut,
 					noSave:       noSave,
@@ -339,6 +349,7 @@ func reviewCommand(opts *options) *cobra.Command {
 				ExpandWindow: expand,
 				TokenBudget:  tokenBudget,
 				FilterMode:   filterMode,
+				WantDiagram:  wantDiagram,
 				NoSave:       noSave,
 				Progress:     prog,
 			}
@@ -400,6 +411,8 @@ func reviewCommand(opts *options) *cobra.Command {
 	f.IntVar(&expand, "expand", 5, "Context lines added above/below each hunk in the new-content window (0 disables)")
 	f.IntVar(&tokenBudget, "token-budget", defaultTokenBudget, "Approximate token budget; over budget degrades context (0 disables)")
 	f.StringVar(&filterMode, "filter-mode", "diff_context", "Inline-eligibility filter on --pr: added|diff_context|file|nofilter (default diff_context; file/nofilter route off-diff findings to the summary/SARIF/local output, never inline)")
+	f.StringVar(&minSeverity, "min-severity", "", "Minimum severity posted INLINE on --pr: none|info|low|medium|high|critical (default keeps current behavior; below-threshold findings still appear in the summary histogram + SARIF, never inline)")
+	f.BoolVar(&wantDiagram, "walkthrough-diagram", false, "Ask the model to also emit an optional mermaid change diagram in the summary (opt-in; diagram quality varies; a malformed/omitted diagram degrades to a plain note)")
 	f.StringVar(&mode, "mode", "review", "GitHub reporter on --pr --post: review (inline comments + summary, default) | checks (a GitHub CheckRun with annotations — survives force-push, works on fork PRs, can be a required check)")
 	f.StringVar(&sarifOut, "sarif-out", "", "Also write a SARIF 2.1.0 report to this path (in addition to the normal --output/posting), from the same single review run; written only on success (atomic temp+rename, so a failed run leaves no file)")
 	f.StringVar(&pr, "pr", "", "Review a GitHub PR: https://github.com/owner/repo/pull/N or owner/repo#N (no GitHub PAT needed for public repos in dry-run)")
@@ -439,6 +452,8 @@ type prRunArgs struct {
 	expand      int
 	tokenBudget int
 	filterMode  string
+	minSeverity string
+	wantDiagram bool
 	mode        string
 	sarifOut    string
 	noSave      bool
@@ -489,6 +504,8 @@ func runPRReview(cmd *cobra.Command, a prRunArgs) error {
 		ExpandWindow: a.expand,
 		TokenBudget:  a.tokenBudget,
 		FilterMode:   a.filterMode,
+		MinSeverity:  a.minSeverity,
+		WantDiagram:  a.wantDiagram,
 		Mode:         a.mode,
 		NoSave:       a.noSave,
 		Force:        a.force,
@@ -605,6 +622,21 @@ func validateFilterMode(mode string) error {
 		Code:    "flags.invalid_filter_mode",
 		Message: fmt.Sprintf("unknown --filter-mode %q", mode),
 		Hint:    "use added, diff_context, file, or nofilter",
+		Exit:    2,
+	}
+}
+
+// validateMinSeverity rejects an out-of-set --min-severity (empty keeps current
+// behavior), delegating to the github enum so the CLI and the publish floor share
+// one source of truth. Mirrors validateFilterMode's flags.* namespace.
+func validateMinSeverity(sev string) error {
+	if sev == "" || ghub.ValidMinSeverity(sev) {
+		return nil
+	}
+	return &CLIError{
+		Code:    "flags.invalid_min_severity",
+		Message: fmt.Sprintf("unknown --min-severity %q", sev),
+		Hint:    "use none, info, low, medium, high, or critical",
 		Exit:    2,
 	}
 }
