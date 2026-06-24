@@ -55,6 +55,13 @@ comment with a new marker); subsequent re-runs dedupe normally. On a
 first M5 review **manually** (or off-hours) to absorb the one-time re-post before
 the next scheduled run.
 
+## [0.24.0](https://github.com/vanducng/miu-cr/compare/v0.23.1...v0.24.0) (2026-06-24)
+
+
+### Features
+
+* **errors:** typed, actionable, retryable error taxonomy on the day-1 failure paths ([ff16663](https://github.com/vanducng/miu-cr/commit/ff166638e426d7ec32956251d0eb208fd5514e14))
+
 ## [0.23.1](https://github.com/vanducng/miu-cr/compare/v0.23.0...v0.23.1) (2026-06-24)
 
 
