@@ -516,7 +516,7 @@ func TestCommentBodyEscapesEmbeddedFence(t *testing.T) {
 		SuggestedPatch: "before\n```\nafter",
 	}
 	// Suggest OFF and multi-line patch → plain hint, never a one-click suggestion.
-	body, native := commentBody(f, "", PostReviewOptions{}, false)
+	body, native := commentBody(nil, f, "", PostReviewOptions{}, false)
 	if native {
 		t.Error("Suggest OFF must report native=false")
 	}
@@ -531,6 +531,35 @@ func TestCommentBodyEscapesEmbeddedFence(t *testing.T) {
 	}
 	if c := strings.Count(body, "````"); c != 2 {
 		t.Errorf("want exactly one opening + one closing 4-backtick fence, got %d:\n%s", c, body)
+	}
+}
+
+// commentBody leads with the bold title when present; absent, the body is
+// byte-for-byte today's body; an untrusted title is mdInline-escaped (no breakout).
+func TestCommentBodyTitle(t *testing.T) {
+	base := engine.Finding{Severity: "high", Category: "bug", Rationale: "nil deref on err path"}
+
+	noTitle, _ := commentBody(nil, base, "", PostReviewOptions{}, false)
+	if strings.Contains(noTitle, "\n\n\n") {
+		t.Errorf("no-title body must not carry an extra title line:\n%s", noTitle)
+	}
+
+	withTitle := base
+	withTitle.Title = "Unchecked nil deref"
+	body, _ := commentBody(nil, withTitle, "", PostReviewOptions{}, false)
+	if !strings.Contains(body, "**Unchecked nil deref**") {
+		t.Errorf("body must lead with the bold title:\n%s", body)
+	}
+	// Title sits before the rationale.
+	if strings.Index(body, "**Unchecked nil deref**") > strings.Index(body, "nil deref on err path") {
+		t.Errorf("title must precede the rationale:\n%s", body)
+	}
+
+	evil := base
+	evil.Title = "pwn](http://evil) `code` <script>"
+	eb, _ := commentBody(nil, evil, "", PostReviewOptions{}, false)
+	if strings.Contains(eb, "pwn](http://evil)") || strings.Contains(eb, "<script>") {
+		t.Errorf("untrusted title must be mdInline-escaped:\n%s", eb)
 	}
 }
 

@@ -11,12 +11,12 @@ func TestCommentBodyCategoryLinkWhenMapped(t *testing.T) {
 	f := engine.Finding{Severity: "high", Category: "Security", Rationale: "x"}
 	urls := map[string]string{"security": "https://docs.example/sec"}
 
-	linked, _ := commentBody(f, "", PostReviewOptions{CategoryURLs: urls}, false)
+	linked, _ := commentBody(nil, f, "", PostReviewOptions{CategoryURLs: urls}, false)
 	if !strings.Contains(linked, "**HIGH** ([Security](<https://docs.example/sec>))") {
 		t.Fatalf("mapped category must render as a link:\n%s", linked)
 	}
 
-	plain, _ := commentBody(f, "", PostReviewOptions{}, false)
+	plain, _ := commentBody(nil, f, "", PostReviewOptions{}, false)
 	if !strings.Contains(plain, "**HIGH** (Security)") || strings.Contains(plain, "](http") {
 		t.Fatalf("unmapped category must render plain (byte-for-byte today):\n%s", plain)
 	}
@@ -44,7 +44,7 @@ func TestCategoryLinkUsesAngleBracketDestination(t *testing.T) {
 	f := engine.Finding{Severity: "high", Category: "Security", Rationale: "x"}
 	urls := map[string]string{"security": "https://en.wikipedia.org/wiki/SQL_(lang)"}
 
-	linked, _ := commentBody(f, "", PostReviewOptions{CategoryURLs: urls}, false)
+	linked, _ := commentBody(nil, f, "", PostReviewOptions{CategoryURLs: urls}, false)
 	if !strings.Contains(linked, "[Security](<https://en.wikipedia.org/wiki/SQL_(lang)>)") {
 		t.Fatalf("URL with a paren must render in an angle-bracket destination:\n%s", linked)
 	}

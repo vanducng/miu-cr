@@ -10,6 +10,7 @@ import (
 	"log/slog"
 	"os"
 	"path/filepath"
+	"strings"
 	"time"
 
 	"github.com/vanducng/miu-cr/internal/cli"
@@ -47,6 +48,35 @@ func loadRules(repoDir string, allowRepo bool) []rules.Rule {
 		slog.Warn(w)
 	}
 	return loaded
+}
+
+// ruleCitations builds the wire-validated stem→citation map from the LOADED
+// (fork-dropped) rule set. Every loaded stem is CITED as text; only a repo
+// (RepoUntrusted) rule is LINKABLE, with its absolute Path converted to a
+// repo-relative path via filepath.Rel(repoRulesDir, Path) for the blob URL. A
+// user rule (absolute home path) and a built-in (defaults/* virtual path) are
+// NEVER given a path — linking either would leak the home dir or point at a
+// non-repo file. A repo rule whose Rel fails is downgraded to cite-only.
+func ruleCitations(loaded []rules.Rule, repoDir string) map[string]mgithub.RuleCitation {
+	if len(loaded) == 0 {
+		return nil
+	}
+	repoRulesDir := ""
+	if repoDir != "" {
+		repoRulesDir = filepath.Join(repoDir, ".miu", "cr", "rules")
+	}
+	cites := make(map[string]mgithub.RuleCitation, len(loaded))
+	for _, r := range loaded {
+		c := mgithub.RuleCitation{}
+		if r.Provenance == rules.RepoUntrusted && repoRulesDir != "" {
+			if rel, err := filepath.Rel(repoRulesDir, r.Path); err == nil && rel != "" && !strings.HasPrefix(rel, "..") {
+				c.RepoRelPath = filepath.ToSlash(rel)
+				c.Linkable = true
+			}
+		}
+		cites[r.Stem] = c
+	}
+	return cites
 }
 
 func init() {
@@ -310,6 +340,9 @@ func (prReviewer) ReviewPR(ctx stdctx.Context, req cli.PRReviewRequest) (cli.Rev
 	if hist != nil {
 		eng.Store = engineStoreFor(hist)
 	}
+	// Hoisted so the same loaded (fork-dropped) rule set feeds BOTH the engine
+	// (injection) and the publish-layer citation map (validation/linking).
+	loaded := loadRules(dir, !info.IsFork)
 	res, err := eng.Review(ctx, engine.Request{
 		Mode:         diff.ModeRange,
 		From:         info.BaseSHA,
@@ -327,7 +360,7 @@ func (prReviewer) ReviewPR(ctx stdctx.Context, req cli.PRReviewRequest) (cli.Rev
 		Repo:         info.Repo,
 		Number:       info.Number,
 
-		Rules:            loadRules(dir, !info.IsFork),
+		Rules:            loaded,
 		RulesFork:        info.IsFork,
 		RulesTokenBudget: defaultRulesTokenBudget,
 		Retriever:        retr,
@@ -357,7 +390,7 @@ func (prReviewer) ReviewPR(ctx stdctx.Context, req cli.PRReviewRequest) (cli.Rev
 			defer closeStore()
 		}
 		ew := embedWriter{emb: emb, store: embStore, repo: repo}
-		if err := publishReview(ctx, client, runner, dir, info, res, prResult, req, prStore, ew, cfg.Review.CategoryURLMap()); err != nil {
+		if err := publishReview(ctx, client, runner, dir, info, res, prResult, req, prStore, ew, cfg.Review.CategoryURLMap(), ruleCitations(loaded, dir)); err != nil {
 			return cli.ReviewOutcome{}, err
 		}
 	}
@@ -402,7 +435,7 @@ func skipUnchanged(ctx stdctx.Context, hist store.Store, info *mgithub.PRInfo, f
 // last so a partial failure leaves the summary reflecting reality. It computes
 // gateClean via engine.GateFailed + reviewedFiles from stats, threads both opt-in
 // write-actions (default OFF) into PostReviewOptions, and fills the outcome fields.
-func publishReview(ctx stdctx.Context, client mgithub.Client, runner *gitcmd.Runner, dir string, info *mgithub.PRInfo, res engine.ReviewResult, prResult *cli.PRResult, req cli.PRReviewRequest, prStore store.PRThreadStore, ew embedWriter, categoryURLs map[string]string) error {
+func publishReview(ctx stdctx.Context, client mgithub.Client, runner *gitcmd.Runner, dir string, info *mgithub.PRInfo, res engine.ReviewResult, prResult *cli.PRResult, req cli.PRReviewRequest, prStore store.PRThreadStore, ew embedWriter, categoryURLs map[string]string, ruleCites map[string]mgithub.RuleCitation) error {
 	diffs, err := mgithub.DiffsForPR(ctx, runner, dir, info.BaseSHA, info.HeadSHA)
 	if err != nil {
 		return err
@@ -459,6 +492,7 @@ func publishReview(ctx stdctx.Context, client mgithub.Client, runner *gitcmd.Run
 		FilterMode:    filterModeOf(req.FilterMode),
 		MinSeverity:   req.MinSeverity,
 		CategoryURLs:  categoryURLs,
+		RuleCitations: ruleCites,
 		// Fork-fallback ::error:: commands must share the envelope's stdout stream
 		// (GitHub parses workflow commands only from stdout); the command's writer is
 		// threaded in via req. nil → PostReview falls back to os.Stdout.
@@ -484,6 +518,7 @@ func publishReview(ctx stdctx.Context, client mgithub.Client, runner *gitcmd.Run
 		Walkthrough:   res.Walkthrough,
 		FileSummaries: res.FileSummaries,
 		Diagram:       res.Diagram,
+		RuleCitations: ruleCites,
 	})
 	action, err := mgithub.UpsertSummaryComment(ctx, client, info, summary)
 	if err != nil {
@@ -696,6 +731,8 @@ func toCLIFindings(in []engine.Finding) []cli.ReviewFinding {
 			File:           f.File,
 			Line:           f.Line,
 			EndLine:        f.EndLine,
+			Title:          f.Title,
+			Rule:           f.Rule,
 			Severity:       f.Severity,
 			Category:       f.Category,
 			Rationale:      f.Rationale,

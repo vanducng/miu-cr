@@ -6,6 +6,8 @@ type Finding struct {
 	File           string `json:"file"`
 	Line           int    `json:"line"`
 	EndLine        int    `json:"end_line"`
+	Title          string `json:"title,omitempty"` // optional short scannable summary the model emits in the same pass.
+	Rule           string `json:"rule,omitempty"`  // optional bare stem of the injected rule that motivated this finding; validated/linked downstream.
 	Severity       string `json:"severity"`
 	Category       string `json:"category"`
 	Rationale      string `json:"rationale"`

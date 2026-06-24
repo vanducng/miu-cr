@@ -41,6 +41,8 @@ var _ Agent = (*fakeAgent)(nil)
 
 func TestFakeAgentZeroNetwork(t *testing.T) {
 	want := []engine.Finding{{
+		Title:      "Off-by-one loop bound",
+		Rule:       "go",
 		Severity:   "high",
 		Category:   "bug",
 		Rationale:  "off-by-one, example token " + secretToken + " in prose",
@@ -60,6 +62,12 @@ func TestFakeAgentZeroNetwork(t *testing.T) {
 	}
 	if got[0].QuotedCode == "" {
 		t.Fatal("quoted code must be carried for anchoring")
+	}
+	if got[0].Title != "Off-by-one loop bound" {
+		t.Fatalf("title must be carried, got %q", got[0].Title)
+	}
+	if got[0].Rule != "go" {
+		t.Fatalf("rule must be carried, got %q", got[0].Rule)
 	}
 	if !fa.bailedOut {
 		t.Fatal("fake tool loop did not reach the empty-round bail")
@@ -119,6 +127,57 @@ func TestParseFindingsPopulatesFileAndAnchors(t *testing.T) {
 	})
 	if got[0].Line != 11 || got[0].EndLine != 11 {
 		t.Fatalf("agent->anchor handoff: got %d..%d, want 11..11", got[0].Line, got[0].EndLine)
+	}
+}
+
+// parseFindings maps the optional title onto engine.Finding.Title (the shared
+// path covers all 3 backends), caps it, and leaves it empty on a response that
+// omits it (back-compat).
+func TestParseFindingsTitle(t *testing.T) {
+	out, ok := parseFindings(`{"findings":[{"file":"a.go","existing_code":"x","severity":"low","category":"bug","title":"Unchecked nil deref","rationale":"r"}]}`)
+	if !ok || len(out.Findings) != 1 {
+		t.Fatalf("parse: ok=%v len=%d", ok, len(out.Findings))
+	}
+	if out.Findings[0].Title != "Unchecked nil deref" {
+		t.Fatalf("title not mapped: %q", out.Findings[0].Title)
+	}
+
+	// Absent title => empty (back-compat).
+	out2, _ := parseFindings(`{"findings":[{"file":"a.go","existing_code":"x","severity":"low","category":"bug","rationale":"r"}]}`)
+	if out2.Findings[0].Title != "" {
+		t.Fatalf("absent title must be empty, got %q", out2.Findings[0].Title)
+	}
+
+	// Over-long title is rune-capped, not rejected.
+	long := strings.Repeat("é", maxTitleLen+50)
+	out3, _ := parseFindings(`{"findings":[{"file":"a.go","existing_code":"x","severity":"low","category":"bug","title":"` + long + `","rationale":"r"}]}`)
+	if n := len([]rune(out3.Findings[0].Title)); n != maxTitleLen {
+		t.Fatalf("title cap: got %d runes, want %d", n, maxTitleLen)
+	}
+}
+
+// parseFindings maps the optional rule stem onto engine.Finding.Rule (the shared
+// path covers all 3 backends), trims + caps it, and leaves it empty when omitted.
+func TestParseFindingsRule(t *testing.T) {
+	out, ok := parseFindings(`{"findings":[{"file":"a.go","existing_code":"x","severity":"low","category":"bug","rule":"  go  ","rationale":"r"}]}`)
+	if !ok || len(out.Findings) != 1 {
+		t.Fatalf("parse: ok=%v len=%d", ok, len(out.Findings))
+	}
+	if out.Findings[0].Rule != "go" {
+		t.Fatalf("rule not trimmed/mapped: %q", out.Findings[0].Rule)
+	}
+
+	// Absent rule => empty (back-compat).
+	out2, _ := parseFindings(`{"findings":[{"file":"a.go","existing_code":"x","severity":"low","category":"bug","rationale":"r"}]}`)
+	if out2.Findings[0].Rule != "" {
+		t.Fatalf("absent rule must be empty, got %q", out2.Findings[0].Rule)
+	}
+
+	// Over-long rule is rune-capped, not rejected.
+	long := strings.Repeat("é", maxRuleLen+50)
+	out3, _ := parseFindings(`{"findings":[{"file":"a.go","existing_code":"x","severity":"low","category":"bug","rule":"` + long + `","rationale":"r"}]}`)
+	if n := len([]rune(out3.Findings[0].Rule)); n != maxRuleLen {
+		t.Fatalf("rule cap: got %d runes, want %d", n, maxRuleLen)
 	}
 }
 

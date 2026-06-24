@@ -301,6 +301,8 @@ func parseFindings(text string) (engine.ReviewOutput, bool) {
 	for _, r := range raw.Findings {
 		findings = append(findings, engine.Finding{
 			File:           r.File,
+			Title:          capRunes(r.Title, maxTitleLen),
+			Rule:           capRunes(strings.TrimSpace(r.Rule), maxRuleLen),
 			Severity:       r.Severity,
 			Category:       r.Category,
 			Rationale:      r.Rationale,

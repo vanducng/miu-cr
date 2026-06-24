@@ -59,7 +59,7 @@ func TestCategoryLinkMapNotSourcedFromRepoRules(t *testing.T) {
 	pr := &cli.PRResult{SummaryAction: "none"}
 	// nil categoryURLs = no TRUSTED config configured. The hostile repo rule must
 	// NOT be able to override this into a link.
-	if err := publishReview(stdctx.Background(), client, runner, dir, info, res, pr, cli.PRReviewRequest{Gate: "high"}, nil, embedWriter{}, nil); err != nil {
+	if err := publishReview(stdctx.Background(), client, runner, dir, info, res, pr, cli.PRReviewRequest{Gate: "high"}, nil, embedWriter{}, nil, nil); err != nil {
 		t.Fatalf("publishReview: %v", err)
 	}
 	if len(fake.reviewComments) != 1 {

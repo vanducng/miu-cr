@@ -86,6 +86,12 @@ approves or requests changes; two opt-in write-actions (`--suggest`,
 `--approve-clean`, both default OFF) are described under **Opt-in write-actions**
 below. miu-cr never requests changes and never pushes commits.
 
+When a finding is motivated by one of your project rules, the inline comment cites
+it as `(per <rule>)`. The rule stem is validated against the rules actually loaded
+for the review (a hallucinated citation is dropped); a repo rule
+(`.miu/cr/rules/*.md`) is additionally linked to its file, repo-relative at the
+head SHA, while user and built-in rules are cited as text only.
+
 When a finding spans more than one line (the anchor resolves an `EndLine` past
 its `Line`), miu-cr posts a **multi-line range comment** — but only when the
 whole `Line`..`EndLine` span is **contiguous inside a single RIGHT-side diff
@@ -171,7 +177,7 @@ If a review would carry more inline comments than GitHub accepts in one request,
 miu-cr posts the highest-severity findings up to a fixed cap (40), notes the
 omitted count in the summary body, and lists every capped finding in a
 collapsible **`<details>` overflow block** at the end of the summary — each with
-its severity, category, `file:line`, rationale, and a **blob permalink** pinned
+its severity, category, optional bold **title**, optional **`(per <rule>)`** citation, `file:line`, rationale, and a **blob permalink** pinned
 to the head SHA — so a finding dropped from the inline set is never silently
 lost. The whole review can't 422 on size.
 

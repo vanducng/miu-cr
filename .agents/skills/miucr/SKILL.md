@@ -166,6 +166,8 @@ miucr review --pr owner/repo#123          # a GitHub PR (dry-run by default)
 "data": {
   "findings": [
     { "file": "internal/foo/bar.go", "line": 42, "end_line": 42,
+      "title": "…optional short scannable summary…",   // omitted when the model emits none
+      "rule": "go",                                     // optional: stem of the project rule that motivated this finding (omitted when none)
       "severity": "high", "category": "bug",
       "rationale": "…why this is a problem…",
       "suggested_patch": "…optional minimal fix…",
@@ -263,6 +265,12 @@ A file with **no `---` fence is skipped** (never always-applied). Untrusted repo
 context-only, byte-capped, and **dropped on fork PRs**; the finding-JSON schema stays in the cached
 system prompt so injected prose can't redefine it. `rules check` data lists each applicable rule with
 `provenance`, `stem`, `globs`/`always_apply`, `trusted`, plus skipped `body_only` files.
+
+**Rule grounding.** A finding may carry the `rule` stem of the project rule that motivated it. The
+wire layer validates the stem against the rules actually loaded this review (a hallucinated stem is
+dropped) and renders it as `(per <stem>)` on the inline comment + summary overflow. A repo rule
+(`.miu/cr/rules/*.md`) additionally links to its file, repo-relative at the head SHA; user and
+built-in rules are cited as text only (no link — a user-rule home path never leaks).
 
 ### `history` — browse saved reviews
 

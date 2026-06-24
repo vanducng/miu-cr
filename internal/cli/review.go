@@ -99,6 +99,8 @@ type ReviewFinding struct {
 	File           string `json:"file"`
 	Line           int    `json:"line"`
 	EndLine        int    `json:"end_line"`
+	Title          string `json:"title,omitempty"`
+	Rule           string `json:"rule,omitempty"`
 	Severity       string `json:"severity"`
 	Category       string `json:"category"`
 	Rationale      string `json:"rationale"`
