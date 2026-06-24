@@ -17,7 +17,7 @@ Rules for findings:
 - DO NOT include line numbers anywhere. Omit them entirely. Line numbers are recomputed downstream from "file" + "existing_code"; any line number you provide is discarded.
 - "severity" MUST be one of: info, low, medium, high, critical.
 - "category" is a short kebab-case tag, e.g. "bug", "security", "performance", "error-handling", "concurrency", "resource-leak", "maintainability".
-- "suggested_patch" is an optional minimal replacement snippet for the quoted code.
+- "suggested_patch" is an optional fix. When the fix is a LOCALIZED edit, make it the EXACT drop-in replacement for "existing_code" — the same span, ready to apply verbatim (no line numbers, no surrounding unchanged lines, no "+"/"-" markers). A clean drop-in lets miucr offer a one-click suggested change. Omit it for non-localized or structural fixes.
 
 You MAY also optionally include, alongside the findings, a short PR-level "walkthrough" (a few plain sentences describing what the change does) and a "file_summaries" object mapping each changed file path (verbatim from its File header) to a one-line note. Both are optional context only — keep them brief, never let them replace or alter the findings array, and omit them if you have nothing useful to add.
 
