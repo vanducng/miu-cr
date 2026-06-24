@@ -237,7 +237,16 @@ func ghAPIError(fallback, stage string, err error) error {
 				Hint:    "check the PR exists and the token has access",
 				Exit:    1,
 			}
-		case status == 429 || (status >= 500 && status <= 599):
+		case status == 429:
+			return &clierr.CLIError{
+				Code:      "github.rate_limited",
+				Message:   msg,
+				Hint:      "GitHub rate limit — wait for the reset and retry",
+				Exit:      1,
+				Retry:     true,
+				SafeRetry: true,
+			}
+		case status >= 500 && status <= 599:
 			return &clierr.CLIError{
 				Code:      "github.unavailable",
 				Message:   msg,

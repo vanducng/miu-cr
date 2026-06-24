@@ -27,9 +27,13 @@ import (
 func classifyReviewErr(err error, timeout time.Duration) error {
 	switch {
 	case errors.Is(err, stdctx.DeadlineExceeded):
+		msg := "review timed out"
+		if timeout > 0 { // only the CLI-owned deadline knows the budget; a 0 means the deadline came from elsewhere
+			msg = fmt.Sprintf("review timed out after %s", timeout)
+		}
 		return &CLIError{
 			Code:    "review.timeout",
-			Message: fmt.Sprintf("review timed out after %s", timeout),
+			Message: msg,
 			Hint:    "raise --timeout (e.g. 600s) or narrow the diff",
 			Exit:    1,
 			Retry:   true,
