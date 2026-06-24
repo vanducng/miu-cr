@@ -3,6 +3,7 @@ package agent
 import (
 	stdctx "context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"strings"
 	"time"
@@ -15,6 +16,19 @@ import (
 	"github.com/vanducng/miu-cr/internal/engine"
 	"github.com/vanducng/miu-cr/internal/engine/gitcmd"
 )
+
+// classifyOpenAIErr types a proven OpenAI-compatible API status into the stable
+// taxonomy; an unrecognized error keeps the bare %w wrap so the ctx error chain
+// survives to the review-layer errors.Is.
+func classifyOpenAIErr(err error) error {
+	var apiErr *openai.Error
+	if errors.As(err, &apiErr) {
+		if c := classifyStatus(apiErr.StatusCode, err.Error(), hintLoginOpenAI, codeAuthFailed); c != nil {
+			return c
+		}
+	}
+	return fmt.Errorf("agent: chat.completions: %w", err)
+}
 
 // openaiClient is the subset of the OpenAI SDK the agent needs; satisfied by the
 // real client and a fake in tests so the parse/tool loop runs without network.
@@ -127,7 +141,7 @@ func (a *openaiAgent) Review(ctx stdctx.Context, rc Context) (engine.ReviewOutpu
 
 		resp, err := a.client.create(ctx, params)
 		if err != nil {
-			return engine.ReviewOutput{}, fmt.Errorf("agent: chat.completions: %w", err)
+			return engine.ReviewOutput{}, classifyOpenAIErr(err)
 		}
 		if len(resp.Choices) == 0 {
 			return engine.ReviewOutput{}, fmt.Errorf("agent: empty completion (no choices)")

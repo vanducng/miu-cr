@@ -8,6 +8,8 @@ import (
 	"path/filepath"
 
 	toml "github.com/pelletier/go-toml/v2"
+
+	"github.com/vanducng/miu-cr/internal/cli/clierr"
 )
 
 // userHomeDir is a seam so tests can point config/state resolution at a temp dir.
@@ -57,8 +59,9 @@ func FilePathOrEmpty() string {
 
 // Load returns the layered configuration: built-in Defaults overlaid by the
 // user config file when present. A missing file yields the defaults; an
-// unreadable or malformed file returns the defaults plus an error so callers
-// can surface it without losing a working baseline.
+// unreadable or malformed file returns the defaults plus a typed config.invalid
+// CLIError (Exit 2) so review/history/serve surface it identically. Importing
+// the leaf internal/cli/clierr only (not internal/cli) keeps this cycle-free.
 func Load() (Config, error) {
 	cfg := Defaults()
 	path, err := FilePath()
@@ -70,13 +73,26 @@ func Load() (Config, error) {
 		return cfg, nil
 	}
 	if err != nil {
-		return cfg, fmt.Errorf("read config %s: %w", path, err)
+		return cfg, invalidConfig(path, err)
 	}
 	var fileCfg Config
 	if err := toml.Unmarshal(data, &fileCfg); err != nil {
-		return cfg, fmt.Errorf("parse config %s: %w", path, err)
+		return cfg, invalidConfig(path, err)
 	}
 	return Merge(cfg, fileCfg), nil
+}
+
+// invalidConfig wraps a read/parse failure as a typed config.invalid CLIError.
+// The go-toml/v2 error carries a row/col, kept in Message; the message is
+// redacted in case a path or value fragment is sensitive.
+func invalidConfig(path string, err error) error {
+	return &clierr.CLIError{
+		Code:    "config.invalid",
+		Message: RedactString(fmt.Sprintf("config %s: %v", path, err)),
+		Hint:    "fix or remove " + path,
+		Exit:    2,
+		Cause:   err,
+	}
 }
 
 // Merge overlays file config onto base: a non-empty DefaultProvider wins, and

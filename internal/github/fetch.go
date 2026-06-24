@@ -2,7 +2,9 @@ package github
 
 import (
 	stdctx "context"
+	"errors"
 	"fmt"
+	"net"
 	"net/url"
 	"os"
 	"strings"
@@ -184,10 +186,56 @@ func fetchError(stage string, err error) error {
 	}
 }
 
-func ghAPIError(code, stage string, err error) error {
+// ghAPIError classifies a GitHub API failure into a typed CLIError by a PROVEN
+// signal: the go-github *ErrorResponse status (401/403/404/5xx) or a net error
+// (DNS/refused/timeout). Anything unrecognized keeps the caller's fallback code
+// (github.pr_fetch_failed) so a real bug is never mislabeled retryable. The
+// message is redacted so a 401 body can't leak a token fragment.
+func ghAPIError(fallback, stage string, err error) error {
+	msg := config.RedactString(fmt.Sprintf("%s: %v", stage, err))
+
+	var er *gh.ErrorResponse
+	if errors.As(err, &er) && er.Response != nil {
+		switch status := er.Response.StatusCode; {
+		case status == 401 || status == 403:
+			return &clierr.CLIError{
+				Code:    "github.auth",
+				Message: msg,
+				Hint:    "check GITHUB_TOKEN / its repo scope",
+				Exit:    1,
+			}
+		case status == 404:
+			return &clierr.CLIError{
+				Code:    "github.pr_not_found",
+				Message: msg,
+				Hint:    "check the PR exists and the token has access",
+				Exit:    1,
+			}
+		case status >= 500 && status <= 599:
+			return &clierr.CLIError{
+				Code:    "github.unavailable",
+				Message: msg,
+				Hint:    "GitHub is unavailable — retry shortly",
+				Exit:    1,
+				Retry:   true,
+			}
+		}
+	}
+
+	var netErr net.Error
+	if errors.As(err, &netErr) {
+		return &clierr.CLIError{
+			Code:    "github.unavailable",
+			Message: msg,
+			Hint:    "cannot reach GitHub — check your network and retry",
+			Exit:    1,
+			Retry:   true,
+		}
+	}
+
 	return &clierr.CLIError{
-		Code:    code,
-		Message: config.RedactString(fmt.Sprintf("%s: %v", stage, err)),
+		Code:    fallback,
+		Message: msg,
 		Exit:    1,
 	}
 }

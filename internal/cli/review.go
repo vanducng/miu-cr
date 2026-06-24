@@ -2,6 +2,7 @@ package cli
 
 import (
 	stdctx "context"
+	"errors"
 	"fmt"
 	"io"
 	"log/slog"
@@ -17,6 +18,34 @@ import (
 	ghub "github.com/vanducng/miu-cr/internal/github"
 	"github.com/vanducng/miu-cr/internal/sarif"
 )
+
+// classifyReviewErr types a ctx timeout/cancel raised during the review pass —
+// the review layer is the one place that knows the --timeout value. Any other
+// error passes through unchanged (preserving an already-typed CLIError or a bare
+// %w). This is the timeout owner; backends keep the ctx chain via %w so the
+// errors.Is below still reaches it through the engine pass-through.
+func classifyReviewErr(err error, timeout time.Duration) error {
+	switch {
+	case errors.Is(err, stdctx.DeadlineExceeded):
+		return &CLIError{
+			Code:    "review.timeout",
+			Message: fmt.Sprintf("review timed out after %s", timeout),
+			Hint:    "raise --timeout (e.g. 600s) or narrow the diff",
+			Exit:    1,
+			Retry:   true,
+			Cause:   err,
+		}
+	case errors.Is(err, stdctx.Canceled):
+		return &CLIError{
+			Code:    "review.canceled",
+			Message: "review canceled",
+			Exit:    130,
+			Cause:   err,
+		}
+	default:
+		return err
+	}
+}
 
 // ReviewRequest is the mode-agnostic review invocation passed to the injected
 // Reviewer. It mirrors engine.Request but lives in cli so the engine (which
@@ -363,7 +392,7 @@ func reviewCommand(opts *options) *cobra.Command {
 			}
 			out, err := reviewer.Review(ctx, req)
 			if err != nil {
-				return err
+				return classifyReviewErr(err, opts.timeout)
 			}
 			if prog != nil {
 				prog(fmt.Sprintf("done: %d findings", len(out.Findings)))
@@ -515,7 +544,7 @@ func runPRReview(cmd *cobra.Command, a prRunArgs) error {
 		ActionsOut:   cmd.OutOrStdout(),
 	})
 	if err != nil {
-		return err
+		return classifyReviewErr(err, a.timeout)
 	}
 
 	// Incremental-skip path (additive, back-compatible): an unchanged head SHA

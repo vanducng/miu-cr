@@ -26,6 +26,7 @@ func ValidateInvocation(staged bool, from, to, commit, gate string) error {
 		return &clierr.CLIError{
 			Code:    "review.bad_gate",
 			Message: fmt.Sprintf("invalid gate %q: want one of none|info|low|medium|high|critical", gate),
+			Hint:    "use --gate none|info|low|medium|high|critical",
 			Exit:    2,
 		}
 	}

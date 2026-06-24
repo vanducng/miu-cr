@@ -59,6 +59,9 @@ func TestValidateInvocation(t *testing.T) {
 			if ce.Exit != 2 {
 				t.Errorf("exit = %d, want 2", ce.Exit)
 			}
+			if tt.wantCode == "review.bad_gate" && ce.Hint == "" {
+				t.Error("review.bad_gate must carry an actionable hint")
+			}
 		})
 	}
 }

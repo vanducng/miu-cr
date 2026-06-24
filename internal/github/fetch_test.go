@@ -2,6 +2,9 @@ package github
 
 import (
 	stdctx "context"
+	"net/http"
+	"net/http/httptest"
+	"net/url"
 	"strings"
 	"testing"
 
@@ -266,4 +269,121 @@ func asCLIErr(err error, target **clierr.CLIError) bool {
 		return true
 	}
 	return false
+}
+
+// ghClientAt builds the real go-github client pointed at a test server so
+// FetchPR runs the genuine *gh.ErrorResponse classification path offline.
+func ghClientAt(t *testing.T, srvURL string) Client {
+	t.Helper()
+	base, err := url.Parse(srvURL + "/")
+	if err != nil {
+		t.Fatalf("parse base: %v", err)
+	}
+	c := gh.NewClient(nil)
+	c.BaseURL = base
+	return ghClient{c: c}
+}
+
+func TestFetchPRClassifiesAPIStatus(t *testing.T) {
+	ref := PRRef{Owner: "o", Repo: "r", Number: 1}
+	tests := []struct {
+		name     string
+		status   int
+		body     string
+		wantCode string
+		wantHint string
+		retry    bool
+	}{
+		{"401 auth", http.StatusUnauthorized, `{"message":"Bad credentials"}`, "github.auth", "check GITHUB_TOKEN / its repo scope", false},
+		{"403 auth", http.StatusForbidden, `{"message":"Forbidden"}`, "github.auth", "check GITHUB_TOKEN / its repo scope", false},
+		{"404 not found", http.StatusNotFound, `{"message":"Not Found"}`, "github.pr_not_found", "check the PR exists and the token has access", false},
+		{"500 unavailable", http.StatusInternalServerError, `{"message":"oops"}`, "github.unavailable", "GitHub is unavailable — retry shortly", true},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+				w.WriteHeader(tt.status)
+				_, _ = w.Write([]byte(tt.body))
+			}))
+			defer srv.Close()
+
+			_, err := FetchPR(stdctx.Background(), ghClientAt(t, srv.URL), ref)
+			if err == nil {
+				t.Fatal("want error")
+			}
+			var ce *clierr.CLIError
+			if !asCLIErr(err, &ce) {
+				t.Fatalf("want *clierr.CLIError, got %T", err)
+			}
+			if ce.Code != tt.wantCode {
+				t.Fatalf("code = %q, want %q", ce.Code, tt.wantCode)
+			}
+			if ce.Hint != tt.wantHint {
+				t.Fatalf("hint = %q, want %q", ce.Hint, tt.wantHint)
+			}
+			if ce.Retry != tt.retry {
+				t.Fatalf("retry = %v, want %v", ce.Retry, tt.retry)
+			}
+			if ce.Exit != 1 {
+				t.Fatalf("exit = %d, want 1", ce.Exit)
+			}
+		})
+	}
+}
+
+func TestFetchPRNetErrorIsUnavailable(t *testing.T) {
+	// A server that's closed immediately → connection refused (a net.Error).
+	srv := httptest.NewServer(http.HandlerFunc(func(http.ResponseWriter, *http.Request) {}))
+	closedURL := srv.URL
+	srv.Close()
+
+	_, err := FetchPR(stdctx.Background(), ghClientAt(t, closedURL), PRRef{Owner: "o", Repo: "r", Number: 1})
+	if err == nil {
+		t.Fatal("want error")
+	}
+	var ce *clierr.CLIError
+	if !asCLIErr(err, &ce) {
+		t.Fatalf("want *clierr.CLIError, got %T", err)
+	}
+	if ce.Code != "github.unavailable" || !ce.Retry {
+		t.Fatalf("net error → code=%q retry=%v, want github.unavailable retry=true", ce.Code, ce.Retry)
+	}
+}
+
+func TestFetchPRUnrecognizedKeepsFallback(t *testing.T) {
+	// 451 is a real status we don't classify → stays the default fallback code.
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.WriteHeader(http.StatusUnavailableForLegalReasons)
+		_, _ = w.Write([]byte(`{"message":"blocked"}`))
+	}))
+	defer srv.Close()
+
+	_, err := FetchPR(stdctx.Background(), ghClientAt(t, srv.URL), PRRef{Owner: "o", Repo: "r", Number: 1})
+	var ce *clierr.CLIError
+	if !asCLIErr(err, &ce) {
+		t.Fatalf("want *clierr.CLIError, got %T", err)
+	}
+	if ce.Code != "github.pr_fetch_failed" {
+		t.Fatalf("code = %q, want github.pr_fetch_failed (unrecognized → fallback)", ce.Code)
+	}
+	if ce.Retry {
+		t.Error("unrecognized failure must not be retryable")
+	}
+}
+
+func TestFetchPRDoesNotLeakToken(t *testing.T) {
+	// A 401 body that echoes a token-shaped string must be redacted in the message.
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.WriteHeader(http.StatusUnauthorized)
+		_, _ = w.Write([]byte(`{"message":"bad token ghp_AAAABBBBCCCCDDDDEEEE1234"}`))
+	}))
+	defer srv.Close()
+
+	_, err := FetchPR(stdctx.Background(), ghClientAt(t, srv.URL), PRRef{Owner: "o", Repo: "r", Number: 1})
+	if err == nil {
+		t.Fatal("want error")
+	}
+	if strings.Contains(err.Error(), "ghp_AAAABBBBCCCCDDDDEEEE1234") {
+		t.Fatalf("token leaked into message: %q", err.Error())
+	}
 }

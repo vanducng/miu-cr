@@ -74,12 +74,7 @@ type OAuthCredential struct {
 func Resolve(in ResolveInput) (Credentials, error) {
 	cfg, err := config.Load()
 	if err != nil {
-		return Credentials{}, &clierr.CLIError{
-			Code:    "config.invalid",
-			Message: err.Error(),
-			Hint:    "fix or remove " + config.FilePathOrEmpty(),
-			Exit:    1,
-		}
+		return Credentials{}, err // config.Load already returns a typed config.invalid CLIError
 	}
 	return resolveWith(cfg, in)
 }
@@ -191,10 +186,28 @@ func resolveOpenAI(in ResolveInput, prof config.Provider) (Credentials, error) {
 			Exit:    1,
 		}
 	}
-	baseURL := firstNonEmpty(in.BaseURL, os.Getenv("OPENAI_BASE_URL"), prof.BaseURL, config.DefaultOpenAIBaseURL)
+	// preDefaultBase is the explicitly-configured endpoint, BEFORE the
+	// DefaultOpenAIBaseURL fallback. An api-key (non-OAuth) profile with NONE set
+	// would ship the key to api.openai.com — a key-leak for a custom keyed
+	// kind=openai gateway profile that forgot base_url. The built-in openai profile
+	// sets prof.BaseURL=DefaultOpenAIBaseURL (provider.go), so it passes. Mirrors
+	// the symmetric Anthropic auth_token guard above.
+	preDefaultBase := firstNonEmpty(in.BaseURL, os.Getenv("OPENAI_BASE_URL"), prof.BaseURL)
+	baseURL := firstNonEmpty(preDefaultBase, config.DefaultOpenAIBaseURL)
 	model := firstNonEmpty(in.Model, os.Getenv("OPENAI_MODEL"), prof.Model, config.DefaultOpenAIModel)
-	apiKeyCreds := func(k string) Credentials {
-		return Credentials{Kind: config.KindOpenAI, APIKey: k, BaseURL: baseURL, Model: model}
+	gatewayBaseRequired := func() (Credentials, error) {
+		return Credentials{}, &clierr.CLIError{
+			Code:    "config.invalid",
+			Message: "an openai-kind gateway profile with an api key must set base_url; without one the key would be sent to api.openai.com",
+			Hint:    "set base_url for an openai-kind gateway profile (or OPENAI_BASE_URL / --base-url)",
+			Exit:    2,
+		}
+	}
+	apiKeyCreds := func(k string) (Credentials, error) {
+		if preDefaultBase == "" {
+			return gatewayBaseRequired()
+		}
+		return Credentials{Kind: config.KindOpenAI, APIKey: k, BaseURL: baseURL, Model: model}, nil
 	}
 
 	noCred := func(msg string) (Credentials, error) {
@@ -213,7 +226,7 @@ func resolveOpenAI(in ResolveInput, prof config.Provider) (Credentials, error) {
 
 	// --api-key is the most explicit (per-call) credential and always wins.
 	if k := strings.TrimSpace(in.APIKey); k != "" {
-		return apiKeyCreds(k), nil
+		return apiKeyCreds(k)
 	}
 
 	// `auth` pins the method explicitly when set.
@@ -229,7 +242,7 @@ func resolveOpenAI(in ResolveInput, prof config.Provider) (Credentials, error) {
 		return noCred("provider auth = \"oauth\" but no `miucr login` session — run `miucr login --provider openai`")
 	case "api_key", "apikey", "key":
 		if k := firstNonEmpty(profileSecret(prof), os.Getenv("OPENAI_API_KEY")); k != "" {
-			return apiKeyCreds(k), nil
+			return apiKeyCreds(k)
 		}
 		return noCred("provider auth = \"api_key\" but no key — set OPENAI_API_KEY, a profile auth_env, or pass --api-key")
 	case "":
@@ -239,7 +252,7 @@ func resolveOpenAI(in ResolveInput, prof config.Provider) (Credentials, error) {
 			Code:    "config.invalid",
 			Message: "unknown provider auth " + strconv.Quote(authMode) + " — use \"oauth\" or \"api_key\" (or omit for auto)",
 			Hint:    "set auth = \"oauth\" or auth = \"api_key\" in " + config.FilePathOrEmpty(),
-			Exit:    1,
+			Exit:    2,
 		}
 	}
 
@@ -249,14 +262,14 @@ func resolveOpenAI(in ResolveInput, prof config.Provider) (Credentials, error) {
 	//   2. a cached `miucr login` (OAuth) -> the codex/ChatGPT-plan backend
 	//   3. zero-config fallback: an ambient OPENAI_API_KEY env var
 	if k := profileSecret(prof); k != "" {
-		return apiKeyCreds(k), nil
+		return apiKeyCreds(k)
 	}
 	creds, ok, oauthErr := tryOAuth()
 	if ok {
 		return creds, nil
 	}
 	if k := strings.TrimSpace(os.Getenv("OPENAI_API_KEY")); k != "" {
-		return apiKeyCreds(k), nil // fall back to the env key even if a stale OAuth session errored
+		return apiKeyCreds(k) // fall back to the env key even if a stale OAuth session errored
 	}
 	if oauthErr != nil {
 		return Credentials{}, oauthErr

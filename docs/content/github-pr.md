@@ -75,6 +75,13 @@ It must be a personal access token with `repo` scope. The token is held in
 memory only — it is never written to config, never logged, and never appears in
 the JSON envelope.
 
+A PR-fetch failure is classified by cause so the next step is obvious: a `401`/
+`403` → `github.auth` (check `GITHUB_TOKEN` / its repo scope), a `404` →
+`github.pr_not_found` (check the PR exists and the token has access), and a
+`5xx`/network error → `github.unavailable` with `retryable:true`. Any other
+failure stays `github.pr_fetch_failed`. The redacted message never echoes a
+token.
+
 ## What gets posted
 
 With `--post`, inline comments are filtered to lines **inside the PR's diff

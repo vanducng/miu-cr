@@ -3,12 +3,15 @@ package agent
 import (
 	stdctx "context"
 	"encoding/json"
+	"errors"
 	"io"
 	"net/http"
 	"net/http/httptest"
 	"strings"
 	"testing"
+	"time"
 
+	"github.com/vanducng/miu-cr/internal/cli/clierr"
 	"github.com/vanducng/miu-cr/internal/config"
 )
 
@@ -210,5 +213,207 @@ func TestCodexAgentBackendErrorRedactsToken(t *testing.T) {
 	}
 	if strings.Contains(err.Error(), "access-tok-1") {
 		t.Errorf("error leaked the token: %v", err)
+	}
+}
+
+func TestCodexAgentClassifiesStatus(t *testing.T) {
+	tests := []struct {
+		name      string
+		status    int
+		wantCode  string
+		wantRetry bool
+	}{
+		{"401 expired", http.StatusUnauthorized, "agent.auth_expired", false},
+		{"403 forbidden", http.StatusForbidden, "agent.auth_expired", false},
+		{"429 rate limited", http.StatusTooManyRequests, "provider.rate_limited", true},
+		{"500 unavailable", http.StatusInternalServerError, "agent.unavailable", true},
+		{"503 unavailable", http.StatusServiceUnavailable, "agent.unavailable", true},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				w.WriteHeader(tt.status)
+				// embed the bearer token in the body to prove redaction
+				io.WriteString(w, `{"error":"denied for Bearer access-tok-1"}`)
+			}))
+			defer srv.Close()
+
+			// No refresh callback ⇒ a 401 returns directly (does not loop).
+			a := newTestCodexAgent(t, srv)
+			a.refresh = nil
+			_, err := a.Review(stdctx.Background(), Context{Text: "diff"})
+			ce, ok := err.(*clierr.CLIError)
+			if !ok {
+				t.Fatalf("want *clierr.CLIError, got %T: %v", err, err)
+			}
+			if ce.Code != tt.wantCode {
+				t.Fatalf("code = %q, want %q", ce.Code, tt.wantCode)
+			}
+			if ce.Retry != tt.wantRetry {
+				t.Fatalf("retry = %v, want %v", ce.Retry, tt.wantRetry)
+			}
+			if ce.Hint == "" && (tt.wantCode == "agent.auth_expired") {
+				t.Fatalf("expected a login hint for %s", tt.wantCode)
+			}
+			if strings.Contains(ce.Message, "access-tok-1") {
+				t.Fatalf("token leaked into classified message: %q", ce.Message)
+			}
+		})
+	}
+}
+
+// shrinkCodexBackoff makes the retry sleeps near-zero so the loop tests run
+// fast and deterministically; restored on cleanup.
+func shrinkCodexBackoff(t *testing.T) {
+	t.Helper()
+	base, maxb, attempts, maxRA := codexBaseBackoff, codexMaxBackoff, codexMaxAttempts, codexMaxRetryAfter
+	codexBaseBackoff = time.Millisecond
+	codexMaxBackoff = 2 * time.Millisecond
+	codexMaxRetryAfter = 2 * time.Millisecond
+	codexMaxAttempts = 3
+	t.Cleanup(func() {
+		codexBaseBackoff, codexMaxBackoff, codexMaxAttempts, codexMaxRetryAfter = base, maxb, attempts, maxRA
+	})
+}
+
+func TestCodexAgentRetriesThenSucceeds(t *testing.T) {
+	shrinkCodexBackoff(t)
+	var calls int
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if calls == 0 {
+			calls++
+			w.WriteHeader(http.StatusTooManyRequests)
+			io.WriteString(w, `{"error":"slow down"}`)
+			return
+		}
+		calls++
+		io.WriteString(w, codexMessageResp(codexFindingsJSON))
+	}))
+	defer srv.Close()
+
+	a := newTestCodexAgent(t, srv)
+	out, err := a.Review(stdctx.Background(), Context{Text: "diff"})
+	if err != nil {
+		t.Fatalf("Review after one 429 retry: %v", err)
+	}
+	if calls != 2 {
+		t.Fatalf("calls = %d, want 2 (one retry)", calls)
+	}
+	if len(out.Findings) != 1 {
+		t.Fatalf("findings = %d, want 1", len(out.Findings))
+	}
+}
+
+func TestCodexAgentPersistent429SurfacesReset(t *testing.T) {
+	shrinkCodexBackoff(t)
+	var calls int
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		calls++
+		w.WriteHeader(http.StatusTooManyRequests)
+		// usage_limit_reached body + a token to prove redaction
+		io.WriteString(w, `{"error":{"type":"usage_limit_reached","resets_in_seconds":7200,"detail":"Bearer access-tok-1"}}`)
+	}))
+	defer srv.Close()
+
+	a := newTestCodexAgent(t, srv)
+	_, err := a.Review(stdctx.Background(), Context{Text: "diff"})
+	ce, ok := err.(*clierr.CLIError)
+	if !ok {
+		t.Fatalf("want *clierr.CLIError, got %T: %v", err, err)
+	}
+	if ce.Code != "provider.rate_limited" || !ce.Retry {
+		t.Fatalf("got %+v, want provider.rate_limited+retry", ce)
+	}
+	if calls != codexMaxAttempts {
+		t.Fatalf("calls = %d, want %d (bounded attempts)", calls, codexMaxAttempts)
+	}
+	if got, _ := ce.Details["resets_in_seconds"].(int); got != 7200 {
+		t.Fatalf("Details[resets_in_seconds] = %v, want 7200", ce.Details["resets_in_seconds"])
+	}
+	if !strings.Contains(ce.Hint, "resets in") {
+		t.Fatalf("Hint missing reset window: %q", ce.Hint)
+	}
+	if strings.Contains(ce.Message, "access-tok-1") || strings.Contains(ce.Hint, "access-tok-1") {
+		t.Fatalf("token leaked: msg=%q hint=%q", ce.Message, ce.Hint)
+	}
+}
+
+func TestCodexAgentRetries5xx(t *testing.T) {
+	shrinkCodexBackoff(t)
+	var calls int
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if calls < 2 {
+			calls++
+			w.WriteHeader(http.StatusServiceUnavailable)
+			return
+		}
+		calls++
+		io.WriteString(w, codexMessageResp(codexFindingsJSON))
+	}))
+	defer srv.Close()
+
+	a := newTestCodexAgent(t, srv)
+	out, err := a.Review(stdctx.Background(), Context{Text: "diff"})
+	if err != nil {
+		t.Fatalf("Review after two 503 retries: %v", err)
+	}
+	if calls != 3 || len(out.Findings) != 1 {
+		t.Fatalf("calls=%d findings=%d, want 3/1", calls, len(out.Findings))
+	}
+}
+
+func TestCodexAgentCancelDuringBackoffReturnsPromptly(t *testing.T) {
+	// Long backoff so the test's own cancel — not a timer — ends the wait.
+	base, attempts := codexBaseBackoff, codexMaxAttempts
+	codexBaseBackoff = 30 * time.Second
+	codexMaxAttempts = 3
+	t.Cleanup(func() { codexBaseBackoff, codexMaxAttempts = base, attempts })
+
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusTooManyRequests)
+	}))
+	defer srv.Close()
+
+	ctx, cancel := stdctx.WithCancel(stdctx.Background())
+	go func() { time.Sleep(20 * time.Millisecond); cancel() }()
+
+	a := newTestCodexAgent(t, srv)
+	done := make(chan error, 1)
+	go func() { _, err := a.Review(ctx, Context{Text: "diff"}); done <- err }()
+	select {
+	case err := <-done:
+		if !errors.Is(err, stdctx.Canceled) {
+			t.Fatalf("err = %v, want context.Canceled (no double-wrap)", err)
+		}
+	case <-time.After(5 * time.Second):
+		t.Fatal("Review did not abort promptly on ctx cancel during backoff")
+	}
+}
+
+func TestCodexAgentRefreshFailedIsAuthExpired(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusUnauthorized)
+	}))
+	defer srv.Close()
+
+	creds := Credentials{
+		Kind: config.KindOpenAI, Backend: "codex",
+		OAuthToken: "stale-tok", OAuthAccountID: "acct", BaseURL: srv.URL,
+		Model: "gpt-test", HTTPClient: srv.Client(),
+		OAuthRefresh: func(stdctx.Context) (string, error) {
+			return "", errors.New("refresh endpoint 400")
+		},
+	}
+	a, ok := newCodexAgentFromNew(t, creds)
+	if !ok {
+		t.Fatal("expected codexAgent")
+	}
+	_, err := a.Review(stdctx.Background(), Context{Text: "diff"})
+	ce, ok := err.(*clierr.CLIError)
+	if !ok {
+		t.Fatalf("want *clierr.CLIError, got %T: %v", err, err)
+	}
+	if ce.Code != "agent.auth_expired" || ce.Hint == "" {
+		t.Fatalf("got %+v, want auth_expired+hint", ce)
 	}
 }

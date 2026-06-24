@@ -149,4 +149,7 @@ func TestEmbeddingDimMismatch(t *testing.T) {
 	if ce.Code != "store.dim_mismatch" {
 		t.Fatalf("code = %q, want store.dim_mismatch", ce.Code)
 	}
+	if ce.Hint == "" {
+		t.Fatal("store.dim_mismatch must carry an actionable hint")
+	}
 }

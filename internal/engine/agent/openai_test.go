@@ -9,9 +9,28 @@ import (
 
 	openai "github.com/openai/openai-go/v3"
 
+	"github.com/vanducng/miu-cr/internal/cli/clierr"
 	"github.com/vanducng/miu-cr/internal/config"
 	"github.com/vanducng/miu-cr/internal/engine"
 )
+
+// A proven 429 from the SDK surfaces the typed rate_limited code (retryable)
+// through Review.
+func TestOpenAIAgentClassifies429(t *testing.T) {
+	req, resp := fakeReqResp(429)
+	a := &openaiAgent{
+		client: &fakeOpenAI{err: &openai.Error{StatusCode: 429, Request: req, Response: resp}},
+		model:  "gpt-test",
+	}
+	_, err := a.Review(stdctx.Background(), Context{Text: "ctx", RepoDir: t.TempDir()})
+	ce, ok := err.(*clierr.CLIError)
+	if !ok {
+		t.Fatalf("want *clierr.CLIError, got %T: %v", err, err)
+	}
+	if ce.Code != "provider.rate_limited" || !ce.Retry {
+		t.Fatalf("got %+v, want rate_limited+retry", ce)
+	}
+}
 
 // fakeOpenAI returns scripted completions and records the params it saw, so the
 // tool loop and parse path run with zero network.
@@ -19,10 +38,14 @@ type fakeOpenAI struct {
 	responses []string // JSON ChatCompletion bodies, served in order
 	calls     int
 	seen      []openai.ChatCompletionNewParams
+	err       error
 }
 
 func (f *fakeOpenAI) create(_ stdctx.Context, params openai.ChatCompletionNewParams) (*openai.ChatCompletion, error) {
 	f.seen = append(f.seen, params)
+	if f.err != nil {
+		return nil, f.err
+	}
 	body := f.responses[f.calls]
 	f.calls++
 	var cc openai.ChatCompletion

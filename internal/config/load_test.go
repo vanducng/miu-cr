@@ -1,9 +1,12 @@
 package config
 
 import (
+	"errors"
 	"os"
 	"path/filepath"
 	"testing"
+
+	"github.com/vanducng/miu-cr/internal/cli/clierr"
 )
 
 func TestDefaults(t *testing.T) {
@@ -140,6 +143,19 @@ func TestLoadMalformedReturnsDefaultsAndError(t *testing.T) {
 	}
 	if cfg.DefaultProvider != "anthropic" {
 		t.Fatalf("malformed file must still yield a usable default baseline, got %+v", cfg)
+	}
+	var ce *clierr.CLIError
+	if !errors.As(err, &ce) {
+		t.Fatalf("malformed config must return a typed CLIError, got %T", err)
+	}
+	if ce.Code != "config.invalid" {
+		t.Fatalf("code: want config.invalid, got %q", ce.Code)
+	}
+	if ce.Exit != 2 {
+		t.Fatalf("exit: want 2, got %d", ce.Exit)
+	}
+	if ce.Hint == "" {
+		t.Fatal("config.invalid must carry an actionable hint")
 	}
 }
 
