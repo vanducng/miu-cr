@@ -102,6 +102,8 @@ human table):
         "file": "internal/auth/session.go",
         "line": 42,
         "end_line": 42,
+        "title": "Auth check missing early return",
+        "rule": "go",
         "severity": "high",
         "category": "correctness",
         "rationale": "ServeHTTP continues after writing the 401, leaking the handler body to an unauthenticated caller.",

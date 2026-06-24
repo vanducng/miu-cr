@@ -37,6 +37,9 @@ type SummaryOptions struct {
 	Walkthrough   string
 	FileSummaries map[string]string
 	Diagram       string
+	// RuleCitations grounds an omitted finding's cited rule stem in the overflow
+	// list (validated/linked in the wire layer; an unmatched stem is dropped).
+	RuleCitations map[string]RuleCitation
 }
 
 // RenderSummaryFull is RenderSummaryWithOverflow plus the LLM-free reviewer-trust
@@ -90,7 +93,7 @@ func RenderSummaryFull(info *PRInfo, findings []engine.Finding, stats map[string
 	}
 
 	if len(omitted) > 0 {
-		renderOverflow(&b, info, omitted, categoryURLs)
+		renderOverflow(&b, info, omitted, categoryURLs, opts.RuleCitations)
 	}
 
 	renderPresentation(&b, info, findings, opts.Diffs, opts.ReviewID, opts.FileSummaries)
@@ -100,7 +103,7 @@ func RenderSummaryFull(info *PRInfo, findings []engine.Finding, stats map[string
 }
 
 // renderOverflow appends a collapsible block listing the omitted inline findings.
-func renderOverflow(b *strings.Builder, info *PRInfo, omitted []engine.Finding, categoryURLs map[string]string) {
+func renderOverflow(b *strings.Builder, info *PRInfo, omitted []engine.Finding, categoryURLs map[string]string, cites map[string]RuleCitation) {
 	fmt.Fprintf(b, "\n<details>\n<summary>Omitted inline findings (%d)</summary>\n\n", len(omitted))
 	for _, f := range omitted {
 		sev := strings.ToUpper(strings.TrimSpace(f.Severity))
@@ -118,7 +121,11 @@ func renderOverflow(b *strings.Builder, info *PRInfo, omitted []engine.Finding, 
 		if c := mdInline(f.Category); c != "" {
 			cat = " (" + categoryMarkdownText(f.Category, c, categoryURLs) + ")"
 		}
-		fmt.Fprintf(b, "- **%s**%s %s — %s\n", mdInline(sev), cat, loc, mdInline(f.Rationale))
+		title := ""
+		if t := mdInline(f.Title); t != "" {
+			title = " **" + t + "**"
+		}
+		fmt.Fprintf(b, "- **%s**%s %s —%s %s%s\n", mdInline(sev), cat, loc, title, mdInline(f.Rationale), ruleCitation(info, f.Rule, cites))
 	}
 	b.WriteString("\n</details>\n")
 }
@@ -145,6 +152,40 @@ func categoryMarkdownText(cat, plainText string, categoryURLs map[string]string)
 		return "[" + mdInline(cat) + "](<" + url + ">)"
 	}
 	return plainText
+}
+
+// RuleCitation is the wire-validated grounding for one rule stem the model cited:
+// whether it matched a loaded rule and, for repo (RepoUntrusted) rules only, the
+// repo-relative path to link. The wire layer NEVER sets RepoRelPath for a user
+// rule (absolute home path → privacy leak) or a built-in (defaults/* → not a repo
+// file); those stay Linkable=false and are cited as text only.
+type RuleCitation struct {
+	RepoRelPath string
+	Linkable    bool
+}
+
+// ruleCitation renders the trailing "(per <stem>)" grounding for a finding. The
+// stem is matched against the wire-validated cites map (built from the LOADED,
+// fork-dropped rule set); a stem absent from the map is DROPPED entirely
+// (anti-hallucination/injection). A matched stem is cited as mdInline-escaped
+// text; a Linkable (repo) stem additionally links to its repo-relative blob URL.
+// Returns "" when there is nothing to cite, so callers append it unconditionally.
+func ruleCitation(info *PRInfo, ruleStem string, cites map[string]RuleCitation) string {
+	stem := strings.TrimSpace(ruleStem)
+	if stem == "" || cites == nil {
+		return ""
+	}
+	cite, ok := cites[stem]
+	if !ok {
+		return ""
+	}
+	label := mdInline(stem)
+	if cite.Linkable {
+		if url := blobURL(info, cite.RepoRelPath, 0, 0); url != "" {
+			return fmt.Sprintf(" (per [%s](<%s>))", label, url)
+		}
+	}
+	return fmt.Sprintf(" (per %s)", label)
 }
 
 // mdInline neutralizes untrusted model text (rationale/category) for a Markdown

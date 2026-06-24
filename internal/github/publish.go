@@ -358,6 +358,10 @@ type PostReviewOptions struct {
 	// (TRUSTED config only — never repo rules). When a finding's category matches,
 	// commentBody renders it as a Markdown link; an empty/nil map = plain category.
 	CategoryURLs map[string]string
+	// RuleCitations maps a wire-validated rule stem to its citation (linkable repo
+	// rule vs cite-only user/built-in). Built from the LOADED, fork-dropped rule set
+	// in the wire layer; a finding citing a stem absent here is not grounded.
+	RuleCitations map[string]RuleCitation
 	// ActionsOut is where the fork-PR 403 fallback writes ::error:: workflow commands.
 	// GitHub Actions parses workflow commands ONLY from the step's stdout, so this must
 	// resolve to the same stream as the miucr.cli/v1 envelope (the command's stdout
@@ -452,7 +456,7 @@ func PostReview(ctx stdctx.Context, client Client, info *PRInfo, findings []engi
 		// degrades to a plain fenced hint (a single-anchored multi-line suggestion
 		// inserts instead of replaces — a broken patch the spec forbids).
 		isRange := f.EndLine > f.Line && rangeInOneHunk(hunkSets, f.File, f.Line, f.EndLine)
-		rendered, native := commentBody(f, newFileContent[f.File], opts, isRange)
+		rendered, native := commentBody(info, f, newFileContent[f.File], opts, isRange)
 		if native {
 			suggestions++
 		}
@@ -671,17 +675,21 @@ func escapeWorkflowProperty(s string) string {
 // span that fell back to a single-line comment never carries a one-click multi-line
 // fence (which GitHub would INSERT, not replace — a broken unverified patch). A
 // single-line finding (EndLine<=Line) ignores isRange.
-func commentBody(f engine.Finding, newFileContent string, opts PostReviewOptions, isRange bool) (string, bool) {
+func commentBody(info *PRInfo, f engine.Finding, newFileContent string, opts PostReviewOptions, isRange bool) (string, bool) {
 	var b strings.Builder
 	sev := strings.ToUpper(f.Severity)
 	if sev == "" {
 		sev = "NOTE"
 	}
+	cite := ruleCitation(info, f.Rule, opts.RuleCitations)
 	cat := f.Category
 	if cat != "" {
-		fmt.Fprintf(&b, "**%s** (%s)\n\n", sev, categoryMarkdown(cat, opts.CategoryURLs))
+		fmt.Fprintf(&b, "**%s** (%s)%s\n\n", sev, categoryMarkdown(cat, opts.CategoryURLs), cite)
 	} else {
-		fmt.Fprintf(&b, "**%s**\n\n", sev)
+		fmt.Fprintf(&b, "**%s**%s\n\n", sev, cite)
+	}
+	if t := mdInline(f.Title); t != "" {
+		fmt.Fprintf(&b, "**%s**\n\n", t)
 	}
 	b.WriteString(f.Rationale)
 

@@ -42,7 +42,7 @@ func TestBlobURLEmptyWhenBaseMissing(t *testing.T) {
 func TestRenderSummaryOverflowListsOmittedWithPermalinks(t *testing.T) {
 	info := &PRInfo{Owner: "o", Repo: "r", Number: 1, HeadSHA: "abc123", HTMLBase: "https://github.com/o/r"}
 	omitted := []engine.Finding{
-		{File: "pkg/a.go", Line: 12, EndLine: 15, Severity: "high", Category: "bug", Rationale: "leak\nhere"},
+		{File: "pkg/a.go", Line: 12, EndLine: 15, Severity: "high", Category: "bug", Title: "Resource leak", Rationale: "leak\nhere"},
 		{File: "pkg/b.go", Line: 3, Severity: "medium", Category: "style", Rationale: "rename"},
 	}
 	out := RenderSummaryWithOverflow(info, nil, nil, 2, omitted, nil)
@@ -57,6 +57,9 @@ func TestRenderSummaryOverflowListsOmittedWithPermalinks(t *testing.T) {
 	}
 	if !strings.Contains(out, "**HIGH** (bug)") || !strings.Contains(out, "leak here") {
 		t.Fatalf("want severity/category + one-line rationale:\n%s", out)
+	}
+	if !strings.Contains(out, "**Resource leak**") {
+		t.Fatalf("want the finding title in the overflow entry:\n%s", out)
 	}
 }
 

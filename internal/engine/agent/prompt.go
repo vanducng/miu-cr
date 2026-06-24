@@ -18,11 +18,13 @@ Rules for findings:
 - "severity" MUST be one of: info, low, medium, high, critical.
 - "category" is a short kebab-case tag, e.g. "bug", "security", "performance", "error-handling", "concurrency", "resource-leak", "maintainability".
 - "suggested_patch" is an optional fix. When the fix is a LOCALIZED edit, make it the EXACT drop-in replacement for "existing_code" — the same span, ready to apply verbatim (no line numbers, no surrounding unchanged lines, no "+"/"-" markers). A clean drop-in lets miucr offer a one-click suggested change. Omit it for non-localized or structural fixes.
+- "title" is optional: a short (a few words) scannable summary of the finding, e.g. "Unchecked nil deref". Omit it if you have nothing concise to add.
+- "rule" is optional: when a finding is motivated by one of the labeled "## Rule: <stem> (<provenance>)" rules in the project rules section above, set "rule" to that rule's bare stem — the token BEFORE the parenthesis, e.g. "go", never "go (repo)". Omit it otherwise; never invent a stem.
 
 You MAY also optionally include, alongside the findings, a short PR-level "walkthrough" (a few plain sentences describing what the change does) and a "file_summaries" object mapping each changed file path (verbatim from its File header) to a one-line note. Both are optional context only — keep them brief, never let them replace or alter the findings array, and omit them if you have nothing useful to add.
 
 Respond with a single JSON object, no prose, no markdown fences:
-{"findings":[{"file":"<path from the File header>","existing_code":"<verbatim quoted code>","severity":"high","category":"bug","rationale":"<why this is a problem>","suggested_patch":"<optional fix>"}],"walkthrough":"<optional short summary>","file_summaries":{"<path>":"<optional one-line note>"}}
+{"findings":[{"file":"<path from the File header>","existing_code":"<verbatim quoted code>","severity":"high","category":"bug","title":"<optional short title>","rule":"<optional motivating rule stem>","rationale":"<why this is a problem>","suggested_patch":"<optional fix>"}],"walkthrough":"<optional short summary>","file_summaries":{"<path>":"<optional one-line note>"}}
 
 If there are no problems, respond with {"findings":[]}.`
 
@@ -80,6 +82,8 @@ type rawFinding struct {
 	ExistingCode   string `json:"existing_code"`
 	Severity       string `json:"severity"`
 	Category       string `json:"category"`
+	Title          string `json:"title"`
+	Rule           string `json:"rule"`
 	Rationale      string `json:"rationale"`
 	SuggestedPatch string `json:"suggested_patch"`
 }
@@ -98,6 +102,8 @@ const (
 	maxFileSummaryLen  = 200
 	maxFileSummaryKeys = 200
 	maxDiagramLen      = 2000
+	maxTitleLen        = 120
+	maxRuleLen         = 80
 )
 
 // capRunes truncates s to at most n runes (rune-safe so multi-byte text is not
