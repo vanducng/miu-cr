@@ -26,8 +26,8 @@ func TestRuleCitationsLinksRepoOnly(t *testing.T) {
 	if !ok || !go_.Linkable {
 		t.Fatalf("repo rule must be linkable: %+v", go_)
 	}
-	if go_.RepoRelPath != "go.md" {
-		t.Fatalf("repo rule path must be repo-relative, got %q", go_.RepoRelPath)
+	if go_.RepoRelPath != ".miu/cr/rules/go.md" {
+		t.Fatalf("repo rule path must be repo-ROOT-relative (blobURL anchors at root), got %q", go_.RepoRelPath)
 	}
 
 	team, ok := cites["team"]
