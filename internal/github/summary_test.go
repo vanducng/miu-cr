@@ -94,7 +94,7 @@ func presentationFixture() (*PRInfo, []diff.Diff, []engine.Finding) {
 
 func TestRenderSummaryFullChangesTable(t *testing.T) {
 	info, diffs, findings := presentationFixture()
-	out := RenderSummaryFull(info, findings, nil, 0, nil, nil, diffs, "")
+	out := RenderSummaryFull(info, findings, nil, 0, nil, nil, diffs, "", "", nil, "")
 	if !strings.Contains(out, "<summary>Changed files (2)</summary>") {
 		t.Fatalf("want a changes table for 2 changed files (deleted excluded):\n%s", out)
 	}
@@ -111,7 +111,7 @@ func TestRenderSummaryFullChangesTable(t *testing.T) {
 
 func TestRenderSummaryFullEffortBadge(t *testing.T) {
 	info, diffs, findings := presentationFixture()
-	out := RenderSummaryFull(info, findings, nil, 0, nil, nil, diffs, "")
+	out := RenderSummaryFull(info, findings, nil, 0, nil, nil, diffs, "", "", nil, "")
 	if !strings.Contains(out, "Review effort: **S** · 2 file(s) · +12/-4 · max severity high") {
 		t.Fatalf("want a deterministic effort badge:\n%s", out)
 	}
@@ -150,7 +150,7 @@ func TestMaxSeverityNoneWhenEmpty(t *testing.T) {
 
 func TestRenderSummaryFullHandoff(t *testing.T) {
 	info, diffs, _ := presentationFixture()
-	out := RenderSummaryFull(info, nil, nil, 0, nil, nil, diffs, "rev_abc")
+	out := RenderSummaryFull(info, nil, nil, 0, nil, nil, diffs, "rev_abc", "", nil, "")
 	if !strings.Contains(out, "<summary>Hand off to an agent</summary>") {
 		t.Fatalf("want an agent-handoff block:\n%s", out)
 	}
@@ -171,7 +171,7 @@ func TestRenderSummaryFullHandoff(t *testing.T) {
 
 func TestRenderSummaryFullHandoffSkippedWithoutReviewID(t *testing.T) {
 	info, diffs, _ := presentationFixture()
-	out := RenderSummaryFull(info, nil, nil, 0, nil, nil, diffs, "")
+	out := RenderSummaryFull(info, nil, nil, 0, nil, nil, diffs, "", "", nil, "")
 	if strings.Contains(out, "Hand off to an agent") {
 		t.Fatalf("empty review_id must skip the handoff block:\n%s", out)
 	}
@@ -179,7 +179,7 @@ func TestRenderSummaryFullHandoffSkippedWithoutReviewID(t *testing.T) {
 
 func TestRenderSummaryFullEmptyFindingsStillClean(t *testing.T) {
 	info, diffs, _ := presentationFixture()
-	out := RenderSummaryFull(info, nil, nil, 0, nil, nil, diffs, "rev_x")
+	out := RenderSummaryFull(info, nil, nil, 0, nil, nil, diffs, "rev_x", "", nil, "")
 	if !strings.Contains(out, "No findings.") {
 		t.Fatalf("empty-findings review must still render a clean summary:\n%s", out)
 	}
@@ -192,7 +192,7 @@ func TestRenderSummaryFullDegradesWithoutDiffs(t *testing.T) {
 	// nil diffs + empty reviewID = the legacy RenderSummaryWithOverflow body,
 	// byte-for-byte, so the comment shape stays back-compatible.
 	info := &PRInfo{HeadSHA: "h"}
-	full := RenderSummaryFull(info, nil, nil, 0, nil, nil, nil, "")
+	full := RenderSummaryFull(info, nil, nil, 0, nil, nil, nil, "", "", nil, "")
 	legacy := RenderSummaryWithOverflow(info, nil, nil, 0, nil, nil)
 	if full != legacy {
 		t.Fatalf("nil diffs/empty id must equal the legacy body:\n--full--\n%s\n--legacy--\n%s", full, legacy)
@@ -208,8 +208,133 @@ func TestRenderChangesTableCapsRows(t *testing.T) {
 	for i := range diffs {
 		diffs[i] = diff.Diff{NewPath: "f", Insertions: 1}
 	}
-	out := RenderSummaryFull(info, nil, nil, 0, nil, nil, diffs, "")
+	out := RenderSummaryFull(info, nil, nil, 0, nil, nil, diffs, "", "", nil, "")
 	if !strings.Contains(out, "5 more file(s)") {
 		t.Fatalf("want an overflow note for capped rows:\n%s", out)
+	}
+}
+
+func TestRenderSummaryFullWalkthrough(t *testing.T) {
+	info, diffs, findings := presentationFixture()
+	out := RenderSummaryFull(info, findings, nil, 0, nil, nil, diffs, "rev_x",
+		"This PR refactors the parser and adds a cache.", nil, "")
+	if !strings.Contains(out, "## Walkthrough") {
+		t.Fatalf("want a leading walkthrough section:\n%s", out)
+	}
+	if !strings.Contains(out, "This PR refactors the parser and adds a cache.") {
+		t.Fatalf("want the walkthrough text:\n%s", out)
+	}
+	// Walkthrough leads the body, before the changes table.
+	if strings.Index(out, "## Walkthrough") > strings.Index(out, "Changed files") {
+		t.Fatalf("walkthrough must lead the changes table:\n%s", out)
+	}
+}
+
+func TestRenderSummaryFullWalkthroughOmittedWhenEmpty(t *testing.T) {
+	info, diffs, findings := presentationFixture()
+	withWT := RenderSummaryFull(info, findings, nil, 0, nil, nil, diffs, "rev_x", "", nil, "")
+	if strings.Contains(withWT, "## Walkthrough") {
+		t.Fatalf("empty walkthrough must omit the section:\n%s", withWT)
+	}
+	// Whitespace-only walkthrough also collapses to empty (no section).
+	if strings.Contains(RenderSummaryFull(info, findings, nil, 0, nil, nil, diffs, "rev_x", "   \n  ", nil, ""), "## Walkthrough") {
+		t.Fatalf("whitespace-only walkthrough must omit the section")
+	}
+}
+
+func TestRenderSummaryFullPerFileDigest(t *testing.T) {
+	info, diffs, findings := presentationFixture()
+	summaries := map[string]string{"pkg/a.go": "adds a leak guard"}
+	out := RenderSummaryFull(info, findings, nil, 0, nil, nil, diffs, "", "", summaries, "")
+	if !strings.Contains(out, "| File | Δ | Findings | Summary |") {
+		t.Fatalf("want a Summary column header when any file has a digest:\n%s", out)
+	}
+	if !strings.Contains(out, "adds a leak guard") {
+		t.Fatalf("want the per-file digest in the row:\n%s", out)
+	}
+	// A file without a digest renders an em-dash in the Summary cell.
+	if !strings.Contains(out, "| +2/-0 | — | — |") {
+		t.Fatalf("want an em-dash digest for a file with no summary:\n%s", out)
+	}
+}
+
+func TestRenderSummaryFullNoSummaryColumnWhenAbsent(t *testing.T) {
+	info, diffs, findings := presentationFixture()
+	// No file_summaries → the table keeps the legacy 3-column layout byte-for-byte.
+	out := RenderSummaryFull(info, findings, nil, 0, nil, nil, diffs, "", "", nil, "")
+	if strings.Contains(out, "Summary |") {
+		t.Fatalf("no digests must keep the 3-column table:\n%s", out)
+	}
+	if !strings.Contains(out, "| File | Δ | Findings |") {
+		t.Fatalf("want the legacy 3-column header:\n%s", out)
+	}
+	// A summary map with only an entry for a non-changed file adds no column.
+	out2 := RenderSummaryFull(info, findings, nil, 0, nil, nil, diffs, "", "", map[string]string{"other.go": "x"}, "")
+	if strings.Contains(out2, "Summary |") {
+		t.Fatalf("a digest only for an unchanged file must add no column:\n%s", out2)
+	}
+}
+
+func TestRenderSummaryFullEscapesUntrustedText(t *testing.T) {
+	info, diffs, findings := presentationFixture()
+	breakout := "</details>**bad**|col`x`[y](z)<script>"
+	out := RenderSummaryFull(info, findings, nil, 0, nil, nil, diffs, "rev_x",
+		breakout, map[string]string{"pkg/a.go": breakout}, "")
+	if strings.Contains(out, "<script>") {
+		t.Fatalf("untrusted text must be HTML-escaped, found raw <script>:\n%s", out)
+	}
+	if strings.Contains(out, "</details>**bad**") {
+		t.Fatalf("untrusted text must not break out of the block:\n%s", out)
+	}
+	if !strings.Contains(out, "&lt;script&gt;") {
+		t.Fatalf("want HTML-escaped angle brackets:\n%s", out)
+	}
+}
+
+func TestRenderSummaryFullDegradesByteForByteWithoutNewFields(t *testing.T) {
+	info, diffs, findings := presentationFixture()
+	withFields := RenderSummaryFull(info, findings, nil, 0, nil, nil, diffs, "rev_x", "", nil, "")
+	legacy := RenderSummaryFull(info, findings, nil, 0, nil, nil, diffs, "rev_x", "", map[string]string{}, "")
+	if withFields != legacy {
+		t.Fatalf("empty walkthrough + empty summaries must render byte-for-byte:\n--a--\n%s\n--b--\n%s", withFields, legacy)
+	}
+}
+
+func TestRenderSummaryFullDiagramRendersFencedBlock(t *testing.T) {
+	info, diffs, findings := presentationFixture()
+	out := RenderSummaryFull(info, findings, nil, 0, nil, nil, diffs, "rev_x", "", nil, "flowchart TD\n  A-->B")
+	if !strings.Contains(out, "```mermaid\nflowchart TD\n  A-->B\n```") {
+		t.Fatalf("want a fenced mermaid block:\n%s", out)
+	}
+}
+
+func TestRenderSummaryFullDiagramNonMermaidPlainNote(t *testing.T) {
+	info, diffs, findings := presentationFixture()
+	out := RenderSummaryFull(info, findings, nil, 0, nil, nil, diffs, "rev_x", "", nil, "not a real diagram at all")
+	if strings.Contains(out, "```mermaid") {
+		t.Fatalf("a non-mermaid diagram must NOT render a fenced block:\n%s", out)
+	}
+	if !strings.Contains(out, "Diagram omitted") {
+		t.Fatalf("a non-mermaid diagram must degrade to a plain note:\n%s", out)
+	}
+}
+
+func TestRenderSummaryFullDiagramEmptyOmitsSection(t *testing.T) {
+	info, diffs, findings := presentationFixture()
+	out := RenderSummaryFull(info, findings, nil, 0, nil, nil, diffs, "rev_x", "", nil, "   \n  ")
+	if strings.Contains(out, "```mermaid") || strings.Contains(out, "Diagram omitted") {
+		t.Fatalf("an empty diagram must render nothing:\n%s", out)
+	}
+}
+
+func TestRenderSummaryFullDiagramFenceInjectionFallsBack(t *testing.T) {
+	info, diffs, findings := presentationFixture()
+	// A mermaid-looking payload that smuggles a closing fence must not emit a block.
+	out := RenderSummaryFull(info, findings, nil, 0, nil, nil, diffs, "rev_x", "", nil, "flowchart TD\n```\n## injected")
+	if strings.Contains(out, "## injected") && !strings.Contains(out, "Diagram omitted") {
+		t.Fatalf("a fence-injecting diagram must degrade, not break the comment:\n%s", out)
+	}
+	if strings.Contains(out, "```mermaid") {
+		t.Fatalf("a fence-injecting diagram must not open a mermaid block:\n%s", out)
 	}
 }

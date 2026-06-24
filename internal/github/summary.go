@@ -23,17 +23,22 @@ func RenderSummary(info *PRInfo, findings []engine.Finding, stats map[string]any
 // lists each capped/omitted inline finding (severity, category, file:line, rationale,
 // blob permalink) so nothing is silently dropped.
 func RenderSummaryWithOverflow(info *PRInfo, findings []engine.Finding, stats map[string]any, omittedInline int, omitted []engine.Finding, categoryURLs map[string]string) string {
-	return RenderSummaryFull(info, findings, stats, omittedInline, omitted, categoryURLs, nil, "")
+	return RenderSummaryFull(info, findings, stats, omittedInline, omitted, categoryURLs, nil, "", "", nil, "")
 }
 
 // RenderSummaryFull is RenderSummaryWithOverflow plus the LLM-free reviewer-trust
-// blocks (effort badge, per-file changes table, agent-handoff) derived from the
-// diff list + the review_id. All three blocks are additive markdown and degrade
-// cleanly (nil diffs skip table/badge, empty reviewID skips handoff), so the
-// summary stays idempotent + back-compatible; no extra model call is made.
-func RenderSummaryFull(info *PRInfo, findings []engine.Finding, stats map[string]any, omittedInline int, omitted []engine.Finding, categoryURLs map[string]string, diffs []diff.Diff, reviewID string) string {
+// blocks (walkthrough, effort badge, per-file changes table, agent-handoff)
+// derived from the same review pass (walkthrough/fileSummaries) + local data
+// (diffs, review_id). Every block is additive markdown and degrades cleanly
+// (empty walkthrough/diffs/reviewID skip their block), so the summary stays
+// idempotent + back-compatible; no extra model call is made. Untrusted model
+// text (walkthrough/fileSummaries) is escaped via mdInline at render.
+func RenderSummaryFull(info *PRInfo, findings []engine.Finding, stats map[string]any, omittedInline int, omitted []engine.Finding, categoryURLs map[string]string, diffs []diff.Diff, reviewID, walkthrough string, fileSummaries map[string]string, diagram string) string {
 	var b strings.Builder
 	b.WriteString("## miu-cr review\n\n")
+
+	renderWalkthrough(&b, walkthrough)
+	renderDiagram(&b, diagram)
 
 	counts := map[string]int{}
 	for _, f := range findings {
@@ -75,7 +80,7 @@ func RenderSummaryFull(info *PRInfo, findings []engine.Finding, stats map[string
 		renderOverflow(&b, info, omitted, categoryURLs)
 	}
 
-	renderPresentation(&b, info, findings, diffs, reviewID)
+	renderPresentation(&b, info, findings, diffs, reviewID, fileSummaries)
 
 	b.WriteString("\n<sub>Posted by miu-cr. Re-runs edit this summary and skip already-posted inline comments.</sub>")
 	return b.String()
