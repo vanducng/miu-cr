@@ -55,6 +55,13 @@ comment with a new marker); subsequent re-runs dedupe normally. On a
 first M5 review **manually** (or off-hours) to absorb the one-time re-post before
 the next scheduled run.
 
+## [0.22.1](https://github.com/vanducng/miu-cr/compare/v0.22.0...v0.22.1) (2026-06-24)
+
+
+### Bug Fixes
+
+* **pr-review:** rename the summary heading to Code Review ([005978a](https://github.com/vanducng/miu-cr/commit/005978aa9e6d79c8bb42fabbb85ae7da201366cd))
+
 ## [0.22.0](https://github.com/vanducng/miu-cr/compare/v0.21.0...v0.22.0) (2026-06-24)
 
 
