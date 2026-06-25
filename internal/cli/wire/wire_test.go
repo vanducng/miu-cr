@@ -7,6 +7,7 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
 	gh "github.com/google/go-github/v84/github"
 
@@ -213,9 +214,9 @@ func TestPublishReviewWireFlow(t *testing.T) {
 	if le, ri := indexOf(fake.order, "list_review"), indexOf(fake.order, "create_review"); le < 0 || ri < 0 || le > ri {
 		t.Fatalf("ExistingFingerprints (list_review) must run before the review; order=%v", fake.order)
 	}
-	// Inline review must be posted BEFORE the summary upsert.
-	if cr, ci := indexOf(fake.order, "create_review"), indexOf(fake.order, "create_issue"); cr < 0 || ci < 0 || cr > ci {
-		t.Fatalf("inline review (create_review) must precede the summary upsert (create_issue); order=%v", fake.order)
+	// Summary upsert must be posted BEFORE the inline review (it anchors above it).
+	if ci, cr := indexOf(fake.order, "create_issue"), indexOf(fake.order, "create_review"); cr < 0 || ci < 0 || ci > cr {
+		t.Fatalf("summary upsert (create_issue) must precede the inline review (create_review); order=%v", fake.order)
 	}
 
 	// Re-run at the same SHA: 0 new inline (fingerprint dedupe), the summary comment
@@ -542,5 +543,31 @@ func TestPatchRepairedCount(t *testing.T) {
 				t.Fatalf("patchRepairedCount=%d want %d", got, tc.want)
 			}
 		})
+	}
+}
+
+func TestRetryTransient(t *testing.T) {
+	defer func(b time.Duration) { retryBackoffBase = b }(retryBackoffBase)
+	retryBackoffBase = time.Millisecond // keep the test off real wall-clock backoff
+	// Retryable error: retried until it succeeds, within the attempt budget.
+	calls := 0
+	err := retryTransient(stdctx.Background(), 3, func() error {
+		calls++
+		if calls < 2 {
+			return &cli.CLIError{Code: "github.unavailable", Retry: true}
+		}
+		return nil
+	})
+	if err != nil || calls != 2 {
+		t.Fatalf("retryable error must retry to success: err=%v calls=%d", err, calls)
+	}
+	// Non-retryable error: returned immediately, no retry.
+	calls = 0
+	err = retryTransient(stdctx.Background(), 3, func() error {
+		calls++
+		return &cli.CLIError{Code: "config.invalid", Retry: false}
+	})
+	if err == nil || calls != 1 {
+		t.Fatalf("non-retryable error must not retry: err=%v calls=%d", err, calls)
 	}
 }
