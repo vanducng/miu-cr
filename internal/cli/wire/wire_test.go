@@ -200,7 +200,7 @@ func TestPublishReviewWireFlow(t *testing.T) {
 	if b := fake.lastReviewed.GetBody(); strings.TrimSpace(b) != "" {
 		t.Fatalf("review body must be empty (summary lives in the issue comment), got:\n%s", b)
 	}
-	// The summary issue comment carries the marker + this run's Reviews (1) line.
+	// The summary issue comment carries the marker + this run's Review attempts: 1 footer.
 	if len(fake.issueComments) != 1 {
 		t.Fatalf("want one summary issue comment, have %d", len(fake.issueComments))
 	}
@@ -208,8 +208,8 @@ func TestPublishReviewWireFlow(t *testing.T) {
 	if !strings.Contains(summary, mgithub.ReviewMarker) {
 		t.Fatalf("summary comment must carry the marker:\n%s", summary)
 	}
-	if !strings.Contains(summary, "Reviews (1)") {
-		t.Fatalf("first-run summary must show Reviews (1):\n%s", summary)
+	if !strings.Contains(summary, "Review attempts: 1") {
+		t.Fatalf("first-run summary must show Review attempts: 1:\n%s", summary)
 	}
 	if le, ri := indexOf(fake.order, "list_review"), indexOf(fake.order, "create_review"); le < 0 || ri < 0 || le > ri {
 		t.Fatalf("ExistingFingerprints (list_review) must run before the review; order=%v", fake.order)
@@ -220,7 +220,7 @@ func TestPublishReviewWireFlow(t *testing.T) {
 	}
 
 	// Re-run at the same SHA: 0 new inline (fingerprint dedupe), the summary comment
-	// is EDITED in place (not stacked), and the count advances to Reviews (2).
+	// is EDITED in place (not stacked), and the count advances to Review attempts: 2.
 	fake.order = nil
 	info.ReviewCount = 2 // FetchPR would read the prior token (1) and +1
 	pr2 := &cli.PRResult{SummaryAction: "none"}
@@ -242,8 +242,8 @@ func TestPublishReviewWireFlow(t *testing.T) {
 	if len(fake.issueComments) != 1 {
 		t.Fatalf("re-run must not create a second summary comment, have %d", len(fake.issueComments))
 	}
-	if got := fake.issueComments[0].GetBody(); !strings.Contains(got, "Reviews (2)") {
-		t.Fatalf("re-run summary must advance to Reviews (2):\n%s", got)
+	if got := fake.issueComments[0].GetBody(); !strings.Contains(got, "Review attempts: 2") {
+		t.Fatalf("re-run summary must advance to Review attempts: 2:\n%s", got)
 	}
 }
 

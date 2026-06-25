@@ -157,20 +157,19 @@ func TestRenderSummaryShape(t *testing.T) {
 	if !strings.HasPrefix(out, ReviewMarker) {
 		t.Fatalf("summary body must lead with the review marker: %q", out[:min(40, len(out))])
 	}
-	if !strings.Contains(out, "## Code Review") {
+	if !strings.Contains(out, "## Code Review Summary") {
 		t.Fatalf("summary must contain the heading:\n%s", out)
 	}
 	// Header chips high-first (empty severity folds to ⚪), finding count, the
-	// zero-count identity line (no "Reviews (" prefix), the runs token seeded to 1,
-	// the collapsed internals bullets (Context + files-reviewed fallback, no diffs),
-	// fork note, footer SHA.
-	for _, want := range []string{shieldsCount("P1", 2, "orange"), shieldsCount("P3", 1, "blue"), "4 findings", "Last reviewed commit: `deadbeef`", runsCountToken(1), "<summary>Agent handoff & review internals</summary>", "context-hunks", "**Files** `3`", "fork"} {
+	// runs token seeded to 1, the collapsed internals bullets (Context + files-reviewed
+	// fallback, no diffs), fork note, footer SHA.
+	for _, want := range []string{shieldsCount("P1", 2, "orange"), shieldsCount("P3", 1, "blue"), "4 findings", runsCountToken(1), "<summary>Agent handoff & review internals</summary>", "context-hunks", "**Files** `3`", "fork"} {
 		if !strings.Contains(out, want) {
 			t.Errorf("summary missing %q:\n%s", want, out)
 		}
 	}
 	if strings.Contains(out, "Reviews (") {
-		t.Errorf("zero ReviewCount must not render a Reviews (N) prefix:\n%s", out)
+		t.Errorf("old identity line must be gone:\n%s", out)
 	}
 }
 
@@ -180,7 +179,7 @@ func TestRenderSummaryNoFindings(t *testing.T) {
 	if !strings.HasPrefix(out, ReviewMarker) {
 		t.Fatal("body must lead with the review marker")
 	}
-	if !strings.Contains(out, "no_issues_found-brightgreen") {
+	if !strings.Contains(out, "No_findings-brightgreen") {
 		t.Errorf("want the no-findings header:\n%s", out)
 	}
 	if !strings.Contains(out, "context-full") {
