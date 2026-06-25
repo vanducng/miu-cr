@@ -1,6 +1,6 @@
 ---
 title: Use cases & recipes
-description: Command-first local-review recipes: pre-commit gates, pre-PR branch checks, agent fix-loops, SARIF in your editor, and Makefile quality gates.
+description: "Command-first local-review recipes: pre-commit gates, pre-PR branch checks, agent fix-loops, SARIF in your editor, and Makefile quality gates."
 ---
 
 Concrete, copy-paste workflows for reviewing your own changes **before** they
