@@ -30,10 +30,29 @@ jobs:
           app-id: ${{ secrets.GH_APP_ID }}
           private-key: ${{ secrets.GH_APP_MUNMIU_PRIVATE_KEY }}
       - uses: googleapis/release-please-action@v4
+        id: release
         with:
           token: ${{ steps.app-token.outputs.token }}
           config-file: release-please-config.json
           manifest-file: .release-please-manifest.json
+
+      # Auto-merge the version-bump PR once its checks pass, so a release ships
+      # without a manual merge. Uses the app token (not GITHUB_TOKEN) so the merge
+      # commit re-triggers this workflow's goreleaser job on the new tag.
+      - name: Enable auto-merge on the release PR
+        if: ${{ steps.release.outputs.pr }}
+        env:
+          GH_TOKEN: ${{ steps.app-token.outputs.token }}
+          # Pass step/context values via env (never inline ${{ }} in run:) to avoid
+          # shell injection through the release-please output.
+          RELEASE_PR: ${{ steps.release.outputs.pr }}
+          REPO: ${{ github.repository }}
+        run: |
+          set -euo pipefail
+          pr_num="$(printf '%s' "$RELEASE_PR" | jq -r '.number')"
+          [ -n "$pr_num" ] && [ "$pr_num" != "null" ] || { echo "no release PR number"; exit 0; }
+          gh pr merge "$pr_num" --squash --auto -R "$REPO" || \
+            echo "::warning::could not enable auto-merge on PR #$pr_num (may already be mergeable; will need a manual merge)"
 
   # Builds + publishes binaries/checksums on any v* tag. Homebrew tap publish is
   # skipped automatically when HOMEBREW_TAP_GITHUB_TOKEN is not configured, so the

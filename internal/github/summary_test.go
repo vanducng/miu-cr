@@ -115,9 +115,9 @@ func TestRenderSummaryFullChangesTable(t *testing.T) {
 func TestRenderSummaryFullMetaQuote(t *testing.T) {
 	info, diffs, findings := presentationFixture()
 	out := RenderSummaryFull(info, findings, nil, 0, nil, nil, SummaryOptions{Diffs: diffs})
-	// The metadata segments follow the severity count-badge lead on the quote line.
-	if !strings.Contains(out, "2 files · +12/−4 · effort S · context full") {
-		t.Fatalf("want the compact metadata segments on the quote line:\n%s", out)
+	// The metadata is its own visible (non-quoted) line with a bold file count.
+	if !strings.Contains(out, "**2 files** · +12/−4 · effort S · context full") {
+		t.Fatalf("want the bold metadata line:\n%s", out)
 	}
 }
 
