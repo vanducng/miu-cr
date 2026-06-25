@@ -52,7 +52,7 @@ func SetHistoryStoreFactory(f func(ctx stdctx.Context) (store.Store, func(), err
 	historyStoreFactory = f
 }
 
-var version = "v0.28.1" // x-release-please-version
+var version = "v0.29.0" // x-release-please-version
 
 // Execute runs the miucr root command with args, returning a CLIError whose Exit
 // code the caller (cmd/miucr) maps to the process status.

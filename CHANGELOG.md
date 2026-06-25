@@ -55,6 +55,13 @@ comment with a new marker); subsequent re-runs dedupe normally. On a
 first M5 review **manually** (or off-hours) to absorb the one-time re-post before
 the next scheduled run.
 
+## [0.29.0](https://github.com/vanducng/miu-cr/compare/v0.28.1...v0.29.0) (2026-06-25)
+
+
+### Features
+
+* **review:** shields.io badges + a smaller Code Review header ([106a7ea](https://github.com/vanducng/miu-cr/commit/106a7ea7086528fff8d926f8cb636b45bca87919))
+
 ## [0.28.1](https://github.com/vanducng/miu-cr/compare/v0.28.0...v0.28.1) (2026-06-25)
 
 
