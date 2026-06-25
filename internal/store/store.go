@@ -5,10 +5,16 @@ package store
 
 import (
 	"context"
+	"errors"
 	"time"
 
 	"github.com/vanducng/miu-cr/internal/engine"
 )
+
+// ErrReviewNotFound is returned (wrapped) by GetReview when no review has the
+// given id — distinct from a transient store failure, so a caller can tell
+// "unknown id" from "store unavailable".
+var ErrReviewNotFound = errors.New("review not found")
 
 // ReviewRecord is one persisted review. Findings, Stats, and Transcript are
 // stored as JSON. No credential field exists or is ever written. Status is

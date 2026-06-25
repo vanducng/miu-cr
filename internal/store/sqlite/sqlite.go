@@ -256,7 +256,7 @@ func (s *Store) GetReview(ctx context.Context, id string) (store.ReviewRecord, e
 	err := row.Scan(&rec.ID, &rec.RepoDir, &rec.Mode, &rec.HeadSHA, &rec.Status, &createdAt, &findingsJSON, &statsJSON,
 		&rec.Owner, &rec.Repo, &rec.Number, &rec.Provider, &rec.Model, &transcriptJSON, &rec.RawPrompt, &rec.RawResponse, &rec.TraceJSON)
 	if errors.Is(err, sql.ErrNoRows) {
-		return store.ReviewRecord{}, fmt.Errorf("review %q not found", id)
+		return store.ReviewRecord{}, fmt.Errorf("review %q: %w", id, store.ErrReviewNotFound)
 	}
 	if err != nil {
 		return store.ReviewRecord{}, err

@@ -109,6 +109,23 @@ func TestTraceShowOrderedSteps(t *testing.T) {
 	}
 }
 
+// Proves the pretty renderer's []engine.TurnRecord case is REACHABLE — the
+// historical tool_calls step renders its turns (not just the JSON path).
+func TestTraceShowPrettyRendersToolCalls(t *testing.T) {
+	tr := engine.ReviewTrace{
+		SystemPrompt: "sys",
+		Turns:        []engine.TurnRecord{{Turn: 1, Tool: "grep", Args: "needleArg"}},
+	}
+	st, id := seededTraceStore(t, sampleTraceJSON(t, tr))
+	out, err := runTrace(t, st, true, id) // pretty
+	if err != nil {
+		t.Fatalf("trace -o pretty: %v", err)
+	}
+	if !strings.Contains(out, "grep") || !strings.Contains(out, "needleArg") {
+		t.Fatalf("tool_calls turn not rendered in pretty trace (TurnRecord case unreachable?):\n%s", out)
+	}
+}
+
 func TestTraceShowRedactedTokenNeverAppears(t *testing.T) {
 	// A trace whose free-text already passed redactTrace at persist; assert the
 	// rendered view carries no secret-shaped token even if one slipped in.

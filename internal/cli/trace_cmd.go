@@ -2,6 +2,7 @@ package cli
 
 import (
 	"encoding/json"
+	"errors"
 	"io"
 	"strings"
 	"sync"
@@ -10,6 +11,7 @@ import (
 
 	"github.com/vanducng/miu-cr/internal/config"
 	"github.com/vanducng/miu-cr/internal/engine"
+	"github.com/vanducng/miu-cr/internal/store"
 )
 
 // newTraceSink returns a trace Sink that writes each captured step to w as one
@@ -54,7 +56,10 @@ func traceCommand(_ *options) *cobra.Command {
 			defer closeStore()
 			rec, err := st.GetReview(cmd.Context(), id)
 			if err != nil {
-				return &CLIError{Code: "trace.not_found", Message: err.Error(), Hint: "run `miucr history` to list ids", Exit: 2, Details: map[string]any{"id": id}}
+				if errors.Is(err, store.ErrReviewNotFound) {
+					return &CLIError{Code: "trace.not_found", Message: err.Error(), Hint: "run `miucr history` to list ids", Exit: 2, Details: map[string]any{"id": id}}
+				}
+				return &CLIError{Code: "store.unavailable", Message: config.RedactString(err.Error()), Hint: "the review store could not be read — check the DB/config", Exit: 1, Details: map[string]any{"id": id}}
 			}
 			tr, perr := parseTrace(rec.TraceJSON)
 			if perr != nil {

@@ -91,6 +91,7 @@ type ReviewTrace struct {
 	FinalResponse string                         `json:"final_response"`
 	Turns         []TurnRecord                   `json:"turns"`
 	Sink          func(step string, payload any) `json:"-"`
+	modelEmitted  bool                           // the live "model" step fires once, when model first becomes non-empty
 }
 
 // emit forwards a recorded step to the live Sink when set; nil-safe.
@@ -150,12 +151,22 @@ func (t *ReviewTrace) SetInjectedRules(refs []RuleRef) {
 
 // SetModel records the resolved model + provider; nil-safe. Called per backend.
 func (t *ReviewTrace) SetModel(provider, model string) {
-	if t == nil || t.Model != "" { // first-write-wins; emit the step exactly once
+	if t == nil {
 		return
 	}
-	t.Provider = provider
-	t.Model = model
-	t.emit("model", map[string]string{"provider": provider, "model": model})
+	// First-NON-EMPTY-wins per field: the engine may call this with an empty
+	// req.Provider/Model before the backend supplies the resolved values.
+	if t.Provider == "" {
+		t.Provider = provider
+	}
+	if t.Model == "" {
+		t.Model = model
+	}
+	// Emit the live step exactly once — when the model first becomes known.
+	if !t.modelEmitted && t.Model != "" {
+		t.modelEmitted = true
+		t.emit("model", map[string]string{"provider": t.Provider, "model": t.Model})
+	}
 }
 
 // SetFinalResponse records the raw final response text; nil-safe.
