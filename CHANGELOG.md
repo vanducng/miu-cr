@@ -55,6 +55,13 @@ comment with a new marker); subsequent re-runs dedupe normally. On a
 first M5 review **manually** (or off-hours) to absorb the one-time re-post before
 the next scheduled run.
 
+## [0.33.0](https://github.com/vanducng/miu-cr/compare/v0.32.0...v0.33.0) (2026-06-25)
+
+
+### Features
+
+* **config:** config set + config edit (merge, no overwrite; secrets stay in env) ([7181057](https://github.com/vanducng/miu-cr/commit/71810577bc2fe1989c81a41a2ef62b886ddf8aac))
+
 ## [0.32.0](https://github.com/vanducng/miu-cr/compare/v0.31.0...v0.32.0) (2026-06-25)
 
 
