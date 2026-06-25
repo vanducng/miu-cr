@@ -117,7 +117,7 @@ func TestRenderSummaryFullReviewInternals(t *testing.T) {
 	out := RenderSummaryFull(info, findings, nil, 0, nil, nil, SummaryOptions{Diffs: diffs})
 	// Metadata now lives in a collapsed Review internals details as bullets.
 	for _, want := range []string{
-		"<summary>Review internals</summary>",
+		"<summary>Agent handoff & review internals</summary>",
 		"- Files: **2**",
 		"- Churn: +12/−4",
 		"- Effort: S",
@@ -211,7 +211,7 @@ func TestRenderSummaryFullOrder(t *testing.T) {
 		"> ", // severity blockquote
 		"Confidence:",
 		"this is the walkthrough lead prose",
-		"<summary>Review internals</summary>",
+		"<summary>Agent handoff & review internals</summary>",
 		"<sub>Reviewed commit",
 	})
 }
@@ -291,7 +291,7 @@ func TestEffortSizeBuckets(t *testing.T) {
 func TestRenderSummaryFullHandoff(t *testing.T) {
 	info, diffs, _ := presentationFixture()
 	out := RenderSummaryFull(info, nil, nil, 0, nil, nil, SummaryOptions{Diffs: diffs, ReviewID: "rev_abc"})
-	if !strings.Contains(out, "<summary>Hand off to an agent</summary>") {
+	if !strings.Contains(out, "**Hand off to an agent**") {
 		t.Fatalf("want an agent-handoff block:\n%s", out)
 	}
 	if !strings.Contains(out, "review_id: `rev_abc`") {

@@ -13,14 +13,12 @@ import (
 // enormous comment; overflow is noted on a trailing row, mirroring the inline cap.
 const maxChangesRows = 60
 
-// renderPresentation appends the LLM-free reviewer-trust blocks — effort badge,
-// per-file changes table, agent-handoff — to the summary body. Every block is
-// derived from local data (diff stats + findings), so it costs zero model calls.
-// All three degrade cleanly: nil diffs skip the table/badge, an empty reviewID
-// skips the handoff.
-func renderPresentation(b *strings.Builder, info *PRInfo, findings []engine.Finding, diffs []diff.Diff, reviewID string, fileSummaries map[string]string) {
+// renderPresentation appends the per-file changes table to the summary body. It is
+// derived from local data (diff stats + findings), so it costs zero model calls and
+// degrades cleanly (nil diffs skip the table). The agent handoff moved into the
+// combined renderHandoffAndInternals block.
+func renderPresentation(b *strings.Builder, info *PRInfo, findings []engine.Finding, diffs []diff.Diff, fileSummaries map[string]string) {
 	renderChangesTable(b, info, diffs, findings, fileSummaries)
-	renderHandoff(b, info, reviewID)
 }
 
 // mermaidKeywords are the diagram-type keywords a GitHub-rendered ```mermaid
@@ -231,24 +229,6 @@ func findingCounts(counts map[string]int) string {
 		return "-"
 	}
 	return strings.Join(parts, ", ")
-}
-
-// renderHandoff writes a collapsed agent-handoff block: the review_id + a
-// copy-paste pointer a human can hand to an AI agent. Text only — no secrets.
-func renderHandoff(b *strings.Builder, info *PRInfo, reviewID string) {
-	if strings.TrimSpace(reviewID) == "" {
-		return
-	}
-	b.WriteString("\n<details>\n<summary>Hand off to an agent</summary>\n\n")
-	// Inside a code span markdown chars are inert; only a backtick can break out.
-	fmt.Fprintf(b, "- review_id: `%s`\n", strings.ReplaceAll(reviewID, "`", "'"))
-	if url := prURL(info); url != "" {
-		fmt.Fprintf(b, "- Re-run as JSON: `miucr review --pr %s -o json`\n", url)
-	} else {
-		b.WriteString("- Re-run as JSON: `miucr review --pr <pr-url> -o json`\n")
-	}
-	b.WriteString("- MCP: call `review_run` (or `review_get` with the review_id) from an agent host.\n")
-	b.WriteString("\n</details>\n")
 }
 
 // prURL builds the PR's HTML URL from the base repo URL + number; empty when the
