@@ -111,6 +111,7 @@ func FetchPR(ctx stdctx.Context, client Client, ref PRRef) (*PRInfo, error) {
 // token budget (defaultRulesTokenBudget=4096) so injected untrusted participant
 // text can't starve the diff; over-cap content is truncated with an ellipsis marker.
 const maxConversationBytes = 4096
+const maxConvPages = 10 // bound conversation pagination (~1000 comments) so a huge PR can't fan out unboundedly
 
 const conversationTruncated = "\n…(conversation truncated)"
 
@@ -170,7 +171,7 @@ func capConversation(s string) string {
 func fetchPriorSummaries(ctx stdctx.Context, client Client, info *PRInfo) string {
 	var b strings.Builder
 	opts := &gh.ListOptions{PerPage: 100}
-	for {
+	for page := 0; page < maxConvPages; page++ {
 		reviews, resp, err := client.ListReviews(ctx, info.Owner, info.Repo, info.Number, opts)
 		if err != nil {
 			os.Stderr.WriteString(config.RedactString("miucr: conversation fetch (reviews) skipped: "+err.Error()) + "\n")
@@ -197,7 +198,7 @@ func fetchPriorSummaries(ctx stdctx.Context, client Client, info *PRInfo) string
 func fetchInlineThreads(ctx stdctx.Context, client Client, info *PRInfo) string {
 	var b strings.Builder
 	opts := &gh.PullRequestListCommentsOptions{ListOptions: gh.ListOptions{PerPage: 100}}
-	for {
+	for page := 0; page < maxConvPages; page++ {
 		comments, resp, err := client.ListReviewComments(ctx, info.Owner, info.Repo, info.Number, opts)
 		if err != nil {
 			os.Stderr.WriteString(config.RedactString("miucr: conversation fetch (review comments) skipped: "+err.Error()) + "\n")
@@ -233,7 +234,7 @@ func fetchInlineThreads(ctx stdctx.Context, client Client, info *PRInfo) string 
 func fetchDeveloperReplies(ctx stdctx.Context, client Client, info *PRInfo) string {
 	var b strings.Builder
 	opts := &gh.IssueListCommentsOptions{ListOptions: gh.ListOptions{PerPage: 100}}
-	for {
+	for page := 0; page < maxConvPages; page++ {
 		comments, resp, err := client.ListIssueComments(ctx, info.Owner, info.Repo, info.Number, opts)
 		if err != nil {
 			os.Stderr.WriteString(config.RedactString("miucr: conversation fetch (issue comments) skipped: "+err.Error()) + "\n")

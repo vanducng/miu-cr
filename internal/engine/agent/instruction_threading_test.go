@@ -24,8 +24,10 @@ func TestAllBackendsThreadInstruction(t *testing.T) {
 		if end := strings.IndexByte(call, '\n'); end >= 0 {
 			call = call[:end]
 		}
-		if !strings.Contains(call, "Instruction:") {
-			t.Errorf("%s: BuildUserPrompt call does not pass Instruction:\n%s", f, call)
+		for _, field := range []string{"Instruction:", "Conversation:"} {
+			if !strings.Contains(call, field) {
+				t.Errorf("%s: BuildUserPrompt call does not pass %s\n%s", f, field, call)
+			}
 		}
 	}
 }
