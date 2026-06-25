@@ -5,6 +5,7 @@ import (
 	"errors"
 	"strings"
 	"testing"
+	"unicode/utf8"
 
 	gh "github.com/google/go-github/v84/github"
 )
@@ -115,5 +116,16 @@ func TestFetchConversationListErrorDegradesToEmpty(t *testing.T) {
 	}
 	if out := FetchConversation(stdctx.Background(), c, convInfo()); out != "" {
 		t.Fatalf("list error must degrade to empty, got %q", out)
+	}
+}
+
+func TestCapConversationValidUTF8(t *testing.T) {
+	s := strings.Repeat("世界", 3000) // 3-byte runes, well over the cap
+	out := capConversation(s)
+	if !utf8.ValidString(out) {
+		t.Fatal("capConversation produced invalid UTF-8 (split a multi-byte rune)")
+	}
+	if len(out) > maxConversationBytes {
+		t.Fatalf("capConversation overshot the byte cap: %d > %d", len(out), maxConversationBytes)
 	}
 }

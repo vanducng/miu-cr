@@ -129,15 +129,21 @@ func FetchConversation(ctx stdctx.Context, client Client, info *PRInfo) string {
 		b.WriteString(summaries)
 		b.WriteString("\n")
 	}
-	if threads := fetchInlineThreads(ctx, client, info); threads != "" {
-		b.WriteString("Inline finding threads:\n")
-		b.WriteString(threads)
-		b.WriteString("\n")
+	// Early-exit: once the byte budget is reached the rest is truncated anyway, so skip
+	// the remaining (paginated) fetches.
+	if b.Len() < maxConversationBytes {
+		if threads := fetchInlineThreads(ctx, client, info); threads != "" {
+			b.WriteString("Inline finding threads:\n")
+			b.WriteString(threads)
+			b.WriteString("\n")
+		}
 	}
-	if replies := fetchDeveloperReplies(ctx, client, info); replies != "" {
-		b.WriteString("Developer replies:\n")
-		b.WriteString(replies)
-		b.WriteString("\n")
+	if b.Len() < maxConversationBytes {
+		if replies := fetchDeveloperReplies(ctx, client, info); replies != "" {
+			b.WriteString("Developer replies:\n")
+			b.WriteString(replies)
+			b.WriteString("\n")
+		}
 	}
 
 	out := strings.TrimSpace(b.String())
