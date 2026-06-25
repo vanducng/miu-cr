@@ -119,8 +119,10 @@ runs:
           set -e
           printf '%s\n' "$out"
           [ "$rc" -eq 0 ] && break
-          # Tolerate optional whitespace in the JSON (e.g. "retryable": true).
-          if printf '%s' "$out" | grep -qE '"retryable":[[:space:]]*true'; then
+          # Retry only on a FAILURE envelope marked retryable (require "ok":false so a
+          # findings-mention of the literal "retryable":true can't trigger a false soft-pass);
+          # tolerate optional whitespace.
+          if printf '%s' "$out" | grep -q '"ok":[[:space:]]*false' && printf '%s' "$out" | grep -qE '"retryable":[[:space:]]*true'; then
             if [ "$attempt" -lt "$max" ]; then
               backoff=$(( attempt * 20 + RANDOM % 20 ))  # escalating + jittered: avoid a thundering herd
               echo "::warning::miucr review hit a retryable provider error (attempt $attempt/$max); retrying in ${backoff}s"
