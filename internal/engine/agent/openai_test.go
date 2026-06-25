@@ -212,7 +212,7 @@ var _ openaiClient = (*toolHungryOpenAI)(nil)
 
 // On a large diff the model may keep requesting tools to the budget. The loop
 // must FORCE finalization on the last turn (withdraw tools + nudge) so it is
-// driven to emit findings — a real review, not a hard maxToolTurns failure.
+// driven to emit findings, a real review, not a hard maxToolTurns failure.
 func TestOpenAIAgentForcedFinalizeReturnsFindings(t *testing.T) {
 	fc := &toolHungryOpenAI{findings: `{"findings":[{"file":"a.go","existing_code":"x","severity":"warning","category":"bug","rationale":"r"}]}`}
 	a := &openaiAgent{client: fc, model: "gpt-test"}

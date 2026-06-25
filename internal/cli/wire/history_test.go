@@ -43,7 +43,7 @@ func TestNewHistoryStoreGating(t *testing.T) {
 	}
 }
 
-// openHistoryStore degrades to (nil,nil) when the seam errors — the review must
+// openHistoryStore degrades to (nil,nil) when the seam errors, the review must
 // never fail because the store could not open.
 func TestOpenHistoryStoreDegradesOnError(t *testing.T) {
 	restore := newHistoryStore

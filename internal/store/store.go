@@ -12,7 +12,7 @@ import (
 )
 
 // ErrReviewNotFound is returned (wrapped) by GetReview when no review has the
-// given id — distinct from a transient store failure, so a caller can tell
+// given id, distinct from a transient store failure, so a caller can tell
 // "unknown id" from "store unavailable".
 var ErrReviewNotFound = errors.New("review not found")
 
@@ -46,7 +46,7 @@ type ReviewRecord struct {
 	TraceJSON string
 }
 
-// ReviewSummary is the list row for `history` — the scalar columns only (no
+// ReviewSummary is the list row for `history`, the scalar columns only (no
 // findings/stats/transcript blobs), with the findings count + max severity
 // projected for at-a-glance triage.
 type ReviewSummary struct {
@@ -81,7 +81,7 @@ type PrunePolicy struct {
 }
 
 // Store persists and retrieves review records. UpsertReview inserts or, on id
-// conflict, updates an existing row — the REST POST persists a pending record up
+// conflict, updates an existing row, the REST POST persists a pending record up
 // front and the worker fills the final (done/failed) record under the same id.
 // ListReviews/PruneReviews back the `history` command group.
 type Store interface {

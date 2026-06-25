@@ -698,7 +698,7 @@ func TestSuggestMultiLinePatchOnSingleAnchorEmits(t *testing.T) {
 
 func TestSuggestMultiLinePatchAnchorMismatchDropped(t *testing.T) {
 	// The safety boundary: a multi-line patch whose anchored line does NOT match
-	// QuotedCode must be dropped — never a wrong-span replace (no data loss).
+	// QuotedCode must be dropped, never a wrong-span replace (no data loss).
 	c := &recordClient{}
 	info := &PRInfo{Owner: "o", Repo: "r", Number: 1, HeadSHA: "h"}
 	f := suggestFinding()
@@ -729,7 +729,7 @@ func TestSuggestNoOpDegradesToHint(t *testing.T) {
 
 func TestSuggestOperatorPrefixedPatchStillSuggests(t *testing.T) {
 	// A patch that legitimately begins with +/- (operator-prefixed code) and
-	// differs from the raw line must still emit a suggestion — the no-op check
+	// differs from the raw line must still emit a suggestion, the no-op check
 	// must NOT strip +/- from the patch (else it falsely reads as a no-op).
 	c := &recordClient{}
 	info := &PRInfo{Owner: "o", Repo: "r", Number: 1, HeadSHA: "h"}
@@ -900,7 +900,7 @@ func TestFingerprintWhollyDiffStripped(t *testing.T) {
 }
 
 // Under-dedup (documented, best-effort): the same bug quoted with a different span
-// yields a DIFFERENT fingerprint — exact content match is the M5 ceiling, semantic
+// yields a DIFFERENT fingerprint, exact content match is the M5 ceiling, semantic
 // matching is M7. This asserts the accepted limitation rather than a desired win.
 func TestFingerprintUnderDedupDifferentSpan(t *testing.T) {
 	f := engine.Finding{File: "p.go", Category: "bug", QuotedCode: "x := y / 0"}

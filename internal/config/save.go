@@ -29,7 +29,7 @@ type savedConfig struct {
 
 // Save writes the user-set deltas of cfg to FilePath() atomically with safe
 // perms (dir 0700, file 0600). It marshals ONLY fields that differ from the
-// built-in Defaults() — never the merged defaults themselves — so built-in
+// built-in Defaults(), never the merged defaults themselves, so built-in
 // provider profiles are never baked onto disk and the file stays minimal.
 func Save(cfg Config) error {
 	path, err := FilePath()
@@ -75,7 +75,7 @@ func Save(cfg Config) error {
 // omits) so a user-set [review].gate is visible. A flat struct (NOT an embedded
 // savedConfig) because go-toml/v2 does not inline an anonymous embedded struct.
 // Pointer/omitempty sections keep an unchanged section out of the output. This is
-// display-only — Save still writes only savedConfig, so init's write path is
+// display-only, Save still writes only savedConfig, so init's write path is
 // unchanged.
 type showConfig struct {
 	DefaultProvider string              `toml:"default_provider,omitempty"`

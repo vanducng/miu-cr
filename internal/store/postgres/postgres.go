@@ -29,7 +29,7 @@ const connectTimeout = 10 * time.Second
 // Store is the Postgres-backed review store. It holds no per-process write lock:
 // Postgres serializes via MVCC, and a per-process lock would defeat a
 // multi-instance serve. SaveReview is a plain INSERT of a freshly-generated
-// unique ID (no ON CONFLICT — no duplicate is expected); the ON CONFLICT upsert
+// unique ID (no ON CONFLICT, no duplicate is expected); the ON CONFLICT upsert
 // serialization applies to pr_findings (see UpsertPosted). Multi-row writes stay
 // transactional (BeginTx/Commit).
 type Store struct {
@@ -275,7 +275,7 @@ func (s *Store) PruneReviews(ctx context.Context, p store.PrunePolicy) (int, err
 }
 
 // LatestReviewForPR returns the newest review's id + head SHA for the PR key, or
-// ok=false when none exists. Over the existing columns — no schema change.
+// ok=false when none exists. Over the existing columns, no schema change.
 func (s *Store) LatestReviewForPR(ctx context.Context, key store.PRKey) (store.LatestReview, bool, error) {
 	var lr store.LatestReview
 	row := s.db.QueryRowContext(ctx, store.LatestReviewForPRQuery(store.PostgresPlaceholder), key.Owner, key.Repo, key.Number)

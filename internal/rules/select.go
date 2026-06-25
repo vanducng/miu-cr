@@ -13,7 +13,7 @@ import (
 //
 // Output order is deterministic and doubles as the truncation order: applicable
 // rules first by descending priority (alwaysApply, then trust), then
-// alphabetically by stem — so the least-important rules sort last and get
+// alphabetically by stem, so the least-important rules sort last and get
 // dropped first under a token cap.
 func SelectRules(rules []Rule, changedPaths []string) []Rule {
 	out := make([]Rule, 0, len(rules))

@@ -8,7 +8,7 @@ import (
 	"github.com/vanducng/miu-cr/internal/config"
 )
 
-// Each built-in kind maps to its concrete Agent via the registry — no network.
+// Each built-in kind maps to its concrete Agent via the registry, no network.
 func TestRegistryKindToConstructor(t *testing.T) {
 	anth, err := New(Credentials{Kind: config.KindAnthropic, APIKey: secretToken, Model: "m"}, 0)
 	if err != nil {

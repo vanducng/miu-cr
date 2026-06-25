@@ -22,7 +22,7 @@ func TestRuleCitationRepoLinks(t *testing.T) {
 	}
 }
 
-// A user (cite-only) citation renders "(per <stem>)" as TEXT — no link, and the
+// A user (cite-only) citation renders "(per <stem>)" as TEXT, no link, and the
 // absolute home path the wire layer withheld never appears.
 func TestRuleCitationUserTextOnly(t *testing.T) {
 	cites := map[string]RuleCitation{"team": {Linkable: false}}

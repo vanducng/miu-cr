@@ -71,7 +71,7 @@ func Open(path string) (*Store, error) {
 		return nil, fmt.Errorf("create state dir: %w", err)
 	}
 	// DSN-level pragmas so EVERY pooled connection inherits them (busy_timeout
-	// is per-connection — a one-shot db.Exec only sets it on one connection,
+	// is per-connection, a one-shot db.Exec only sets it on one connection,
 	// leaving other/cross-process writers to fail SQLITE_BUSY immediately).
 	db, err := sql.Open("sqlite", dsn(path))
 	if err != nil {
@@ -110,7 +110,7 @@ var reviewColumnMigrations = []struct{ col, ddl string }{
 }
 
 // migrateReviewColumns backfills any missing reviews column on a DB created
-// before that column existed. Idempotent — a no-op once all columns are present.
+// before that column existed. Idempotent, a no-op once all columns are present.
 func migrateReviewColumns(db *sql.DB) error {
 	have, err := reviewColumns(db)
 	if err != nil {
@@ -292,7 +292,7 @@ func (s *Store) PruneReviews(ctx context.Context, p store.PrunePolicy) (int, err
 }
 
 // LatestReviewForPR returns the newest review's id + head SHA for the PR key, or
-// ok=false when none exists. Over the existing columns — no schema change.
+// ok=false when none exists. Over the existing columns, no schema change.
 func (s *Store) LatestReviewForPR(ctx context.Context, key store.PRKey) (store.LatestReview, bool, error) {
 	var lr store.LatestReview
 	row := s.db.QueryRowContext(ctx, store.LatestReviewForPRQuery(store.SqlitePlaceholder), key.Owner, key.Repo, key.Number)

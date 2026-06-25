@@ -12,7 +12,7 @@ import (
 )
 
 // statefulClient persists posted inline review comments and reviews so a second
-// run sees the first run's state — exercising cross-run inline-fingerprint dedupe
+// run sees the first run's state, exercising cross-run inline-fingerprint dedupe
 // at the PostReview primitive level (summaryFn-into-body, not the wire upsert).
 type statefulClient struct {
 	reviewComments []*gh.PullRequestComment

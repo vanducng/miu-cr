@@ -58,7 +58,7 @@ func wireFake(t *testing.T) (*fakeGitHub, mgithub.Client) {
 }
 
 // TestStoreCrossPush: a finding posted in run A is recorded posted; a re-anchored
-// run B (same fingerprint) is NOT re-posted — dedupe holds through the store.
+// run B (same fingerprint) is NOT re-posted, dedupe holds through the store.
 func TestStoreCrossPush(t *testing.T) {
 	runner := gitcmd.New()
 	dir, base, head := setupRepo(t, runner)
@@ -87,7 +87,7 @@ func TestStoreCrossPush(t *testing.T) {
 		t.Fatalf("run B: re-anchored finding must not re-post, got %d", prB.PostedInline)
 	}
 	// Upsert model: run B has no NEW inline (dedupe) and no review body, so the
-	// empty-review guard skips CreateReview entirely — createReviewN stays 1 (run A).
+	// empty-review guard skips CreateReview entirely, createReviewN stays 1 (run A).
 	// The summary issue comment is EDITED in place instead.
 	if fake.createReviewN != 1 {
 		t.Fatalf("run B must not create a second review (empty-guard), want createReviewN=1, got %d", fake.createReviewN)
@@ -269,7 +269,7 @@ func TestPublishNoStoreUnchanged(t *testing.T) {
 	}
 }
 
-// TestStoreListErrorDegrades: a ListFindings failure is swallowed — the review
+// TestStoreListErrorDegrades: a ListFindings failure is swallowed, the review
 // still posts (inline + summary) with an empty prior set, never aborting.
 func TestStoreListErrorDegrades(t *testing.T) {
 	runner := gitcmd.New()
@@ -292,7 +292,7 @@ func TestStoreListErrorDegrades(t *testing.T) {
 }
 
 // TestStoreWriteErrorKeepsOutcome: after the inline review + summary upsert succeed,
-// a store write failure (Upsert/MarkResolved) is swallowed — publishReview returns
+// a store write failure (Upsert/MarkResolved) is swallowed, publishReview returns
 // the successful outcome (not an error), so ReviewPR doesn't discard the review.
 func TestStoreWriteErrorKeepsOutcome(t *testing.T) {
 	for _, tc := range []struct {

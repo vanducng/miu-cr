@@ -14,7 +14,7 @@ import (
 )
 
 // Every backend's Review must capture a NON-EMPTY system prompt + its
-// model/provider into the threaded Trace — the headline bug fix. Without this an
+// model/provider into the threaded Trace, the headline bug fix. Without this an
 // openai/codex review would persist an empty SystemPrompt.
 func TestTrace_AnthropicCapturesSystemPromptAndModel(t *testing.T) {
 	a := &anthropicAgent{
@@ -67,7 +67,7 @@ func assertCapturedSystemPrompt(t *testing.T, tr *engine.ReviewTrace, wantProvid
 }
 
 // runTool records each dispatch into a non-nil Trace (turn, tool, args), with
-// args holding only the path/pattern label — never the file content or a token.
+// args holding only the path/pattern label, never the file content or a token.
 func TestTrace_RecordsToolDispatches(t *testing.T) {
 	repo, sha := runToolRepo(t)
 	tr := &engine.ReviewTrace{}

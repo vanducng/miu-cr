@@ -209,7 +209,7 @@ func TestParseFindingsWalkthroughRoundTrips(t *testing.T) {
 	}
 }
 
-// A response WITHOUT the new fields yields empty walkthrough/digest — the legacy
+// A response WITHOUT the new fields yields empty walkthrough/digest, the legacy
 // shape stays back-compatible.
 func TestParseFindingsWalkthroughBackCompat(t *testing.T) {
 	out, ok := parseFindings(`{"findings":[{"file":"a.go","existing_code":"x","severity":"low","category":"bug","rationale":"r"}]}`)
@@ -240,7 +240,7 @@ func TestParseFindingsWalkthroughLengthCaps(t *testing.T) {
 }
 
 // Over the maxFileSummaryKeys cap the kept subset is the alphabetically-first N
-// keys, deterministically — Go map iteration order must not leak into the output,
+// keys, deterministically, Go map iteration order must not leak into the output,
 // or re-reviews of the same diff would render a different per-file digest.
 func TestParseFindingsFileSummariesDeterministicTruncation(t *testing.T) {
 	summaries := make(map[string]string, maxFileSummaryKeys+50)

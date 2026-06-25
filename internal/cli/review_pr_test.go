@@ -115,7 +115,7 @@ func TestPRSkippedUnchangedEnvelope(t *testing.T) {
 		t.Fatalf("want data.prior_review_id=prior-9, got %v", data["prior_review_id"])
 	}
 	// Fix: the skip path must emit findings as an empty ARRAY (not null) and stats
-	// as an object — a consumer expecting an array/object shape must not break.
+	// as an object, a consumer expecting an array/object shape must not break.
 	f, ok := data["findings"]
 	if !ok || f == nil {
 		t.Fatalf("skip envelope must carry findings as [] (not null/absent), got %#v", f)

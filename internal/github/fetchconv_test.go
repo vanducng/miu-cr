@@ -55,7 +55,7 @@ func TestFetchConversationRendersSections(t *testing.T) {
 		},
 		issueComments: []*gh.IssueComment{
 			// miucr's summary now lives in a marker-bearing ISSUE COMMENT (not a review
-			// body) — fetchPriorSummaries reads it from here.
+			// body), fetchPriorSummaries reads it from here.
 			{Body: gh.Ptr(ReviewMarker + "\nReview summary: 2 findings.")},
 			{Body: gh.Ptr("I disagree, that path is unreachable")}, // developer reply
 		},

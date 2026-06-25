@@ -16,9 +16,9 @@ import (
 // CreateInstallationToken. It NEVER runs in CI and is skipped unless all three
 // envs are set:
 //
-//	MIUCR_LIVE_APP_ID            — the numeric GitHub App ID
-//	MIUCR_LIVE_APP_INSTALL_ID    — the numeric installation id
-//	MIUCR_LIVE_APP_KEY_PATH      — path to the App private-key PEM
+//	MIUCR_LIVE_APP_ID           , the numeric GitHub App ID
+//	MIUCR_LIVE_APP_INSTALL_ID   , the numeric installation id
+//	MIUCR_LIVE_APP_KEY_PATH     , path to the App private-key PEM
 //
 // The minted installation token is never logged or printed (only its presence and
 // expiry window are asserted), so no secret reaches the test output.

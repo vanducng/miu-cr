@@ -62,7 +62,7 @@ func TestReviewProgressEmitsMilestones(t *testing.T) {
 }
 
 // A nil Progress sink (the default) must not panic and must leave the review
-// outcome identical — progress is a pure side-channel.
+// outcome identical, progress is a pure side-channel.
 func TestReviewNilProgressIsSilentNoOp(t *testing.T) {
 	dir, findings := progressDir(t)
 	fa := &fakeAgent{findings: findings}

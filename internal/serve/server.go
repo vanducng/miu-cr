@@ -19,7 +19,7 @@ import (
 const maxBodyBytes = 5 << 20 // 5MB
 
 // prKey identifies a PR for coalesce. A single daemon serves many repos, so the
-// PR number alone is not unique — the owner/repo pair is part of the key.
+// PR number alone is not unique, the owner/repo pair is part of the key.
 type prKey struct {
 	Owner  string
 	Repo   string
@@ -41,7 +41,7 @@ type Job struct {
 	// CLI/webhook/poll paths leave it empty and skip that upsert.
 	ReviewID string
 	// OnDone, when non-nil, runs after the review returns: nil on success, the
-	// reviewFn's error (or a recovered panic) on failure. Additive — the webhook Job leaves it nil so the
+	// reviewFn's error (or a recovered panic) on failure. Additive, the webhook Job leaves it nil so the
 	// webhook path is byte-for-byte unchanged; the poller sets it to record its
 	// dedup cursor only on review success.
 	OnDone func(error)
@@ -69,7 +69,7 @@ type repoRef struct {
 type repoAllowlist map[repoRef]struct{}
 
 // newRepoAllowlist parses each entry as exactly "owner/repo". Entries that aren't
-// well-formed (missing or extra "/", empty halves) are skipped — they can never
+// well-formed (missing or extra "/", empty halves) are skipped, they can never
 // match a real owner/repo lookup, so the safe default is deny.
 func newRepoAllowlist(repos []string) repoAllowlist {
 	a := make(repoAllowlist, len(repos))
@@ -165,8 +165,8 @@ func newServer(cfg Config) *Server {
 }
 
 // New builds the production Server. It fails fast on security-critical
-// misconfiguration — an empty Secret would make ValidatePayload accept any
-// payload, and a nil ResolveToken would panic on the first request — rather than
+// misconfiguration, an empty Secret would make ValidatePayload accept any
+// payload, and a nil ResolveToken would panic on the first request, rather than
 // degrading silently at runtime. New always builds its own bounded worker Pool
 // (the real reviewFn calls cli.ReviewPRForServe); any cfg.Dispatcher is ignored
 // (tests inject a fake via the lower-level newServer). Returns the Server plus the

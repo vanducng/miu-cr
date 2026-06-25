@@ -57,7 +57,7 @@ func TestCategoryLinkUsesAngleBracketDestination(t *testing.T) {
 	}
 }
 
-// Annotations stay plain text — no markdown link in the title.
+// Annotations stay plain text, no markdown link in the title.
 func TestChecksAnnotationCategoryPlain(t *testing.T) {
 	a := annotationFor(engine.Finding{File: "a.go", Line: 4, Severity: "high", Category: "Security", Rationale: "x"})
 	if a.GetTitle() != "HIGH (Security)" {

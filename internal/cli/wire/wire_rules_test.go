@@ -9,7 +9,7 @@ import (
 )
 
 // captureAgent records the agent.Context it was called with so we can assert the
-// adapter forwards every field — Rules in particular, whose copy is easy to
+// adapter forwards every field, Rules in particular, whose copy is easy to
 // forget and would silently drop all project rules.
 type captureAgent struct{ got agent.Context }
 

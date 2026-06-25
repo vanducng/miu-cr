@@ -80,7 +80,7 @@ func stemOf(path string) string {
 // rules (Untrusted, only when allowRepo). A later layer may override a stem only
 // when it is at least as trusted as the rule already present: defaults and user
 // (both Trusted) may override each other, but the Untrusted repo layer may add
-// NEW stems only — it may NOT replace a stem provided by a Trusted layer (doing
+// NEW stems only, it may NOT replace a stem provided by a Trusted layer (doing
 // so would let an attacker `.miu/cr/rules/security.md` gut the baseline). A
 // blocked override is dropped with a warning. Per-file parse errors are isolated
 // as warnings and the file is skipped; a missing directory is not an error. The
@@ -111,7 +111,7 @@ func LoadRules(userDir, repoDir string, allowRepo bool) (rules []Rule, warnings 
 				}
 				// Intra-layer collision: two repo rules resolve to the same stem
 				// (e.g. security.md and security.MD on a case-insensitive FS); the
-				// later one silently shadows the earlier — warn before overwriting.
+				// later one silently shadows the earlier, warn before overwriting.
 				warnings = append(warnings, fmt.Sprintf("rules: duplicate stem %q in repo layer (%s shadows %s)", r.Stem, r.Path, existing.Path))
 			}
 			byStem[r.Stem] = r
@@ -144,7 +144,7 @@ func loadDir(dir string, prov Provenance) (rules []Rule, warnings []string) {
 		path := filepath.Join(dir, e.Name())
 		// openNoFollow refuses a symlinked .miu/cr/rules/link.md -> /etc/passwd
 		// (atomically on unix), then we fstat the handle (not the path) for the
-		// size cap and read from the same handle — no lstat-then-read TOCTOU.
+		// size cap and read from the same handle, no lstat-then-read TOCTOU.
 		f, err := openNoFollow(path)
 		if err != nil {
 			if errors.Is(err, errSymlink) {

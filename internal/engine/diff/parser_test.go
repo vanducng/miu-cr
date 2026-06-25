@@ -196,7 +196,7 @@ Binary files a/logo.png and b/logo.png differ
 // git C-quotes paths with non-ASCII/control bytes in the diff header
 // (`"a/caf\303\251.go"`); the parser must unquote them so the file is reviewed
 // rather than silently dropped. The blob read fails (the temp dir has no such
-// file) which is fine — we only assert the header parsed into the right path.
+// file) which is fine, we only assert the header parsed into the right path.
 func TestParseDiffText_QuotedNonASCIIHeader(t *testing.T) {
 	diffText := "diff --git \"a/caf\\303\\251.go\" \"b/caf\\303\\251.go\"\n" +
 		"index 1111111..2222222 100644\n" +

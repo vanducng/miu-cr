@@ -9,7 +9,7 @@ import (
 
 // ruleCitations links ONLY repo (RepoUntrusted) rules, converting their absolute
 // Path to a repo-relative one via filepath.Rel; user (absolute home path) and
-// built-in (defaults/* virtual path) rules are cite-only — never given a path,
+// built-in (defaults/* virtual path) rules are cite-only, never given a path,
 // so a home dir or a non-repo path can never reach blobURL.
 func TestRuleCitationsLinksRepoOnly(t *testing.T) {
 	repo := "/tmp/clone"

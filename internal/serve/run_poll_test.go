@@ -13,7 +13,7 @@ import (
 // TestPollDispatchesOnePerHeadSHA wires NewPoller to a REAL Pool (the production
 // Dispatcher) + a fake reviewFn, and proves an allowlisted PR notification yields
 // exactly one reviewFn call per head SHA (dedup across ticks), end-to-end through
-// the OnDone seam — no network, no LLM.
+// the OnDone seam, no network, no LLM.
 func TestPollDispatchesOnePerHeadSHA(t *testing.T) {
 	dir := t.TempDir()
 	orig := configDir
@@ -57,7 +57,7 @@ func TestPollDispatchesOnePerHeadSHA(t *testing.T) {
 
 	// OnDone (success) recorded seen; wait for it to land before tick 2. The Pool
 	// runs OnDone after reviewFn, so the channel receive doesn't guarantee record
-	// — poll until seen is set.
+	//, poll until seen is set.
 	deadline := time.Now().Add(2 * time.Second)
 	for {
 		p.mu.Lock()
@@ -195,7 +195,7 @@ func TestRunPoll_DrainsExactlyOnceOnCancel(t *testing.T) {
 
 	// Drain is idempotent on the Pool, so "drained exactly once" is asserted by:
 	// RunPoll returns cleanly on cancel AND the pool is closed afterward (Submit
-	// refuses) — a second drain would be a safe no-op, never a double-close panic.
+	// refuses), a second drain would be a safe no-op, never a double-close panic.
 	pool := NewPool(func(Job) error { return nil }, discardLog())
 
 	gh := &fakeNotifGetter{}

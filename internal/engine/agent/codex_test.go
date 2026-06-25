@@ -229,7 +229,7 @@ func TestCodexAgentBackendErrorRedactsToken(t *testing.T) {
 }
 
 func TestCodexAgentClassifiesStatus(t *testing.T) {
-	shrinkCodexBackoff(t) // 429/5xx are retryable — don't sleep through real backoff
+	shrinkCodexBackoff(t) // 429/5xx are retryable, don't sleep through real backoff
 	tests := []struct {
 		name      string
 		status    int
@@ -376,7 +376,7 @@ func TestCodexAgentRetries5xx(t *testing.T) {
 }
 
 func TestCodexAgentCancelDuringBackoffReturnsPromptly(t *testing.T) {
-	// Long backoff so the test's own cancel — not a timer — ends the wait.
+	// Long backoff so the test's own cancel, not a timer, ends the wait.
 	base, attempts := codexBaseBackoff, codexMaxAttempts
 	codexBaseBackoff = 30 * time.Second
 	codexMaxAttempts = 3
@@ -433,7 +433,7 @@ func TestCodexAgentRefreshFailedIsAuthExpired(t *testing.T) {
 
 // TestCodexAgentRefreshTransientIsRetryable proves a transient refresh failure
 // (Retry-typed clierr from the OAuth endpoint) surfaces as retryable
-// agent.unavailable — not a misleading re-login prompt — preserving the cause.
+// agent.unavailable, not a misleading re-login prompt, preserving the cause.
 func TestCodexAgentRefreshTransientIsRetryable(t *testing.T) {
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusUnauthorized)

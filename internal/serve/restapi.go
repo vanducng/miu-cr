@@ -59,7 +59,7 @@ func (s *Server) requireAPIAuth(next http.Handler) http.Handler {
 
 // bearerToken extracts the credential from a strict case-insensitive "Bearer "
 // scheme. A missing/odd scheme yields ok=false (→ 401), never a partial match.
-// The credential is returned VERBATIM — trimming would both alter the secret
+// The credential is returned VERBATIM, trimming would both alter the secret
 // (" tok " vs "tok") and leak whitespace via the length fed to the constant-time
 // compare; whitespace is part of the token.
 func bearerToken(header string) (string, bool) {
@@ -149,7 +149,7 @@ func (s *Server) handleCreateReview(w http.ResponseWriter, r *http.Request) {
 }
 
 // handleGetReview is GET /v1/reviews/{id}. It reads the persisted record and maps
-// a WHITELIST (id, status, created_at, findings, stats) to the envelope — never
+// a WHITELIST (id, status, created_at, findings, stats) to the envelope, never
 // RepoDir (the /tmp clone path = host info disclosure). A pending row older than
 // reviewTO is lazily recovered to failed (a crashed worker leaves no eternal
 // pending).

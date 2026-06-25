@@ -54,7 +54,7 @@ func NewPool(reviewFn func(Job) error, log *slog.Logger) *Pool {
 // Submit enqueues a job. It returns false (without enqueuing) after Drain (the
 // pool is closed), when the same PR is already in flight (coalesced), or when the
 // queue is full (loud-logged + counted). The closed check and the channel send
-// both happen under p.mu — and Drain closes the channel under the same lock — so
+// both happen under p.mu, and Drain closes the channel under the same lock, so
 // Submit can never send on a closed channel (no "send on closed channel" panic).
 func (p *Pool) Submit(j Job) bool {
 	p.mu.Lock()

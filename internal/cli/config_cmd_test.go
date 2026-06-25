@@ -88,7 +88,7 @@ dsn = "` + secretDSN + `"
 }
 
 // TestConfigShowNeverLeaksSecrets: a configured auth_token AND store DSN must not
-// appear in config show output — in json or pretty, with or without --all.
+// appear in config show output, in json or pretty, with or without --all.
 func TestConfigShowNeverLeaksSecrets(t *testing.T) {
 	for _, pretty := range []bool{false, true} {
 		for _, all := range []bool{false, true} {

@@ -64,14 +64,14 @@ func TestEmitWorkflowAnnotationsEscapesProperties(t *testing.T) {
 	if got != want {
 		t.Fatalf("escaping mismatch:\n got=%q\nwant=%q", got, want)
 	}
-	// Exactly one command line — a raw newline/comma in the path did NOT inject a second.
+	// Exactly one command line, a raw newline/comma in the path did NOT inject a second.
 	if c := strings.Count(got, "::error"); c != 1 {
 		t.Fatalf("path delimiters must not inject extra commands, got %d ::error tokens:\n%s", c, got)
 	}
 }
 
 // A finding with Line<=0 (file-level / drift, not line-anchorable) must emit a
-// FILE-level workflow annotation — `file=` with no line/endLine (the grammar allows
+// FILE-level workflow annotation, `file=` with no line/endLine (the grammar allows
 // it); emitting line=0 is rejected by the runner.
 func TestEmitWorkflowAnnotationsFileLevelForNonPositiveLine(t *testing.T) {
 	var out strings.Builder

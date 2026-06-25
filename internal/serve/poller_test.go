@@ -136,7 +136,7 @@ func TestPoller_DedupSameHeadAcrossTicks(t *testing.T) {
 		t.Fatal(err)
 	}
 	// second tick: same head SHA but a newer notification updated_at (so the
-	// pre-GetPR dedup does not short-circuit) — head-SHA dedup must.
+	// pre-GetPR dedup does not short-circuit), head-SHA dedup must.
 	gh.notifs = []*github.Notification{prNotif("octo", "hello", 1, time.Now().Add(time.Minute))}
 	if _, err := p.tick(ctx); err != nil {
 		t.Fatal(err)

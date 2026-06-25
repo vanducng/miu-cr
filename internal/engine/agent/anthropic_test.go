@@ -190,7 +190,7 @@ var _ anthropicClient = (*toolHungryAnthropic)(nil)
 
 // On a large diff the model may keep requesting tools to the budget. The loop
 // must FORCE finalization on the last turn (withdraw tools + nudge) so the model
-// is driven to emit findings — a real review, not a hard maxToolTurns failure.
+// is driven to emit findings, a real review, not a hard maxToolTurns failure.
 func TestAnthropicAgentForcedFinalizeReturnsFindings(t *testing.T) {
 	fc := &toolHungryAnthropic{findings: `{"findings":[{"file":"a.go","existing_code":"x","severity":"warning","category":"bug","rationale":"r"}]}`}
 	a := &anthropicAgent{client: fc, model: "claude-test"}
