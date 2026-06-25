@@ -43,11 +43,15 @@ jobs:
         if: ${{ steps.release.outputs.pr }}
         env:
           GH_TOKEN: ${{ steps.app-token.outputs.token }}
+          # Pass step/context values via env (never inline ${{ }} in run:) to avoid
+          # shell injection through the release-please output.
+          RELEASE_PR: ${{ steps.release.outputs.pr }}
+          REPO: ${{ github.repository }}
         run: |
           set -euo pipefail
-          pr_num="$(printf '%s' '${{ steps.release.outputs.pr }}' | jq -r '.number')"
+          pr_num="$(printf '%s' "$RELEASE_PR" | jq -r '.number')"
           [ -n "$pr_num" ] && [ "$pr_num" != "null" ] || { echo "no release PR number"; exit 0; }
-          gh pr merge "$pr_num" --squash --auto -R "${{ github.repository }}" || \
+          gh pr merge "$pr_num" --squash --auto -R "$REPO" || \
             echo "::warning::could not enable auto-merge on PR #$pr_num (may already be mergeable; will need a manual merge)"
 
   # Builds + publishes binaries/checksums on any v* tag. Homebrew tap publish is
