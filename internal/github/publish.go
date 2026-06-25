@@ -787,7 +787,7 @@ func UpsertSummaryComment(ctx stdctx.Context, client Client, info *PRInfo, body 
 			if !strings.Contains(c.GetBody(), ReviewMarker) {
 				continue
 			}
-			if id := c.GetID(); targetID == 0 || id < targetID {
+			if id := c.GetID(); id > 0 && (targetID == 0 || id < targetID) {
 				targetID = id
 			}
 		}

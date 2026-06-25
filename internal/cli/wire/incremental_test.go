@@ -36,7 +36,7 @@ func TestSkipUnchangedSameSHA(t *testing.T) {
 		t.Fatalf("seed: %v", err)
 	}
 
-	prior, ok := skipUnchanged(ctx, st, &fakeGitHub{}, prInfo("sha-1"), false, false, "review")
+	prior, ok := skipUnchanged(ctx, st, prInfo("sha-1"), false, false)
 	if !ok {
 		t.Fatal("same head SHA must skip")
 	}
@@ -56,7 +56,7 @@ func TestSkipUnchangedPostNeverSkips(t *testing.T) {
 	}); err != nil {
 		t.Fatalf("seed: %v", err)
 	}
-	if _, ok := skipUnchanged(ctx, st, &fakeGitHub{}, prInfo("sha-1"), false, true, "review"); ok {
+	if _, ok := skipUnchanged(ctx, st, prInfo("sha-1"), false, true); ok {
 		t.Fatal("--post must re-enter (never skip) so the summary comment is edited")
 	}
 }
@@ -71,7 +71,7 @@ func TestSkipUnchangedChecksModeNeverSkips(t *testing.T) {
 	}); err != nil {
 		t.Fatalf("seed: %v", err)
 	}
-	if _, ok := skipUnchanged(ctx, st, &fakeGitHub{}, prInfo("sha-1"), false, true, "checks"); ok {
+	if _, ok := skipUnchanged(ctx, st, prInfo("sha-1"), false, true); ok {
 		t.Fatal("--mode checks --post must always publish the CheckRun")
 	}
 }
@@ -85,7 +85,7 @@ func TestSkipUnchangedDifferentSHA(t *testing.T) {
 	}); err != nil {
 		t.Fatalf("seed: %v", err)
 	}
-	if _, ok := skipUnchanged(ctx, st, &fakeGitHub{}, prInfo("sha-2"), false, false, "review"); ok {
+	if _, ok := skipUnchanged(ctx, st, prInfo("sha-2"), false, false); ok {
 		t.Fatal("a changed head SHA must NOT skip")
 	}
 }
@@ -99,7 +99,7 @@ func TestSkipUnchangedForce(t *testing.T) {
 	}); err != nil {
 		t.Fatalf("seed: %v", err)
 	}
-	if _, ok := skipUnchanged(ctx, st, &fakeGitHub{}, prInfo("sha-1"), true, false, "review"); ok {
+	if _, ok := skipUnchanged(ctx, st, prInfo("sha-1"), true, false); ok {
 		t.Fatal("--force must bypass the skip")
 	}
 }
@@ -108,14 +108,14 @@ func TestSkipUnchangedForce(t *testing.T) {
 func TestSkipUnchangedNoPrior(t *testing.T) {
 	ctx := stdctx.Background()
 	st := tempStore(t)
-	if _, ok := skipUnchanged(ctx, st, &fakeGitHub{}, prInfo("sha-1"), false, false, "review"); ok {
+	if _, ok := skipUnchanged(ctx, st, prInfo("sha-1"), false, false); ok {
 		t.Fatal("no prior review must NOT skip")
 	}
 }
 
 // TestSkipUnchangedNilStore: history off / --no-save (nil store) reviews.
 func TestSkipUnchangedNilStore(t *testing.T) {
-	if _, ok := skipUnchanged(stdctx.Background(), nil, &fakeGitHub{}, prInfo("sha-1"), false, false, "review"); ok {
+	if _, ok := skipUnchanged(stdctx.Background(), nil, prInfo("sha-1"), false, false); ok {
 		t.Fatal("a nil history store must NOT skip (degrade to always-review)")
 	}
 }
@@ -124,7 +124,7 @@ func TestSkipUnchangedNilStore(t *testing.T) {
 // always-review (no skip), never blocking the review.
 func TestSkipUnchangedReadErrorDegrades(t *testing.T) {
 	st := errStore{err: errors.New("db locked")}
-	if _, ok := skipUnchanged(stdctx.Background(), st, &fakeGitHub{}, prInfo("sha-1"), false, false, "review"); ok {
+	if _, ok := skipUnchanged(stdctx.Background(), st, prInfo("sha-1"), false, false); ok {
 		t.Fatal("a read error must degrade to always-review, not skip")
 	}
 }

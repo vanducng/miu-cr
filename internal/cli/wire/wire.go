@@ -285,7 +285,7 @@ func (prReviewer) ReviewPR(ctx stdctx.Context, req cli.PRReviewRequest) (cli.Rev
 	// always re-enters so the single summary issue comment gets EDITED in place. A
 	// store read failure degrades to always-review (skipUnchanged returns ok=false),
 	// never blocks. See skipUnchanged.
-	if prior, ok := skipUnchanged(ctx, hist, client, info, req.Force, req.Post, req.Mode); ok {
+	if prior, ok := skipUnchanged(ctx, hist, info, req.Force, req.Post); ok {
 		if req.Progress != nil {
 			req.Progress("skipped: head SHA " + info.HeadSHA + " already reviewed (use --force to re-review)")
 		}
@@ -425,7 +425,7 @@ func (prReviewer) ReviewPR(ctx stdctx.Context, req cli.PRReviewRequest) (cli.Rev
 // A nil store / any read failure degrades to ok=false (always review) — never
 // blocks. The returned LatestReview carries the prior review id for the
 // skipped_unchanged envelope.
-func skipUnchanged(ctx stdctx.Context, hist store.Store, client mgithub.Client, info *mgithub.PRInfo, force, post bool, mode string) (store.LatestReview, bool) {
+func skipUnchanged(ctx stdctx.Context, hist store.Store, info *mgithub.PRInfo, force, post bool) (store.LatestReview, bool) {
 	if force {
 		return store.LatestReview{}, false
 	}
@@ -555,9 +555,13 @@ func publishReview(ctx stdctx.Context, client mgithub.Client, runner *gitcmd.Run
 	})
 	action, err := mgithub.UpsertSummaryComment(ctx, client, info, body)
 	if err != nil {
-		return err
+		// PostReview already succeeded (the inline review is live); a summary-upsert
+		// failure must not discard that outcome. Surface it via SummaryAction, continue.
+		slog.Warn("summary upsert failed, inline review still posted: " + config.RedactString(err.Error()))
+		prResult.SummaryAction = "failed"
+	} else {
+		prResult.SummaryAction = string(action)
 	}
-	prResult.SummaryAction = string(action)
 
 	if prStore != nil {
 		// PostReview already succeeded — the review is live. A store write failure must
