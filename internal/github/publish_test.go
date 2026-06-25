@@ -68,6 +68,9 @@ func (c *recordClient) GetPR(stdctx.Context, string, string, int) (*gh.PullReque
 func (c *recordClient) ListFiles(stdctx.Context, string, string, int, *gh.ListOptions) ([]*gh.CommitFile, *gh.Response, error) {
 	return nil, &gh.Response{}, nil
 }
+func (c *recordClient) GetCommit(stdctx.Context, string, string, string) (*gh.Commit, error) {
+	return nil, nil
+}
 
 func (c *recordClient) CreateReview(_ stdctx.Context, _, _ string, _ int, r *gh.PullRequestReviewRequest) (*gh.PullRequestReview, error) {
 	c.createReviewN++

@@ -142,6 +142,7 @@ func renderChangesTable(b *strings.Builder, info *PRInfo, diffs []diff.Diff, fin
 	type row struct {
 		path       string
 		adds, dels int64
+		findings   int
 	}
 	rows := make([]row, 0, len(diffs))
 	for i := range diffs {
@@ -149,11 +150,28 @@ func renderChangesTable(b *strings.Builder, info *PRInfo, diffs []diff.Diff, fin
 		if p == "" || p == "/dev/null" {
 			continue
 		}
-		rows = append(rows, row{path: p, adds: diffs[i].Insertions, dels: diffs[i].Deletions})
+		fc := 0
+		for _, n := range byFile[p] {
+			fc += n
+		}
+		rows = append(rows, row{path: p, adds: diffs[i].Insertions, dels: diffs[i].Deletions, findings: fc})
 	}
 	if len(rows) == 0 {
 		return
 	}
+
+	// Most important first: files with findings, then biggest churn, then path. The
+	// row cap then keeps the most important rows, not arbitrary diff order.
+	sort.SliceStable(rows, func(i, j int) bool {
+		if rows[i].findings != rows[j].findings {
+			return rows[i].findings > rows[j].findings
+		}
+		di, dj := rows[i].adds+rows[i].dels, rows[j].adds+rows[j].dels
+		if di != dj {
+			return di > dj
+		}
+		return rows[i].path < rows[j].path
+	})
 
 	overflow := 0
 	if len(rows) > maxChangesRows {

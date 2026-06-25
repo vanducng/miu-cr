@@ -84,6 +84,21 @@ func commitRef(info *PRInfo) string {
 	return "`" + short + "`"
 }
 
+// commitLabel renders the reviewed commit as a permalink whose text is the commit
+// SUBJECT (truncated, escaped) when known, so the cover reads like a changelog line
+// instead of a bare hash. Falls back to commitRef (short SHA) when the subject or the
+// HTML base is missing. The subject is UNTRUSTED, escaped via mdInline.
+func commitLabel(info *PRInfo) string {
+	subj := strings.TrimSpace(info.HeadSubject)
+	if subj == "" || info.HTMLBase == "" || info.HeadSHA == "" {
+		return commitRef(info)
+	}
+	if r := []rune(subj); len(r) > 72 {
+		subj = strings.TrimRight(string(r[:72]), " ") + "…"
+	}
+	return fmt.Sprintf("[%s](<%s/commit/%s>)", mdInline(subj), info.HTMLBase, info.HeadSHA)
+}
+
 // RenderSummary builds the PR summary upserted as the single miucr issue comment:
 // it leads with ReviewMarker (the owning sentinel) + the hidden runs token, then a
 // `## Code Review` header, the Reviews-(N)/last-commit identity line, the shields
@@ -140,9 +155,9 @@ func RenderSummaryFull(info *PRInfo, findings []engine.Finding, stats map[string
 
 	if info.HeadSHA != "" {
 		if info.ReviewCount > 0 {
-			fmt.Fprintf(&b, "**Reviews (%d)** · Last reviewed commit: %s\n\n", info.ReviewCount, commitRef(info))
+			fmt.Fprintf(&b, "**Reviews (%d)** · Last reviewed commit: %s\n\n", info.ReviewCount, commitLabel(info))
 		} else {
-			fmt.Fprintf(&b, "Last reviewed commit: %s\n\n", commitRef(info))
+			fmt.Fprintf(&b, "Last reviewed commit: %s\n\n", commitLabel(info))
 		}
 	}
 
@@ -171,7 +186,7 @@ func RenderSummaryFull(info *PRInfo, findings []engine.Finding, stats map[string
 
 	renderPresentation(&b, info, findings, opts.Diffs, opts.FileSummaries)
 
-	renderHandoffAndInternals(&b, info, opts.ReviewID, stats, opts.Diffs)
+	renderHandoffAndInternals(&b, info, stats, opts.Diffs)
 
 	fmt.Fprintf(&b, "\n<sub>Reviewed commit %s · Posted by miu-cr</sub>", commitRef(info))
 	return b.String()
@@ -186,36 +201,67 @@ func plural(n int) string {
 }
 
 // renderHandoffAndInternals writes ONE collapsed <details> combining the agent
-// handoff (review_id, re-run command, MCP) and the verbose review metadata (Files,
-// Churn, Effort, Context), so the summary has a single secondary block instead of two
-// confusingly-similar ones. The handoff group is omitted when reviewID is empty; the
-// internals group always renders. All values are trusted (ids, ints, fixed labels);
-// only a backtick inside the review_id is neutralized.
-func renderHandoffAndInternals(b *strings.Builder, info *PRInfo, reviewID string, stats map[string]any, diffs []diff.Diff) {
+// handoff (how to re-run / pick up the review) and the review metadata (Files, Churn,
+// Effort, Context) with a one-line meaning each, so the block is a single secondary
+// section. review_id is NOT shown: it only resolves on the machine + store that ran
+// the review, so it is meaningless in a posted comment (it stays in the JSON envelope).
+// All values are trusted (ints, the PR URL, fixed effort/context enums).
+func renderHandoffAndInternals(b *strings.Builder, info *PRInfo, stats map[string]any, diffs []diff.Diff) {
 	b.WriteString("\n<details>\n<summary>Agent handoff & review internals</summary>\n\n")
 
-	if strings.TrimSpace(reviewID) != "" {
-		b.WriteString("**Hand off to an agent**\n\n")
-		fmt.Fprintf(b, "- review_id: `%s`\n", strings.ReplaceAll(reviewID, "`", "'"))
-		if url := prURL(info); url != "" {
-			fmt.Fprintf(b, "- Re-run as JSON: `miucr review --pr %s -o json`\n", strings.ReplaceAll(url, "`", "'"))
+	// Handoff only makes sense for a real PR target (a re-run URL); the legacy non-PR
+	// body has neither a URL nor diffs, so it skips the handoff and keeps just internals.
+	if url := prURL(info); url != "" || len(diffs) > 0 {
+		b.WriteString("**Hand off to an agent** · pick up or re-run this review\n\n")
+		if url != "" {
+			fmt.Fprintf(b, "- Run locally: `miucr review --pr %s`\n", strings.ReplaceAll(url, "`", "'"))
 		} else {
-			b.WriteString("- Re-run as JSON: `miucr review --pr <pr-url> -o json`\n")
+			b.WriteString("- Run locally: `miucr review --pr <pr-url>`\n")
 		}
-		b.WriteString("- MCP: call `review_run` (or `review_get` with the review_id) from an agent host.\n\n")
+		b.WriteString("- MCP: call `review_run` from an agent host (add `-o json` for a machine-readable envelope).\n\n")
 	}
 
-	b.WriteString("**Review internals**\n\n")
+	b.WriteString("**Review internals** · how miucr sized this review\n\n")
 	files, adds, dels := diffStats(diffs)
-	if files > 0 {
-		fmt.Fprintf(b, "- Files: **%d**\n", files)
-		fmt.Fprintf(b, "- Churn: +%d/−%d\n", adds, dels)
-		fmt.Fprintf(b, "- Effort: %s\n", effortSize(files, adds+dels))
-	} else {
-		fmt.Fprintf(b, "- Files: **%d**\n", statIntVal(stats, "files_reviewed"))
+	if files == 0 {
+		files = statIntVal(stats, "files_reviewed")
 	}
-	fmt.Fprintf(b, "- Context: %s\n", truncationLevel(stats))
+	fmt.Fprintf(b, "- **Files** `%d` · files changed in this diff\n", files)
+	if adds > 0 || dels > 0 {
+		fmt.Fprintf(b, "- **Churn** `+%d / −%d` · lines added / removed\n", adds, dels)
+		fmt.Fprintf(b, "- **Effort** %s · estimated review size from files + churn\n", effortBadge(effortSize(files, adds+dels)))
+	}
+	lvl := truncationLevel(stats)
+	fmt.Fprintf(b, "- **Context** %s · %s\n", contextBadge(lvl), contextNote(lvl))
 	b.WriteString("\n</details>\n")
+}
+
+// effortBadge renders the S/M/L/XL effort bucket as a color-graded shields badge
+// (green to red). The bucket is a fixed enum, safe in the badge URL.
+func effortBadge(size string) string {
+	color := map[string]string{"S": "brightgreen", "M": "blue", "L": "orange", "XL": "red"}[size]
+	if color == "" {
+		color = "lightgrey"
+	}
+	return fmt.Sprintf("<sub><sub>![%s](https://img.shields.io/badge/effort-%s-%s?style=flat)</sub></sub>", size, size, color)
+}
+
+// contextBadge renders the diff-context level (full vs truncated) as a shields badge:
+// green when the model saw the whole diff, yellow when it was truncated.
+func contextBadge(level string) string {
+	color := "yellow"
+	if level == "full" {
+		color = "brightgreen"
+	}
+	return fmt.Sprintf("<sub><sub>![%s](https://img.shields.io/badge/context-%s-%s?style=flat)</sub></sub>", level, level, color)
+}
+
+// contextNote explains the context level in one line.
+func contextNote(level string) string {
+	if level == "full" {
+		return "the model saw the complete diff"
+	}
+	return "the diff was truncated to fit the model context"
 }
 
 // diffStats sums the changed-file count and total insertions/deletions, skipping

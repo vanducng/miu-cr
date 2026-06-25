@@ -25,6 +25,9 @@ type statefulClient struct {
 func (c *statefulClient) GetPR(stdctx.Context, string, string, int) (*gh.PullRequest, error) {
 	return &gh.PullRequest{Head: &gh.PullRequestBranch{SHA: gh.Ptr("headsha")}}, nil
 }
+func (c *statefulClient) GetCommit(stdctx.Context, string, string, string) (*gh.Commit, error) {
+	return nil, nil
+}
 
 func (c *statefulClient) ListReviews(stdctx.Context, string, string, int, *gh.ListOptions) ([]*gh.PullRequestReview, *gh.Response, error) {
 	return c.reviews, &gh.Response{}, nil
@@ -161,7 +164,7 @@ func TestRenderSummaryShape(t *testing.T) {
 	// zero-count identity line (no "Reviews (" prefix), the runs token seeded to 1,
 	// the collapsed internals bullets (Context + files-reviewed fallback, no diffs),
 	// fork note, footer SHA.
-	for _, want := range []string{shieldsCount("P1", 2, "orange"), shieldsCount("P3", 1, "blue"), "4 findings", "Last reviewed commit: `deadbeef`", runsCountToken(1), "<summary>Agent handoff & review internals</summary>", "- Context: hunks", "- Files: **3**", "fork"} {
+	for _, want := range []string{shieldsCount("P1", 2, "orange"), shieldsCount("P3", 1, "blue"), "4 findings", "Last reviewed commit: `deadbeef`", runsCountToken(1), "<summary>Agent handoff & review internals</summary>", "context-hunks", "**Files** `3`", "fork"} {
 		if !strings.Contains(out, want) {
 			t.Errorf("summary missing %q:\n%s", want, out)
 		}
@@ -180,7 +183,7 @@ func TestRenderSummaryNoFindings(t *testing.T) {
 	if !strings.Contains(out, "no_issues_found-brightgreen") {
 		t.Errorf("want the no-findings header:\n%s", out)
 	}
-	if !strings.Contains(out, "- Context: full") {
+	if !strings.Contains(out, "context-full") {
 		t.Errorf("want default truncation full:\n%s", out)
 	}
 }
