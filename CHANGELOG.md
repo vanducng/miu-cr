@@ -55,6 +55,13 @@ comment with a new marker); subsequent re-runs dedupe normally. On a
 first M5 review **manually** (or off-hours) to absorb the one-time re-post before
 the next scheduled run.
 
+## [0.38.1](https://github.com/vanducng/miu-cr/compare/v0.38.0...v0.38.1) (2026-06-25)
+
+
+### Bug Fixes
+
+* **docs:** quote frontmatter descriptions containing colons so Astro parses them ([bf04bd0](https://github.com/vanducng/miu-cr/commit/bf04bd092f64c4f775eea296e393acb3dba59f80))
+
 ## [0.38.0](https://github.com/vanducng/miu-cr/compare/v0.37.0...v0.38.0) (2026-06-25)
 
 
