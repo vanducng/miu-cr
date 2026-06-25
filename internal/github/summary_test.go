@@ -98,7 +98,7 @@ func presentationFixture() (*PRInfo, []diff.Diff, []engine.Finding) {
 func TestRenderSummaryFullChangesTable(t *testing.T) {
 	info, diffs, findings := presentationFixture()
 	out := RenderSummaryFull(info, findings, nil, 0, nil, nil, SummaryOptions{Diffs: diffs})
-	if !strings.Contains(out, "<summary>Changed files (2)</summary>") {
+	if !strings.Contains(out, "<summary>Important Files Changed (2)</summary>") {
 		t.Fatalf("want a changes table for 2 changed files (deleted excluded):\n%s", out)
 	}
 	if !strings.Contains(out, "| +10/-4 | 1 high, 1 low |") {
@@ -112,11 +112,52 @@ func TestRenderSummaryFullChangesTable(t *testing.T) {
 	}
 }
 
-func TestRenderSummaryFullEffortBadge(t *testing.T) {
+func TestRenderSummaryFullMetaQuote(t *testing.T) {
 	info, diffs, findings := presentationFixture()
 	out := RenderSummaryFull(info, findings, nil, 0, nil, nil, SummaryOptions{Diffs: diffs})
-	if !strings.Contains(out, "Review effort: **S** · 2 file(s) · +12/-4 · max severity high") {
-		t.Fatalf("want a deterministic effort badge:\n%s", out)
+	if !strings.Contains(out, "> 2 files · +12/−4 · effort S · context full") {
+		t.Fatalf("want a compact metadata quote line:\n%s", out)
+	}
+}
+
+func TestRenderSummaryHeaderCountsHighFirst(t *testing.T) {
+	info := &PRInfo{HeadSHA: "abc123"}
+	findings := []engine.Finding{
+		{Severity: "low"}, {Severity: "high"}, {Severity: "high"}, {Severity: "medium"},
+	}
+	out := RenderSummaryFull(info, findings, nil, 0, nil, nil, SummaryOptions{})
+	// High-first chips, then the finding count.
+	if !strings.Contains(out, "## Code Review · 🟠 2 · 🟡 1 · 🔵 1  (4 findings)") {
+		t.Fatalf("want emoji-severity counts (high-first) + finding count:\n%s", out)
+	}
+	// The severity histogram list is gone from the body.
+	if strings.Contains(out, "- high: 2") {
+		t.Fatalf("the old per-severity list must be gone:\n%s", out)
+	}
+}
+
+func TestRenderSummaryHeaderNoFindings(t *testing.T) {
+	out := RenderSummaryFull(&PRInfo{HeadSHA: "h"}, nil, nil, 0, nil, nil, SummaryOptions{})
+	if !strings.Contains(out, "## Code Review · ✅ no findings") {
+		t.Fatalf("zero findings must render the no-findings header:\n%s", out)
+	}
+	if strings.Contains(out, "(0 finding") {
+		t.Fatalf("no-findings header must not append a count:\n%s", out)
+	}
+}
+
+func TestRenderSummaryFooterReviewedCommit(t *testing.T) {
+	out := RenderSummaryFull(&PRInfo{HeadSHA: "deadbeef"}, nil, nil, 0, nil, nil, SummaryOptions{})
+	if !strings.Contains(out, "<sub>Reviewed commit `deadbeef` · Posted by miu-cr</sub>") {
+		t.Fatalf("want the per-commit attribution footer:\n%s", out)
+	}
+	// The old upsert footer line must be gone.
+	if strings.Contains(out, "Re-runs edit this summary") {
+		t.Fatalf("the old upsert footer must be gone:\n%s", out)
+	}
+	// Head/files/context no longer render as a bulleted list.
+	if strings.Contains(out, "- Head: `") || strings.Contains(out, "- Files reviewed:") {
+		t.Fatalf("metadata must move to the quote/footer, not a bullet list:\n%s", out)
 	}
 }
 
@@ -139,15 +180,6 @@ func TestEffortSizeBuckets(t *testing.T) {
 		if got := effortSize(tt.files, tt.churn); got != tt.want {
 			t.Errorf("effortSize(%d, %d) = %q, want %q", tt.files, tt.churn, got, tt.want)
 		}
-	}
-}
-
-func TestMaxSeverityNoneWhenEmpty(t *testing.T) {
-	if got := maxSeverity(nil); got != "none" {
-		t.Fatalf("no findings must yield max severity none, got %q", got)
-	}
-	if got := maxSeverity([]engine.Finding{{Severity: "medium"}, {Severity: "critical"}}); got != "critical" {
-		t.Fatalf("want the highest severity, got %q", got)
 	}
 }
 
@@ -183,10 +215,10 @@ func TestRenderSummaryFullHandoffSkippedWithoutReviewID(t *testing.T) {
 func TestRenderSummaryFullEmptyFindingsStillClean(t *testing.T) {
 	info, diffs, _ := presentationFixture()
 	out := RenderSummaryFull(info, nil, nil, 0, nil, nil, SummaryOptions{Diffs: diffs, ReviewID: "rev_x"})
-	if !strings.Contains(out, "No findings.") {
+	if !strings.Contains(out, "## Code Review · ✅ no findings") {
 		t.Fatalf("empty-findings review must still render a clean summary:\n%s", out)
 	}
-	if !strings.Contains(out, "Changed files (2)") || !strings.Contains(out, "Hand off to an agent") {
+	if !strings.Contains(out, "Important Files Changed (2)") || !strings.Contains(out, "Hand off to an agent") {
 		t.Fatalf("blocks must still render with zero findings:\n%s", out)
 	}
 }
@@ -200,7 +232,7 @@ func TestRenderSummaryFullDegradesWithoutDiffs(t *testing.T) {
 	if full != legacy {
 		t.Fatalf("nil diffs/empty id must equal the legacy body:\n--full--\n%s\n--legacy--\n%s", full, legacy)
 	}
-	if strings.Contains(full, "Changed files") || strings.Contains(full, "Review effort") || strings.Contains(full, "Hand off") {
+	if strings.Contains(full, "Important Files Changed") || strings.Contains(full, "Review effort") || strings.Contains(full, "Hand off") {
 		t.Fatalf("no diffs/id must emit none of the new blocks:\n%s", full)
 	}
 }
@@ -221,27 +253,41 @@ func TestRenderSummaryFullWalkthrough(t *testing.T) {
 	info, diffs, findings := presentationFixture()
 	out := RenderSummaryFull(info, findings, nil, 0, nil, nil, SummaryOptions{
 		Diffs: diffs, ReviewID: "rev_x", Walkthrough: "This PR refactors the parser and adds a cache."})
-	if !strings.Contains(out, "## Walkthrough") {
-		t.Fatalf("want a leading walkthrough section:\n%s", out)
-	}
 	if !strings.Contains(out, "This PR refactors the parser and adds a cache.") {
-		t.Fatalf("want the walkthrough text:\n%s", out)
+		t.Fatalf("want the walkthrough text (lead prose):\n%s", out)
+	}
+	if strings.Contains(out, "### Walkthrough") {
+		t.Fatalf("walkthrough must be lead prose, NOT a Walkthrough heading:\n%s", out)
 	}
 	// Walkthrough leads the body, before the changes table.
-	if strings.Index(out, "## Walkthrough") > strings.Index(out, "Changed files") {
+	if strings.Index(out, "This PR refactors the parser") > strings.Index(out, "Important Files Changed") {
 		t.Fatalf("walkthrough must lead the changes table:\n%s", out)
+	}
+}
+
+func TestRenderSummaryFullWalkthroughBullets(t *testing.T) {
+	info, diffs, findings := presentationFixture()
+	out := RenderSummaryFull(info, findings, nil, 0, nil, nil, SummaryOptions{
+		Diffs: diffs, Walkthrough: "- adds a cache\n- guards a nil deref\n- renames the parser"})
+	if !strings.Contains(out, "- adds a cache\n- guards a nil deref\n- renames the parser") {
+		t.Fatalf("want the bullet walkthrough (no heading) with newlines preserved:\n%s", out)
+	}
+	if strings.Contains(out, "### Walkthrough") {
+		t.Fatalf("bullets must render without a Walkthrough heading:\n%s", out)
 	}
 }
 
 func TestRenderSummaryFullWalkthroughOmittedWhenEmpty(t *testing.T) {
 	info, diffs, findings := presentationFixture()
-	withWT := RenderSummaryFull(info, findings, nil, 0, nil, nil, SummaryOptions{Diffs: diffs, ReviewID: "rev_x"})
-	if strings.Contains(withWT, "## Walkthrough") {
-		t.Fatalf("empty walkthrough must omit the section:\n%s", withWT)
+	const wt = "DISTINCTIVE-WALKTHROUGH-LINE"
+	withWT := RenderSummaryFull(info, findings, nil, 0, nil, nil, SummaryOptions{Diffs: diffs, ReviewID: "rev_x", Walkthrough: wt})
+	if !strings.Contains(withWT, wt) {
+		t.Fatalf("a present walkthrough must render:\n%s", withWT)
 	}
-	// Whitespace-only walkthrough also collapses to empty (no section).
-	if strings.Contains(RenderSummaryFull(info, findings, nil, 0, nil, nil, SummaryOptions{Diffs: diffs, ReviewID: "rev_x", Walkthrough: "   \n  "}), "## Walkthrough") {
-		t.Fatalf("whitespace-only walkthrough must omit the section")
+	empty := RenderSummaryFull(info, findings, nil, 0, nil, nil, SummaryOptions{Diffs: diffs, ReviewID: "rev_x"})
+	ws := RenderSummaryFull(info, findings, nil, 0, nil, nil, SummaryOptions{Diffs: diffs, ReviewID: "rev_x", Walkthrough: "   \n  "})
+	if strings.Contains(empty, wt) || empty != ws {
+		t.Fatalf("empty/whitespace walkthrough must render nothing, identically:\nempty=%s\nws=%s", empty, ws)
 	}
 }
 
@@ -249,7 +295,7 @@ func TestRenderSummaryFullPerFileDigest(t *testing.T) {
 	info, diffs, findings := presentationFixture()
 	summaries := map[string]string{"pkg/a.go": "adds a leak guard"}
 	out := RenderSummaryFull(info, findings, nil, 0, nil, nil, SummaryOptions{Diffs: diffs, FileSummaries: summaries})
-	if !strings.Contains(out, "| File | Δ | Findings | Summary |") {
+	if !strings.Contains(out, "| File | Δ | Findings | Overview |") {
 		t.Fatalf("want a Summary column header when any file has a digest:\n%s", out)
 	}
 	if !strings.Contains(out, "adds a leak guard") {
@@ -265,7 +311,7 @@ func TestRenderSummaryFullNoSummaryColumnWhenAbsent(t *testing.T) {
 	info, diffs, findings := presentationFixture()
 	// No file_summaries → the table keeps the legacy 3-column layout byte-for-byte.
 	out := RenderSummaryFull(info, findings, nil, 0, nil, nil, SummaryOptions{Diffs: diffs})
-	if strings.Contains(out, "Summary |") {
+	if strings.Contains(out, "Overview |") {
 		t.Fatalf("no digests must keep the 3-column table:\n%s", out)
 	}
 	if !strings.Contains(out, "| File | Δ | Findings |") {
@@ -273,31 +319,47 @@ func TestRenderSummaryFullNoSummaryColumnWhenAbsent(t *testing.T) {
 	}
 	// A summary map with only an entry for a non-changed file adds no column.
 	out2 := RenderSummaryFull(info, findings, nil, 0, nil, nil, SummaryOptions{Diffs: diffs, FileSummaries: map[string]string{"other.go": "x"}})
-	if strings.Contains(out2, "Summary |") {
+	if strings.Contains(out2, "Overview |") {
 		t.Fatalf("a digest only for an unchanged file must add no column:\n%s", out2)
 	}
 }
 
-func TestRenderSummaryFullEscapesUntrustedText(t *testing.T) {
+func TestRenderSummaryFullEscapesUntrustedWalkthrough(t *testing.T) {
+	info, diffs, findings := presentationFixture()
+	// Bullets with HTML/comment + fence breakout vectors; newlines must survive.
+	walkthrough := "- adds a guard\n- closes </details><script>alert(1)</script>\n- ```fence``` should not open a block"
+	out := RenderSummaryFull(info, findings, nil, 0, nil, nil, SummaryOptions{
+		Diffs: diffs, ReviewID: "rev_x", Walkthrough: walkthrough})
+	if strings.Contains(out, "<script>") || strings.Contains(out, "</script>") {
+		t.Fatalf("walkthrough HTML breakout must be neutralized:\n%s", out)
+	}
+	if !strings.Contains(out, "&lt;/details&gt;&lt;script&gt;") {
+		t.Fatalf("want the walkthrough's </details><script> HTML-escaped:\n%s", out)
+	}
+	// The triple-backtick fence must be neutralized (mdProse escapes backticks)
+	// so it can't open a code block that swallows the rest of the body.
+	if strings.Contains(out, "```fence```") {
+		t.Fatalf("walkthrough fence must be neutralized:\n%s", out)
+	}
+	// Bullet newlines survive (mdProse preserves them; mdInline would collapse).
+	if !strings.Contains(out, "- adds a guard\n") {
+		t.Fatalf("walkthrough bullet newlines must survive:\n%s", out)
+	}
+}
+
+func TestRenderSummaryFullEscapesUntrustedTableCell(t *testing.T) {
 	info, diffs, findings := presentationFixture()
 	breakout := "# Injected Heading </details>**bad**|col`x`[y](z)<script>"
 	out := RenderSummaryFull(info, findings, nil, 0, nil, nil, SummaryOptions{
-		Diffs: diffs, ReviewID: "rev_x", Walkthrough: breakout, FileSummaries: map[string]string{"pkg/a.go": breakout}})
+		Diffs: diffs, ReviewID: "rev_x", FileSummaries: map[string]string{"pkg/a.go": breakout}})
 	if strings.Contains(out, "<script>") {
-		t.Fatalf("untrusted text must be HTML-escaped, found raw <script>:\n%s", out)
-	}
-	if strings.Contains(out, "</details>**bad**") {
-		t.Fatalf("untrusted text must not break out of the block:\n%s", out)
+		t.Fatalf("table cell must be HTML-escaped, found raw <script>:\n%s", out)
 	}
 	if !strings.Contains(out, "&lt;script&gt;") {
-		t.Fatalf("want HTML-escaped angle brackets:\n%s", out)
-	}
-	// A leading '#' must not inject a Markdown heading at the start of a line.
-	if strings.Contains(out, "\n# Injected Heading") {
-		t.Fatalf("untrusted text must not inject a heading:\n%s", out)
+		t.Fatalf("want HTML-escaped angle brackets in the cell:\n%s", out)
 	}
 	if !strings.Contains(out, "\\# Injected Heading") {
-		t.Fatalf("want the leading '#' backslash-escaped:\n%s", out)
+		t.Fatalf("want the table cell '#' backslash-escaped (mdInline):\n%s", out)
 	}
 }
 
@@ -359,5 +421,25 @@ func TestMdProseEscapesBreakoutKeepsFormatting(t *testing.T) {
 	}
 	if !strings.Contains(out, "[link](u)") { // brackets/links stay readable
 		t.Fatalf("intentional Markdown was over-escaped: %q", out)
+	}
+}
+
+func TestRenderSummaryConfidence(t *testing.T) {
+	info, diffs, findings := presentationFixture() // findings include a high
+	// model-emitted confidence wins + the reason renders.
+	out := RenderSummaryFull(info, findings, nil, 0, nil, nil, SummaryOptions{Diffs: diffs, Confidence: 4, ConfidenceReason: "localized changes, well tested"})
+	if !strings.Contains(out, "**Confidence: 4/5**") || !strings.Contains(out, "localized changes, well tested") {
+		t.Fatalf("model confidence + reason must render:\n%s", out)
+	}
+	// derived fallback (Confidence 0): no findings -> 5/5.
+	clean := RenderSummaryFull(info, nil, nil, 0, nil, nil, SummaryOptions{Diffs: diffs})
+	if !strings.Contains(clean, "**Confidence: 5/5**") {
+		t.Fatalf("no findings must derive 5/5:\n%s", clean)
+	}
+	// derived fallback with a critical -> below 5.
+	crit := []engine.Finding{{Severity: "critical", Category: "security", Rationale: "x"}}
+	cout := RenderSummaryFull(info, crit, nil, 0, nil, nil, SummaryOptions{Diffs: diffs})
+	if strings.Contains(cout, "Confidence: 5/5") {
+		t.Fatalf("a critical finding must lower the derived confidence below 5/5:\n%s", cout)
 	}
 }

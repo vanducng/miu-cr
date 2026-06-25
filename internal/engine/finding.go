@@ -25,16 +25,21 @@ type ReviewOutput struct {
 	// Diagram is the optional mermaid change diagram (opt-in via --walkthrough-diagram).
 	// Empty unless the model emitted one on a diagram-requested pass.
 	Diagram string
+	// Confidence (1-5) is the model's confidence the change is safe to merge; 0 = not emitted.
+	Confidence       int
+	ConfidenceReason string
 }
 
 // ReviewResult is the engine output: the persisted id (empty when no Store is
 // wired), anchored findings, plus run stats. Walkthrough/FileSummaries ride the
 // same review pass (additive; empty when the model omits them).
 type ReviewResult struct {
-	ID            string            `json:"id,omitempty"`
-	Findings      []Finding         `json:"findings"`
-	Walkthrough   string            `json:"walkthrough,omitempty"`
-	FileSummaries map[string]string `json:"file_summaries,omitempty"`
-	Diagram       string            `json:"diagram,omitempty"`
-	Stats         map[string]any    `json:"stats"`
+	ID               string            `json:"id,omitempty"`
+	Findings         []Finding         `json:"findings"`
+	Walkthrough      string            `json:"walkthrough,omitempty"`
+	FileSummaries    map[string]string `json:"file_summaries,omitempty"`
+	Diagram          string            `json:"diagram,omitempty"`
+	Confidence       int               `json:"confidence,omitempty"`
+	ConfidenceReason string            `json:"confidence_reason,omitempty"`
+	Stats            map[string]any    `json:"stats"`
 }

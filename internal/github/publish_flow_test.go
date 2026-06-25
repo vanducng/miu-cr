@@ -11,17 +11,15 @@ import (
 	"github.com/vanducng/miu-cr/internal/engine/diff"
 )
 
-// statefulClient persists posted inline review comments and issue comments so a
-// second run sees the first run's state — exercising cross-run dedupe (inline
-// fingerprint skip) and sentinel summary upsert (create then edit).
+// statefulClient persists posted inline review comments and reviews so a second
+// run sees the first run's state — exercising cross-run inline-fingerprint dedupe
+// and the Codex per-commit review body.
 type statefulClient struct {
 	reviewComments []*gh.PullRequestComment
-	issueComments  []*gh.IssueComment
+	reviews        []*gh.PullRequestReview
 	nextID         int64
 
 	createReviewN int
-	createIssueN  int
-	editN         int
 }
 
 func (c *statefulClient) GetPR(stdctx.Context, string, string, int) (*gh.PullRequest, error) {
@@ -29,7 +27,7 @@ func (c *statefulClient) GetPR(stdctx.Context, string, string, int) (*gh.PullReq
 }
 
 func (c *statefulClient) ListReviews(stdctx.Context, string, string, int, *gh.ListOptions) ([]*gh.PullRequestReview, *gh.Response, error) {
-	return nil, &gh.Response{}, nil
+	return c.reviews, &gh.Response{}, nil
 }
 func (c *statefulClient) ListFiles(stdctx.Context, string, string, int, *gh.ListOptions) ([]*gh.CommitFile, *gh.Response, error) {
 	return nil, &gh.Response{}, nil
@@ -44,6 +42,10 @@ func (c *statefulClient) CreateReview(_ stdctx.Context, _, _ string, _ int, r *g
 			Body: gh.Ptr(dc.GetBody()),
 		})
 	}
+	c.reviews = append(c.reviews, &gh.PullRequestReview{
+		CommitID: r.CommitID,
+		Body:     r.Body,
+	})
 	return &gh.PullRequestReview{}, nil
 }
 
@@ -52,25 +54,15 @@ func (c *statefulClient) ListReviewComments(_ stdctx.Context, _, _ string, _ int
 }
 
 func (c *statefulClient) ListIssueComments(_ stdctx.Context, _, _ string, _ int, _ *gh.IssueListCommentsOptions) ([]*gh.IssueComment, *gh.Response, error) {
-	return c.issueComments, &gh.Response{}, nil
+	return nil, &gh.Response{}, nil
 }
 
-func (c *statefulClient) CreateIssueComment(_ stdctx.Context, _, _ string, _ int, com *gh.IssueComment) (*gh.IssueComment, error) {
-	c.createIssueN++
-	c.nextID++
-	saved := &gh.IssueComment{ID: gh.Ptr(c.nextID), Body: gh.Ptr(com.GetBody())}
-	c.issueComments = append(c.issueComments, saved)
-	return saved, nil
+func (c *statefulClient) CreateIssueComment(stdctx.Context, string, string, int, *gh.IssueComment) (*gh.IssueComment, error) {
+	return nil, nil
 }
 
-func (c *statefulClient) EditIssueComment(_ stdctx.Context, _, _ string, id int64, com *gh.IssueComment) (*gh.IssueComment, error) {
-	c.editN++
-	for _, ic := range c.issueComments {
-		if ic.GetID() == id {
-			ic.Body = gh.Ptr(com.GetBody())
-		}
-	}
-	return com, nil
+func (c *statefulClient) EditIssueComment(stdctx.Context, string, string, int64, *gh.IssueComment) (*gh.IssueComment, error) {
+	return nil, nil
 }
 
 func (c *statefulClient) CreateCheckRun(stdctx.Context, string, string, gh.CreateCheckRunOptions) (*gh.CheckRun, error) {
@@ -83,25 +75,29 @@ func (c *statefulClient) ListCheckRunsForRef(stdctx.Context, string, string, str
 	return &gh.ListCheckRunsResults{}, &gh.Response{}, nil
 }
 
-// runPublishWithDiffs mirrors wire.publishReview's order (existing fps → inline
-// → summary last) without the engine, so the flow's cross-run behavior is
-// exercised here.
-func runPublishWithDiffs(t *testing.T, c Client, info *PRInfo, findings []engine.Finding, diffs []diff.Diff) (int, string) {
+// runPublishWithDiffs mirrors wire.publishReview's Codex flow (existing fps →
+// inline + summary as the review BODY) without the engine, so the cross-run
+// behavior is exercised here. It returns inline-posted count + whether a body
+// was set on the submitted review.
+func runPublishWithDiffs(t *testing.T, c Client, info *PRInfo, findings []engine.Finding, diffs []diff.Diff) (int, bool) {
 	t.Helper()
 	ctx := stdctx.Background()
 	existing, err := ExistingFingerprints(ctx, c, info)
 	if err != nil {
 		t.Fatalf("ExistingFingerprints: %v", err)
 	}
-	res, err := PostReview(ctx, c, info, findings, diffs, "", existing, PostReviewOptions{})
+	summaryFn := func(omitted int, _ []engine.Finding) string {
+		return RenderSummary(info, findings, nil, omitted)
+	}
+	res, err := PostReview(ctx, c, info, findings, diffs, summaryFn, existing, PostReviewOptions{})
 	if err != nil {
 		t.Fatalf("PostReview: %v", err)
 	}
-	action, err := UpsertSummaryComment(ctx, c, info, RenderSummary(info, findings, nil, res.Omitted))
-	if err != nil {
-		t.Fatalf("UpsertSummaryComment: %v", err)
+	body := ""
+	if sc, ok := c.(*statefulClient); ok && len(sc.reviews) > 0 {
+		body = sc.reviews[len(sc.reviews)-1].GetBody()
 	}
-	return res.Posted, action
+	return res.Posted, body != ""
 }
 
 func TestPublishFlowPostThenRerun(t *testing.T) {
@@ -114,41 +110,35 @@ func TestPublishFlowPostThenRerun(t *testing.T) {
 	}
 	diffs := sampleDiffs()
 
-	// First run: 2 in-hunk inline + a created summary.
-	posted, action := runPublishWithDiffs(t, c, info, findings, diffs)
+	// First run: 2 in-hunk inline nested under a review carrying the summary body.
+	posted, hasBody := runPublishWithDiffs(t, c, info, findings, diffs)
 	if posted != 2 {
 		t.Fatalf("first run: want 2 inline posted, got %d", posted)
 	}
-	if action != "created" {
-		t.Fatalf("first run: want summary created, got %q", action)
+	if !hasBody {
+		t.Fatalf("first run: review must carry the summary body")
 	}
-	if c.createReviewN != 1 || c.createIssueN != 1 || c.editN != 0 {
-		t.Fatalf("first run calls: review=%d create=%d edit=%d", c.createReviewN, c.createIssueN, c.editN)
+	if c.createReviewN != 1 {
+		t.Fatalf("first run: want 1 CreateReview, got %d", c.createReviewN)
 	}
 
-	// Second run: same findings → 0 new inline (fp skip), summary edited.
-	posted, action = runPublishWithDiffs(t, c, info, findings, diffs)
+	// Second run (same SHA, no wire-layer skip here): inline dedupe still drops the
+	// 2 already-posted comments; the review body carries the summary again. The
+	// duplicate-review guard lives at the wire layer (AlreadyPostedAtSHA), not here.
+	posted, hasBody = runPublishWithDiffs(t, c, info, findings, diffs)
 	if posted != 0 {
 		t.Fatalf("re-run: want 0 new inline (dedupe), got %d", posted)
 	}
-	if action != "edited" {
-		t.Fatalf("re-run: want summary edited, got %q", action)
-	}
-	if c.createIssueN != 1 {
-		t.Errorf("re-run must not create a second summary, create=%d", c.createIssueN)
-	}
-	if c.editN != 1 {
-		t.Errorf("re-run must edit the summary once, edit=%d", c.editN)
+	if !hasBody {
+		t.Fatalf("re-run: review still carries the summary body")
 	}
 	if len(c.reviewComments) != 2 {
 		t.Errorf("re-run must not duplicate inline comments, have %d", len(c.reviewComments))
 	}
-	// The final summary body must carry exactly one sentinel (no double-sentinel).
-	if len(c.issueComments) != 1 {
-		t.Fatalf("want exactly one summary issue comment, got %d", len(c.issueComments))
-	}
-	if got := strings.Count(c.issueComments[0].GetBody(), SummarySentinel); got != 1 {
-		t.Errorf("final summary must carry exactly one sentinel, got %d:\n%s", got, c.issueComments[0].GetBody())
+	// The submitted review body carries exactly one marker.
+	last := c.reviews[len(c.reviews)-1].GetBody()
+	if got := strings.Count(last, ReviewMarker); got != 1 {
+		t.Errorf("review body must carry exactly one marker, got %d:\n%s", got, last)
 	}
 }
 
@@ -160,13 +150,16 @@ func TestRenderSummaryShape(t *testing.T) {
 	stats := map[string]any{"truncation_level": "hunks", "files_reviewed": float64(3)}
 	out := RenderSummary(info, findings, stats, 0)
 
-	if strings.Contains(out, SummarySentinel) {
-		t.Fatalf("summary body must NOT include the sentinel (UpsertSummaryComment owns it): %q", out[:min(40, len(out))])
+	if !strings.HasPrefix(out, ReviewMarker) {
+		t.Fatalf("summary body must lead with the review marker: %q", out[:min(40, len(out))])
 	}
-	if !strings.HasPrefix(out, "## Code Review") {
-		t.Fatalf("summary must start with the heading: %q", out[:min(40, len(out))])
+	if !strings.Contains(out, "## Code Review") {
+		t.Fatalf("summary must contain the heading:\n%s", out)
 	}
-	for _, want := range []string{"high: 2", "low: 1", "info: 1", "deadbeef", "hunks", "Files reviewed: 3", "fork"} {
+	// Header chips high-first (empty severity folds to ⚪), finding count, the
+	// reviewed-commit lead-in, quote-line context + files-reviewed fallback (no
+	// diffs), fork note, footer SHA.
+	for _, want := range []string{"🟠 2 · 🔵 1 · ⚪ 1", "(4 findings)", "Reviewed commit: `deadbeef`", "context hunks", "3 files", "fork"} {
 		if !strings.Contains(out, want) {
 			t.Errorf("summary missing %q:\n%s", want, out)
 		}
@@ -176,13 +169,13 @@ func TestRenderSummaryShape(t *testing.T) {
 func TestRenderSummaryNoFindings(t *testing.T) {
 	info := &PRInfo{HeadSHA: "abc"}
 	out := RenderSummary(info, nil, nil, 0)
-	if strings.Contains(out, SummarySentinel) {
-		t.Fatal("body must not contain the sentinel")
+	if !strings.HasPrefix(out, ReviewMarker) {
+		t.Fatal("body must lead with the review marker")
 	}
-	if !strings.Contains(out, "No findings") {
-		t.Errorf("want No findings:\n%s", out)
+	if !strings.Contains(out, "✅ no findings") {
+		t.Errorf("want the no-findings header:\n%s", out)
 	}
-	if !strings.Contains(out, "full") {
+	if !strings.Contains(out, "context full") {
 		t.Errorf("want default truncation full:\n%s", out)
 	}
 }

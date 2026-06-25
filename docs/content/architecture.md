@@ -84,7 +84,7 @@ flowchart TD
     H --> I{"Worst severity<br/>reaches --gate?"}
     I -->|"yes"| Gate["gate status set — review exits 2"]
     I -->|"no"| Pass["gate clean"]
-    Gate --> P["Publish (--post)<br/>head-anchored inline + sentinel summary"]
+    Gate --> P["Publish (--post)<br/>one review per commit: summary body + nested inline"]
     Pass --> P
 ```
 
@@ -100,8 +100,10 @@ of `rationale + suggested_patch`, then the gate ranks severities
 (`info < low < medium < high < critical`); an unrecognized gate fails loudly so a
 misconfigured run never silently passes.
 
-Publishing is head-SHA-anchored inline comments plus **one idempotent sentinel
-summary**. See [How it works](/how-it-works/) for the per-stage detail.
+Publishing is **one head-SHA-anchored review per commit** (Codex-style): the
+summary is the review body, inline comments nested under it. A same-commit re-run
+is skipped (reviews aren't editable); a new commit gets a fresh review. See
+[How it works](/how-it-works/) for the per-stage detail.
 
 ### Project-rules injection seam
 

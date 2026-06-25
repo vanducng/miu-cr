@@ -22,10 +22,10 @@ import (
 	"github.com/vanducng/miu-cr/internal/engine/gitcmd"
 )
 
-// SummarySentinel is the hidden HTML marker on the first line of the summary
-// comment body; its presence in an existing issue comment makes the upsert edit
-// (not duplicate) our own comment.
-const SummarySentinel = "<!-- miu-cr-review -->"
+// ReviewMarker is the hidden HTML marker on the first line of our review body; its
+// presence in a PR review identifies the review as miucr-authored so a same-SHA
+// re-run can detect we already posted (alreadyPostedAtSHA) and skip.
+const ReviewMarker = "<!-- miu-cr-review -->"
 
 const fpPrefix = "miucr:fp="
 
@@ -414,7 +414,10 @@ type PostedFinding struct {
 // (the bot is the author) or approve_rejected (any other 422: stale head, branch
 // protection, …) — never an error. A non-422 API failure surfaces as an error and
 // never reports a phantom approval.
-func PostReview(ctx stdctx.Context, client Client, info *PRInfo, findings []engine.Finding, diffs []diff.Diff, summary string, existingFPs map[string]bool, opts PostReviewOptions) (PostReviewResult, error) {
+// summaryFn renders the review body given the inline-omitted set (known only after
+// the cap is applied), so the body's overflow block lists the actually-omitted
+// findings. A nil summaryFn means no body (e.g. --mode checks / approve-only paths).
+func PostReview(ctx stdctx.Context, client Client, info *PRInfo, findings []engine.Finding, diffs []diff.Diff, summaryFn func(omitted int, omittedFindings []engine.Finding) string, existingFPs map[string]bool, opts PostReviewOptions) (PostReviewResult, error) {
 	newFileContent := make(map[string]string, len(diffs))
 	for i := range diffs {
 		if diffs[i].NewPath != "" {
@@ -441,6 +444,11 @@ func PostReview(ctx stdctx.Context, client Client, info *PRInfo, findings []engi
 		omitted = len(toPost) - maxInlineComments
 		omittedFindings = append(omittedFindings, toPost[maxInlineComments:]...)
 		toPost = toPost[:maxInlineComments]
+	}
+
+	summary := ""
+	if summaryFn != nil {
+		summary = summaryFn(omitted, omittedFindings)
 	}
 
 	hunkSets := hunkRightSets(diffs)
@@ -678,16 +686,13 @@ func escapeWorkflowProperty(s string) string {
 // single-line finding (EndLine<=Line) ignores isRange.
 func commentBody(info *PRInfo, f engine.Finding, newFileContent string, opts PostReviewOptions, isRange bool) (string, bool) {
 	var b strings.Builder
-	sev := strings.ToUpper(f.Severity)
-	if sev == "" {
-		sev = "NOTE"
-	}
+	badge := priorityBadge(f.Severity)
 	cite := ruleCitation(info, f.Rule, opts.RuleCitations)
 	cat := f.Category
 	if cat != "" {
-		fmt.Fprintf(&b, "**%s** (%s)%s\n\n", sev, categoryMarkdown(cat, opts.CategoryURLs), cite)
+		fmt.Fprintf(&b, "%s · %s%s\n\n", badge, categoryMarkdown(cat, opts.CategoryURLs), cite)
 	} else {
-		fmt.Fprintf(&b, "**%s**%s\n\n", sev, cite)
+		fmt.Fprintf(&b, "%s%s\n\n", badge, cite)
 	}
 	if t := mdInline(f.Title); t != "" {
 		fmt.Fprintf(&b, "**%s**\n\n", t)
@@ -723,36 +728,22 @@ func fenceFor(s string) string {
 	return fence
 }
 
-// UpsertSummaryComment ensures exactly one sentinel-headed summary issue comment:
-// it edits ours if an existing comment carries SummarySentinel, else creates one.
-// Returns "edited" or "created".
-func UpsertSummaryComment(ctx stdctx.Context, client Client, info *PRInfo, body string) (string, error) {
-	full := SummarySentinel + "\n" + body
-
-	opts := &gh.IssueListCommentsOptions{ListOptions: gh.ListOptions{PerPage: 100}}
-	for {
-		comments, resp, err := client.ListIssueComments(ctx, info.Owner, info.Repo, info.Number, opts)
-		if err != nil {
-			return "", mapWriteError("github.list_issue_comments_failed", "listing issue comments", err)
-		}
-		for _, c := range comments {
-			if strings.Contains(c.GetBody(), SummarySentinel) {
-				if _, eerr := client.EditIssueComment(ctx, info.Owner, info.Repo, c.GetID(), &gh.IssueComment{Body: gh.Ptr(full)}); eerr != nil {
-					return "", mapWriteError("github.edit_comment_failed", "editing summary comment", eerr)
-				}
-				return "edited", nil
-			}
-		}
-		if resp == nil || resp.NextPage == 0 {
-			break
-		}
-		opts.Page = resp.NextPage
+// alreadyPostedAtSHA reports whether a miucr-authored review (its body carries
+// ReviewMarker) already exists at the current head SHA, so a same-commit re-run
+// skips rather than posting a duplicate review (GitHub reviews aren't editable).
+// Mirrors alreadyApproved: first page only (PerPage:100). A reviewed-but-unposted
+// prior leaves no such review, so it still posts.
+func AlreadyPostedAtSHA(ctx stdctx.Context, client Client, info *PRInfo) (bool, error) {
+	reviews, _, err := client.ListReviews(ctx, info.Owner, info.Repo, info.Number, &gh.ListOptions{PerPage: 100})
+	if err != nil {
+		return false, mapWriteError("github.list_reviews_failed", "listing reviews", err)
 	}
-
-	if _, err := client.CreateIssueComment(ctx, info.Owner, info.Repo, info.Number, &gh.IssueComment{Body: gh.Ptr(full)}); err != nil {
-		return "", mapWriteError("github.create_comment_failed", "creating summary comment", err)
+	for _, r := range reviews {
+		if info.HeadSHA != "" && r.GetCommitID() == info.HeadSHA && strings.Contains(r.GetBody(), ReviewMarker) {
+			return true, nil
+		}
 	}
-	return "created", nil
+	return false, nil
 }
 
 // mapWriteError maps go-github rate-limit errors to a retryable github.rate_limited

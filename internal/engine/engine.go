@@ -456,7 +456,7 @@ func (e *Engine) Review(ctx stdctx.Context, req Request) (ReviewResult, error) {
 		stats["semantic_recall"] = semanticStat
 	}
 
-	result := ReviewResult{Findings: kept, Walkthrough: out.Walkthrough, FileSummaries: out.FileSummaries, Diagram: out.Diagram, Stats: stats}
+	result := ReviewResult{Findings: kept, Walkthrough: out.Walkthrough, FileSummaries: out.FileSummaries, Diagram: out.Diagram, Confidence: out.Confidence, ConfidenceReason: out.ConfidenceReason, Stats: stats}
 
 	if e.Store != nil {
 		headSHA, _ := e.Runner.HeadSHA(ctx, req.RepoDir)

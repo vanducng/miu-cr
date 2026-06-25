@@ -171,6 +171,15 @@ func sampleDiffs() []diff.Diff {
 	return []diff.Diff{{NewPath: "p.go", Diff: sampleFileDiff}}
 }
 
+// staticSummary adapts a constant body into PostReview's summaryFn (ignores the
+// omitted set). nil/"" body → a nil summaryFn (no review body).
+func staticSummary(body string) func(int, []engine.Finding) string {
+	if body == "" {
+		return nil
+	}
+	return func(int, []engine.Finding) string { return body }
+}
+
 func TestFilterToDiffHunks(t *testing.T) {
 	diffs := sampleDiffs()
 	// new-side lines for the hunk above: 1 (context), 2 (added), 3 (added), 4 (context), 5 (context).
@@ -292,7 +301,7 @@ func TestPostReviewMinSeverityFloor(t *testing.T) {
 		{File: "p.go", Line: 2, Severity: "low", Category: "x", Rationale: "minor"},
 		{File: "p.go", Line: 3, Severity: "high", Category: "bug", Rationale: "boom"},
 	}
-	res, err := PostReview(stdctx.Background(), c, info, findings, sampleDiffs(), "summary", nil, PostReviewOptions{MinSeverity: "high"})
+	res, err := PostReview(stdctx.Background(), c, info, findings, sampleDiffs(), staticSummary("summary"), nil, PostReviewOptions{MinSeverity: "high"})
 	if err != nil {
 		t.Fatalf("PostReview: %v", err)
 	}
@@ -305,10 +314,10 @@ func TestPostReviewMinSeverityFloor(t *testing.T) {
 	if c.gotReview.Comments[0].GetLine() != 3 {
 		t.Fatalf("the high finding (line 3) must be the one posted, got line %d", c.gotReview.Comments[0].GetLine())
 	}
-	// The below-threshold finding still reaches the summary histogram.
+	// The below-threshold finding still reaches the summary header counts.
 	summary := RenderSummary(info, findings, nil, 0)
-	if !strings.Contains(summary, "low: 1") || !strings.Contains(summary, "high: 1") {
-		t.Fatalf("both findings must appear in the summary histogram:\n%s", summary)
+	if !strings.Contains(summary, "🟠 1 · 🔵 1") || !strings.Contains(summary, "(2 findings)") {
+		t.Fatalf("both findings must appear in the summary header counts:\n%s", summary)
 	}
 }
 
@@ -331,7 +340,7 @@ func TestPostReviewShape(t *testing.T) {
 		{File: "p.go", Line: 2, Severity: "high", Category: "bug", Rationale: "boom"},
 		{File: "p.go", Line: 99, Rationale: "out of hunk"}, // dropped by filter
 	}
-	res, err := PostReview(stdctx.Background(), c, info, findings, sampleDiffs(), "summary body", nil, PostReviewOptions{})
+	res, err := PostReview(stdctx.Background(), c, info, findings, sampleDiffs(), staticSummary("summary body"), nil, PostReviewOptions{})
 	if err != nil {
 		t.Fatalf("PostReview: %v", err)
 	}
@@ -375,7 +384,7 @@ func TestPostReviewSkipsExistingFingerprints(t *testing.T) {
 	f := engine.Finding{File: "p.go", Line: 2, Category: "bug", Rationale: "dup"}
 	fp := fingerprint(f)
 
-	res, err := PostReview(stdctx.Background(), c, info, []engine.Finding{f}, sampleDiffs(), "", map[string]bool{fp: true}, PostReviewOptions{})
+	res, err := PostReview(stdctx.Background(), c, info, []engine.Finding{f}, sampleDiffs(), staticSummary(""), map[string]bool{fp: true}, PostReviewOptions{})
 	if err != nil {
 		t.Fatalf("PostReview: %v", err)
 	}
@@ -406,48 +415,61 @@ func TestExistingFingerprints(t *testing.T) {
 	}
 }
 
-func TestUpsertSummaryCommentCreatesWhenAbsent(t *testing.T) {
-	c := &recordClient{
-		issueComments: [][]*gh.IssueComment{
-			{{ID: gh.Ptr(int64(1)), Body: gh.Ptr("unrelated comment")}},
-		},
+// Codex pattern: the rendered summary lands in the CreateReview BODY (with the
+// marker + reviewed-commit lead-in), and no issue comment is created.
+func TestPostReviewSummaryIsReviewBody(t *testing.T) {
+	c := &recordClient{}
+	info := &PRInfo{Owner: "o", Repo: "r", Number: 1, HeadSHA: "deadbeef"}
+	findings := []engine.Finding{{File: "p.go", Line: 2, Severity: "high", Category: "bug", Rationale: "boom"}}
+	summaryFn := func(omitted int, omittedFindings []engine.Finding) string {
+		return RenderSummary(info, findings, nil, omitted)
 	}
-	action, err := UpsertSummaryComment(stdctx.Background(), c, &PRInfo{Owner: "o", Repo: "r", Number: 1}, "the summary")
-	if err != nil {
-		t.Fatalf("UpsertSummaryComment: %v", err)
+	if _, err := PostReview(stdctx.Background(), c, info, findings, sampleDiffs(), summaryFn, nil, PostReviewOptions{}); err != nil {
+		t.Fatalf("PostReview: %v", err)
 	}
-	if action != "created" {
-		t.Fatalf("want created, got %q", action)
+	r := c.gotReview
+	if r == nil || r.GetBody() == "" {
+		t.Fatal("CreateReview must carry the summary as its body")
 	}
-	if c.createIssueN != 1 || c.editN != 0 {
-		t.Fatalf("want 1 create / 0 edit, got %d/%d", c.createIssueN, c.editN)
+	if !strings.Contains(r.GetBody(), ReviewMarker) {
+		t.Errorf("review body must contain the marker:\n%s", r.GetBody())
 	}
-	if !strings.HasPrefix(c.createdIssue.GetBody(), SummarySentinel) {
-		t.Error("created summary must start with the sentinel")
+	if !strings.Contains(r.GetBody(), "Reviewed commit: `deadbeef`") {
+		t.Errorf("review body must contain the reviewed-commit lead-in:\n%s", r.GetBody())
+	}
+	if c.createIssueN != 0 || c.editN != 0 {
+		t.Errorf("no issue comment must be created/edited (Codex pattern), got create=%d edit=%d", c.createIssueN, c.editN)
 	}
 }
 
-func TestUpsertSummaryCommentEditsWhenPresent(t *testing.T) {
-	c := &recordClient{
-		issueComments: [][]*gh.IssueComment{
-			{{ID: gh.Ptr(int64(9)), Body: gh.Ptr(SummarySentinel + "\nold body")}},
-		},
+// alreadyPostedAtSHA detects our own review (marker + matching CommitID) so a
+// same-SHA re-run can skip; a new SHA / a non-miucr review must not match.
+func TestAlreadyPostedAtSHA(t *testing.T) {
+	info := &PRInfo{Owner: "o", Repo: "r", Number: 1, HeadSHA: "abc"}
+
+	posted := &recordClient{reviews: []*gh.PullRequestReview{
+		{CommitID: gh.Ptr("abc"), Body: gh.Ptr(ReviewMarker + "\n## Code Review")},
+	}}
+	if ok, err := AlreadyPostedAtSHA(stdctx.Background(), posted, info); err != nil || !ok {
+		t.Fatalf("want posted=true for our review at the head SHA, got %v err=%v", ok, err)
 	}
-	action, err := UpsertSummaryComment(stdctx.Background(), c, &PRInfo{Owner: "o", Repo: "r", Number: 1}, "new body")
-	if err != nil {
-		t.Fatalf("UpsertSummaryComment: %v", err)
+
+	newSHA := &recordClient{reviews: []*gh.PullRequestReview{
+		{CommitID: gh.Ptr("old"), Body: gh.Ptr(ReviewMarker)},
+	}}
+	if ok, _ := AlreadyPostedAtSHA(stdctx.Background(), newSHA, info); ok {
+		t.Error("a review at a DIFFERENT SHA must not count as posted")
 	}
-	if action != "edited" {
-		t.Fatalf("want edited, got %q", action)
+
+	foreign := &recordClient{reviews: []*gh.PullRequestReview{
+		{CommitID: gh.Ptr("abc"), Body: gh.Ptr("someone else's review")},
+	}}
+	if ok, _ := AlreadyPostedAtSHA(stdctx.Background(), foreign, info); ok {
+		t.Error("a non-miucr review (no marker) must not count as posted")
 	}
-	if c.editN != 1 || c.createIssueN != 0 {
-		t.Fatalf("want 1 edit / 0 create, got %d/%d", c.editN, c.createIssueN)
-	}
-	if c.editedID != 9 {
-		t.Errorf("edited wrong comment id %d, want 9", c.editedID)
-	}
-	if !strings.HasPrefix(c.editedBody, SummarySentinel) {
-		t.Error("edited summary must keep the sentinel")
+
+	if ok, _ := AlreadyPostedAtSHA(stdctx.Background(), &recordClient{}, info); ok {
+		t.Error("no reviews → not posted")
 	}
 }
 
@@ -455,7 +477,7 @@ func TestPostReviewRateLimitMapped(t *testing.T) {
 	c := &recordClient{createReviewErr: &gh.RateLimitError{Message: "rate limited"}}
 	info := &PRInfo{Owner: "o", Repo: "r", Number: 1, HeadSHA: "h"}
 	findings := []engine.Finding{{File: "p.go", Line: 2, Rationale: "x"}}
-	_, err := PostReview(stdctx.Background(), c, info, findings, sampleDiffs(), "", nil, PostReviewOptions{})
+	_, err := PostReview(stdctx.Background(), c, info, findings, sampleDiffs(), staticSummary(""), nil, PostReviewOptions{})
 	if err == nil {
 		t.Fatal("want rate-limit error")
 	}
@@ -488,7 +510,7 @@ func TestPostReviewCapsInlineComments(t *testing.T) {
 		})
 	}
 
-	res, err := PostReview(stdctx.Background(), c, info, findings, diffs, "", nil, PostReviewOptions{})
+	res, err := PostReview(stdctx.Background(), c, info, findings, diffs, staticSummary(""), nil, PostReviewOptions{})
 	if err != nil {
 		t.Fatalf("PostReview: %v", err)
 	}
@@ -619,7 +641,7 @@ func postedBody(t *testing.T, c *recordClient) string {
 func TestSuggestEmitsNativeSuggestionForCleanSingleLine(t *testing.T) {
 	c := &recordClient{}
 	info := &PRInfo{Owner: "o", Repo: "r", Number: 1, HeadSHA: "h"}
-	_, err := PostReview(stdctx.Background(), c, info, []engine.Finding{suggestFinding()}, suggestDiff(), "", nil, PostReviewOptions{Suggest: true})
+	_, err := PostReview(stdctx.Background(), c, info, []engine.Finding{suggestFinding()}, suggestDiff(), staticSummary(""), nil, PostReviewOptions{Suggest: true})
 	if err != nil {
 		t.Fatalf("PostReview: %v", err)
 	}
@@ -632,7 +654,7 @@ func TestSuggestEmitsNativeSuggestionForCleanSingleLine(t *testing.T) {
 func TestSuggestOffNeverEmitsSuggestion(t *testing.T) {
 	c := &recordClient{}
 	info := &PRInfo{Owner: "o", Repo: "r", Number: 1, HeadSHA: "h"}
-	_, err := PostReview(stdctx.Background(), c, info, []engine.Finding{suggestFinding()}, suggestDiff(), "", nil, PostReviewOptions{})
+	_, err := PostReview(stdctx.Background(), c, info, []engine.Finding{suggestFinding()}, suggestDiff(), staticSummary(""), nil, PostReviewOptions{})
 	if err != nil {
 		t.Fatalf("PostReview: %v", err)
 	}
@@ -650,7 +672,7 @@ func TestSuggestMultiLineDegradesToHint(t *testing.T) {
 	info := &PRInfo{Owner: "o", Repo: "r", Number: 1, HeadSHA: "h"}
 	f := suggestFinding()
 	f.EndLine = 3 // multi-line range → always hint
-	_, err := PostReview(stdctx.Background(), c, info, []engine.Finding{f}, suggestDiff(), "", nil, PostReviewOptions{Suggest: true})
+	_, err := PostReview(stdctx.Background(), c, info, []engine.Finding{f}, suggestDiff(), staticSummary(""), nil, PostReviewOptions{Suggest: true})
 	if err != nil {
 		t.Fatalf("PostReview: %v", err)
 	}
@@ -667,7 +689,7 @@ func TestSuggestMultiLinePatchOnSingleAnchorEmits(t *testing.T) {
 	info := &PRInfo{Owner: "o", Repo: "r", Number: 1, HeadSHA: "h"}
 	f := suggestFinding()
 	f.SuggestedPatch = "if a == nil {\n\tvar a = 2\n}" // wrap the anchored line
-	_, err := PostReview(stdctx.Background(), c, info, []engine.Finding{f}, suggestDiff(), "", nil, PostReviewOptions{Suggest: true})
+	_, err := PostReview(stdctx.Background(), c, info, []engine.Finding{f}, suggestDiff(), staticSummary(""), nil, PostReviewOptions{Suggest: true})
 	if err != nil {
 		t.Fatalf("PostReview: %v", err)
 	}
@@ -684,7 +706,7 @@ func TestSuggestMultiLinePatchAnchorMismatchDropped(t *testing.T) {
 	f := suggestFinding()
 	f.QuotedCode = "var a = 0" // old-side anchor: != raw NewFileContent line 2 ("var a = 1")
 	f.SuggestedPatch = "if a == nil {\n\tvar a = 2\n}"
-	_, err := PostReview(stdctx.Background(), c, info, []engine.Finding{f}, suggestDiff(), "", nil, PostReviewOptions{Suggest: true})
+	_, err := PostReview(stdctx.Background(), c, info, []engine.Finding{f}, suggestDiff(), staticSummary(""), nil, PostReviewOptions{Suggest: true})
 	if err != nil {
 		t.Fatalf("PostReview: %v", err)
 	}
@@ -698,7 +720,7 @@ func TestSuggestNoOpDegradesToHint(t *testing.T) {
 	info := &PRInfo{Owner: "o", Repo: "r", Number: 1, HeadSHA: "h"}
 	f := suggestFinding()
 	f.SuggestedPatch = "var a = 1" // identical to raw line → no-op
-	_, err := PostReview(stdctx.Background(), c, info, []engine.Finding{f}, suggestDiff(), "", nil, PostReviewOptions{Suggest: true})
+	_, err := PostReview(stdctx.Background(), c, info, []engine.Finding{f}, suggestDiff(), staticSummary(""), nil, PostReviewOptions{Suggest: true})
 	if err != nil {
 		t.Fatalf("PostReview: %v", err)
 	}
@@ -733,7 +755,7 @@ func TestSuggestOperatorPrefixedPatchStillSuggests(t *testing.T) {
 		QuotedCode:     "delta",
 		SuggestedPatch: "+delta", // starts with '+' but differs from raw "delta"
 	}
-	_, err := PostReview(stdctx.Background(), c, info, []engine.Finding{f}, diffs, "", nil, PostReviewOptions{Suggest: true})
+	_, err := PostReview(stdctx.Background(), c, info, []engine.Finding{f}, diffs, staticSummary(""), nil, PostReviewOptions{Suggest: true})
 	if err != nil {
 		t.Fatalf("PostReview: %v", err)
 	}
@@ -749,7 +771,7 @@ func TestSuggestOldSideAnchoredDegradesToHint(t *testing.T) {
 	f := suggestFinding()
 	// Anchor fell back to old side: QuotedCode does NOT match raw NewFileContent[Line].
 	f.QuotedCode = "var a = 0"
-	_, err := PostReview(stdctx.Background(), c, info, []engine.Finding{f}, suggestDiff(), "", nil, PostReviewOptions{Suggest: true})
+	_, err := PostReview(stdctx.Background(), c, info, []engine.Finding{f}, suggestDiff(), staticSummary(""), nil, PostReviewOptions{Suggest: true})
 	if err != nil {
 		t.Fatalf("PostReview: %v", err)
 	}
@@ -763,7 +785,7 @@ func TestSuggestBelowFloorDegradesToHint(t *testing.T) {
 	info := &PRInfo{Owner: "o", Repo: "r", Number: 1, HeadSHA: "h"}
 	f := suggestFinding()
 	f.Severity = "low" // below the medium floor
-	_, err := PostReview(stdctx.Background(), c, info, []engine.Finding{f}, suggestDiff(), "", nil, PostReviewOptions{Suggest: true})
+	_, err := PostReview(stdctx.Background(), c, info, []engine.Finding{f}, suggestDiff(), staticSummary(""), nil, PostReviewOptions{Suggest: true})
 	if err != nil {
 		t.Fatalf("PostReview: %v", err)
 	}
@@ -799,9 +821,9 @@ func TestExistingFingerprintsRateLimitMapped(t *testing.T) {
 	}
 }
 
-func TestUpsertSummaryListRateLimitMapped(t *testing.T) {
-	c := &recordClient{listIssueErr: &gh.RateLimitError{Message: "rate limited"}}
-	_, err := UpsertSummaryComment(stdctx.Background(), c, &PRInfo{Owner: "o", Repo: "r", Number: 1}, "body")
+func TestAlreadyPostedListRateLimitMapped(t *testing.T) {
+	c := &recordClient{listReviewsErr: &gh.RateLimitError{Message: "rate limited"}}
+	_, err := AlreadyPostedAtSHA(stdctx.Background(), c, &PRInfo{Owner: "o", Repo: "r", Number: 1, HeadSHA: "h"})
 	if err == nil {
 		t.Fatal("want rate-limit error")
 	}
@@ -971,7 +993,7 @@ func TestPostReviewMultiLineRangeContiguousInOneHunk(t *testing.T) {
 	c := &recordClient{}
 	info := &PRInfo{Owner: "o", Repo: "r", Number: 1, HeadSHA: "h"}
 	f := engine.Finding{File: "p.go", Line: 2, EndLine: 3, Severity: "high", Category: "bug", Rationale: "span"}
-	res, err := PostReview(stdctx.Background(), c, info, []engine.Finding{f}, multiLineDiff(), "", nil, PostReviewOptions{})
+	res, err := PostReview(stdctx.Background(), c, info, []engine.Finding{f}, multiLineDiff(), staticSummary(""), nil, PostReviewOptions{})
 	if err != nil {
 		t.Fatalf("PostReview: %v", err)
 	}
@@ -1001,7 +1023,7 @@ func TestPostReviewMultiLineCrossHunkFallsBackToSingleLine(t *testing.T) {
 +var z = 1
 `
 	diffs := []diff.Diff{{NewPath: "p.go", Diff: d}}
-	res, err := PostReview(stdctx.Background(), c, info, []engine.Finding{f}, diffs, "", nil, PostReviewOptions{})
+	res, err := PostReview(stdctx.Background(), c, info, []engine.Finding{f}, diffs, staticSummary(""), nil, PostReviewOptions{})
 	if err != nil {
 		t.Fatalf("PostReview: %v", err)
 	}
@@ -1023,7 +1045,7 @@ func TestPostReviewMultiLineSuggestionForCleanOnDiffSpan(t *testing.T) {
 		QuotedCode:     "var a = 1\nvar b = 2",
 		SuggestedPatch: "var a = 2\nvar b = 3",
 	}
-	res, err := PostReview(stdctx.Background(), c, info, []engine.Finding{f}, multiLineDiff(), "", nil, PostReviewOptions{Suggest: true})
+	res, err := PostReview(stdctx.Background(), c, info, []engine.Finding{f}, multiLineDiff(), staticSummary(""), nil, PostReviewOptions{Suggest: true})
 	if err != nil {
 		t.Fatalf("PostReview: %v", err)
 	}
@@ -1045,7 +1067,7 @@ func TestPostReviewMultiLineSuggestionRejectsMismatchedSpan(t *testing.T) {
 		QuotedCode:     "var a = 1\nUNRELATED",
 		SuggestedPatch: "var a = 2\nvar b = 3",
 	}
-	_, err := PostReview(stdctx.Background(), c, info, []engine.Finding{f}, multiLineDiff(), "", nil, PostReviewOptions{Suggest: true})
+	_, err := PostReview(stdctx.Background(), c, info, []engine.Finding{f}, multiLineDiff(), staticSummary(""), nil, PostReviewOptions{Suggest: true})
 	if err != nil {
 		t.Fatalf("PostReview: %v", err)
 	}
@@ -1088,7 +1110,7 @@ func TestPostReviewMultiLineSuggestionRejectsOffRangeSpan(t *testing.T) {
 		QuotedCode:     "var a = 1\nmid\nvar b = 2",
 		SuggestedPatch: "var a = 2\nmid2\nvar b = 3",
 	}
-	res, err := PostReview(stdctx.Background(), c, info, []engine.Finding{f}, diffs, "", nil, PostReviewOptions{Suggest: true})
+	res, err := PostReview(stdctx.Background(), c, info, []engine.Finding{f}, diffs, staticSummary(""), nil, PostReviewOptions{Suggest: true})
 	if err != nil {
 		t.Fatalf("PostReview: %v", err)
 	}

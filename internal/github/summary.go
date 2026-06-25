@@ -11,10 +11,72 @@ import (
 // severityOrder ranks severities high→low for a stable histogram.
 var severityOrder = []string{"critical", "high", "medium", "low", "info"}
 
-// RenderSummary builds the PR summary body WITHOUT the sentinel — UpsertSummaryComment
-// owns prepending SummarySentinel as the first line, so the body must not repeat it.
-// It emits a severity histogram, truncation level, head SHA, files reviewed, an optional
-// omitted-inline note, and a short footer.
+// priorityBadge maps an internal severity to the display-only emoji + P-level
+// badge (Codex/Graphite convention): critical→🔴 P0, high→🟠 P1, medium→🟡 P2,
+// low→🔵 P3, info→⚪ P4. An unknown/empty severity falls back to ⚪ P4 so a finding
+// never renders a blank badge. DISPLAY ONLY — severity stays the gate/SARIF
+// source-of-truth (severityOrder/severityRank are untouched).
+func priorityBadge(sev string) string {
+	switch strings.ToLower(strings.TrimSpace(sev)) {
+	case "critical":
+		return "🔴 **P0**"
+	case "high":
+		return "🟠 **P1**"
+	case "medium":
+		return "🟡 **P2**"
+	case "low":
+		return "🔵 **P3**"
+	case "info":
+		return "⚪ **P4**"
+	default:
+		return "⚪ **P4**"
+	}
+}
+
+// severityEmoji is the compact (emoji-only) form of priorityBadge for count
+// chips: critical→🔴, high→🟠, medium→🟡, low→🔵, info/unknown→⚪.
+func severityEmoji(sev string) string {
+	switch strings.ToLower(strings.TrimSpace(sev)) {
+	case "critical":
+		return "🔴"
+	case "high":
+		return "🟠"
+	case "medium":
+		return "🟡"
+	case "low":
+		return "🔵"
+	case "info":
+		return "⚪"
+	default:
+		return "⚪"
+	}
+}
+
+// severityCounts renders the emoji-count chips for findings, critical/high first
+// (severityOrder), e.g. "🟡 2 · 🔵 1". Unknown severities fold into the info (⚪)
+// chip. Returns "" when there are no findings so callers can omit the chip line.
+func severityCounts(findings []engine.Finding) string {
+	counts := map[string]int{}
+	for _, f := range findings {
+		sev := strings.ToLower(strings.TrimSpace(f.Severity))
+		if !known(sev) {
+			sev = "info"
+		}
+		counts[sev]++
+	}
+	var chips []string
+	for _, sev := range severityOrder {
+		if n := counts[sev]; n > 0 {
+			chips = append(chips, fmt.Sprintf("%s %d", severityEmoji(sev), n))
+		}
+	}
+	return strings.Join(chips, " · ")
+}
+
+// RenderSummary builds the PR summary that becomes the CreateReview BODY: it leads
+// with ReviewMarker (identifies the review as ours for alreadyPostedAtSHA) and a
+// Codex-style `Reviewed commit` line, then a severity histogram, truncation level,
+// files reviewed, an optional omitted-inline note, and a short footer.
 func RenderSummary(info *PRInfo, findings []engine.Finding, stats map[string]any, omittedInline int) string {
 	return RenderSummaryWithOverflow(info, findings, stats, omittedInline, nil, nil)
 }
@@ -37,6 +99,9 @@ type SummaryOptions struct {
 	Walkthrough   string
 	FileSummaries map[string]string
 	Diagram       string
+	// Confidence (1-5) is the model's merge-safety confidence; 0 => derive from findings.
+	Confidence       int
+	ConfidenceReason string
 	// RuleCitations grounds an omitted finding's cited rule stem in the overflow
 	// list (validated/linked in the wire layer; an unmatched stem is dropped).
 	RuleCitations map[string]RuleCitation
@@ -51,45 +116,30 @@ type SummaryOptions struct {
 // text (walkthrough/fileSummaries) is escaped via mdInline at render.
 func RenderSummaryFull(info *PRInfo, findings []engine.Finding, stats map[string]any, omittedInline int, omitted []engine.Finding, categoryURLs map[string]string, opts SummaryOptions) string {
 	var b strings.Builder
-	b.WriteString("## Code Review\n\n")
+
+	b.WriteString(ReviewMarker + "\n")
+
+	if chips := severityCounts(findings); chips != "" {
+		fmt.Fprintf(&b, "## Code Review · %s  (%d finding%s)\n\n", chips, len(findings), plural(len(findings)))
+	} else {
+		b.WriteString("## Code Review · ✅ no findings\n\n")
+	}
+
+	if info.HeadSHA != "" {
+		fmt.Fprintf(&b, "Reviewed commit: `%s`\n\n", info.HeadSHA)
+	}
+
+	renderMetaQuote(&b, stats, opts.Diffs, findings)
+	renderConfidence(&b, opts.Confidence, opts.ConfidenceReason, findings)
 
 	renderWalkthrough(&b, opts.Walkthrough)
 	renderDiagram(&b, opts.Diagram)
 
-	counts := map[string]int{}
-	for _, f := range findings {
-		sev := strings.ToLower(strings.TrimSpace(f.Severity))
-		if sev == "" {
-			sev = "info"
-		}
-		counts[sev]++
-	}
-
-	if len(findings) == 0 {
-		b.WriteString("No findings.\n\n")
-	} else {
-		fmt.Fprintf(&b, "**%d finding(s):**\n\n", len(findings))
-		for _, sev := range severityOrder {
-			if n := counts[sev]; n > 0 {
-				fmt.Fprintf(&b, "- %s: %d\n", sev, n)
-			}
-		}
-		for sev, n := range counts {
-			if !known(sev) {
-				fmt.Fprintf(&b, "- %s: %d\n", sev, n)
-			}
-		}
-		b.WriteString("\n")
-	}
-
-	fmt.Fprintf(&b, "- Head: `%s`\n", info.HeadSHA)
-	fmt.Fprintf(&b, "- Files reviewed: %s\n", statInt(stats, "files_reviewed"))
-	fmt.Fprintf(&b, "- Context: %s\n", truncationLevel(stats))
 	if info.IsFork {
-		b.WriteString("- Source: fork (comments posted to the base repo)\n")
+		b.WriteString("> Source: fork (comments posted to the base repo)\n\n")
 	}
 	if omittedInline > 0 {
-		fmt.Fprintf(&b, "- Omitted inline: %d finding(s) over the %d-comment limit were not posted inline\n", omittedInline, maxInlineComments)
+		fmt.Fprintf(&b, "> Omitted inline: %d finding(s) over the %d-comment limit were not posted inline\n\n", omittedInline, maxInlineComments)
 	}
 
 	if len(omitted) > 0 {
@@ -98,8 +148,49 @@ func RenderSummaryFull(info *PRInfo, findings []engine.Finding, stats map[string
 
 	renderPresentation(&b, info, findings, opts.Diffs, opts.ReviewID, opts.FileSummaries)
 
-	b.WriteString("\n<sub>Posted by miu-cr. Re-runs edit this summary and skip already-posted inline comments.</sub>")
+	fmt.Fprintf(&b, "\n<sub>Reviewed commit `%s` · Posted by miu-cr</sub>", info.HeadSHA)
 	return b.String()
+}
+
+// plural returns "s" unless n == 1, for "N finding(s)" phrasing.
+func plural(n int) string {
+	if n == 1 {
+		return ""
+	}
+	return "s"
+}
+
+// renderMetaQuote writes the compact one-line metadata blockquote relocating the
+// effort/size/files/churn/context that previously lived in the severity list +
+// effort badge: `> <files> files · +<adds>/−<dels> · effort <L> · context <full>`.
+// File/churn/effort come from opts.Diffs; with no diffs it falls back to the
+// stats files_reviewed count and omits the churn/effort segments.
+func renderMetaQuote(b *strings.Builder, stats map[string]any, diffs []diff.Diff, findings []engine.Finding) {
+	files, adds, dels := diffStats(diffs)
+	var seg []string
+	if files > 0 {
+		seg = append(seg, fmt.Sprintf("%d file%s", files, plural(files)))
+		seg = append(seg, fmt.Sprintf("+%d/−%d", adds, dels))
+		seg = append(seg, fmt.Sprintf("effort %s", effortSize(files, adds+dels)))
+	} else {
+		seg = append(seg, fmt.Sprintf("%s files", statInt(stats, "files_reviewed")))
+	}
+	seg = append(seg, fmt.Sprintf("context %s", truncationLevel(stats)))
+	fmt.Fprintf(b, "> %s\n\n", strings.Join(seg, " · "))
+}
+
+// diffStats sums the changed-file count and total insertions/deletions, skipping
+// deleted files (NewPath empty or /dev/null).
+func diffStats(diffs []diff.Diff) (files int, adds, dels int64) {
+	for i := range diffs {
+		if p := diffs[i].NewPath; p == "" || p == "/dev/null" {
+			continue
+		}
+		files++
+		adds += diffs[i].Insertions
+		dels += diffs[i].Deletions
+	}
+	return files, adds, dels
 }
 
 // renderOverflow appends a collapsible block listing the omitted inline findings.

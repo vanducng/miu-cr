@@ -69,7 +69,7 @@ func TestCategoryLinkMapNotSourcedFromRepoRules(t *testing.T) {
 	if strings.Contains(body, "evil.example") || strings.Contains(body, "](http") {
 		t.Fatalf("repo rule must NOT inject a category link:\n%s", body)
 	}
-	if !strings.Contains(body, "(security)") {
+	if !strings.Contains(body, "🟠 **P1** · security") {
 		t.Fatalf("category must render PLAIN when no trusted map is set:\n%s", body)
 	}
 }

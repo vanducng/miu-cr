@@ -64,8 +64,9 @@ reaches a log line, because the clone URL embeds the PAT.
 6. **Bounded async worker** — the review runs on a worker pool, never on the HTTP
    goroutine. A panic in one review is recovered and can't kill a worker.
 7. **Per-PR coalesce** — two rapid events for the same `{owner, repo, number}`
-   collapse to a single in-flight review. (Re-runs are also idempotent at the
-   publish layer via the sentinel summary + comment fingerprints.)
+   collapse to a single in-flight review. (Re-runs are also safe at the publish
+   layer: a same-commit re-run is skipped, and inline-comment fingerprints prevent
+   duplicates across commits.)
 8. **No silent drop** — if the queue is genuinely full, the drop is loud-logged
    and counted; it is never swallowed silently.
 
@@ -296,7 +297,7 @@ normally.
 ## One review path
 
 Both modes funnel into the same `cli.PRReviewer.ReviewPR` pipeline that backs
-`miucr review --pr` — same diff fetch, same engine, same head-SHA-anchored inline
-comments, same idempotent sentinel summary. serve adds only the HTTP front,
+`miucr review --pr` — same diff fetch, same engine, same per-commit review
+(summary body + nested head-SHA-anchored inline comments). serve adds only the HTTP front,
 security guards, and the async worker; the action adds only install + invocation.
 Neither duplicates review logic.

@@ -170,7 +170,8 @@ func TestPublishReviewWireFlow(t *testing.T) {
 		Stats: map[string]any{"truncation_level": "full", "files_reviewed": float64(1)},
 	}
 
-	// First run: one inline posted + summary created.
+	// Codex pattern: one inline posted, nested under a review whose BODY is the
+	// summary (marker + reviewed-commit lead-in); no issue comment.
 	pr := &cli.PRResult{SummaryAction: "none"}
 	if err := publishReview(stdctx.Background(), client, runner, dir, info, res, pr, cli.PRReviewRequest{Gate: "high"}, nil, embedWriter{}, nil, nil); err != nil {
 		t.Fatalf("publishReview: %v", err)
@@ -178,18 +179,21 @@ func TestPublishReviewWireFlow(t *testing.T) {
 	if pr.PostedInline != 1 {
 		t.Fatalf("first run: want 1 inline posted, got %d", pr.PostedInline)
 	}
-	if pr.SummaryAction != "created" {
-		t.Fatalf("first run: want summary created, got %q", pr.SummaryAction)
+	if pr.SummaryAction != "review" {
+		t.Fatalf("first run: want summary action review, got %q", pr.SummaryAction)
 	}
-	ci, ri := indexOf(fake.order, "create_issue"), indexOf(fake.order, "create_review")
-	if ri < 0 || ci < 0 || ri > ci {
-		t.Fatalf("inline review must post BEFORE the summary; order=%v", fake.order)
+	if fake.createIssueN != 0 || fake.editN != 0 {
+		t.Fatalf("Codex pattern must not create/edit an issue comment: create=%d edit=%d", fake.createIssueN, fake.editN)
 	}
-	if le := indexOf(fake.order, "list_review"); le < 0 || le > ri {
+	if le, ri := indexOf(fake.order, "list_review"), indexOf(fake.order, "create_review"); le < 0 || ri < 0 || le > ri {
 		t.Fatalf("ExistingFingerprints (list_review) must run before the review; order=%v", fake.order)
 	}
+	if fake.lastReviewed.GetBody() == "" || !strings.Contains(fake.lastReviewed.GetBody(), mgithub.ReviewMarker) {
+		t.Fatalf("review body must carry the summary + marker:\n%s", fake.lastReviewed.GetBody())
+	}
 
-	// Re-run: 0 new inline (fingerprint skip), summary edited (not duplicated).
+	// Re-run (publishReview bypasses the wire-layer AlreadyPostedAtSHA skip): 0 new
+	// inline (fingerprint dedupe), no inline-comment duplication.
 	fake.order = nil
 	pr2 := &cli.PRResult{SummaryAction: "none"}
 	if err := publishReview(stdctx.Background(), client, runner, dir, info, res, pr2, cli.PRReviewRequest{Gate: "high"}, nil, embedWriter{}, nil, nil); err != nil {
@@ -198,20 +202,8 @@ func TestPublishReviewWireFlow(t *testing.T) {
 	if pr2.PostedInline != 0 {
 		t.Fatalf("re-run: want 0 new inline, got %d", pr2.PostedInline)
 	}
-	if pr2.SummaryAction != "edited" {
-		t.Fatalf("re-run: want summary edited, got %q", pr2.SummaryAction)
-	}
-	if fake.createReviewN != 1 {
-		t.Errorf("re-run must not create a second review, createReviewN=%d", fake.createReviewN)
-	}
-	if fake.createIssueN != 1 || fake.editN != 1 {
-		t.Errorf("re-run must edit (not re-create) the summary: create=%d edit=%d", fake.createIssueN, fake.editN)
-	}
 	if len(fake.reviewComments) != 1 {
 		t.Errorf("re-run must not duplicate inline comments, have %d", len(fake.reviewComments))
-	}
-	if got := strings.Count(fake.issueComments[0].GetBody(), mgithub.SummarySentinel); got != 1 {
-		t.Errorf("final summary must carry exactly one sentinel, got %d", got)
 	}
 }
 

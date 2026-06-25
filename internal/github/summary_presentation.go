@@ -19,7 +19,6 @@ const maxChangesRows = 60
 // All three degrade cleanly: nil diffs skip the table/badge, an empty reviewID
 // skips the handoff.
 func renderPresentation(b *strings.Builder, info *PRInfo, findings []engine.Finding, diffs []diff.Diff, reviewID string, fileSummaries map[string]string) {
-	renderEffortBadge(b, diffs, findings)
 	renderChangesTable(b, info, diffs, findings, fileSummaries)
 	renderHandoff(b, info, reviewID)
 }
@@ -68,41 +67,42 @@ func startsWithMermaidKeyword(d string) bool {
 	return false
 }
 
-// renderWalkthrough writes a leading "## Walkthrough" section from the same
-// review pass's PR-level summary. Empty walkthrough omits the section entirely
-// (byte-for-byte back-compatible with the prior layout). The text is untrusted
-// model output, escaped via mdInline so it can't inject markup or break out.
+// renderWalkthrough writes the review pass's PR-level summary as LEAD PROSE — no
+// "Walkthrough" heading (intentionally un-CodeRabbit-like). Rendered via mdProse so
+// the model's bullet newlines survive (mdInline would collapse them) while HTML/fence
+// breakout vectors stay neutralized. Empty (after trim) omits it.
 func renderWalkthrough(b *strings.Builder, walkthrough string) {
-	w := mdInline(walkthrough)
-	if w == "" {
+	if strings.TrimSpace(walkthrough) == "" {
 		return
 	}
-	b.WriteString("## Walkthrough\n\n")
-	b.WriteString(w)
+	b.WriteString(mdProse(walkthrough))
 	b.WriteString("\n\n")
 }
 
-// renderEffortBadge writes a one-line, deterministic review-effort badge derived
-// purely from diff stats + max finding severity (no model call).
-func renderEffortBadge(b *strings.Builder, diffs []diff.Diff, findings []engine.Finding) {
-	if len(diffs) == 0 {
-		return
-	}
-	var adds, dels int64
-	files := 0
-	for i := range diffs {
-		if p := diffs[i].NewPath; p == "" || p == "/dev/null" {
-			continue
+// renderConfidence writes "Confidence: N/5 — reason". The model's confidence (1-5)
+// wins when emitted; otherwise it derives from findings (5 when none; critical −2,
+// high −1, floored at 1) so the line is always present (greptile-style).
+func renderConfidence(b *strings.Builder, confidence int, reason string, findings []engine.Finding) {
+	score := confidence
+	if score <= 0 {
+		score = 5
+		for _, f := range findings {
+			switch strings.ToLower(f.Severity) {
+			case "critical":
+				score -= 2
+			case "high":
+				score--
+			}
 		}
-		files++
-		adds += diffs[i].Insertions
-		dels += diffs[i].Deletions
+		if score < 1 {
+			score = 1
+		}
 	}
-	if files == 0 {
-		return
+	if r := strings.TrimSpace(reason); r != "" {
+		fmt.Fprintf(b, "**Confidence: %d/5** — %s\n\n", score, mdInline(r))
+	} else {
+		fmt.Fprintf(b, "**Confidence: %d/5**\n\n", score)
 	}
-	fmt.Fprintf(b, "- Review effort: **%s** · %d file(s) · +%d/-%d · max severity %s\n",
-		effortSize(files, adds+dels), files, adds, dels, maxSeverity(findings))
 }
 
 // effortSize buckets a PR into S/M/L/XL from file count + total churn — pure
@@ -118,20 +118,6 @@ func effortSize(files int, churn int64) string {
 	default:
 		return "XL"
 	}
-}
-
-// maxSeverity returns the highest finding severity (high→low) or "none".
-func maxSeverity(findings []engine.Finding) string {
-	best := len(severityOrder)
-	for _, f := range findings {
-		if r := severityRank(f.Severity); r < best {
-			best = r
-		}
-	}
-	if best == len(severityOrder) {
-		return "none"
-	}
-	return severityOrder[best]
 }
 
 // renderChangesTable writes a collapsed per-file table (file · +adds/-dels ·
@@ -185,9 +171,9 @@ func renderChangesTable(b *strings.Builder, info *PRInfo, diffs []diff.Diff, fin
 		}
 	}
 
-	fmt.Fprintf(b, "\n<details>\n<summary>Changed files (%d)</summary>\n\n", len(rows)+overflow)
+	fmt.Fprintf(b, "\n<details>\n<summary>Important Files Changed (%d)</summary>\n\n", len(rows)+overflow)
 	if withSummary {
-		b.WriteString("| File | Δ | Findings | Summary |\n| --- | --- | --- | --- |\n")
+		b.WriteString("| File | Δ | Findings | Overview |\n| --- | --- | --- | --- |\n")
 	} else {
 		b.WriteString("| File | Δ | Findings |\n| --- | --- | --- |\n")
 	}
