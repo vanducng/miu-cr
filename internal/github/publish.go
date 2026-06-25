@@ -10,6 +10,7 @@ import (
 	"os"
 	"regexp"
 	"sort"
+	"strconv"
 	"strings"
 	"time"
 
@@ -22,9 +23,9 @@ import (
 	"github.com/vanducng/miu-cr/internal/engine/gitcmd"
 )
 
-// ReviewMarker is the hidden HTML marker on the first line of our review body; its
-// presence in a PR review identifies the review as miucr-authored so a same-SHA
-// re-run can detect we already posted (alreadyPostedAtSHA) and skip.
+// ReviewMarker is the hidden HTML marker on the first line of the summary issue
+// comment; its presence identifies the single miucr-authored summary comment so a
+// re-run finds and EDITS it in place (UpsertSummaryComment) instead of stacking.
 const ReviewMarker = "<!-- miu-cr-review -->"
 
 const fpPrefix = "miucr:fp="
@@ -35,6 +36,26 @@ const fpPrefix = "miucr:fp="
 const maxInlineComments = 40
 
 var fpMarkerRe = regexp.MustCompile(`<!-- miucr:fp=([0-9a-f]{16}) -->`)
+
+// runsCountRe extracts the storeless "Nth review" counter the upsert embeds in
+// the summary comment; the value is a trusted int we wrote, never model text.
+var runsCountRe = regexp.MustCompile(`<!-- miu-cr-runs:(\d+) -->`)
+
+// runsCountToken renders the hidden runs counter line for the summary comment.
+func runsCountToken(n int) string { return fmt.Sprintf("<!-- miu-cr-runs:%d -->", n) }
+
+// parseRunsCount returns the first runs counter in body, or 0 when absent/garbled.
+func parseRunsCount(body string) int {
+	m := runsCountRe.FindStringSubmatch(body)
+	if m == nil {
+		return 0
+	}
+	n, err := strconv.Atoi(m[1])
+	if err != nil {
+		return 0
+	}
+	return n
+}
 
 // DiffsForPR re-derives the PR diff by re-running the engine's own diff.GetDiff
 // over the temp clone with the SAME ModeRange/From/To the engine anchored
@@ -728,33 +749,71 @@ func fenceFor(s string) string {
 	return fence
 }
 
-// alreadyPostedAtSHA reports whether a miucr-authored review (its body carries
-// ReviewMarker) already exists at the current head SHA, so a same-commit re-run
-// skips rather than posting a duplicate review (GitHub reviews aren't editable).
-// Paginates (bounded) so our review is found even on a PR with many reviews — our
-// own review is the most recent and lands on a later page. A reviewed-but-unposted
-// prior leaves no such review, so it still posts.
-func AlreadyPostedAtSHA(ctx stdctx.Context, client Client, info *PRInfo) (bool, error) {
-	if info.HeadSHA == "" {
-		return false, nil
+// UpsertAction reports what UpsertSummaryComment did to the single summary issue
+// comment: created a new one, edited the existing one in place, degraded on a fork
+// 403, or did nothing (empty body guard).
+type UpsertAction string
+
+const (
+	UpsertNone         UpsertAction = "none"
+	UpsertCreated      UpsertAction = "created"
+	UpsertEdited       UpsertAction = "edited"
+	UpsertForkFallback UpsertAction = "fork_fallback"
+)
+
+// UpsertSummaryComment posts the rendered summary as ONE issue comment, upserted
+// across re-runs: list issue comments, find the lowest-id body carrying
+// ReviewMarker, EditIssueComment it in place; else CreateIssueComment. Editing the
+// lowest-id marked comment is deterministic and dedupes accidental race-created
+// duplicates (later duplicates are ignored, so the system reconverges to one). On a
+// fork-PR 403 under Actions (token lacks comment-write scope) it degrades to
+// fork_fallback (no hard fail), mirroring PostReview's inline 403 path. An empty
+// body is a no-op (UpsertNone). The marker lives on the ISSUE COMMENT here, distinct
+// from review bodies (ListReviews), so there is no cross-match with historical
+// per-commit review bodies.
+func UpsertSummaryComment(ctx stdctx.Context, client Client, info *PRInfo, body string) (UpsertAction, error) {
+	if strings.TrimSpace(body) == "" {
+		return UpsertNone, nil
 	}
-	opt := &gh.ListOptions{PerPage: 100}
-	for page := 0; page < 10; page++ { // bounded at 1000 reviews — pathological PRs don't loop forever
-		reviews, resp, err := client.ListReviews(ctx, info.Owner, info.Repo, info.Number, opt)
+
+	targetID := int64(0)
+	opts := &gh.IssueListCommentsOptions{ListOptions: gh.ListOptions{PerPage: 100}}
+	for page := 0; page < maxConvPages; page++ {
+		comments, resp, err := client.ListIssueComments(ctx, info.Owner, info.Repo, info.Number, opts)
 		if err != nil {
-			return false, mapWriteError("github.list_reviews_failed", "listing reviews", err)
+			return UpsertNone, mapWriteError("github.upsert_summary_failed", "listing issue comments", err)
 		}
-		for _, r := range reviews {
-			if r.GetCommitID() == info.HeadSHA && strings.Contains(r.GetBody(), ReviewMarker) {
-				return true, nil
+		for _, c := range comments {
+			if !strings.Contains(c.GetBody(), ReviewMarker) {
+				continue
+			}
+			if id := c.GetID(); id > 0 && (targetID == 0 || id < targetID) {
+				targetID = id
 			}
 		}
 		if resp == nil || resp.NextPage == 0 {
 			break
 		}
-		opt.Page = resp.NextPage
+		opts.Page = resp.NextPage
 	}
-	return false, nil
+
+	if targetID != 0 {
+		if _, err := client.EditIssueComment(ctx, info.Owner, info.Repo, targetID, &gh.IssueComment{Body: gh.Ptr(body)}); err != nil {
+			if is403(err) && inGitHubActions() {
+				return UpsertForkFallback, nil
+			}
+			return UpsertNone, mapWriteError("github.upsert_summary_failed", "editing summary comment", err)
+		}
+		return UpsertEdited, nil
+	}
+
+	if _, err := client.CreateIssueComment(ctx, info.Owner, info.Repo, info.Number, &gh.IssueComment{Body: gh.Ptr(body)}); err != nil {
+		if is403(err) && inGitHubActions() {
+			return UpsertForkFallback, nil
+		}
+		return UpsertNone, mapWriteError("github.upsert_summary_failed", "creating summary comment", err)
+	}
+	return UpsertCreated, nil
 }
 
 // mapWriteError maps go-github rate-limit errors to a retryable github.rate_limited

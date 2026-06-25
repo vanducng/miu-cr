@@ -86,11 +86,17 @@ func TestStoreCrossPush(t *testing.T) {
 	if prB.PostedInline != 0 {
 		t.Fatalf("run B: re-anchored finding must not re-post, got %d", prB.PostedInline)
 	}
-	// Codex pattern: publishReview always posts a review carrying the summary body
-	// (the wire-layer AlreadyPostedAtSHA skip — bypassed here — owns same-SHA dedupe).
-	// The inline-comment dedupe (PostedInline==0) is what this test guards.
-	if fake.createReviewN != 2 {
-		t.Fatalf("run B posts a body-only review, want createReviewN=2, got %d", fake.createReviewN)
+	// Upsert model: run B has no NEW inline (dedupe) and no review body, so the
+	// empty-review guard skips CreateReview entirely — createReviewN stays 1 (run A).
+	// The summary issue comment is EDITED in place instead.
+	if fake.createReviewN != 1 {
+		t.Fatalf("run B must not create a second review (empty-guard), want createReviewN=1, got %d", fake.createReviewN)
+	}
+	if prB.SummaryAction != "edited" {
+		t.Fatalf("run B must edit the summary comment, got %q", prB.SummaryAction)
+	}
+	if fake.editN != 1 || fake.createIssueN != 1 {
+		t.Fatalf("run B must EDIT (not stack) the summary: create=%d edit=%d", fake.createIssueN, fake.editN)
 	}
 }
 
@@ -222,9 +228,10 @@ func TestPostedFindingsOnlySubmitted(t *testing.T) {
 	}
 }
 
-// TestPublishNoStoreUnchanged asserts the nil-store Codex flow: each run lists the
-// existing inline fingerprints then posts ONE review whose body is the summary —
-// no issue comment is ever created/edited.
+// TestPublishNoStoreUnchanged asserts the nil-store upsert flow: run 1 lists the
+// existing inline fingerprints, posts the inline review (no body), then CREATES the
+// summary issue comment. Run 2 dedupes the inline away (no CreateReview), then
+// EDITS the single summary comment in place.
 func TestPublishNoStoreUnchanged(t *testing.T) {
 	runner := gitcmd.New()
 	dir, base, head := setupRepo(t, runner)
@@ -236,9 +243,14 @@ func TestPublishNoStoreUnchanged(t *testing.T) {
 	if err := publishReview(stdctx.Background(), client, runner, dir, info, res, pr, cli.PRReviewRequest{Gate: "high"}, nil, embedWriter{}, nil, nil); err != nil {
 		t.Fatalf("run 1: %v", err)
 	}
-	wantOrder := []string{"list_review", "create_review"}
-	if !equalStr(fake.order, wantOrder) {
-		t.Fatalf("run 1 call order = %v, want %v", fake.order, wantOrder)
+	// list_review (ExistingFingerprints) → create_review (inline, no body) →
+	// list_issue (upsert scan) → create_issue (summary).
+	wantOrder1 := []string{"list_review", "create_review", "list_issue", "create_issue"}
+	if !equalStr(fake.order, wantOrder1) {
+		t.Fatalf("run 1 call order = %v, want %v", fake.order, wantOrder1)
+	}
+	if pr.SummaryAction != "created" {
+		t.Fatalf("run 1 must create the summary, got %q", pr.SummaryAction)
 	}
 
 	fake.order = nil
@@ -246,12 +258,13 @@ func TestPublishNoStoreUnchanged(t *testing.T) {
 	if err := publishReview(stdctx.Background(), client, runner, dir, info, res, pr2, cli.PRReviewRequest{Gate: "high"}, nil, embedWriter{}, nil, nil); err != nil {
 		t.Fatalf("run 2: %v", err)
 	}
-	// Re-run (publishReview bypasses the wire AlreadyPostedAtSHA skip): inline
-	// dedupe drops the comment, but a body-only review is still posted.
-	if !equalStr(fake.order, wantOrder) {
-		t.Fatalf("run 2 call order = %v, want %v", fake.order, wantOrder)
+	// Inline dedupe drops the comment → empty-review guard skips CreateReview; the
+	// summary comment is found (list_issue) and EDITED.
+	wantOrder2 := []string{"list_review", "list_issue", "edit_issue"}
+	if !equalStr(fake.order, wantOrder2) {
+		t.Fatalf("run 2 call order = %v, want %v", fake.order, wantOrder2)
 	}
-	if fake.createReviewN != 2 || fake.createIssueN != 0 || fake.editN != 0 {
+	if fake.createReviewN != 1 || fake.createIssueN != 1 || fake.editN != 1 {
 		t.Fatalf("no-store counts: createReview=%d createIssue=%d edit=%d", fake.createReviewN, fake.createIssueN, fake.editN)
 	}
 }
@@ -278,9 +291,9 @@ func TestStoreListErrorDegrades(t *testing.T) {
 	}
 }
 
-// TestStoreWriteErrorKeepsOutcome: after PostReview (summary in the review body)
-// succeeds, a store write failure (Upsert/MarkResolved) is swallowed — publishReview
-// returns the successful outcome (not an error), so ReviewPR doesn't discard the review.
+// TestStoreWriteErrorKeepsOutcome: after the inline review + summary upsert succeed,
+// a store write failure (Upsert/MarkResolved) is swallowed — publishReview returns
+// the successful outcome (not an error), so ReviewPR doesn't discard the review.
 func TestStoreWriteErrorKeepsOutcome(t *testing.T) {
 	for _, tc := range []struct {
 		name string

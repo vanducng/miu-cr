@@ -5,8 +5,6 @@ import (
 	"errors"
 	"testing"
 
-	gh "github.com/google/go-github/v84/github"
-
 	mgithub "github.com/vanducng/miu-cr/internal/github"
 	"github.com/vanducng/miu-cr/internal/store"
 )
@@ -38,7 +36,7 @@ func TestSkipUnchangedSameSHA(t *testing.T) {
 		t.Fatalf("seed: %v", err)
 	}
 
-	prior, ok := skipUnchanged(ctx, st, &fakeGitHub{}, prInfo("sha-1"), false, false, "review")
+	prior, ok := skipUnchanged(ctx, st, prInfo("sha-1"), false, false)
 	if !ok {
 		t.Fatal("same head SHA must skip")
 	}
@@ -47,44 +45,34 @@ func TestSkipUnchangedSameSHA(t *testing.T) {
 	}
 }
 
-// postedReviewClient is a fakeGitHub preloaded with a miucr-authored review (marker
-// in the body) at the given commit SHA, so AlreadyPostedAtSHA matches.
-func postedReviewClient(sha string) *fakeGitHub {
-	return &fakeGitHub{reviews: []*gh.PullRequestReview{
-		{CommitID: gh.Ptr(sha), Body: gh.Ptr(mgithub.ReviewMarker + "\n## Code Review")},
-	}}
-}
-
-// TestSkipUnchangedPostSkipsWhenAlreadyPosted: --post on a head SHA we ALREADY
-// posted a review for (Codex per-commit model) skips — a second review would be a
-// duplicate (reviews aren't editable). A reviewed-but-unposted prior (no matching
-// review on the API) still posts.
-func TestSkipUnchangedPostSkipsWhenAlreadyPosted(t *testing.T) {
+// TestSkipUnchangedPostNeverSkips: --post NEVER skips, even at a head SHA that was
+// already reviewed (same store record, same SHA). A re-run must re-enter
+// publishReview so the single summary issue comment gets EDITED in place.
+func TestSkipUnchangedPostNeverSkips(t *testing.T) {
 	ctx := stdctx.Background()
 	st := tempStore(t)
-
-	// No review on the API yet → --post must publish (reviewed-but-unposted prior).
-	if _, ok := skipUnchanged(ctx, st, &fakeGitHub{}, prInfo("sha-1"), false, true, "review"); ok {
-		t.Fatal("--post must publish when no review was posted for this SHA yet")
+	if _, err := st.SaveReview(ctx, store.ReviewRecord{
+		ID: "prior-1", Mode: "pr", Owner: "o", Repo: "r", Number: 7, HeadSHA: "sha-1",
+	}); err != nil {
+		t.Fatalf("seed: %v", err)
 	}
-	// A miucr review already exists at this SHA → skip the duplicate.
-	if _, ok := skipUnchanged(ctx, st, postedReviewClient("sha-1"), prInfo("sha-1"), false, true, "review"); !ok {
-		t.Fatal("--post must skip when a review was already posted for this head SHA")
-	}
-	// An already-posted review at a DIFFERENT SHA → still publish.
-	if _, ok := skipUnchanged(ctx, st, postedReviewClient("old"), prInfo("sha-1"), false, true, "review"); ok {
-		t.Fatal("--post must publish when the only posted review is at a different SHA")
+	if _, ok := skipUnchanged(ctx, st, prInfo("sha-1"), false, true); ok {
+		t.Fatal("--post must re-enter (never skip) so the summary comment is edited")
 	}
 }
 
-// TestSkipUnchangedChecksModeNeverPostedSkip: a prior miucr REVIEW at this SHA must
-// NOT skip a `--mode checks --post` run — CheckRuns are idempotent per commit and the
-// review-marker posted-SHA detection is review-only.
-func TestSkipUnchangedChecksModeNeverPostedSkip(t *testing.T) {
+// TestSkipUnchangedChecksModeNeverSkips: --mode checks --post always publishes the
+// (idempotent per-commit) CheckRun, even at an already-reviewed SHA.
+func TestSkipUnchangedChecksModeNeverSkips(t *testing.T) {
 	ctx := stdctx.Background()
 	st := tempStore(t)
-	if _, ok := skipUnchanged(ctx, st, postedReviewClient("sha-1"), prInfo("sha-1"), false, true, "checks"); ok {
-		t.Fatal("--mode checks --post must publish the CheckRun even when a prior review exists at this SHA")
+	if _, err := st.SaveReview(ctx, store.ReviewRecord{
+		ID: "prior-1", Mode: "pr", Owner: "o", Repo: "r", Number: 7, HeadSHA: "sha-1",
+	}); err != nil {
+		t.Fatalf("seed: %v", err)
+	}
+	if _, ok := skipUnchanged(ctx, st, prInfo("sha-1"), false, true); ok {
+		t.Fatal("--mode checks --post must always publish the CheckRun")
 	}
 }
 
@@ -97,7 +85,7 @@ func TestSkipUnchangedDifferentSHA(t *testing.T) {
 	}); err != nil {
 		t.Fatalf("seed: %v", err)
 	}
-	if _, ok := skipUnchanged(ctx, st, &fakeGitHub{}, prInfo("sha-2"), false, false, "review"); ok {
+	if _, ok := skipUnchanged(ctx, st, prInfo("sha-2"), false, false); ok {
 		t.Fatal("a changed head SHA must NOT skip")
 	}
 }
@@ -111,7 +99,7 @@ func TestSkipUnchangedForce(t *testing.T) {
 	}); err != nil {
 		t.Fatalf("seed: %v", err)
 	}
-	if _, ok := skipUnchanged(ctx, st, &fakeGitHub{}, prInfo("sha-1"), true, false, "review"); ok {
+	if _, ok := skipUnchanged(ctx, st, prInfo("sha-1"), true, false); ok {
 		t.Fatal("--force must bypass the skip")
 	}
 }
@@ -120,14 +108,14 @@ func TestSkipUnchangedForce(t *testing.T) {
 func TestSkipUnchangedNoPrior(t *testing.T) {
 	ctx := stdctx.Background()
 	st := tempStore(t)
-	if _, ok := skipUnchanged(ctx, st, &fakeGitHub{}, prInfo("sha-1"), false, false, "review"); ok {
+	if _, ok := skipUnchanged(ctx, st, prInfo("sha-1"), false, false); ok {
 		t.Fatal("no prior review must NOT skip")
 	}
 }
 
 // TestSkipUnchangedNilStore: history off / --no-save (nil store) reviews.
 func TestSkipUnchangedNilStore(t *testing.T) {
-	if _, ok := skipUnchanged(stdctx.Background(), nil, &fakeGitHub{}, prInfo("sha-1"), false, false, "review"); ok {
+	if _, ok := skipUnchanged(stdctx.Background(), nil, prInfo("sha-1"), false, false); ok {
 		t.Fatal("a nil history store must NOT skip (degrade to always-review)")
 	}
 }
@@ -136,7 +124,7 @@ func TestSkipUnchangedNilStore(t *testing.T) {
 // always-review (no skip), never blocking the review.
 func TestSkipUnchangedReadErrorDegrades(t *testing.T) {
 	st := errStore{err: errors.New("db locked")}
-	if _, ok := skipUnchanged(stdctx.Background(), st, &fakeGitHub{}, prInfo("sha-1"), false, false, "review"); ok {
+	if _, ok := skipUnchanged(stdctx.Background(), st, prInfo("sha-1"), false, false); ok {
 		t.Fatal("a read error must degrade to always-review, not skip")
 	}
 }

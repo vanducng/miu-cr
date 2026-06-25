@@ -13,7 +13,7 @@ import (
 
 // statefulClient persists posted inline review comments and reviews so a second
 // run sees the first run's state — exercising cross-run inline-fingerprint dedupe
-// and the Codex per-commit review body.
+// at the PostReview primitive level (summaryFn-into-body, not the wire upsert).
 type statefulClient struct {
 	reviewComments []*gh.PullRequestComment
 	reviews        []*gh.PullRequestReview
@@ -122,9 +122,10 @@ func TestPublishFlowPostThenRerun(t *testing.T) {
 		t.Fatalf("first run: want 1 CreateReview, got %d", c.createReviewN)
 	}
 
-	// Second run (same SHA, no wire-layer skip here): inline dedupe still drops the
-	// 2 already-posted comments; the review body carries the summary again. The
-	// duplicate-review guard lives at the wire layer (AlreadyPostedAtSHA), not here.
+	// Second run (same SHA): inline dedupe still drops the 2 already-posted comments;
+	// with a non-nil summaryFn the primitive re-posts a body-carrying review. (The
+	// wire layer uses nil summaryFn + an upserted issue comment; this is the
+	// primitive-level body path only.)
 	posted, hasBody = runPublishWithDiffs(t, c, info, findings, diffs)
 	if posted != 0 {
 		t.Fatalf("re-run: want 0 new inline (dedupe), got %d", posted)
@@ -157,12 +158,16 @@ func TestRenderSummaryShape(t *testing.T) {
 		t.Fatalf("summary must contain the heading:\n%s", out)
 	}
 	// Header chips high-first (empty severity folds to ⚪), finding count, the
-	// reviewed-commit lead-in, quote-line context + files-reviewed fallback (no
-	// diffs), fork note, footer SHA.
-	for _, want := range []string{shieldsCount("P1", 2, "orange"), shieldsCount("P3", 1, "blue"), "4 findings", "Reviewed commit: `deadbeef`", "context hunks", "3 files", "fork"} {
+	// zero-count identity line (no "Reviews (" prefix), the runs token seeded to 1,
+	// the collapsed internals bullets (Context + files-reviewed fallback, no diffs),
+	// fork note, footer SHA.
+	for _, want := range []string{shieldsCount("P1", 2, "orange"), shieldsCount("P3", 1, "blue"), "4 findings", "Last reviewed commit: `deadbeef`", runsCountToken(1), "<summary>Review internals</summary>", "- Context: hunks", "- Files: **3**", "fork"} {
 		if !strings.Contains(out, want) {
 			t.Errorf("summary missing %q:\n%s", want, out)
 		}
+	}
+	if strings.Contains(out, "Reviews (") {
+		t.Errorf("zero ReviewCount must not render a Reviews (N) prefix:\n%s", out)
 	}
 }
 
@@ -175,7 +180,7 @@ func TestRenderSummaryNoFindings(t *testing.T) {
 	if !strings.Contains(out, "✅ no findings") {
 		t.Errorf("want the no-findings header:\n%s", out)
 	}
-	if !strings.Contains(out, "context full") {
+	if !strings.Contains(out, "- Context: full") {
 		t.Errorf("want default truncation full:\n%s", out)
 	}
 }
