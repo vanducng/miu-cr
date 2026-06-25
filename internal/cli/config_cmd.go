@@ -2,6 +2,10 @@ package cli
 
 import (
 	"io"
+	"os"
+	"os/exec"
+	"path/filepath"
+	"strings"
 
 	toml "github.com/pelletier/go-toml/v2"
 	"github.com/spf13/cobra"
@@ -9,15 +13,110 @@ import (
 	"github.com/vanducng/miu-cr/internal/config"
 )
 
-// configCommand groups read-only config inspection. The write path (get/set) is
-// deliberately deferred — a plaintext-secret footgun.
+// configCommand groups config inspection (show) and a single-key writer (set). The
+// writer refuses secret-bearing keys: tokens and DSNs are read from env at runtime,
+// never persisted, so set only touches non-secret config.
 func configCommand(opts *options) *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   "config",
-		Short: "Inspect miu-cr configuration",
+		Short: "Inspect and update miu-cr configuration",
 	}
 	cmd.AddCommand(configShowCommand(opts))
+	cmd.AddCommand(configSetCommand(opts))
+	cmd.AddCommand(configEditCommand(opts))
 	return cmd
+}
+
+// configEditCommand opens the config file in $VISUAL/$EDITOR (falling back to vi) for
+// free-form edits, then reloads it so a syntax/enum error surfaces immediately. It
+// requires an interactive terminal; in CI use `config set`.
+func configEditCommand(opts *options) *cobra.Command {
+	return &cobra.Command{
+		Use:   "edit",
+		Short: "Open the config file in $VISUAL/$EDITOR (interactive)",
+		Args:  cobra.NoArgs,
+		RunE: func(cmd *cobra.Command, args []string) error {
+			if fi, _ := os.Stdin.Stat(); fi == nil || fi.Mode()&os.ModeCharDevice == 0 {
+				return &CLIError{Code: "config.no_tty", Message: "config edit needs an interactive terminal", Hint: "use `miucr config set <key> <value>` in non-interactive contexts", Exit: 2}
+			}
+			path, err := config.FilePath()
+			if err != nil {
+				return err
+			}
+			if err := ensureConfigFile(path); err != nil {
+				return err
+			}
+			editor := firstNonEmpty(os.Getenv("VISUAL"), os.Getenv("EDITOR"), "vi")
+			parts := strings.Fields(editor)
+			ed := exec.Command(parts[0], append(parts[1:], path)...) //nolint:gosec // user's own $EDITOR
+			ed.Stdin, ed.Stdout, ed.Stderr = os.Stdin, os.Stderr, os.Stderr
+			if err := ed.Run(); err != nil {
+				return &CLIError{Code: "config.edit_failed", Message: "editor exited with error: " + config.RedactString(err.Error()), Hint: "check your $EDITOR/$VISUAL", Exit: 1}
+			}
+			// Reload to validate; report (do not block) if the edited file is invalid.
+			valid := true
+			var loadErr string
+			if _, lerr := config.Load(); lerr != nil {
+				valid = false
+				loadErr = config.RedactString(lerr.Error())
+			}
+			return writeSuccess(cmd.OutOrStdout(), "config edit", "config.edit",
+				map[string]any{"path": path, "valid": valid, "load_error": loadErr},
+				map[string]any{"path": path, "valid": valid})
+		},
+	}
+}
+
+// ensureConfigFile creates the config dir and an empty file if absent, so the editor
+// always opens something.
+func ensureConfigFile(path string) error {
+	if _, err := os.Stat(path); err == nil {
+		return nil
+	}
+	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+		return &CLIError{Code: "config.write_failed", Message: "create config dir: " + config.RedactString(err.Error()), Exit: 1}
+	}
+	if err := os.WriteFile(path, []byte("# miu-cr config. See config.example.toml for all keys.\n"), 0o600); err != nil {
+		return &CLIError{Code: "config.write_failed", Message: "create config file: " + config.RedactString(err.Error()), Exit: 1}
+	}
+	return nil
+}
+
+func firstNonEmpty(vals ...string) string {
+	for _, v := range vals {
+		if strings.TrimSpace(v) != "" {
+			return v
+		}
+	}
+	return ""
+}
+
+// configSetCommand sets ONE dotted, non-secret key (e.g. default_provider, review.gate,
+// providers.zai.model) and merges it into the existing config file, so the user updates
+// config without re-running init. Secret keys (auth_token, store.dsn) are rejected.
+func configSetCommand(opts *options) *cobra.Command {
+	return &cobra.Command{
+		Use:   "set <key> <value>",
+		Short: "Set one non-secret config key, merged into the existing config",
+		Args:  cobra.ExactArgs(2),
+		RunE: func(cmd *cobra.Command, args []string) error {
+			key, value := args[0], args[1]
+			cfg, err := config.Load()
+			if err != nil {
+				return err
+			}
+			if err := config.SetKey(&cfg, key, value); err != nil {
+				return err
+			}
+			if err := config.Save(cfg); err != nil {
+				return err
+			}
+			path := config.FilePathOrEmpty()
+			return writeSuccess(cmd.OutOrStdout(), "config set", "config.set",
+				map[string]any{"key": key, "path": path},
+				map[string]any{"key": key, "path": path})
+		},
+	}
 }
 
 // configShowCommand prints the EFFECTIVE configuration with every token/DSN
