@@ -198,7 +198,7 @@ func renderHandoffAndInternals(b *strings.Builder, info *PRInfo, reviewID string
 		b.WriteString("**Hand off to an agent**\n\n")
 		fmt.Fprintf(b, "- review_id: `%s`\n", strings.ReplaceAll(reviewID, "`", "'"))
 		if url := prURL(info); url != "" {
-			fmt.Fprintf(b, "- Re-run as JSON: `miucr review --pr %s -o json`\n", url)
+			fmt.Fprintf(b, "- Re-run as JSON: `miucr review --pr %s -o json`\n", strings.ReplaceAll(url, "`", "'"))
 		} else {
 			b.WriteString("- Re-run as JSON: `miucr review --pr <pr-url> -o json`\n")
 		}
