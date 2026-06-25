@@ -140,6 +140,7 @@ func reviewTools() []anthropic.ToolUnionParam {
 	grepSchema := anthropic.ToolInputSchemaParam{
 		Properties: map[string]any{
 			"pattern": map[string]any{"type": "string", "description": "fixed string to search for"},
+			"file":    map[string]any{"type": "string", "description": "optional file path to limit the search"},
 		},
 		Required: []string{"pattern"},
 	}
@@ -259,6 +260,13 @@ func fileReadLabel(a fileReadArgs) string {
 	return fmt.Sprintf("%s:%d-%d", a.File, a.Start, a.End)
 }
 
+func grepLabel(a grepArgs) string {
+	if strings.TrimSpace(a.File) == "" {
+		return a.Pattern
+	}
+	return fmt.Sprintf("%s in %s", a.Pattern, a.File)
+}
+
 // runTool executes one tool against the reviewed revision. Provider-agnostic so
 // all agent loops share it (and record the dispatch into the trace). Returns
 // (content, isError).
@@ -286,9 +294,10 @@ func runTool(ctx stdctx.Context, rc Context, turn int, name string, input json.R
 		if strings.TrimSpace(args.Pattern) == "" {
 			return "grep requires a non-empty \"pattern\"", true
 		}
-		rc.progress("→ grep " + args.Pattern)
-		rc.Trace.RecordTool(turn, "grep", args.Pattern)
-		out, err := enginectx.Grep(ctx, rc.RepoDir, rc.Rev, args.Pattern, rc.Runner)
+		label := grepLabel(args)
+		rc.progress("→ grep " + label)
+		rc.Trace.RecordTool(turn, "grep", label)
+		out, err := enginectx.Grep(ctx, rc.RepoDir, rc.Rev, args.Pattern, rc.Runner, args.File)
 		if err != nil {
 			return fmt.Sprintf("grep failed: %v", err), true
 		}
