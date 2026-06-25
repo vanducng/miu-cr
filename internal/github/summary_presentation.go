@@ -77,32 +77,6 @@ func renderWalkthrough(b *strings.Builder, walkthrough string) {
 	b.WriteString("\n\n")
 }
 
-// renderConfidence writes "Confidence: N/5 · reason". The model's confidence (1-5)
-// wins when emitted; otherwise it derives from findings (5 when none; critical −2,
-// high −1, floored at 1) so the line is always present (greptile-style).
-func renderConfidence(b *strings.Builder, confidence int, reason string, findings []engine.Finding) {
-	score := confidence
-	if score <= 0 {
-		score = 5
-		for _, f := range findings {
-			switch strings.ToLower(f.Severity) {
-			case "critical":
-				score -= 2
-			case "high":
-				score--
-			}
-		}
-		if score < 1 {
-			score = 1
-		}
-	}
-	if r := strings.TrimSpace(reason); r != "" {
-		fmt.Fprintf(b, "**Confidence: %d/5** · %s\n\n", score, mdInline(r))
-	} else {
-		fmt.Fprintf(b, "**Confidence: %d/5**\n\n", score)
-	}
-}
-
 // effortSize buckets a PR into S/M/L/XL from file count + total churn: pure
 // arithmetic, stable across runs.
 func effortSize(files int, churn int64) string {

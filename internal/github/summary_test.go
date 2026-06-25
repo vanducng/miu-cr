@@ -139,14 +139,14 @@ func TestRenderSummaryHeaderCountsHighFirst(t *testing.T) {
 		{Severity: "low"}, {Severity: "high"}, {Severity: "high"}, {Severity: "medium"},
 	}
 	out := RenderSummaryFull(info, findings, nil, 0, nil, nil, SummaryOptions{})
-	// The H2 header is clean; severity count badges + total ride the compact quote line.
-	if !strings.Contains(out, "## Code Review\n") {
+	// The H2 header is clean; severity count badges + total ride the compact Result line.
+	if !strings.Contains(out, "## Code Review Summary\n") {
 		t.Fatalf("want a clean H2 header:\n%s", out)
 	}
-	if strings.Contains(out, "## Code Review · ") {
+	if strings.Contains(out, "## Code Review Summary · ") {
 		t.Fatalf("severity must NOT be on the H2 header:\n%s", out)
 	}
-	want := "> " + shieldsCount("P1", 2, "orange") + " " + shieldsCount("P2", 1, "yellow") + " " + shieldsCount("P3", 1, "blue") + " · 4 findings"
+	want := "**Result:** " + shieldsCount("P1", 2, "orange") + " " + shieldsCount("P2", 1, "yellow") + " " + shieldsCount("P3", 1, "blue") + " · 4 findings"
 	if !strings.Contains(out, want) {
 		t.Fatalf("want count badges (high-first) + total in the quote:\n%s", out)
 	}
@@ -157,11 +157,11 @@ func TestRenderSummaryHeaderCountsHighFirst(t *testing.T) {
 
 func TestRenderSummaryHeaderNoFindings(t *testing.T) {
 	out := RenderSummaryFull(&PRInfo{HeadSHA: "h"}, nil, nil, 0, nil, nil, SummaryOptions{})
-	if !strings.Contains(out, "## Code Review\n") {
+	if !strings.Contains(out, "## Code Review Summary\n") {
 		t.Fatalf("want a clean H2 header:\n%s", out)
 	}
-	if !strings.Contains(out, "no_issues_found-brightgreen") {
-		t.Fatalf("zero findings must render the no-findings marker in the quote:\n%s", out)
+	if !strings.Contains(out, "No_findings-brightgreen") {
+		t.Fatalf("zero findings must render the no-findings marker in the Result line:\n%s", out)
 	}
 	if strings.Contains(out, "(0 finding") {
 		t.Fatalf("no-findings must not append a count:\n%s", out)
@@ -170,7 +170,7 @@ func TestRenderSummaryHeaderNoFindings(t *testing.T) {
 
 func TestRenderSummaryFooterReviewedCommit(t *testing.T) {
 	out := RenderSummaryFull(&PRInfo{HeadSHA: "deadbeef"}, nil, nil, 0, nil, nil, SummaryOptions{})
-	if !strings.Contains(out, "<sub>Reviewed commit `deadbeef` · Posted by [miu-cr](https://github.com/vanducng/miu-cr)</sub>") {
+	if !strings.Contains(out, "<sub>Reviewed commit `deadbee` · Posted by [miu-cr](https://github.com/vanducng/miu-cr)</sub>") {
 		t.Fatalf("want the per-SHA reviewed-commit attribution footer with the miu-cr repo link:\n%s", out)
 	}
 	// The old upsert footer line must be gone.
@@ -206,10 +206,8 @@ func TestRenderSummaryFullOrder(t *testing.T) {
 	mustOrder(t, out, []string{
 		ReviewMarker,
 		"<!-- miu-cr-runs:",
-		"## Code Review",
-		"**Reviews (2)** · Last reviewed commit",
-		"> ", // severity blockquote
-		"Confidence:",
+		"## Code Review Summary",
+		"**Result:**", // result line lead
 		"this is the walkthrough lead prose",
 		"<summary>Agent handoff & review internals</summary>",
 		"<sub>Reviewed commit",
@@ -217,22 +215,26 @@ func TestRenderSummaryFullOrder(t *testing.T) {
 }
 
 func TestRenderSummaryReviewCountIdentity(t *testing.T) {
-	// Zero ReviewCount: bare "Last reviewed commit", no "Reviews (" prefix, token seeded to 1.
+	// Zero ReviewCount: old identity line gone, no "Reviews (" prefix, no "Last reviewed commit:",
+	// footer omits the Review-attempts clause, token seeded to 1.
 	zero := RenderSummaryFull(&PRInfo{HeadSHA: "abc"}, nil, nil, 0, nil, nil, SummaryOptions{})
 	if strings.Contains(zero, "Reviews (") {
-		t.Fatalf("zero ReviewCount must not render a Reviews (N) prefix:\n%s", zero)
+		t.Fatalf("summary must not render the old Reviews (N) identity line:\n%s", zero)
 	}
-	if !strings.Contains(zero, "Last reviewed commit:") {
-		t.Fatalf("zero ReviewCount must still render the identity line:\n%s", zero)
+	if strings.Contains(zero, "Last reviewed commit:") {
+		t.Fatalf("old top identity line must be gone:\n%s", zero)
+	}
+	if strings.Contains(zero, "Review attempts:") {
+		t.Fatalf("zero ReviewCount must omit the Review-attempts clause:\n%s", zero)
 	}
 	if !strings.Contains(zero, runsCountToken(1)) {
 		t.Fatalf("zero ReviewCount must seed the runs token to 1:\n%s", zero)
 	}
 
-	// ReviewCount=3: identity prefix present, token carries 3.
+	// ReviewCount=3: count relocated to the footer as "Review attempts: 3", token carries 3.
 	three := RenderSummaryFull(&PRInfo{HeadSHA: "abc", ReviewCount: 3}, nil, nil, 0, nil, nil, SummaryOptions{})
-	if !strings.Contains(three, "**Reviews (3)** · Last reviewed commit:") {
-		t.Fatalf("ReviewCount=3 must render the Reviews (3) identity prefix:\n%s", three)
+	if !strings.Contains(three, "Review attempts: 3") {
+		t.Fatalf("ReviewCount=3 must render the relocated footer count:\n%s", three)
 	}
 	if !strings.Contains(three, runsCountToken(3)) {
 		t.Fatalf("ReviewCount=3 must carry runs token 3:\n%s", three)
@@ -322,7 +324,7 @@ func TestRenderSummaryHandoffNeverShowsReviewID(t *testing.T) {
 func TestRenderSummaryFullEmptyFindingsStillClean(t *testing.T) {
 	info, diffs, _ := presentationFixture()
 	out := RenderSummaryFull(info, nil, nil, 0, nil, nil, SummaryOptions{Diffs: diffs, ReviewID: "rev_x"})
-	if !strings.Contains(out, "no_issues_found-brightgreen") {
+	if !strings.Contains(out, "No_findings-brightgreen") {
 		t.Fatalf("empty-findings review must still render a clean summary:\n%s", out)
 	}
 	if !strings.Contains(out, "Important Files Changed (2)") || !strings.Contains(out, "Hand off to an agent") {
@@ -533,21 +535,15 @@ func TestMdProseEscapesBreakoutKeepsFormatting(t *testing.T) {
 
 func TestRenderSummaryConfidence(t *testing.T) {
 	info, diffs, findings := presentationFixture() // findings include a high
-	// model-emitted confidence wins + the reason renders.
+	// Confidence line removed; model confidence + reason must NOT render.
 	out := RenderSummaryFull(info, findings, nil, 0, nil, nil, SummaryOptions{Diffs: diffs, Confidence: 4, ConfidenceReason: "localized changes, well tested"})
-	if !strings.Contains(out, "**Confidence: 4/5**") || !strings.Contains(out, "localized changes, well tested") {
-		t.Fatalf("model confidence + reason must render:\n%s", out)
+	if strings.Contains(out, "Confidence:") {
+		t.Fatalf("summary must no longer render a Confidence line:\n%s", out)
 	}
-	// derived fallback (Confidence 0): no findings -> 5/5.
+	// derived fallback (Confidence 0): no findings -> no Confidence line either.
 	clean := RenderSummaryFull(info, nil, nil, 0, nil, nil, SummaryOptions{Diffs: diffs})
-	if !strings.Contains(clean, "**Confidence: 5/5**") {
-		t.Fatalf("no findings must derive 5/5:\n%s", clean)
-	}
-	// derived fallback with a critical -> below 5.
-	crit := []engine.Finding{{Severity: "critical", Category: "security", Rationale: "x"}}
-	cout := RenderSummaryFull(info, crit, nil, 0, nil, nil, SummaryOptions{Diffs: diffs})
-	if strings.Contains(cout, "Confidence: 5/5") {
-		t.Fatalf("a critical finding must lower the derived confidence below 5/5:\n%s", cout)
+	if strings.Contains(clean, "Confidence:") {
+		t.Fatalf("summary must no longer render a Confidence line:\n%s", clean)
 	}
 }
 
@@ -562,17 +558,5 @@ func TestRenderChangesTableSortsByImportance(t *testing.T) {
 	bi, gi := strings.Index(out, "buggy.go"), strings.Index(out, "big.go")
 	if bi < 0 || gi < 0 || bi > gi {
 		t.Fatalf("a file with a finding must sort before a bigger no-finding file:\n%s", out)
-	}
-}
-
-func TestCommitLabelSubjectThenHashFallback(t *testing.T) {
-	base := &PRInfo{HeadSHA: "deadbeef1234", HTMLBase: "https://github.com/o/r"}
-	withSubj := *base
-	withSubj.HeadSubject = "fix: handle nil"
-	if got := commitLabel(&withSubj); !strings.Contains(got, "fix: handle nil") || !strings.Contains(got, "/commit/deadbeef1234") {
-		t.Fatalf("subject must be the link text over the commit permalink: %q", got)
-	}
-	if got := commitLabel(base); !strings.Contains(got, "`deadbeef`") {
-		t.Fatalf("no subject must fall back to the short hash: %q", got)
 	}
 }

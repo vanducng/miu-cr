@@ -432,9 +432,9 @@ func TestParseRunsCount(t *testing.T) {
 		body string
 		want int
 	}{
-		{"present", ReviewMarker + "\n" + runsCountToken(3) + "\n## Code Review", 3},
+		{"present", ReviewMarker + "\n" + runsCountToken(3) + "\n## Code Review Summary", 3},
 		{"zero", runsCountToken(0), 0},
-		{"missing", ReviewMarker + "\n## Code Review", 0},
+		{"missing", ReviewMarker + "\n## Code Review Summary", 0},
 		{"garbled", "<!-- miu-cr-runs:abc -->", 0},
 		{"first of multiple", runsCountToken(1) + "\n" + runsCountToken(9), 1},
 	}
@@ -465,7 +465,7 @@ func TestPriorRunsCount(t *testing.T) {
 		},
 		{
 			"marked but no token",
-			[]*gh.IssueComment{marked(5, ReviewMarker+"\n## Code Review")},
+			[]*gh.IssueComment{marked(5, ReviewMarker+"\n## Code Review Summary")},
 			nil, 0,
 		},
 		{
@@ -515,7 +515,7 @@ func TestReviewCountIncrementChain(t *testing.T) {
 			t.Fatalf("run %d: ReviewCount = %d, want %d (prior+1, not stuck/off-by-one)", run, info.ReviewCount, run)
 		}
 		out := RenderSummaryFull(info, nil, nil, 0, nil, nil, SummaryOptions{})
-		if !strings.Contains(out, fmt.Sprintf("**Reviews (%d)**", run)) {
+		if !strings.Contains(out, fmt.Sprintf("Review attempts: %d", run)) {
 			t.Fatalf("run %d: displayed N must equal %d:\n%s", run, run, out)
 		}
 		if got := parseRunsCount(out); got != run {

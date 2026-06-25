@@ -67,7 +67,7 @@ func severityCounts(findings []engine.Finding) string {
 	return strings.Join(chips, " ")
 }
 
-// commitRef renders the head SHA as a short (8-char) linked reference when an HTML base
+// commitRef renders the head SHA as a short (7-char) linked reference when an HTML base
 // is known, else a short code span, so the summary never repeats the full 40-char SHA.
 func commitRef(info *PRInfo) string {
 	sha := info.HeadSHA
@@ -75,8 +75,8 @@ func commitRef(info *PRInfo) string {
 		return ""
 	}
 	short := sha
-	if len(short) > 8 {
-		short = short[:8]
+	if len(short) > 7 {
+		short = short[:7]
 	}
 	if info.HTMLBase != "" {
 		return fmt.Sprintf("[`%s`](<%s/commit/%s>)", short, info.HTMLBase, sha)
@@ -84,26 +84,11 @@ func commitRef(info *PRInfo) string {
 	return "`" + short + "`"
 }
 
-// commitLabel renders the reviewed commit as a permalink whose text is the commit
-// SUBJECT (truncated, escaped) when known, so the cover reads like a changelog line
-// instead of a bare hash. Falls back to commitRef (short SHA) when the subject or the
-// HTML base is missing. The subject is UNTRUSTED, escaped via mdInline.
-func commitLabel(info *PRInfo) string {
-	subj := strings.TrimSpace(info.HeadSubject)
-	if subj == "" || info.HTMLBase == "" || info.HeadSHA == "" {
-		return commitRef(info)
-	}
-	if r := []rune(subj); len(r) > 72 {
-		subj = strings.TrimRight(string(r[:72]), " ") + "…"
-	}
-	return fmt.Sprintf("[%s](<%s/commit/%s>)", mdInline(subj), info.HTMLBase, info.HeadSHA)
-}
-
 // RenderSummary builds the PR summary upserted as the single miucr issue comment:
 // it leads with ReviewMarker (the owning sentinel) + the hidden runs token, then a
-// `## Code Review` header, the Reviews-(N)/last-commit identity line, the shields
-// severity badges, confidence, walkthrough prose, Important Files Changed, the
-// collapsed Review internals details, and a footer.
+// `## Code Review Summary` header, the inline `**Result:**` severity-chips line,
+// walkthrough prose, Important Files Changed, the collapsed Review internals
+// details, and a footer whose `Review attempts: N` carries the relocated count.
 func RenderSummary(info *PRInfo, findings []engine.Finding, stats map[string]any, omittedInline int) string {
 	return RenderSummaryWithOverflow(info, findings, stats, omittedInline, nil, nil)
 }
@@ -150,25 +135,16 @@ func RenderSummaryFull(info *PRInfo, findings []engine.Finding, stats map[string
 	// render with an unset ReviewCount (no FetchPR), which still seeds N=1.
 	b.WriteString(runsCountToken(max(info.ReviewCount, 1)) + "\n")
 
-	// Keep the H2 small; severity chips ride the compact quote line below, not the header.
-	b.WriteString("## Code Review\n\n")
-
-	if info.HeadSHA != "" {
-		if info.ReviewCount > 0 {
-			fmt.Fprintf(&b, "**Reviews (%d)** · Last reviewed commit: %s\n\n", info.ReviewCount, commitLabel(info))
-		} else {
-			fmt.Fprintf(&b, "Last reviewed commit: %s\n\n", commitLabel(info))
-		}
-	}
+	// Keep the H2 small; severity chips ride the compact Result line below, not the header.
+	b.WriteString("## Code Review Summary\n\n")
 
 	lead := severityCounts(findings)
 	if lead != "" {
 		lead += fmt.Sprintf(" · %d finding%s", len(findings), plural(len(findings)))
 	} else {
-		lead = "<sub><sub>![no issues found](https://img.shields.io/badge/no_issues_found-brightgreen?style=flat)</sub></sub>"
+		lead = "<sub><sub>![No findings](https://img.shields.io/badge/No_findings-brightgreen?style=flat)</sub></sub>"
 	}
-	fmt.Fprintf(&b, "> %s\n\n", lead)
-	renderConfidence(&b, opts.Confidence, opts.ConfidenceReason, findings)
+	fmt.Fprintf(&b, "**Result:** %s\n\n", lead)
 
 	renderWalkthrough(&b, opts.Walkthrough)
 	renderDiagram(&b, opts.Diagram)
@@ -188,7 +164,11 @@ func RenderSummaryFull(info *PRInfo, findings []engine.Finding, stats map[string
 
 	renderHandoffAndInternals(&b, info, stats, opts.Diffs)
 
-	fmt.Fprintf(&b, "\n<sub>Reviewed commit %s · Posted by [miu-cr](https://github.com/vanducng/miu-cr)</sub>", commitRef(info))
+	handoff := ""
+	if info.ReviewCount > 0 {
+		handoff = fmt.Sprintf(" · Review attempts: %d", info.ReviewCount)
+	}
+	fmt.Fprintf(&b, "\n<sub>Reviewed commit %s%s · Posted by [miu-cr](https://github.com/vanducng/miu-cr)</sub>", commitRef(info), handoff)
 	return b.String()
 }
 

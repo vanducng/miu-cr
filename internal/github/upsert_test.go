@@ -15,7 +15,7 @@ func upsertInfo() *PRInfo { return &PRInfo{Owner: "o", Repo: "r", Number: 1} }
 
 func TestUpsertSummaryCommentCreatesOnFirstRun(t *testing.T) {
 	c := &recordClient{issueStore: []*gh.IssueComment{}}
-	act, err := UpsertSummaryComment(stdctx.Background(), c, upsertInfo(), ReviewMarker+"\n## Code Review\nbody")
+	act, err := UpsertSummaryComment(stdctx.Background(), c, upsertInfo(), ReviewMarker+"\n## Code Review Summary\nbody")
 	if err != nil {
 		t.Fatalf("upsert: %v", err)
 	}
@@ -163,7 +163,7 @@ func TestUpsertSummaryCommentStorelessRunsRoundTrip(t *testing.T) {
 	c := &recordClient{issueStore: []*gh.IssueComment{}}
 	info := upsertInfo()
 
-	body1 := runsCountToken(1) + "\n" + ReviewMarker + "\n## Code Review"
+	body1 := runsCountToken(1) + "\n" + ReviewMarker + "\n## Code Review Summary"
 	if act, err := UpsertSummaryComment(stdctx.Background(), c, info, body1); err != nil || act != UpsertCreated {
 		t.Fatalf("first run: act=%q err=%v", act, err)
 	}
@@ -171,7 +171,7 @@ func TestUpsertSummaryCommentStorelessRunsRoundTrip(t *testing.T) {
 		t.Fatalf("stored body must parse runs=1, got %d", got)
 	}
 
-	body2 := runsCountToken(2) + "\n" + ReviewMarker + "\n## Code Review"
+	body2 := runsCountToken(2) + "\n" + ReviewMarker + "\n## Code Review Summary"
 	if act, err := UpsertSummaryComment(stdctx.Background(), c, info, body2); err != nil || act != UpsertEdited {
 		t.Fatalf("second run: act=%q err=%v", act, err)
 	}
