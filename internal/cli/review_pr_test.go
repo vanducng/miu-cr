@@ -192,6 +192,37 @@ func TestPRGateUsesPRReviewerNotLocalReviewer(t *testing.T) {
 	}
 }
 
+func TestPRPatchRepairRequiresSuggest(t *testing.T) {
+	_, err := runPR(t, &fakePRReviewer{}, &fakeReviewer{}, "--pr", "o/r#1", "--no-post", "--patch-repair")
+	var ce *CLIError
+	if !asCLIError(err, &ce) || ce.Code != "config.invalid" || ce.Exit != 2 {
+		t.Fatalf("want config.invalid exit 2 for --patch-repair without --suggest, got %+v", err)
+	}
+}
+
+func TestPRPatchRepairThreadedWithSuggest(t *testing.T) {
+	pr := &fakePRReviewer{outcome: ReviewOutcome{PR: &PRResult{Owner: "o", Repo: "r", Number: 1}}}
+	if _, err := runPR(t, pr, &fakeReviewer{}, "--pr", "o/r#1", "--no-post", "--suggest", "--patch-repair"); err != nil {
+		t.Fatalf("run: %v", err)
+	}
+	if !pr.gotReq.Suggest {
+		t.Fatal("--suggest must thread Suggest=true")
+	}
+	if !pr.gotReq.PatchRepair {
+		t.Fatal("--patch-repair (with --suggest) must thread PatchRepair=true into the PR request")
+	}
+}
+
+func TestPRPatchRepairOffByDefault(t *testing.T) {
+	pr := &fakePRReviewer{outcome: ReviewOutcome{PR: &PRResult{Owner: "o", Repo: "r", Number: 1}}}
+	if _, err := runPR(t, pr, &fakeReviewer{}, "--pr", "o/r#1", "--no-post", "--suggest"); err != nil {
+		t.Fatalf("run: %v", err)
+	}
+	if pr.gotReq.PatchRepair {
+		t.Fatal("--patch-repair defaults OFF; must not thread PatchRepair=true without the flag")
+	}
+}
+
 func TestPRPostNoPostConflict(t *testing.T) {
 	_, err := runPR(t, &fakePRReviewer{}, &fakeReviewer{}, "--pr", "o/r#1", "--post", "--no-post")
 	var ce *CLIError

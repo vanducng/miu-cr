@@ -150,6 +150,43 @@ func codexTools() []codexTool {
 	}
 }
 
+// RepairPatch issues one tools-less, code-only Responses completion over the
+// same SSE/stream path as Review (stream:true, entitled model id) and returns
+// the fence-stripped, trimmed reply (lockstep with the SDK backends).
+func (a *codexAgent) RepairPatch(ctx stdctx.Context, rr RepairRequest) (string, error) {
+	if a.timeout > 0 {
+		var cancel stdctx.CancelFunc
+		ctx, cancel = stdctx.WithTimeout(ctx, a.timeout)
+		defer cancel()
+	}
+	resp, err := a.post(ctx, codexReq{
+		Model:        a.model,
+		Instructions: repairSystemPrompt,
+		Input: []codexItem{{
+			Type:    "message",
+			Role:    "user",
+			Content: []codexContent{{Type: "input_text", Text: BuildRepairPrompt(rr)}},
+		}},
+		Store:  false,
+		Stream: true,
+	})
+	if err != nil {
+		return "", err
+	}
+	var text strings.Builder
+	for _, o := range resp.Output {
+		if o.Type != "message" {
+			continue
+		}
+		for _, c := range o.Content {
+			if c.Type == "output_text" || c.Type == "text" {
+				text.WriteString(c.Text)
+			}
+		}
+	}
+	return parseRepairReply(text.String()), nil
+}
+
 func (a *codexAgent) Review(ctx stdctx.Context, rc Context) (engine.ReviewOutput, error) {
 	if a.timeout > 0 {
 		var cancel stdctx.CancelFunc

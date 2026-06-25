@@ -23,6 +23,11 @@ type fakeAgent struct {
 	maxEmpty  int
 	emptySeen int
 	bailedOut bool
+	// repairReply is the canned raw RepairPatch reply (good / junk / empty /
+	// fenced); repairErr forces an error path.
+	repairReply string
+	repairErr   error
+	gotRepair   RepairRequest
 }
 
 func (f *fakeAgent) Review(ctx stdctx.Context, rc Context) (engine.ReviewOutput, error) {
@@ -35,6 +40,16 @@ func (f *fakeAgent) Review(ctx stdctx.Context, rc Context) (engine.ReviewOutput,
 		Walkthrough:   "Sample walkthrough: bounds-check the loop.",
 		FileSummaries: map[string]string{"app.go": "Tightens the loop bound."},
 	}, nil
+}
+
+// RepairPatch records the request and returns the canned reply, fence-stripped
+// the same way the production backends parse it.
+func (f *fakeAgent) RepairPatch(_ stdctx.Context, rr RepairRequest) (string, error) {
+	f.gotRepair = rr
+	if f.repairErr != nil {
+		return "", f.repairErr
+	}
+	return parseRepairReply(f.repairReply), nil
 }
 
 var _ Agent = (*fakeAgent)(nil)

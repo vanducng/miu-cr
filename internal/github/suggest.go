@@ -22,6 +22,67 @@ func meetsSuggestionFloor(sev string) bool {
 	return severityRankOf(sev) >= severityRankOf(suggestionSeverityFloor)
 }
 
+// repairReason classifies why classifyReplacement accepted or rejected a patch.
+// Only the "repairable" subset is worth a second LLM pass; the rest are anchoring
+// bugs a patch-only re-prompt cannot fix.
+type repairReason int
+
+const (
+	reasonOK repairReason = iota
+	reasonNoAnchor
+	reasonOutOfRange
+	reasonEmpty
+	reasonNoOp
+	reasonAnchorMismatch
+	reasonGarbledSpan
+	reasonLengthMismatch
+)
+
+func (r repairReason) String() string {
+	switch r {
+	case reasonOK:
+		return "ok"
+	case reasonNoAnchor:
+		return "no_anchor"
+	case reasonOutOfRange:
+		return "out_of_range"
+	case reasonEmpty:
+		return "empty"
+	case reasonNoOp:
+		return "no_op"
+	case reasonAnchorMismatch:
+		return "anchor_mismatch"
+	case reasonGarbledSpan:
+		return "garbled_span"
+	case reasonLengthMismatch:
+		return "length_mismatch"
+	default:
+		return "unknown"
+	}
+}
+
+// repairable reports whether a rejection is worth a second LLM pass: only an
+// empty/no-op/garbled-span/length-mismatch patch can be fixed by re-prompting for
+// the replacement code. A true anchor mismatch (or no/out-of-range anchor) is an
+// anchoring bug, not a patch problem, so it is NOT repairable.
+func (r repairReason) repairable() bool {
+	switch r {
+	case reasonEmpty, reasonNoOp, reasonGarbledSpan, reasonLengthMismatch:
+		return true
+	default:
+		return false
+	}
+}
+
+// ClassifyReplacement is the exported re-validation seam the engine injects from
+// wire (mirroring Anchorer), keeping internal/engine free of an internal/github
+// import. It returns the suggestion text, a stable lowercase reason string, and
+// whether that reason is worth a repair pass.
+func ClassifyReplacement(f engine.Finding, newFileContent string) (patch string, reason string, repairable bool) {
+	p, r := classifyReplacement(f, newFileContent)
+	return p, r.String(), r.repairable()
+}
+
 // normalizeLine mirrors the anchor resolver's normalization: trim surrounding
 // whitespace and strip a single leading +/- diff marker, then trim again. Kept
 // local so isCleanReplacement re-matches against the SAME normalization the
@@ -52,38 +113,47 @@ func normalizeLine(s string) string {
 //   - the patch is not a no-op (differs from the whitespace-trimmed raw line;
 //     +/- are NOT stripped from the patch, which may be operator-prefixed code)
 func isCleanReplacement(f engine.Finding, newFileContent string) (string, bool) {
+	s, r := classifyReplacement(f, newFileContent)
+	return s, r == reasonOK
+}
+
+// classifyReplacement implements the single- and multi-line accept/reject logic of
+// isCleanReplacement, returning the precise rejection reason for the repair loop.
+// The accept/reject decision is byte-for-byte identical to the original
+// isCleanReplacement/cleanMultiLineReplacement; only the reason is new.
+func classifyReplacement(f engine.Finding, newFileContent string) (string, repairReason) {
 	if f.Line <= 0 {
-		return "", false
+		return "", reasonNoAnchor
 	}
 	if f.EndLine > f.Line {
-		return cleanMultiLineReplacement(f, newFileContent)
+		return classifyMultiLineReplacement(f, newFileContent)
 	}
 	if f.EndLine != 0 && f.EndLine != f.Line {
-		return "", false
+		return "", reasonGarbledSpan
 	}
 
 	patch := strings.TrimRight(strings.TrimSpace(f.SuggestedPatch), "\r")
 	if patch == "" {
-		return "", false
+		return "", reasonEmpty
 	}
 
 	lines := strings.Split(newFileContent, "\n")
 	if f.Line > len(lines) {
-		return "", false
+		return "", reasonOutOfRange
 	}
 	rawLine := strings.TrimRight(lines[f.Line-1], "\r")
 
 	if normalizeLine(rawLine) != normalizeLine(f.QuotedCode) {
-		return "", false
+		return "", reasonAnchorMismatch
 	}
 	// No-op check whitespace-trims BOTH sides (consistent with the multi-line path)
 	// but never strips +/-: SuggestedPatch is replacement CODE that can legitimately
 	// begin with +/- (e.g. an arithmetic `+offset`), so normalizing it would wrongly
 	// flag a real fix as a no-op. QuotedCode anchoring above keeps normalizeLine.
 	if strings.TrimSpace(rawLine) == strings.TrimSpace(patch) {
-		return "", false
+		return "", reasonNoOp
 	}
-	return patch, true
+	return patch, reasonOK
 }
 
 // cleanMultiLineReplacement proves a multi-line one-click suggestion is safe: the
@@ -92,14 +162,19 @@ func isCleanReplacement(f engine.Finding, newFileContent string) (string, bool) 
 // anchored on-diff block. Any mismatch (length, content, no-op) rejects → the
 // caller falls back to a plain fenced hint, never a one-click multi-line apply.
 func cleanMultiLineReplacement(f engine.Finding, newFileContent string) (string, bool) {
+	s, r := classifyMultiLineReplacement(f, newFileContent)
+	return s, r == reasonOK
+}
+
+func classifyMultiLineReplacement(f engine.Finding, newFileContent string) (string, repairReason) {
 	patch := strings.TrimRight(strings.TrimSpace(f.SuggestedPatch), "\r")
 	if patch == "" {
-		return "", false
+		return "", reasonEmpty
 	}
 
 	raw := strings.Split(newFileContent, "\n")
 	if f.EndLine > len(raw) {
-		return "", false
+		return "", reasonOutOfRange
 	}
 	span := make([]string, 0, f.EndLine-f.Line+1)
 	for i := f.Line - 1; i < f.EndLine; i++ {
@@ -108,18 +183,18 @@ func cleanMultiLineReplacement(f engine.Finding, newFileContent string) (string,
 
 	quoted := strings.Split(strings.ReplaceAll(f.QuotedCode, "\r\n", "\n"), "\n")
 	if len(quoted) != len(span) {
-		return "", false
+		return "", reasonLengthMismatch
 	}
 	for i := range span {
 		if normalizeLine(span[i]) != normalizeLine(quoted[i]) {
-			return "", false
+			return "", reasonAnchorMismatch
 		}
 	}
 	// No-op: the patch reproduces the span verbatim (whitespace-trimmed per line).
 	if strings.Join(trimAll(span), "\n") == strings.Join(trimAll(strings.Split(patch, "\n")), "\n") {
-		return "", false
+		return "", reasonNoOp
 	}
-	return patch, true
+	return patch, reasonOK
 }
 
 func trimAll(lines []string) []string {

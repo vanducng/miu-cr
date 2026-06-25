@@ -14,11 +14,15 @@ import (
 	"github.com/vanducng/miu-cr/internal/engine"
 	"github.com/vanducng/miu-cr/internal/engine/anchor"
 	"github.com/vanducng/miu-cr/internal/engine/gitcmd"
+	mgithub "github.com/vanducng/miu-cr/internal/github"
 	"github.com/vanducng/miu-cr/internal/mcpserver"
 	"github.com/vanducng/miu-cr/internal/store/sqlite"
 )
 
-func init() { engine.SetAnchorer(anchor.ResolveLineNumbers) }
+func init() {
+	engine.SetAnchorer(anchor.ResolveLineNumbers)
+	engine.SetCleanReplacement(mgithub.ClassifyReplacement)
+}
 
 // fakeAgent returns canned findings; no network, no API key.
 type fakeAgent struct{ findings []engine.Finding }
@@ -30,6 +34,10 @@ func (f *fakeAgent) Review(_ stdctx.Context, _ engine.AgentContext) (engine.Revi
 		Findings:    findings,
 		Walkthrough: "Sample walkthrough: exercises the review path.",
 	}, nil
+}
+
+func (f *fakeAgent) RepairPatch(stdctx.Context, engine.RepairRequest) (string, error) {
+	return "", nil
 }
 
 func git(t *testing.T, dir string, args ...string) {

@@ -132,6 +132,45 @@ func TestCodexAgentPostsResponsesAndParses(t *testing.T) {
 	}
 }
 
+// RepairPatch must use the SAME SSE/stream path as Review (stream:true, Accept:
+// text/event-stream, no tools, repairSystemPrompt instructions) and return the
+// fence-stripped reply.
+func TestCodexAgentRepairPatch(t *testing.T) {
+	var gotBody codexReq
+	var gotAccept string
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		gotAccept = r.Header.Get("Accept")
+		raw, _ := io.ReadAll(r.Body)
+		_ = json.Unmarshal(raw, &gotBody)
+		io.WriteString(w, codexMessageResp("```go\nval, ok := m[key]\n```"))
+	}))
+	defer srv.Close()
+
+	a := newTestCodexAgent(t, srv)
+	out, err := a.RepairPatch(stdctx.Background(), RepairRequest{Span: "val := m[key]", Rationale: "missing check", Category: "bug", Severity: "high"})
+	if err != nil {
+		t.Fatalf("RepairPatch: %v", err)
+	}
+	if out != "val, ok := m[key]" {
+		t.Fatalf("reply not fence-stripped: %q", out)
+	}
+	if !gotBody.Stream {
+		t.Error("repair must use stream:true (SSE path)")
+	}
+	if gotAccept != "text/event-stream" {
+		t.Errorf("Accept = %q, want text/event-stream", gotAccept)
+	}
+	if len(gotBody.Tools) != 0 {
+		t.Errorf("repair must offer no tools, got %d", len(gotBody.Tools))
+	}
+	if gotBody.Instructions != repairSystemPrompt {
+		t.Errorf("repair must use repairSystemPrompt instructions")
+	}
+	if len(gotBody.Input) == 0 || !strings.Contains(gotBody.Input[0].Content[0].Text, "val := m[key]") {
+		t.Errorf("span missing from repair input: %+v", gotBody.Input)
+	}
+}
+
 func TestCodexAgentToolLoopThenFindings(t *testing.T) {
 	var calls int
 	var sawToolOutput bool

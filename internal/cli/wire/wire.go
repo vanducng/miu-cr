@@ -79,6 +79,7 @@ func ruleCitations(loaded []rules.Rule, repoDir string) map[string]mgithub.RuleC
 
 func init() {
 	engine.SetAnchorer(anchor.ResolveLineNumbers)
+	engine.SetCleanReplacement(mgithub.ClassifyReplacement)
 	cli.SetReviewer(engineReviewer{})
 	cli.SetPRReviewer(prReviewer{})
 	cli.SetMCPServer(mcpServerImpl{})
@@ -369,6 +370,8 @@ func (prReviewer) ReviewPR(ctx stdctx.Context, req cli.PRReviewRequest) (cli.Rev
 		Owner:        info.Owner,
 		Repo:         info.Repo,
 		Number:       info.Number,
+		Post:         req.Post,
+		PatchRepair:  req.PatchRepair,
 
 		Rules:            loaded,
 		RulesFork:        info.IsFork,
@@ -406,6 +409,9 @@ func (prReviewer) ReviewPR(ctx stdctx.Context, req cli.PRReviewRequest) (cli.Rev
 		if err := publishReview(ctx, client, runner, dir, info, res, prResult, req, prStore, ew, cfg.Review.CategoryURLMap(), ruleCitations(loaded, dir)); err != nil {
 			return cli.ReviewOutcome{}, err
 		}
+		// Source of truth is the engine stat (repair ran in the engine, not github);
+		// omitempty drops it when --patch-repair is OFF.
+		prResult.PatchesRepaired = patchRepairedCount(res.Stats)
 	}
 
 	return cli.ReviewOutcome{
@@ -607,6 +613,19 @@ func publishChecks(ctx stdctx.Context, client mgithub.Client, info *mgithub.PRIn
 	return nil
 }
 
+// patchRepairedCount reads the engine's repair stat (set only when --patch-repair
+// ran). The repair loop records counts as float64; a missing/mistyped stat → 0.
+func patchRepairedCount(stats map[string]any) int {
+	pr, ok := stats["patch_repair"].(map[string]any)
+	if !ok {
+		return 0
+	}
+	if n, ok := pr["repaired"].(float64); ok {
+		return int(n)
+	}
+	return 0
+}
+
 // trackResolution records the actually-submitted findings as posted, then marks as
 // resolved any prior 'posted' fp absent from THIS run whose stored path is still in
 // the PR diff (a finding off the diff can't be re-posted, so absence isn't a fix).
@@ -687,6 +706,17 @@ func (a agentAdapter) Review(ctx stdctx.Context, rc engine.AgentContext) (engine
 	})
 }
 
+// RepairPatch forwards the engine's repair request to the concrete agent —
+// lockstep: a missed forward silently no-ops repair for the real agent.
+func (a agentAdapter) RepairPatch(ctx stdctx.Context, rr engine.RepairRequest) (string, error) {
+	return a.inner.RepairPatch(ctx, agent.RepairRequest{
+		Span:      rr.Span,
+		Rationale: rr.Rationale,
+		Category:  rr.Category,
+		Severity:  rr.Severity,
+	})
+}
+
 // mcpServerImpl builds the engine + SQLite store and serves them over MCP. The
 // agent resolves credentials lazily (on the first review_run), so the MCP
 // handshake and tools/list need no Anthropic key.
@@ -750,6 +780,20 @@ func (l lazyAgent) Review(ctx stdctx.Context, rc engine.AgentContext) (engine.Re
 		return engine.ReviewOutput{}, err
 	}
 	return agentAdapter{inner: llm}.Review(ctx, rc)
+}
+
+// RepairPatch resolves credentials lazily then delegates to agentAdapter
+// (mirroring Review) — lockstep with the engine.Agent interface.
+func (l lazyAgent) RepairPatch(ctx stdctx.Context, rr engine.RepairRequest) (string, error) {
+	creds, err := agent.Resolve(agent.ResolveInput{Ctx: ctx, OAuthResolver: oauthResolver()})
+	if err != nil {
+		return "", err
+	}
+	llm, err := agent.New(creds, l.timeout)
+	if err != nil {
+		return "", err
+	}
+	return agentAdapter{inner: llm}.RepairPatch(ctx, rr)
 }
 
 func modeFor(req cli.ReviewRequest) diff.Mode {

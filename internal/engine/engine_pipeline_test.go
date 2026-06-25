@@ -13,9 +13,13 @@ import (
 	"github.com/vanducng/miu-cr/internal/engine"
 	"github.com/vanducng/miu-cr/internal/engine/anchor"
 	"github.com/vanducng/miu-cr/internal/engine/gitcmd"
+	mgithub "github.com/vanducng/miu-cr/internal/github"
 )
 
-func init() { engine.SetAnchorer(anchor.ResolveLineNumbers) }
+func init() {
+	engine.SetAnchorer(anchor.ResolveLineNumbers)
+	engine.SetCleanReplacement(mgithub.ClassifyReplacement)
+}
 
 // fakeAgent returns canned findings, ignoring the assembled context. No network,
 // no API key. It records the rev it was invoked with for revision-source asserts.
@@ -26,6 +30,11 @@ type fakeAgent struct {
 	gotSemantic    string
 	gotInstruction string
 	gotProgress    bool
+
+	// repair drives RepairPatch; nil => default "" (no usable replacement). It
+	// records every call so tests can assert call count / order / skip.
+	repair      func(engine.RepairRequest) (string, error)
+	repairCalls []engine.RepairRequest
 }
 
 func (f *fakeAgent) Review(_ stdctx.Context, rc engine.AgentContext) (engine.ReviewOutput, error) {
@@ -50,6 +59,14 @@ func (f *fakeAgent) Review(_ stdctx.Context, rc engine.AgentContext) (engine.Rev
 		Walkthrough:   "Sample walkthrough: this change updates the example handler.",
 		FileSummaries: map[string]string{"app.go": "Adds a sample handler."},
 	}, nil
+}
+
+func (f *fakeAgent) RepairPatch(_ stdctx.Context, rr engine.RepairRequest) (string, error) {
+	f.repairCalls = append(f.repairCalls, rr)
+	if f.repair != nil {
+		return f.repair(rr)
+	}
+	return "", nil
 }
 
 // fakeRetriever drives the engine's semantic seam without embed/DB/network.

@@ -120,6 +120,9 @@ func reviewEqual(a, b Review) bool {
 	if (a.Suggest == nil) != (b.Suggest == nil) || (a.Suggest != nil && *a.Suggest != *b.Suggest) {
 		return false
 	}
+	if (a.PatchRepair == nil) != (b.PatchRepair == nil) || (a.PatchRepair != nil && *a.PatchRepair != *b.PatchRepair) {
+		return false
+	}
 	if len(a.CategoryURLs) != len(b.CategoryURLs) {
 		return false
 	}
