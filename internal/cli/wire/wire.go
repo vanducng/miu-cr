@@ -550,14 +550,9 @@ func publishReview(ctx stdctx.Context, client mgithub.Client, runner *gitcmd.Run
 		})
 	}
 
-	// Post the summary FIRST on a non-fork PR so it anchors ABOVE the inline review in
-	// the PR timeline (an overview, then the details). The overflow block needs
-	// PostReview's omitted set, so it's filled in by a re-edit after. A fork PR would
-	// 403 on the issue comment, so it keeps the after-PostReview path (which degrades
-	// to ::error:: annotations).
 	// Post the summary FIRST on a non-fork PR (with omitted=0) so it anchors ABOVE the
-	// inline review in the timeline; finalized after PostReview. A fork PR defers to
-	// after PostReview (an issue comment would 403 the same way as the inline review).
+	// inline review in the timeline (overview, then details); finalized after PostReview.
+	// A fork PR defers to after PostReview (an issue comment would 403 like the review).
 	summaryFirst := !info.IsFork
 	preOK := false
 	if summaryFirst {
