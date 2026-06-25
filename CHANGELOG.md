@@ -55,6 +55,13 @@ comment with a new marker); subsequent re-runs dedupe normally. On a
 first M5 review **manually** (or off-hours) to absorb the one-time re-post before
 the next scheduled run.
 
+## [0.27.0](https://github.com/vanducng/miu-cr/compare/v0.26.0...v0.27.0) (2026-06-25)
+
+
+### Features
+
+* **trace:** full review-trace capture + miucr trace + --trace ([6b3d1cb](https://github.com/vanducng/miu-cr/commit/6b3d1cb095d3f59cf1a0ffd93b45e7d67ec8375a))
+
 ## [0.26.0](https://github.com/vanducng/miu-cr/compare/v0.25.0...v0.26.0) (2026-06-24)
 
 
