@@ -85,13 +85,13 @@ func BuildUserPrompt(parts PromptParts) string {
 	if strings.TrimSpace(parts.Instruction) != "" {
 		sb.WriteString(instructionHeader)
 		sb.WriteString("\n```\n")
-		sb.WriteString(capRunes(parts.Instruction, maxInstructionLen))
+		sb.WriteString(fenceSafe(capRunes(parts.Instruction, maxInstructionLen)))
 		sb.WriteString("\n```\n\n")
 	}
 	if strings.TrimSpace(parts.Conversation) != "" {
 		sb.WriteString(conversationHeader)
 		sb.WriteString("\n```\n")
-		sb.WriteString(parts.Conversation)
+		sb.WriteString(fenceSafe(parts.Conversation))
 		sb.WriteString("\n```\n\n")
 	}
 	if parts.WantDiagram {
@@ -148,6 +148,17 @@ func capRunes(s string, n int) string {
 		return s
 	}
 	return string(r[:n])
+}
+
+// fenceSafe neutralizes triple-backtick runs in text embedded inside a ``` fence so
+// untrusted content (conversation, instruction) cannot close the fence early and
+// inject un-fenced prose. A zero-width space breaks each run without dropping content.
+func fenceSafe(s string) string {
+	if !strings.Contains(s, "```") {
+		return s
+	}
+	const zwsp = "​"
+	return strings.ReplaceAll(s, "```", "`"+zwsp+"`"+zwsp+"`")
 }
 
 // clampConfidence keeps a model-emitted confidence in [0,5]; 0 means "not emitted"

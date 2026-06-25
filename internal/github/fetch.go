@@ -8,6 +8,7 @@ import (
 	"net/url"
 	"os"
 	"strings"
+	"unicode/utf8"
 
 	gh "github.com/google/go-github/v84/github"
 
@@ -151,15 +152,17 @@ func capConversation(s string) string {
 	if len(s) <= maxConversationBytes {
 		return s
 	}
-	r := []rune(s)
-	keep := maxConversationBytes - len(conversationTruncated)
-	if keep < 0 {
-		keep = 0
+	// Budget is in BYTES; back up to a UTF-8 rune boundary so a multi-byte rune is
+	// never split (the prior []rune[:keep] used a byte count as a rune index, which
+	// could overshoot the byte budget up to ~4x).
+	budget := maxConversationBytes - len(conversationTruncated)
+	if budget < 0 {
+		budget = 0
 	}
-	if len(r) <= keep {
-		return s
+	for budget > 0 && !utf8.RuneStart(s[budget]) {
+		budget--
 	}
-	return string(r[:keep]) + conversationTruncated
+	return s[:budget] + conversationTruncated
 }
 
 // fetchPriorSummaries returns miucr's own prior review summary bodies (those
@@ -203,6 +206,11 @@ func fetchInlineThreads(ctx stdctx.Context, client Client, info *PRInfo) string 
 		for _, c := range comments {
 			body := strings.TrimSpace(c.GetBody())
 			if body == "" {
+				continue
+			}
+			// Skip miucr's own prior inline findings (they carry the fp marker), so the
+			// agent never re-reads its own output as "conversation" (feedback loop).
+			if strings.Contains(body, fpPrefix) {
 				continue
 			}
 			if path := c.GetPath(); path != "" {
