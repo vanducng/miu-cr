@@ -256,8 +256,8 @@ One LLM pass over a deterministically selected diff, then line-anchor, severity 
 dedupe. Flags: `--gate`, `--provider anthropic|openai|<name>|auto`, `--base-url`,
 `--model`, `--include`/`--exclude`/`--ext`. `--instruction "<text>"` adds a free-text steer
 for **this** review; `--conversation` (on `--pr`) folds the prior PR conversation back in.
-Both ride the same single review pass (no extra LLM call) as fenced, context-only input —
-they never change the finding schema; conversation text is treated as untrusted and dropped
+Both ride the same single review pass (no extra LLM call) as fenced, context-only input.
+They never change the finding schema; conversation text is treated as untrusted and dropped
 on fork PRs. GitHub PRs add head-SHA anchoring and one review per commit (same-SHA re-runs
 skip).
 [Usage](https://miucr.vanducng.dev/usage/) ·
@@ -314,7 +314,7 @@ for a human table). `ok` is the branch point; `artifacts` and `warnings` are alw
 envelope with `ok:false`, `kind:"error"`, and a typed `error` object (`code`, `message`,
 `hint`, `retryable`). Secrets never appear in the envelope, logs, or on disk. The
 `--instruction`/`--conversation` flags and the `/miucr review <prompt>` trigger only add
-**input** to a review — the envelope and the finding JSON are unchanged (still
+**input** to a review; the envelope and the finding JSON are unchanged (still
 `miucr.cli/v1`).
 
 Severities low to high: `info` < `low` < `medium` < `high` < `critical`.
