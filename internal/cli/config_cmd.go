@@ -41,14 +41,16 @@ func configEditCommand(opts *options) *cobra.Command {
 			}
 			path, err := config.FilePath()
 			if err != nil {
-				return err
+				return &CLIError{Code: "config.unavailable", Message: "resolve config path: " + config.RedactString(err.Error()), Exit: 1}
 			}
 			if err := ensureConfigFile(path); err != nil {
 				return err
 			}
 			editor := firstNonEmpty(os.Getenv("VISUAL"), os.Getenv("EDITOR"), "vi")
-			parts := strings.Fields(editor)
-			ed := exec.Command(parts[0], append(parts[1:], path)...) //nolint:gosec // user's own $EDITOR
+			// Run via the shell so a multi-word $EDITOR ("code -w") and a path with
+			// spaces both work; the path is passed as $1, never interpolated into the
+			// command string (no quoting/injection footgun, no strings.Fields panic).
+			ed := exec.Command("sh", "-c", editor+` "$1"`, "sh", path) //nolint:gosec // user's own $EDITOR
 			ed.Stdin, ed.Stdout, ed.Stderr = os.Stdin, os.Stderr, os.Stderr
 			if err := ed.Run(); err != nil {
 				return &CLIError{Code: "config.edit_failed", Message: "editor exited with error: " + config.RedactString(err.Error()), Hint: "check your $EDITOR/$VISUAL", Exit: 1}
@@ -73,7 +75,7 @@ func ensureConfigFile(path string) error {
 	if _, err := os.Stat(path); err == nil {
 		return nil
 	}
-	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+	if err := os.MkdirAll(filepath.Dir(path), 0o700); err != nil { // 0o700: matches Save (the dir also holds oauth.json)
 		return &CLIError{Code: "config.write_failed", Message: "create config dir: " + config.RedactString(err.Error()), Exit: 1}
 	}
 	if err := os.WriteFile(path, []byte("# miu-cr config. See config.example.toml for all keys.\n"), 0o600); err != nil {
@@ -114,7 +116,7 @@ func configSetCommand(opts *options) *cobra.Command {
 			path := config.FilePathOrEmpty()
 			return writeSuccess(cmd.OutOrStdout(), "config set", "config.set",
 				map[string]any{"key": key, "path": path},
-				map[string]any{"key": key, "path": path})
+				map[string]any{"key": key})
 		},
 	}
 }

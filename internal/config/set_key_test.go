@@ -85,3 +85,30 @@ func TestSetKeyValidatesEnums(t *testing.T) {
 		}
 	}
 }
+
+// Regression: config set review.* must survive Save->Load (savedConfig once dropped Review).
+func TestSetKeyReviewPersistsThroughSave(t *testing.T) {
+	dir := t.TempDir()
+	t.Setenv("HOME", dir)
+	t.Setenv("XDG_CONFIG_HOME", dir)
+	var cfg Config
+	if err := SetKey(&cfg, "review.gate", "high"); err != nil {
+		t.Fatal(err)
+	}
+	if err := SetKey(&cfg, "default_provider", "zai"); err != nil {
+		t.Fatal(err)
+	}
+	if err := Save(cfg); err != nil {
+		t.Fatalf("Save: %v", err)
+	}
+	got, err := Load()
+	if err != nil {
+		t.Fatalf("Load: %v", err)
+	}
+	if got.Review.Gate != "high" {
+		t.Fatalf("review.gate dropped on Save->Load: %+v", got.Review)
+	}
+	if got.DefaultProvider != "zai" {
+		t.Fatalf("default_provider dropped: %q", got.DefaultProvider)
+	}
+}

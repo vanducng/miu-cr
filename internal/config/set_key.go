@@ -36,6 +36,7 @@ func SetKey(cfg *Config, key, value string) error {
 		return ValidateReview(cfg.Review)
 	case key == "review.timeout":
 		cfg.Review.Timeout = value
+		return ValidateReview(cfg.Review)
 	case key == "store.backend":
 		if value != "sqlite" && value != "postgres" {
 			return invalidKey(key, value, "sqlite|postgres")
@@ -62,8 +63,8 @@ func SetKey(cfg *Config, key, value string) error {
 		cfg.Embedding.Model = value
 	case key == "embedding.dim":
 		n, err := strconv.Atoi(value)
-		if err != nil {
-			return invalidKey(key, value, "an integer")
+		if err != nil || n < 1 || n > MaxEmbeddingDim {
+			return invalidKey(key, value, fmt.Sprintf("an integer in [1, %d]", MaxEmbeddingDim))
 		}
 		cfg.Embedding.Dim = n
 	case strings.HasPrefix(key, "providers."):
