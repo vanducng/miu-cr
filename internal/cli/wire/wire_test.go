@@ -7,6 +7,7 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
 	gh "github.com/google/go-github/v84/github"
 
@@ -546,6 +547,8 @@ func TestPatchRepairedCount(t *testing.T) {
 }
 
 func TestRetryTransient(t *testing.T) {
+	defer func(b time.Duration) { retryBackoffBase = b }(retryBackoffBase)
+	retryBackoffBase = time.Millisecond // keep the test off real wall-clock backoff
 	// Retryable error: retried until it succeeds, within the attempt budget.
 	calls := 0
 	err := retryTransient(stdctx.Background(), 3, func() error {

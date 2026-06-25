@@ -555,13 +555,18 @@ func publishReview(ctx stdctx.Context, client mgithub.Client, runner *gitcmd.Run
 	// PostReview's omitted set, so it's filled in by a re-edit after. A fork PR would
 	// 403 on the issue comment, so it keeps the after-PostReview path (which degrades
 	// to ::error:: annotations).
+	// Post the summary FIRST on a non-fork PR (with omitted=0) so it anchors ABOVE the
+	// inline review in the timeline; finalized after PostReview. A fork PR defers to
+	// after PostReview (an issue comment would 403 the same way as the inline review).
 	summaryFirst := !info.IsFork
+	preOK := false
 	if summaryFirst {
 		if action, uerr := mgithub.UpsertSummaryComment(ctx, client, info, renderSummary(0, nil)); uerr != nil {
 			slog.Warn("summary upsert failed, continuing to inline review: " + config.RedactString(uerr.Error()))
 			prResult.SummaryAction = "failed"
 		} else {
 			prResult.SummaryAction = string(action)
+			preOK = true
 		}
 	}
 
@@ -581,19 +586,14 @@ func publishReview(ctx stdctx.Context, client mgithub.Client, runner *gitcmd.Run
 		return nil
 	}
 
-	if summaryFirst {
-		// Re-edit the already-posted summary with the accurate overflow set only when
-		// PostReview actually omitted findings (the common no-overflow case skips it).
-		if pr.Omitted > 0 {
-			if _, eerr := mgithub.UpsertSummaryComment(ctx, client, info, renderSummary(pr.Omitted, pr.OmittedFindings)); eerr != nil {
-				slog.Warn("summary overflow re-edit failed (review still posted): " + config.RedactString(eerr.Error()))
-			}
-		}
-	} else {
-		// Fork PR whose inline review did NOT 403 (PAT has base access): post the
-		// summary after, with the accurate overflow set.
+	// Finalize the summary with the accurate overflow set when needed: the body changed
+	// (pr.Omitted > 0), the summary-first upsert FAILED (retry it), or it was deferred
+	// (fork path that did not fall back, or pre-upsert skipped). The upsert is idempotent
+	// (create-or-edit), so this lands whether or not the first attempt did. The common
+	// non-fork, no-overflow case skips it (the pre-post upsert was already accurate).
+	if !preOK || pr.Omitted > 0 {
 		if action, uerr := mgithub.UpsertSummaryComment(ctx, client, info, renderSummary(pr.Omitted, pr.OmittedFindings)); uerr != nil {
-			slog.Warn("summary upsert failed, inline review still posted: " + config.RedactString(uerr.Error()))
+			slog.Warn("summary upsert failed (inline review still posted): " + config.RedactString(uerr.Error()))
 			prResult.SummaryAction = "failed"
 		} else {
 			prResult.SummaryAction = string(action)
@@ -886,19 +886,28 @@ func toEngineFindings(in []cli.ReviewFinding) []engine.Finding {
 // handshake / DNS blip without hanging on a genuine outage.
 const maxGitHubAttempts = 5
 
+// retryBackoffBase is the first-retry delay; a package var so tests can shrink it.
+var retryBackoffBase = 500 * time.Millisecond
+
 // retryTransient retries fn while it returns a RETRYABLE CLIError (a network blip or
 // 5xx, classified by ghAPIError), with exponential backoff + equal jitter capped at
 // 8s, up to maxAttempts. A non-retryable error or success returns at once; ctx
 // cancellation aborts the wait so a caller timeout still wins.
 func retryTransient(ctx stdctx.Context, maxAttempts int, fn func() error) error {
-	const base, maxBackoff = 500 * time.Millisecond, 8 * time.Second
+	const maxBackoff = 8 * time.Second
 	var err error
 	for attempt := 1; ; attempt++ {
 		if err = fn(); err == nil || attempt >= maxAttempts || !isRetryableErr(err) {
 			return err
 		}
-		d := base << (attempt - 1)
-		if d > maxBackoff {
+		// Cap the shift before it overflows int64 (a large maxAttempts), then cap the
+		// duration; a negative d (overflow) also clamps to maxBackoff.
+		shift := attempt - 1
+		if shift > 6 {
+			shift = 6
+		}
+		d := retryBackoffBase << shift
+		if d <= 0 || d > maxBackoff {
 			d = maxBackoff
 		}
 		d = d/2 + time.Duration(rand.Int63n(int64(d/2)+1)) // equal jitter [d/2, d]
