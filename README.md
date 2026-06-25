@@ -232,7 +232,7 @@ PR comments are polished, not raw findings (see
 [GitHub PR review](https://miucr.vanducng.dev/github-pr/)):
 
 - **Head-SHA-anchored inline comments** with multi-line ranges, dropped (not mis-posted) on position drift.
-- **One-click suggestions:** GitHub-native suggested edits for proven single-line fixes (`--suggest`, author-applied).
+- **One-click suggestions:** GitHub-native suggested edits for proven single-line fixes (`--suggest`, author-applied); `--patch-repair` adds a 2nd-pass that recovers suggestions the first pass narrowly missed (re-validated by the same exact-anchor gate).
 - **One upserted summary:** the summary is ONE issue comment that is created on the first run and edited in place after (carrying the `<!-- miu-cr-review -->` marker); inline findings post as a PR review with an empty body. Re-runs and re-pushes update that single comment instead of stacking duplicates.
 - **Optional auto-approve:** `--approve-clean` submits `APPROVE` only on a clean, non-fork, trusted-author PR, else it degrades to `COMMENT`.
 - **Fork-safe:** repo rules are trust-fenced and dropped on fork PRs; the engine still reviews.
@@ -267,12 +267,21 @@ on fork PRs. GitHub PRs add head-SHA anchoring and one upserted summary issue co
 ### Suggestions and approval (opt-in, default off)
 
 ```sh
-miucr review --pr owner/repo#123 --post --suggest          # GitHub one-click suggested edits
-miucr review --pr owner/repo#123 --post --approve-clean    # APPROVE only when clean + non-fork + trusted
+miucr review --pr owner/repo#123 --post --suggest                  # GitHub one-click suggested edits
+miucr review --pr owner/repo#123 --post --suggest --patch-repair   # + recover suggestions the first pass missed
+miucr review --pr owner/repo#123 --post --approve-clean            # APPROVE only when clean + non-fork + trusted
 ```
 
 `--suggest` emits native suggestions for proven single-line fixes (author-applied, never
-pushed). `--approve-clean` degrades to `COMMENT` rather than erroring.
+pushed). `--patch-repair` (default OFF, **requires `--suggest`**) adds a conditional second
+LLM pass: for each single-line finding (`>= medium`) whose suggested patch was rejected for
+a repairable reason (empty or no-op, never a true anchor mismatch), it makes one focused
+call asking for a minimal replacement of the verbatim anchored span, then **re-validates it
+through the same exact-anchor gate** — it emits a one-click suggestion only if that passes,
+and never applies an unproven span. It costs one extra LLM call per repaired candidate, is
+capped per review (default 5, highest-severity-first), and is inert in a dry-run (recovers
+only on `--post`). Using it without `--suggest` is a typed `config.invalid` error (exit 2).
+`--approve-clean` degrades to `COMMENT` rather than erroring.
 [GitHub PR review](https://miucr.vanducng.dev/github-pr/)
 
 ### Project rules
