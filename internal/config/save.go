@@ -67,6 +67,67 @@ func Save(cfg Config) error {
 	return nil
 }
 
+// showConfig is the display projection for `config show` (without --all): the
+// Save delta fields plus the History/Review sections (which Save intentionally
+// omits) so a user-set [review].gate is visible. A flat struct (NOT an embedded
+// savedConfig) because go-toml/v2 does not inline an anonymous embedded struct.
+// Pointer/omitempty sections keep an unchanged section out of the output. This is
+// display-only — Save still writes only savedConfig, so init's write path is
+// unchanged.
+type showConfig struct {
+	DefaultProvider string              `toml:"default_provider,omitempty"`
+	Providers       map[string]Provider `toml:"providers,omitempty"`
+	Store           *Store              `toml:"store,omitempty"`
+	Embedding       *Embedding          `toml:"embedding,omitempty"`
+	Github          *Github             `toml:"github,omitempty"`
+	History         *History            `toml:"history,omitempty"`
+	Review          *Review             `toml:"review,omitempty"`
+}
+
+// Delta returns the user-set deltas of cfg for `config show` (without --all):
+// fields differing from built-in Defaults(), including History/Review which Save
+// omits. Returns an opaque marshalable value (omitempty toml tags throughout).
+func Delta(cfg Config) any {
+	base := Defaults()
+	d := delta(cfg)
+	out := showConfig{
+		DefaultProvider: d.DefaultProvider,
+		Providers:       d.Providers,
+		Store:           d.Store,
+		Embedding:       d.Embedding,
+		Github:          d.Github,
+	}
+	if cfg.History != base.History {
+		h := cfg.History
+		out.History = &h
+	}
+	if !reviewEqual(cfg.Review, base.Review) {
+		r := cfg.Review
+		out.Review = &r
+	}
+	return out
+}
+
+// reviewEqual compares two Review values structurally (Review holds a map +
+// pointer, so == is illegal). Used only by Delta to detect a user-set [review].
+func reviewEqual(a, b Review) bool {
+	if a.Gate != b.Gate || a.FilterMode != b.FilterMode || a.MinSeverity != b.MinSeverity || a.Timeout != b.Timeout {
+		return false
+	}
+	if (a.Suggest == nil) != (b.Suggest == nil) || (a.Suggest != nil && *a.Suggest != *b.Suggest) {
+		return false
+	}
+	if len(a.CategoryURLs) != len(b.CategoryURLs) {
+		return false
+	}
+	for k, v := range a.CategoryURLs {
+		if b.CategoryURLs[k] != v {
+			return false
+		}
+	}
+	return true
+}
+
 // delta returns the on-disk projection holding only fields that differ from
 // Defaults(), so the encoded file omits built-in profiles and default sections.
 func delta(cfg Config) savedConfig {

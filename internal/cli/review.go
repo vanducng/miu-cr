@@ -333,10 +333,17 @@ func reviewCommand(opts *options) *cobra.Command {
 			return validateReviewFlags(staged, from, to, commit, gate)
 		},
 		RunE: func(cmd *cobra.Command, args []string) error {
+			// [review] config defaults fill any flag the user did NOT set; an explicit
+			// flag always wins (cmd.Flags().Changed). Validated config-side (config.invalid).
+			rcfg, err := loadReviewDefaults(cmd, &gate, &filterMode, &minSeverity, &suggest)
+			if err != nil {
+				return err
+			}
 			// A real LLM review routinely exceeds the 30s root default; bump it for
-			// review unless the user set --timeout explicitly.
+			// review unless the user set --timeout explicitly. A [review].timeout
+			// fills the unset flag (else 300s).
 			if !cmd.Flags().Changed("timeout") {
-				opts.timeout = 300 * time.Second
+				opts.timeout = reviewTimeoutDefault(rcfg)
 			}
 			prog := newProgress(cmd.ErrOrStderr(), verbose, quiet)
 			var traceSink func(step string, payload any)
@@ -617,6 +624,48 @@ func runPRReview(cmd *cobra.Command, a prRunArgs) error {
 		}
 	}
 	return nil
+}
+
+// loadReviewDefaults loads [review] from config, validates it (config.invalid on
+// a bad enum/timeout), and fills any review flag the user did NOT set on the
+// command line. An explicit flag always wins (cmd.Flags().Changed); a config
+// value only fills an unset flag. Returns the validated Review so the caller can
+// also derive the timeout default. A config-load error propagates (typed).
+func loadReviewDefaults(cmd *cobra.Command, gate, filterMode, minSeverity *string, suggest *bool) (config.Review, error) {
+	cfg, err := config.Load()
+	if err != nil {
+		return config.Review{}, err
+	}
+	r := cfg.Review
+	if err := config.ValidateReview(r); err != nil {
+		return r, err
+	}
+	f := cmd.Flags()
+	if r.Gate != "" && !f.Changed("gate") {
+		*gate = r.Gate
+	}
+	if r.FilterMode != "" && !f.Changed("filter-mode") {
+		*filterMode = r.FilterMode
+	}
+	if r.MinSeverity != "" && !f.Changed("min-severity") {
+		*minSeverity = r.MinSeverity
+	}
+	if r.Suggest != nil && !f.Changed("suggest") {
+		*suggest = *r.Suggest
+	}
+	return r, nil
+}
+
+// reviewTimeoutDefault returns the [review].timeout when set+parseable, else the
+// 300s review default. ValidateReview already rejected an unparsable value, so a
+// parse error here degrades silently to the default.
+func reviewTimeoutDefault(r config.Review) time.Duration {
+	if r.Timeout != "" {
+		if d, err := time.ParseDuration(r.Timeout); err == nil {
+			return d
+		}
+	}
+	return 300 * time.Second
 }
 
 // validatePRFlags rejects --post together with --no-post and (defense-in-depth)

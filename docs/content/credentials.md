@@ -65,6 +65,20 @@ miucr login --no-browser           # prints the authorize URL to open elsewhere
 The `login.result` envelope is **secret-free** — it emits only
 `{provider, oauth_path, expires_at, account_id, has_api_key}`; no tokens.
 
+### Inspect and clear the cached login (`whoami` / `logout`)
+
+```sh
+miucr whoami     # who am I authed as? {logged_in, provider, account_id, expires_at, expired}
+miucr logout     # delete oauth.json; idempotent ({removed: bool})
+```
+
+`whoami` reports only the **non-secret** fields from the cached record (provider,
+account id, expiry) — the access/refresh/id token and api key are never read into
+the envelope, so no token can leak via `whoami` (in either `json` or `pretty`
+output). With no cached record it returns `{logged_in: false}` (a clean result,
+not an error). `logout` deletes `oauth.json`; running it again on an
+already-cleared record is a no-op (`{removed: false}`), so it is safe to repeat.
+
 **Precedence** — the cached login credential sits **below** an explicit key. An
 explicit `--api-key` / `OPENAI_API_KEY` (and any Anthropic path) still wins, so a
 real key always overrides a stale token. OAuth is consulted only when no OpenAI
@@ -106,7 +120,8 @@ jobs:
 - The token lives **only** in `oauth.json` (`0600`, dir `0700`, atomic write),
   is **gitignored**, and is **never** logged, never put in the CLI envelope, and
   redacted from any error string.
-- There is no `miucr logout` — delete `oauth.json` by hand to revoke locally.
+- `miucr logout` deletes `oauth.json` to revoke locally; `miucr whoami` shows the
+  cached identity without ever exposing the token.
 - **Anthropic OAuth is unsupported by design** (Anthropic ToS). Use an API key
   or an Anthropic-compatible gateway for Anthropic providers.
 

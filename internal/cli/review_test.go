@@ -42,6 +42,7 @@ func (f *fakeReviewer) GateFailed(findings []ReviewFinding, gate string) bool {
 
 func runReview(t *testing.T, r Reviewer, args ...string) (string, error) {
 	t.Helper()
+	t.Setenv("HOME", t.TempDir())                       // hermetic config dir: no real ~/.config/miu/cr leaks in
 	t.Setenv("ANTHROPIC_API_KEY", "synthetic-test-key") // satisfy the soft first-run gate
 	prev := reviewer
 	SetReviewer(r)

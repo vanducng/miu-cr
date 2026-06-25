@@ -91,3 +91,19 @@ default_provider = "anthropic"
 # model    = "text-embedding-3-small"    # embedding model (must match the pgvector column dim)
 # dim      = 1536                         # vector dimension; immutable per DB — a mismatch fails loud
 # # base_url = "https://api.openai.com/v1"  # non-secret; override for self-hosted/compatible
+
+# ── Review defaults (optional) ──
+# Defaults for `miucr review` flags. An explicit flag ALWAYS wins; these only
+# fill a flag you did not pass. See `miucr config show --all` for the effective
+# config. Leave a key unset to keep the built-in flag default.
+# [review]
+# gate         = "high"          # fail (exit 2) at this severity: none|info|low|medium|high|critical
+# filter_mode  = "diff_context"  # --pr inline eligibility: added|diff_context|file|nofilter
+# min_severity = "low"           # --pr inline floor: none|info|low|medium|high|critical
+# timeout      = "300s"          # review timeout (a Go duration: 300s, 5m, …)
+# suggest      = false           # emit GitHub one-click suggestions on --post (default off)
+#
+# # category_urls maps a finding Category (case-insensitive) to a docs URL so the
+# # category renders as a clickable link in PR comments/summary + the SARIF helpUri.
+# [review.category_urls]
+# "security" = "https://example.com/docs/security"

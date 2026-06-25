@@ -114,6 +114,37 @@ func TestConventionCitationRidesRationale(t *testing.T) {
 	}
 }
 
+func TestSystemPromptRequiresPatchForHighFindings(t *testing.T) {
+	// The forceful patch instruction + a worked example must live in the cached
+	// systemPrompt (cache-stable; not injectable USER prose).
+	for _, want := range []string{
+		"REQUIRED for every high/critical finding",
+		"FULL replacement for the quoted line(s)",
+		"Worked example",
+		"val, ok := m[key]",
+	} {
+		if !contains(systemPrompt, want) {
+			t.Fatalf("systemPrompt missing patch guidance %q", want)
+		}
+	}
+}
+
+func TestParseFindingsStableWithPatch(t *testing.T) {
+	// A normal findings response with a multi-line suggested_patch still parses;
+	// the strengthened prompt + worked example did not destabilize the contract.
+	body := `{"findings":[{"file":"a.go","existing_code":"val := m[key]","severity":"high","category":"bug","rationale":"missing presence check","suggested_patch":"val, ok := m[key]\nif !ok {\n\treturn fmt.Errorf(\"missing\")\n}"}]}`
+	out, ok := parseFindings(body)
+	if !ok {
+		t.Fatalf("parseFindings failed on patched finding")
+	}
+	if len(out.Findings) != 1 {
+		t.Fatalf("want 1 finding, got %d", len(out.Findings))
+	}
+	if out.Findings[0].SuggestedPatch == "" {
+		t.Fatal("suggested_patch dropped")
+	}
+}
+
 func contains(s, sub string) bool { return indexOf(s, sub) >= 0 }
 
 func indexOf(s, sub string) int {

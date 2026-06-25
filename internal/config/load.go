@@ -120,11 +120,28 @@ func Merge(base, file Config) Config {
 	return out
 }
 
-// mergeReview overlays the file [review] table onto base. A non-empty file
-// CategoryURLs replaces base wholesale (a user opts into their own link map),
-// otherwise base (the built-in default, currently none) is inherited.
+// mergeReview overlays the file [review] table onto base. Non-empty scalar
+// fields win (so a file-supplied [review].gate reaches cfg.Review); a non-nil
+// Suggest wins (explicit true/false beats base's nil, mirroring mergeHistory); a
+// non-empty CategoryURLs replaces base wholesale (a user opts into their own link
+// map). An empty/nil field inherits base.
 func mergeReview(base, file Review) Review {
 	out := base
+	if file.Gate != "" {
+		out.Gate = file.Gate
+	}
+	if file.FilterMode != "" {
+		out.FilterMode = file.FilterMode
+	}
+	if file.MinSeverity != "" {
+		out.MinSeverity = file.MinSeverity
+	}
+	if file.Timeout != "" {
+		out.Timeout = file.Timeout
+	}
+	if file.Suggest != nil {
+		out.Suggest = file.Suggest
+	}
 	if len(file.CategoryURLs) > 0 {
 		out.CategoryURLs = file.CategoryURLs
 	}

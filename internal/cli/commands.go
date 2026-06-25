@@ -103,6 +103,8 @@ func rootCommand(opts *options) *cobra.Command {
 	}
 	root.AddCommand(initCommand(opts))
 	root.AddCommand(loginCommand(opts))
+	root.AddCommand(whoamiCommand(opts))
+	root.AddCommand(logoutCommand(opts))
 	root.AddCommand(upgradeCommand(opts))
 	root.AddCommand(versionCommand())
 	root.AddCommand(reviewCommand(opts))
@@ -111,6 +113,7 @@ func rootCommand(opts *options) *cobra.Command {
 	root.AddCommand(rulesCommand(opts))
 	root.AddCommand(historyCommand(opts))
 	root.AddCommand(traceCommand(opts))
+	root.AddCommand(configCommand(opts))
 	return root
 }
 
@@ -505,4 +508,5 @@ func commandPath(args []string) string {
 
 func init() {
 	cobra.EnableCommandSorting = false
+	config.SetReviewValidators(engine.ValidGate, ghub.ValidFilterMode, ghub.ValidMinSeverity)
 }

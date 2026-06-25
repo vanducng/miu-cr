@@ -45,6 +45,36 @@ The two built-in profiles `anthropic` and `openai` always exist; you only declar
 `auth_env` names an env var; the token is read at run time and never written to the config file. `auth_token` stores the literal token **in plaintext on disk** — use it only when an env var isn't practical. When both are set, `auth_token` wins, and miu-cr prints a one-time warning whenever a plaintext `auth_token` is used.
 :::
 
+### Review defaults — `[review]`
+
+The optional `[review]` table sets defaults for `miucr review` flags. An **explicit flag always wins**; a `[review]` value only fills a flag you did not pass. A bad enum or timeout is a typed `config.invalid` error (exit `2`).
+
+```toml
+[review]
+gate         = "high"          # default --gate: none|info|low|medium|high|critical
+filter_mode  = "diff_context"  # default --filter-mode (--pr): added|diff_context|file|nofilter
+min_severity = "low"           # default --min-severity (--pr inline floor)
+timeout      = "300s"          # default review timeout (a Go duration: 300s, 5m, …)
+suggest      = false           # default --suggest (GitHub one-click suggestions on --post)
+
+[review.category_urls]         # map a finding Category → a docs URL (clickable link + SARIF helpUri)
+"security" = "https://example.com/docs/security"
+```
+
+Only these review attributes can be defaulted from config — there is intentionally **no** `approve_clean` config (a write-action defaulting on is a footgun).
+
+### Viewing the effective config — `config show`
+
+`miucr config show` prints the **effective** configuration with every credential masked (`auth_token`, the store `dsn`) by structural redaction — a token can never reach stdout. By default it shows only your user-set values; `--all` includes the built-in defaults.
+
+```sh
+miucr config show          # user-set values only (secrets redacted)
+miucr config show --all    # full effective config incl. built-in defaults
+miucr config show -o pretty  # TOML view for humans
+```
+
+It is read-only: there is no `config set` write path (deliberately — to avoid a plaintext-secret footgun). Edit `~/.config/miu/cr/config.toml` directly.
+
 ## Anthropic
 
 ```sh

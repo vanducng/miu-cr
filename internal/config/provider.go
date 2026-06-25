@@ -104,12 +104,23 @@ type History struct {
 // default-on, an explicit false disables it.
 func (h History) On() bool { return h.Enabled == nil || *h.Enabled }
 
-// Review carries presentation-only review options. CategoryURLs maps a finding
-// Category (matched case-insensitively) to a docs URL so a mapped category
-// renders as a clickable link in PR comments/summary and sets the SARIF helpUri.
-// This map is TRUSTED config only (user file + built-in defaults) — never sourced
-// from repo .miu/cr/rules, so a fork-PR rule cannot inject a link into comments.
+// Review carries review-attribute defaults plus presentation-only options. The
+// Gate/FilterMode/MinSeverity/Timeout/Suggest fields are CLI defaults: an
+// explicit flag always wins (review.go checks cmd.Flags().Changed); an unset flag
+// falls back to these. An empty/nil value means "no config default" (use the
+// flag default). Suggest is a *bool so an absent key is distinct from an explicit
+// false (mirrors History.Enabled). Timeout is a Go duration string ("300s").
+// CategoryURLs maps a finding Category (matched case-insensitively) to a docs URL
+// so a mapped category renders as a clickable link in PR comments/summary and
+// sets the SARIF helpUri. This struct is TRUSTED config only (user file +
+// built-in defaults) — never sourced from repo .miu/cr/rules, so a fork-PR rule
+// cannot inject a link or override a review default.
 type Review struct {
+	Gate         string            `toml:"gate,omitempty"`
+	FilterMode   string            `toml:"filter_mode,omitempty"`
+	MinSeverity  string            `toml:"min_severity,omitempty"`
+	Timeout      string            `toml:"timeout,omitempty"`
+	Suggest      *bool             `toml:"suggest,omitempty"`
 	CategoryURLs map[string]string `toml:"category_urls,omitempty"`
 }
 
