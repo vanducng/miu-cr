@@ -21,6 +21,40 @@ var (
 	gatewayToken = regexp.MustCompile(`\b[0-9a-fA-F]{16,}\.[A-Za-z0-9_-]{8,}\b`)
 )
 
+// redactedMask is the placeholder substituted for every secret-bearing config
+// field by RedactConfig. A non-empty secret becomes this; an empty field stays
+// empty so a viewer can tell "unset" from "set".
+const redactedMask = "[redacted]"
+
+// RedactConfig returns a deep copy of cfg with every secret-bearing field masked
+// by construction (not by free-text regex): each provider's AuthToken and the
+// store DSN. Non-secret fields (kind, base_url, model, auth_env name, backend,
+// review/github/embedding/history) are preserved verbatim. An empty secret stays
+// empty so `config show` can distinguish unset from set. This is the structural
+// guarantee `config show` relies on so no token/DSN can ever print.
+func RedactConfig(cfg Config) Config {
+	out := cfg
+	out.Providers = make(map[string]Provider, len(cfg.Providers))
+	for name, p := range cfg.Providers {
+		if p.AuthToken != "" {
+			p.AuthToken = redactedMask
+		}
+		out.Providers[name] = p
+	}
+	// Clone the only other nested reference field so the returned config never shares
+	// a backing map with the input (out := cfg is a shallow struct copy).
+	if cfg.Review.CategoryURLs != nil {
+		out.Review.CategoryURLs = make(map[string]string, len(cfg.Review.CategoryURLs))
+		for k, v := range cfg.Review.CategoryURLs {
+			out.Review.CategoryURLs[k] = v
+		}
+	}
+	if out.Store.DSN != "" {
+		out.Store.DSN = redactedMask
+	}
+	return out
+}
+
 // RedactString masks credentials in an arbitrary string: URL userinfo passwords,
 // key=value secret assignments, Authorization/x-api-key header values, bare Bearer
 // tokens, and delimiter-less provider tokens (sk-, GitHub gh*_, and gateway

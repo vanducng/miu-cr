@@ -3,7 +3,7 @@ title: Usage
 description: Review modes, flags, the severity gate, output formats, and exit codes.
 ---
 
-`miucr` has these commands: `init`, `login`, `review`, `mcp`, `serve`, `rules`, `history`, `upgrade`, and `version`. This page covers `review` — the day-to-day loop. See the dedicated pages for [serve & action](/serve-and-action/), [rules](/rules/), [history](/history/), [providers](/providers/), and [credentials](/credentials/); for the MCP server see [MCP integration](/mcp/).
+`miucr` has these commands: `init`, `login`, `review`, `config`, `mcp`, `serve`, `rules`, `history`, `upgrade`, and `version`. This page covers `review` — the day-to-day loop. See the dedicated pages for [serve & action](/serve-and-action/), [rules](/rules/), [history](/history/), [providers](/providers/) (`config show` + the `[review]` defaults table), and [credentials](/credentials/); for the MCP server see [MCP integration](/mcp/).
 
 :::tip[Looking for copy-paste workflows?]
 [Use cases & recipes](/use-cases/) collects the flags below into concrete local-review recipes — pre-commit gate, pre-PR branch check, agent fix-loop, SARIF in your editor, and a Makefile quality gate.
