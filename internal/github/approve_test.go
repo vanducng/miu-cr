@@ -69,7 +69,7 @@ func approveOpts() PostReviewOptions {
 
 func TestPostReviewApprovesCleanPR(t *testing.T) {
 	c := &recordClient{}
-	res, err := PostReview(stdctx.Background(), c, approveInfo(), nil, nil, "looks good", nil, approveOpts())
+	res, err := PostReview(stdctx.Background(), c, approveInfo(), nil, nil, staticSummary("looks good"), nil, approveOpts())
 	if err != nil {
 		t.Fatalf("PostReview: %v", err)
 	}
@@ -85,7 +85,7 @@ func TestPostReviewApproveDegradesForkToComment(t *testing.T) {
 	c := &recordClient{}
 	info := approveInfo()
 	info.IsFork = true
-	res, err := PostReview(stdctx.Background(), c, info, nil, nil, "review", nil, approveOpts())
+	res, err := PostReview(stdctx.Background(), c, info, nil, nil, staticSummary("review"), nil, approveOpts())
 	if err != nil {
 		t.Fatalf("PostReview: %v", err)
 	}
@@ -101,7 +101,7 @@ func TestPostReviewApproveDegradesUntrustedToComment(t *testing.T) {
 	c := &recordClient{}
 	info := approveInfo()
 	info.AuthorAssociation = "NONE"
-	res, err := PostReview(stdctx.Background(), c, info, nil, nil, "review", nil, approveOpts())
+	res, err := PostReview(stdctx.Background(), c, info, nil, nil, staticSummary("review"), nil, approveOpts())
 	if err != nil {
 		t.Fatalf("PostReview: %v", err)
 	}
@@ -114,7 +114,7 @@ func TestPostReviewApproveDegradesGateFailedToComment(t *testing.T) {
 	c := &recordClient{}
 	opts := approveOpts()
 	opts.GateClean = false
-	res, err := PostReview(stdctx.Background(), c, approveInfo(), nil, nil, "review", nil, opts)
+	res, err := PostReview(stdctx.Background(), c, approveInfo(), nil, nil, staticSummary("review"), nil, opts)
 	if err != nil {
 		t.Fatalf("PostReview: %v", err)
 	}
@@ -127,7 +127,7 @@ func TestPostReviewApproveDegradesNothingReviewedToComment(t *testing.T) {
 	c := &recordClient{}
 	opts := approveOpts()
 	opts.ReviewedFiles = 0
-	res, err := PostReview(stdctx.Background(), c, approveInfo(), nil, nil, "review", nil, opts)
+	res, err := PostReview(stdctx.Background(), c, approveInfo(), nil, nil, staticSummary("review"), nil, opts)
 	if err != nil {
 		t.Fatalf("PostReview: %v", err)
 	}
@@ -138,7 +138,7 @@ func TestPostReviewApproveDegradesNothingReviewedToComment(t *testing.T) {
 
 func TestPostReviewApproveDegradesHeadMovedToComment(t *testing.T) {
 	c := &recordClient{headSHA: "moved"} // GetPR returns a different head than info.HeadSHA
-	res, err := PostReview(stdctx.Background(), c, approveInfo(), nil, nil, "review", nil, approveOpts())
+	res, err := PostReview(stdctx.Background(), c, approveInfo(), nil, nil, staticSummary("review"), nil, approveOpts())
 	if err != nil {
 		t.Fatalf("PostReview: %v", err)
 	}
@@ -149,7 +149,7 @@ func TestPostReviewApproveDegradesHeadMovedToComment(t *testing.T) {
 
 func TestPostReviewApproveDegradesNilHeadToComment(t *testing.T) {
 	c := &nilHeadClient{}
-	res, err := PostReview(stdctx.Background(), c, approveInfo(), nil, nil, "review", nil, approveOpts())
+	res, err := PostReview(stdctx.Background(), c, approveInfo(), nil, nil, staticSummary("review"), nil, approveOpts())
 	if err != nil {
 		t.Fatalf("PostReview: %v", err)
 	}
@@ -164,7 +164,7 @@ func TestPostReviewSkipsSecondApproveAtSameSHA(t *testing.T) {
 			{State: gh.Ptr("APPROVED"), CommitID: gh.Ptr("headsha")},
 		},
 	}
-	res, err := PostReview(stdctx.Background(), c, approveInfo(), nil, nil, "review", nil, approveOpts())
+	res, err := PostReview(stdctx.Background(), c, approveInfo(), nil, nil, staticSummary("review"), nil, approveOpts())
 	if err != nil {
 		t.Fatalf("PostReview: %v", err)
 	}
@@ -183,7 +183,7 @@ func TestPostReviewApproveReevaluatesAtNewSHA(t *testing.T) {
 			{State: gh.Ptr("APPROVED"), CommitID: gh.Ptr("oldsha")},
 		},
 	}
-	res, err := PostReview(stdctx.Background(), c, approveInfo(), nil, nil, "review", nil, approveOpts())
+	res, err := PostReview(stdctx.Background(), c, approveInfo(), nil, nil, staticSummary("review"), nil, approveOpts())
 	if err != nil {
 		t.Fatalf("PostReview: %v", err)
 	}
@@ -194,7 +194,7 @@ func TestPostReviewApproveReevaluatesAtNewSHA(t *testing.T) {
 
 func TestPostReviewSelfApprove422DegradesToComment(t *testing.T) {
 	c := &recordClient{createReviewErrFirst: selfApprove422()}
-	res, err := PostReview(stdctx.Background(), c, approveInfo(), nil, nil, "review", nil, approveOpts())
+	res, err := PostReview(stdctx.Background(), c, approveInfo(), nil, nil, staticSummary("review"), nil, approveOpts())
 	if err != nil {
 		t.Fatalf("self-approve 422 must NOT error: %v", err)
 	}
@@ -213,7 +213,7 @@ func TestPostReviewApproveListReviewsErrorDegradesToComment(t *testing.T) {
 	// The idempotency check failing means we can't confirm there isn't already an
 	// APPROVE → degrade to COMMENT (never a duplicate APPROVE), never an error.
 	c := &recordClient{listReviewsErr: errBoom{}}
-	res, err := PostReview(stdctx.Background(), c, approveInfo(), nil, nil, "review", nil, approveOpts())
+	res, err := PostReview(stdctx.Background(), c, approveInfo(), nil, nil, staticSummary("review"), nil, approveOpts())
 	if err != nil {
 		t.Fatalf("ListReviews error must not surface: %v", err)
 	}
@@ -227,7 +227,7 @@ func TestPostReviewApproveListReviewsErrorDegradesToComment(t *testing.T) {
 
 func TestPostReviewNoApproveWhenFlagOff(t *testing.T) {
 	c := &recordClient{}
-	res, err := PostReview(stdctx.Background(), c, approveInfo(), nil, nil, "review", nil, PostReviewOptions{})
+	res, err := PostReview(stdctx.Background(), c, approveInfo(), nil, nil, staticSummary("review"), nil, PostReviewOptions{})
 	if err != nil {
 		t.Fatalf("PostReview: %v", err)
 	}
@@ -280,7 +280,7 @@ func TestPostReviewNonSelfApprove422DegradesToCommentRejected(t *testing.T) {
 	// A 422 that is NOT a self-approve must degrade to COMMENT/approve_rejected,
 	// never be mislabeled self_approve_forbidden, and never surface as an error.
 	c := &recordClient{createReviewErrFirst: generic422()}
-	res, err := PostReview(stdctx.Background(), c, approveInfo(), nil, nil, "review", nil, approveOpts())
+	res, err := PostReview(stdctx.Background(), c, approveInfo(), nil, nil, staticSummary("review"), nil, approveOpts())
 	if err != nil {
 		t.Fatalf("a non-self 422 must degrade, not error: %v", err)
 	}
@@ -299,7 +299,7 @@ func TestPostReviewApproveRealErrorSurfaces(t *testing.T) {
 	// A genuine (non-422) CreateReview failure on the APPROVE path must surface as
 	// an error and must NOT report a phantom approval in the returned result.
 	c := &recordClient{createReviewErrFirst: errBoom{}}
-	res, err := PostReview(stdctx.Background(), c, approveInfo(), nil, nil, "review", nil, approveOpts())
+	res, err := PostReview(stdctx.Background(), c, approveInfo(), nil, nil, staticSummary("review"), nil, approveOpts())
 	if err == nil {
 		t.Fatal("a real CreateReview error must surface to the caller")
 	}
@@ -335,7 +335,7 @@ func TestPostReviewApproveDegradesEmptyHeadToCommentUnknown(t *testing.T) {
 	c := &recordClient{}
 	info := approveInfo()
 	info.HeadSHA = ""
-	res, err := PostReview(stdctx.Background(), c, info, nil, nil, "review", nil, approveOpts())
+	res, err := PostReview(stdctx.Background(), c, info, nil, nil, staticSummary("review"), nil, approveOpts())
 	if err != nil {
 		t.Fatalf("PostReview: %v", err)
 	}
@@ -355,7 +355,7 @@ func TestPostReviewApprove422CommentRetryFailureZeroesPostedAndErrors(t *testing
 		createReviewErr:      errBoom{},    // call 2 (COMMENT retry) → hard failure
 	}
 	findings := []engine.Finding{{File: "p.go", Line: 2, Severity: "high", Category: "bug", Rationale: "boom"}}
-	res, err := PostReview(stdctx.Background(), c, approveInfo(), findings, sampleDiffs(), "review", nil, approveOpts())
+	res, err := PostReview(stdctx.Background(), c, approveInfo(), findings, sampleDiffs(), staticSummary("review"), nil, approveOpts())
 	if err == nil {
 		t.Fatal("a failed COMMENT retry must surface an error")
 	}
@@ -371,7 +371,7 @@ func TestPostReviewApprove422EmptyDegradeSkipsPost(t *testing.T) {
 	// APPROVE 422s, but with 0 inline comments AND no summary there is nothing to
 	// post — skip the empty COMMENT review (GitHub would 422 it anyway).
 	c := &recordClient{createReviewErrFirst: selfApprove422()}
-	res, err := PostReview(stdctx.Background(), c, approveInfo(), nil, nil, "", nil, approveOpts())
+	res, err := PostReview(stdctx.Background(), c, approveInfo(), nil, nil, staticSummary(""), nil, approveOpts())
 	if err != nil {
 		t.Fatalf("empty degrade must not error: %v", err)
 	}

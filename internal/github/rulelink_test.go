@@ -12,13 +12,13 @@ func TestCommentBodyCategoryLinkWhenMapped(t *testing.T) {
 	urls := map[string]string{"security": "https://docs.example/sec"}
 
 	linked, _ := commentBody(nil, f, "", PostReviewOptions{CategoryURLs: urls}, false)
-	if !strings.Contains(linked, "**HIGH** ([Security](<https://docs.example/sec>))") {
-		t.Fatalf("mapped category must render as a link:\n%s", linked)
+	if !strings.Contains(linked, "🟠 **P1** · [Security](<https://docs.example/sec>)") {
+		t.Fatalf("mapped category must render as a link after the badge:\n%s", linked)
 	}
 
 	plain, _ := commentBody(nil, f, "", PostReviewOptions{}, false)
-	if !strings.Contains(plain, "**HIGH** (Security)") || strings.Contains(plain, "](http") {
-		t.Fatalf("unmapped category must render plain (byte-for-byte today):\n%s", plain)
+	if !strings.Contains(plain, "🟠 **P1** · Security") || strings.Contains(plain, "](http") {
+		t.Fatalf("unmapped category must render plain after the badge:\n%s", plain)
 	}
 }
 

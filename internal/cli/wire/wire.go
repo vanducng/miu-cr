@@ -273,17 +273,21 @@ func (prReviewer) ReviewPR(ctx stdctx.Context, req cli.PRReviewRequest) (cli.Rev
 		defer closeHist()
 	}
 
-	// Incremental re-review: an unchanged head SHA since the last saved review (and
-	// not --force) short-circuits before the clone + LLM pass. The skip is a pure
-	// perf optimization, so it only fires when the desired end-state already holds —
-	// never on --post, which must publish (see skipUnchanged). A store read failure
-	// degrades to always-review (skipUnchanged returns ok=false), never blocks.
-	// Ordering note: the skip runs after the post intent is resolved (skipUnchanged
-	// takes req.Post) but before --post token validation — safe because skipUnchanged
-	// returns ok=false whenever req.Post is set, so a --post run never reaches here.
-	if prior, ok := skipUnchanged(ctx, hist, info, req.Force, req.Post); ok {
+	// Incremental re-review: short-circuit before the clone + LLM pass when the
+	// desired end-state already holds and --force was not passed. --no-post skips on
+	// an unchanged saved SHA (perf); --post skips only when a review was ALREADY
+	// POSTED for this exact head SHA (Codex per-commit model — no duplicate reviews,
+	// reviews aren't editable). A store / GitHub read failure degrades to always-
+	// review (skipUnchanged returns ok=false), never blocks. See skipUnchanged.
+	if prior, ok := skipUnchanged(ctx, hist, client, info, req.Force, req.Post, req.Mode); ok {
 		if req.Progress != nil {
 			req.Progress("skipped: head SHA " + info.HeadSHA + " already reviewed (use --force to re-review)")
+		}
+		// On --post the skip means a review was already POSTED for this SHA (Codex
+		// per-commit model); --no-post is the pure LLM-pass perf skip.
+		summaryAction := "none"
+		if req.Post {
+			summaryAction = "skipped"
 		}
 		return cli.ReviewOutcome{
 			// review_id resolves to the prior review this run reuses (not "" — that
@@ -293,7 +297,7 @@ func (prReviewer) ReviewPR(ctx stdctx.Context, req cli.PRReviewRequest) (cli.Rev
 			PriorReviewID:    prior.ID,
 			PR: &cli.PRResult{
 				Owner: info.Owner, Repo: info.Repo, Number: info.Number,
-				HeadSHA: info.HeadSHA, IsFork: info.IsFork, SummaryAction: "none",
+				HeadSHA: info.HeadSHA, IsFork: info.IsFork, SummaryAction: summaryAction,
 			},
 		}, nil
 	}
@@ -403,19 +407,45 @@ func (prReviewer) ReviewPR(ctx stdctx.Context, req cli.PRReviewRequest) (cli.Rev
 	}, nil
 }
 
-// skipUnchanged reports whether the --pr review can short-circuit: a prior saved
-// review of the same PR key exists, its head SHA equals the current one, and
-// --force was not passed. The skip is a perf optimization to avoid re-running the
-// LLM on an unchanged PR — it must skip ONLY when the desired end-state already
-// holds. The history store has no "posted" column, so it cannot prove a prior
-// review actually published; therefore --post never skips (proceed with the
-// normal review+publish — the per-comment fingerprint dedupe + idempotent sentinel
-// summary already prevent duplicate comments on an unchanged SHA). A nil store
-// (history off / --no-save) or any read failure degrades to ok=false (always
-// review) — never blocks. The returned LatestReview carries the prior review id
-// for the skipped_unchanged envelope.
-func skipUnchanged(ctx stdctx.Context, hist store.Store, info *mgithub.PRInfo, force, post bool) (store.LatestReview, bool) {
-	if force || post || hist == nil {
+// skipUnchanged reports whether the --pr review can short-circuit because the
+// desired end-state already holds and --force was not passed.
+//
+//   - --no-post: skip when a prior SAVED review of the same PR key exists at the
+//     current head SHA (a pure LLM-pass perf optimization). The history store has
+//     no "posted" column, so this proves only that we reviewed, not that we posted.
+//   - --post (Codex per-commit model): skip when we ALREADY POSTED a review for the
+//     exact head SHA, detected via the GitHub API (AlreadyPostedAtSHA — a miucr-
+//     authored review carrying ReviewMarker at CommitID==HeadSHA), so a same-commit
+//     re-run doesn't create a duplicate review. A reviewed-but-unposted prior leaves
+//     no such review → still posts.
+//
+// A nil store / any read failure on the --no-post path, or an API read failure on
+// the --post path, degrades to ok=false (always review) — never blocks. The
+// returned LatestReview carries the prior review id for the skipped_unchanged
+// envelope (empty on the --post posted-SHA skip; the store id is unknown there).
+func skipUnchanged(ctx stdctx.Context, hist store.Store, client mgithub.Client, info *mgithub.PRInfo, force, post bool, mode string) (store.LatestReview, bool) {
+	if force {
+		return store.LatestReview{}, false
+	}
+	if post {
+		// The posted-SHA skip is REVIEW-only: it detects a prior miucr *review*
+		// (AlreadyPostedAtSHA). A checks-mode CheckRun is idempotent per commit
+		// (GitHub updates by commit+name), and a prior review at this SHA must NOT
+		// suppress a --mode checks --post run, so checks always posts on --post.
+		if mode == "checks" {
+			return store.LatestReview{}, false
+		}
+		posted, err := mgithub.AlreadyPostedAtSHA(ctx, client, info)
+		if err != nil {
+			slog.Warn("already-posted check failed, reviewing: " + config.RedactString(err.Error()))
+			return store.LatestReview{}, false
+		}
+		if !posted {
+			return store.LatestReview{}, false
+		}
+		return store.LatestReview{}, true
+	}
+	if hist == nil {
 		return store.LatestReview{}, false
 	}
 	key := store.PRKey{Owner: info.Owner, Repo: info.Repo, Number: info.Number}
@@ -499,35 +529,39 @@ func publishReview(ctx stdctx.Context, client mgithub.Client, runner *gitcmd.Run
 		ActionsOut: req.ActionsOut,
 	}
 
-	pr, err := mgithub.PostReview(ctx, client, info, res.Findings, diffs, "", skip, opts)
+	// Codex pattern: the summary IS the review body (one review per commit, inline
+	// comments nested under it) — no separate upsert issue-comment. The body renders
+	// after the inline cap via summaryFn so its overflow block lists the actually-
+	// omitted findings.
+	summaryFn := func(omitted int, omittedFindings []engine.Finding) string {
+		return mgithub.RenderSummaryFull(info, res.Findings, res.Stats, omitted, omittedFindings, categoryURLs, mgithub.SummaryOptions{
+			Diffs:            diffs,
+			ReviewID:         res.ID,
+			Walkthrough:      res.Walkthrough,
+			FileSummaries:    res.FileSummaries,
+			Diagram:          res.Diagram,
+			Confidence:       res.Confidence,
+			ConfidenceReason: res.ConfidenceReason,
+			RuleCitations:    ruleCites,
+		})
+	}
+	pr, err := mgithub.PostReview(ctx, client, info, res.Findings, diffs, summaryFn, skip, opts)
 	if err != nil {
 		return err
 	}
 	prResult.Mode = "review"
 	prResult.FallbackAnnotations = pr.Fallback
 	// Fork-PR 403 fallback fired: findings went to ::error:: workflow annotations,
-	// nothing was posted as comments — skip the summary upsert + store tracking.
+	// nothing was posted as comments — skip store tracking.
 	if pr.Fallback > 0 {
 		prResult.Posted = false
 		prResult.SummaryAction = "fork_fallback"
 		return nil
 	}
-	summary := mgithub.RenderSummaryFull(info, res.Findings, res.Stats, pr.Omitted, pr.OmittedFindings, categoryURLs, mgithub.SummaryOptions{
-		Diffs:         diffs,
-		ReviewID:      res.ID,
-		Walkthrough:   res.Walkthrough,
-		FileSummaries: res.FileSummaries,
-		Diagram:       res.Diagram,
-		RuleCitations: ruleCites,
-	})
-	action, err := mgithub.UpsertSummaryComment(ctx, client, info, summary)
-	if err != nil {
-		return err
-	}
 
 	if prStore != nil {
-		// PostReview + the summary upsert already succeeded — the review is live. A
-		// store write failure must not discard that outcome: log (redacted), continue.
+		// PostReview already succeeded — the review is live. A store write failure must
+		// not discard that outcome: log (redacted), continue.
 		if terr := trackResolution(ctx, prStore, prKey, prior, res.Findings, diffs, pr.PostedFindings); terr != nil {
 			slog.Warn("pr-thread store tracking failed: " + config.RedactString(terr.Error()))
 		}
@@ -540,7 +574,8 @@ func publishReview(ctx stdctx.Context, client mgithub.Client, runner *gitcmd.Run
 
 	prResult.Posted = true
 	prResult.PostedInline = pr.Posted
-	prResult.SummaryAction = action
+	// Codex per-commit review: the summary IS the review body posted by CreateReview.
+	prResult.SummaryAction = "review"
 	prResult.SuggestionsPosted = pr.Suggestions
 	prResult.ApproveAction = approveActionFor(pr.Event)
 	prResult.ApproveReason = pr.Reason

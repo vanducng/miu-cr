@@ -27,7 +27,7 @@ func TestPostReviewForkFallbackUnderActions(t *testing.T) {
 		{File: "p.go", Line: 4, Severity: "medium", Category: "style", Rationale: "nit"},
 	}
 	var out strings.Builder
-	res, err := PostReview(stdctx.Background(), c, info, findings, sampleDiffs(), "summary", nil, PostReviewOptions{ActionsOut: &out})
+	res, err := PostReview(stdctx.Background(), c, info, findings, sampleDiffs(), staticSummary("summary"), nil, PostReviewOptions{ActionsOut: &out})
 	if err != nil {
 		t.Fatalf("fork fallback must not hard-fail, got error: %v", err)
 	}
@@ -99,7 +99,7 @@ func TestPostReview403NotUnderActionsStillErrors(t *testing.T) {
 	c := &recordClient{createReviewErr: forbidden403()}
 	info := &PRInfo{Owner: "o", Repo: "r", Number: 1, HeadSHA: "h"}
 	findings := []engine.Finding{{File: "p.go", Line: 2, Severity: "high", Category: "bug", Rationale: "x"}}
-	if _, err := PostReview(stdctx.Background(), c, info, findings, sampleDiffs(), "summary", nil, PostReviewOptions{}); err == nil {
+	if _, err := PostReview(stdctx.Background(), c, info, findings, sampleDiffs(), staticSummary("summary"), nil, PostReviewOptions{}); err == nil {
 		t.Fatal("a 403 outside Actions must still surface as an error")
 	}
 }

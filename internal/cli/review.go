@@ -105,7 +105,8 @@ type ReviewOutcome struct {
 // path. The token is never carried here (or anywhere in the envelope).
 // PostedInline is the count of inline comments posted THIS run (0 on --no-post
 // and on re-runs where everything was already posted); SummaryAction is
-// created|edited on --post, "none" on --no-post.
+// review|skipped|fork_fallback on --post (the summary is the review body), "none"
+// on --no-post.
 type PRResult struct {
 	Owner         string `json:"owner"`
 	Repo          string `json:"repo"`

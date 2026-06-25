@@ -328,9 +328,11 @@ func parseFindings(text string) (engine.ReviewOutput, bool) {
 		})
 	}
 	out := engine.ReviewOutput{
-		Findings:    findings,
-		Walkthrough: capRunes(raw.Walkthrough, maxWalkthroughLen),
-		Diagram:     capRunes(raw.Diagram, maxDiagramLen),
+		Findings:         findings,
+		Walkthrough:      capRunes(raw.Walkthrough, maxWalkthroughLen),
+		Diagram:          capRunes(raw.Diagram, maxDiagramLen),
+		Confidence:       clampConfidence(raw.Confidence),
+		ConfidenceReason: capRunes(raw.ConfidenceReason, maxConfidenceLen),
 	}
 	if len(raw.FileSummaries) > 0 {
 		// Sort before truncating: Go map iteration order is randomized, so an
