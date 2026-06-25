@@ -59,15 +59,27 @@ func TestParseRef(t *testing.T) {
 // fakeClient implements the full Client interface; only read ops are exercised
 // here. Write ops are present so the same fake serves the P2 publish tests.
 type fakeClient struct {
-	pr        *gh.PullRequest
-	getErr    error
-	pages     [][]*gh.CommitFile // one slice per page; NextPage chains them
-	listErr   error
-	listCalls int
+	pr            *gh.PullRequest
+	getErr        error
+	pages         [][]*gh.CommitFile // one slice per page; NextPage chains them
+	listErr       error
+	listCalls     int
+	commitMessage string
+	commitErr     error
 }
 
 func (f *fakeClient) GetPR(_ stdctx.Context, _, _ string, _ int) (*gh.PullRequest, error) {
 	return f.pr, f.getErr
+}
+
+func (f *fakeClient) GetCommit(_ stdctx.Context, _, _, _ string) (*gh.Commit, error) {
+	if f.commitErr != nil {
+		return nil, f.commitErr
+	}
+	if f.commitMessage == "" {
+		return nil, nil
+	}
+	return &gh.Commit{Message: gh.Ptr(f.commitMessage)}, nil
 }
 
 func (f *fakeClient) ListFiles(_ stdctx.Context, _, _ string, _ int, opts *gh.ListOptions) ([]*gh.CommitFile, *gh.Response, error) {
@@ -115,6 +127,30 @@ func (f *fakeClient) UpdateCheckRun(stdctx.Context, string, string, int64, gh.Up
 }
 func (f *fakeClient) ListCheckRunsForRef(stdctx.Context, string, string, string, *gh.ListCheckRunsOptions) (*gh.ListCheckRunsResults, *gh.Response, error) {
 	return &gh.ListCheckRunsResults{}, &gh.Response{}, nil
+}
+
+func TestFetchPRSetsHeadSubject(t *testing.T) {
+	ref := PRRef{Owner: "vanducng", Repo: "miu-cr", Number: 1}
+	t.Run("subject is the first line of the commit message", func(t *testing.T) {
+		fc := &fakeClient{pr: prFixture("vanducng", "miu-cr", "h", "b", "main"), commitMessage: "feat: add widget\n\nlong body here"}
+		info, err := FetchPR(stdctx.Background(), fc, ref)
+		if err != nil {
+			t.Fatalf("FetchPR: %v", err)
+		}
+		if info.HeadSubject != "feat: add widget" {
+			t.Fatalf("HeadSubject = %q, want the commit subject", info.HeadSubject)
+		}
+	})
+	t.Run("commit fetch error degrades to empty subject (never fails the fetch)", func(t *testing.T) {
+		fc := &fakeClient{pr: prFixture("vanducng", "miu-cr", "h", "b", "main"), commitErr: errors.New("boom")}
+		info, err := FetchPR(stdctx.Background(), fc, ref)
+		if err != nil {
+			t.Fatalf("a commit-fetch error must not fail FetchPR: %v", err)
+		}
+		if info.HeadSubject != "" {
+			t.Fatalf("HeadSubject = %q, want empty on error", info.HeadSubject)
+		}
+	})
 }
 
 func TestFetchPR(t *testing.T) {
@@ -486,5 +522,11 @@ func TestReviewCountIncrementChain(t *testing.T) {
 			t.Fatalf("run %d: rendered token = %d, want %d (must feed next run as %d)", run, got, run, run+1)
 		}
 		prior = parseRunsCount(out) // next run reads what this run wrote
+	}
+}
+
+func TestFirstLineCRLF(t *testing.T) {
+	if got := firstLine("feat: x\r\nbody\r\n"); got != "feat: x" {
+		t.Fatalf("firstLine must strip a trailing CR: %q", got)
 	}
 }

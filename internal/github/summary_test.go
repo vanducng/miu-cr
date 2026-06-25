@@ -118,10 +118,10 @@ func TestRenderSummaryFullReviewInternals(t *testing.T) {
 	// Metadata now lives in a collapsed Review internals details as bullets.
 	for _, want := range []string{
 		"<summary>Agent handoff & review internals</summary>",
-		"- Files: **2**",
-		"- Churn: +12/−4",
-		"- Effort: S",
-		"- Context: full",
+		"**Files** `2`",
+		"**Churn** `+12 / −4`",
+		"effort-S-brightgreen",
+		"context-full-brightgreen",
 	} {
 		if !strings.Contains(out, want) {
 			t.Fatalf("want %q in the Review internals block:\n%s", want, out)
@@ -241,13 +241,13 @@ func TestRenderSummaryReviewCountIdentity(t *testing.T) {
 
 func TestRenderSummaryInternalsOmitsChurnWithoutDiffs(t *testing.T) {
 	out := RenderSummaryFull(&PRInfo{HeadSHA: "abc"}, nil, map[string]any{"files_reviewed": float64(4)}, 0, nil, nil, SummaryOptions{})
-	if !strings.Contains(out, "- Files: **4**") {
+	if !strings.Contains(out, "**Files** `4`") {
 		t.Fatalf("no-diffs internals must keep the files-reviewed fallback:\n%s", out)
 	}
-	if !strings.Contains(out, "- Context: full") {
+	if !strings.Contains(out, "context-full") {
 		t.Fatalf("no-diffs internals must keep Context:\n%s", out)
 	}
-	if strings.Contains(out, "- Churn:") || strings.Contains(out, "- Effort:") {
+	if strings.Contains(out, "**Churn**") || strings.Contains(out, "**Effort**") {
 		t.Fatalf("no-diffs internals must omit Churn/Effort bullets:\n%s", out)
 	}
 }
@@ -294,11 +294,8 @@ func TestRenderSummaryFullHandoff(t *testing.T) {
 	if !strings.Contains(out, "**Hand off to an agent**") {
 		t.Fatalf("want an agent-handoff block:\n%s", out)
 	}
-	if !strings.Contains(out, "review_id: `rev_abc`") {
-		t.Fatalf("want the review_id in the handoff block:\n%s", out)
-	}
-	if !strings.Contains(out, "miucr review --pr https://github.com/o/r/pull/7 -o json") {
-		t.Fatalf("want a copy-paste re-run pointer:\n%s", out)
+	if !strings.Contains(out, "Run locally: `miucr review --pr https://github.com/o/r/pull/7`") {
+		t.Fatalf("want a copy-paste local run pointer:\n%s", out)
 	}
 	if !strings.Contains(out, "review_run") {
 		t.Fatalf("want an MCP pointer:\n%s", out)
@@ -309,11 +306,16 @@ func TestRenderSummaryFullHandoff(t *testing.T) {
 	}
 }
 
-func TestRenderSummaryFullHandoffSkippedWithoutReviewID(t *testing.T) {
+func TestRenderSummaryHandoffNeverShowsReviewID(t *testing.T) {
 	info, diffs, _ := presentationFixture()
-	out := RenderSummaryFull(info, nil, nil, 0, nil, nil, SummaryOptions{Diffs: diffs})
-	if strings.Contains(out, "Hand off to an agent") {
-		t.Fatalf("empty review_id must skip the handoff block:\n%s", out)
+	// review_id only resolves on the machine/store that ran the review, so it must
+	// NOT appear in the posted summary (the handoff still renders, gated on the URL).
+	out := RenderSummaryFull(info, nil, nil, 0, nil, nil, SummaryOptions{Diffs: diffs, ReviewID: "rev_abc"})
+	if strings.Contains(out, "review_id") || strings.Contains(out, "rev_abc") {
+		t.Fatalf("review_id must never appear in the posted summary:\n%s", out)
+	}
+	if !strings.Contains(out, "**Hand off to an agent**") {
+		t.Fatalf("handoff block must still render:\n%s", out)
 	}
 }
 
@@ -546,5 +548,31 @@ func TestRenderSummaryConfidence(t *testing.T) {
 	cout := RenderSummaryFull(info, crit, nil, 0, nil, nil, SummaryOptions{Diffs: diffs})
 	if strings.Contains(cout, "Confidence: 5/5") {
 		t.Fatalf("a critical finding must lower the derived confidence below 5/5:\n%s", cout)
+	}
+}
+
+func TestRenderChangesTableSortsByImportance(t *testing.T) {
+	info := &PRInfo{HeadSHA: "h"}
+	diffs := []diff.Diff{
+		{NewPath: "big.go", Insertions: 200, Deletions: 0}, // big churn, no findings
+		{NewPath: "buggy.go", Insertions: 1, Deletions: 0}, // tiny churn, has a finding
+	}
+	findings := []engine.Finding{{File: "buggy.go", Line: 1, Severity: "high", Rationale: "x"}}
+	out := RenderSummaryFull(info, findings, nil, 0, nil, nil, SummaryOptions{Diffs: diffs})
+	bi, gi := strings.Index(out, "buggy.go"), strings.Index(out, "big.go")
+	if bi < 0 || gi < 0 || bi > gi {
+		t.Fatalf("a file with a finding must sort before a bigger no-finding file:\n%s", out)
+	}
+}
+
+func TestCommitLabelSubjectThenHashFallback(t *testing.T) {
+	base := &PRInfo{HeadSHA: "deadbeef1234", HTMLBase: "https://github.com/o/r"}
+	withSubj := *base
+	withSubj.HeadSubject = "fix: handle nil"
+	if got := commitLabel(&withSubj); !strings.Contains(got, "fix: handle nil") || !strings.Contains(got, "/commit/deadbeef1234") {
+		t.Fatalf("subject must be the link text over the commit permalink: %q", got)
+	}
+	if got := commitLabel(base); !strings.Contains(got, "`deadbeef`") {
+		t.Fatalf("no subject must fall back to the short hash: %q", got)
 	}
 }

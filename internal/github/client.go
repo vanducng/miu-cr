@@ -26,6 +26,10 @@ import (
 type Client interface {
 	GetPR(ctx stdctx.Context, owner, repo string, number int) (*gh.PullRequest, error)
 	ListFiles(ctx stdctx.Context, owner, repo string, number int, opts *gh.ListOptions) ([]*gh.CommitFile, *gh.Response, error)
+	// GetCommit reads a commit's git-data object (message only, no file list) so the
+	// summary can label the head SHA with its subject. Best-effort: callers degrade to
+	// the bare SHA on error.
+	GetCommit(ctx stdctx.Context, owner, repo, sha string) (*gh.Commit, error)
 
 	CreateReview(ctx stdctx.Context, owner, repo string, number int, review *gh.PullRequestReviewRequest) (*gh.PullRequestReview, error)
 	ListReviews(ctx stdctx.Context, owner, repo string, number int, opts *gh.ListOptions) ([]*gh.PullRequestReview, *gh.Response, error)
@@ -69,6 +73,11 @@ func (g ghClient) GetPR(ctx stdctx.Context, owner, repo string, number int) (*gh
 
 func (g ghClient) ListFiles(ctx stdctx.Context, owner, repo string, number int, opts *gh.ListOptions) ([]*gh.CommitFile, *gh.Response, error) {
 	return g.c.PullRequests.ListFiles(ctx, owner, repo, number, opts)
+}
+
+func (g ghClient) GetCommit(ctx stdctx.Context, owner, repo, sha string) (*gh.Commit, error) {
+	c, _, err := g.c.Git.GetCommit(ctx, owner, repo, sha)
+	return c, err
 }
 
 func (g ghClient) CreateReview(ctx stdctx.Context, owner, repo string, number int, review *gh.PullRequestReviewRequest) (*gh.PullRequestReview, error) {

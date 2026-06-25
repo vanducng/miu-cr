@@ -47,6 +47,9 @@ func (f *fakeGitHub) GetPR(stdctx.Context, string, string, int) (*gh.PullRequest
 func (f *fakeGitHub) ListFiles(stdctx.Context, string, string, int, *gh.ListOptions) ([]*gh.CommitFile, *gh.Response, error) {
 	return nil, &gh.Response{}, nil
 }
+func (f *fakeGitHub) GetCommit(stdctx.Context, string, string, string) (*gh.Commit, error) {
+	return nil, nil
+}
 func (f *fakeGitHub) ListReviews(stdctx.Context, string, string, int, *gh.ListOptions) ([]*gh.PullRequestReview, *gh.Response, error) {
 	f.order = append(f.order, "list_reviews")
 	return f.reviews, &gh.Response{}, nil
