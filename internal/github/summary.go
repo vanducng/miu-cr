@@ -68,8 +68,9 @@ func severityCounts(findings []engine.Finding) string {
 
 // RenderSummary builds the PR summary that becomes the CreateReview BODY: it leads
 // with ReviewMarker (identifies the review as ours for alreadyPostedAtSHA) and a
-// Codex-style `Reviewed commit` line, then a severity histogram, truncation level,
-// files reviewed, an optional omitted-inline note, and a short footer.
+// Codex-style `Reviewed commit` line, then an emoji-severity header + count, a
+// compact metadata quote, confidence, the walkthrough prose, the Important Files
+// Changed table, an optional omitted-inline note, and a per-commit footer.
 func RenderSummary(info *PRInfo, findings []engine.Finding, stats map[string]any, omittedInline int) string {
 	return RenderSummaryWithOverflow(info, findings, stats, omittedInline, nil, nil)
 }

@@ -38,7 +38,7 @@ func TestSkipUnchangedSameSHA(t *testing.T) {
 		t.Fatalf("seed: %v", err)
 	}
 
-	prior, ok := skipUnchanged(ctx, st, &fakeGitHub{}, prInfo("sha-1"), false, false)
+	prior, ok := skipUnchanged(ctx, st, &fakeGitHub{}, prInfo("sha-1"), false, false, "review")
 	if !ok {
 		t.Fatal("same head SHA must skip")
 	}
@@ -64,16 +64,27 @@ func TestSkipUnchangedPostSkipsWhenAlreadyPosted(t *testing.T) {
 	st := tempStore(t)
 
 	// No review on the API yet → --post must publish (reviewed-but-unposted prior).
-	if _, ok := skipUnchanged(ctx, st, &fakeGitHub{}, prInfo("sha-1"), false, true); ok {
+	if _, ok := skipUnchanged(ctx, st, &fakeGitHub{}, prInfo("sha-1"), false, true, "review"); ok {
 		t.Fatal("--post must publish when no review was posted for this SHA yet")
 	}
 	// A miucr review already exists at this SHA → skip the duplicate.
-	if _, ok := skipUnchanged(ctx, st, postedReviewClient("sha-1"), prInfo("sha-1"), false, true); !ok {
+	if _, ok := skipUnchanged(ctx, st, postedReviewClient("sha-1"), prInfo("sha-1"), false, true, "review"); !ok {
 		t.Fatal("--post must skip when a review was already posted for this head SHA")
 	}
 	// An already-posted review at a DIFFERENT SHA → still publish.
-	if _, ok := skipUnchanged(ctx, st, postedReviewClient("old"), prInfo("sha-1"), false, true); ok {
+	if _, ok := skipUnchanged(ctx, st, postedReviewClient("old"), prInfo("sha-1"), false, true, "review"); ok {
 		t.Fatal("--post must publish when the only posted review is at a different SHA")
+	}
+}
+
+// TestSkipUnchangedChecksModeNeverPostedSkip: a prior miucr REVIEW at this SHA must
+// NOT skip a `--mode checks --post` run — CheckRuns are idempotent per commit and the
+// review-marker posted-SHA detection is review-only.
+func TestSkipUnchangedChecksModeNeverPostedSkip(t *testing.T) {
+	ctx := stdctx.Background()
+	st := tempStore(t)
+	if _, ok := skipUnchanged(ctx, st, postedReviewClient("sha-1"), prInfo("sha-1"), false, true, "checks"); ok {
+		t.Fatal("--mode checks --post must publish the CheckRun even when a prior review exists at this SHA")
 	}
 }
 
@@ -86,7 +97,7 @@ func TestSkipUnchangedDifferentSHA(t *testing.T) {
 	}); err != nil {
 		t.Fatalf("seed: %v", err)
 	}
-	if _, ok := skipUnchanged(ctx, st, &fakeGitHub{}, prInfo("sha-2"), false, false); ok {
+	if _, ok := skipUnchanged(ctx, st, &fakeGitHub{}, prInfo("sha-2"), false, false, "review"); ok {
 		t.Fatal("a changed head SHA must NOT skip")
 	}
 }
@@ -100,7 +111,7 @@ func TestSkipUnchangedForce(t *testing.T) {
 	}); err != nil {
 		t.Fatalf("seed: %v", err)
 	}
-	if _, ok := skipUnchanged(ctx, st, &fakeGitHub{}, prInfo("sha-1"), true, false); ok {
+	if _, ok := skipUnchanged(ctx, st, &fakeGitHub{}, prInfo("sha-1"), true, false, "review"); ok {
 		t.Fatal("--force must bypass the skip")
 	}
 }
@@ -109,14 +120,14 @@ func TestSkipUnchangedForce(t *testing.T) {
 func TestSkipUnchangedNoPrior(t *testing.T) {
 	ctx := stdctx.Background()
 	st := tempStore(t)
-	if _, ok := skipUnchanged(ctx, st, &fakeGitHub{}, prInfo("sha-1"), false, false); ok {
+	if _, ok := skipUnchanged(ctx, st, &fakeGitHub{}, prInfo("sha-1"), false, false, "review"); ok {
 		t.Fatal("no prior review must NOT skip")
 	}
 }
 
 // TestSkipUnchangedNilStore: history off / --no-save (nil store) reviews.
 func TestSkipUnchangedNilStore(t *testing.T) {
-	if _, ok := skipUnchanged(stdctx.Background(), nil, &fakeGitHub{}, prInfo("sha-1"), false, false); ok {
+	if _, ok := skipUnchanged(stdctx.Background(), nil, &fakeGitHub{}, prInfo("sha-1"), false, false, "review"); ok {
 		t.Fatal("a nil history store must NOT skip (degrade to always-review)")
 	}
 }
@@ -125,7 +136,7 @@ func TestSkipUnchangedNilStore(t *testing.T) {
 // always-review (no skip), never blocking the review.
 func TestSkipUnchangedReadErrorDegrades(t *testing.T) {
 	st := errStore{err: errors.New("db locked")}
-	if _, ok := skipUnchanged(stdctx.Background(), st, &fakeGitHub{}, prInfo("sha-1"), false, false); ok {
+	if _, ok := skipUnchanged(stdctx.Background(), st, &fakeGitHub{}, prInfo("sha-1"), false, false, "review"); ok {
 		t.Fatal("a read error must degrade to always-review, not skip")
 	}
 }

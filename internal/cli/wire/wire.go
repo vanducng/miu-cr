@@ -279,7 +279,7 @@ func (prReviewer) ReviewPR(ctx stdctx.Context, req cli.PRReviewRequest) (cli.Rev
 	// POSTED for this exact head SHA (Codex per-commit model — no duplicate reviews,
 	// reviews aren't editable). A store / GitHub read failure degrades to always-
 	// review (skipUnchanged returns ok=false), never blocks. See skipUnchanged.
-	if prior, ok := skipUnchanged(ctx, hist, client, info, req.Force, req.Post); ok {
+	if prior, ok := skipUnchanged(ctx, hist, client, info, req.Force, req.Post, req.Mode); ok {
 		if req.Progress != nil {
 			req.Progress("skipped: head SHA " + info.HeadSHA + " already reviewed (use --force to re-review)")
 		}
@@ -423,11 +423,18 @@ func (prReviewer) ReviewPR(ctx stdctx.Context, req cli.PRReviewRequest) (cli.Rev
 // the --post path, degrades to ok=false (always review) — never blocks. The
 // returned LatestReview carries the prior review id for the skipped_unchanged
 // envelope (empty on the --post posted-SHA skip; the store id is unknown there).
-func skipUnchanged(ctx stdctx.Context, hist store.Store, client mgithub.Client, info *mgithub.PRInfo, force, post bool) (store.LatestReview, bool) {
+func skipUnchanged(ctx stdctx.Context, hist store.Store, client mgithub.Client, info *mgithub.PRInfo, force, post bool, mode string) (store.LatestReview, bool) {
 	if force {
 		return store.LatestReview{}, false
 	}
 	if post {
+		// The posted-SHA skip is REVIEW-only: it detects a prior miucr *review*
+		// (AlreadyPostedAtSHA). A checks-mode CheckRun is idempotent per commit
+		// (GitHub updates by commit+name), and a prior review at this SHA must NOT
+		// suppress a --mode checks --post run, so checks always posts on --post.
+		if mode == "checks" {
+			return store.LatestReview{}, false
+		}
 		posted, err := mgithub.AlreadyPostedAtSHA(ctx, client, info)
 		if err != nil {
 			slog.Warn("already-posted check failed, reviewing: " + config.RedactString(err.Error()))
