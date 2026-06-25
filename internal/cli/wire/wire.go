@@ -8,6 +8,7 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
+	"math/rand"
 	"os"
 	"path/filepath"
 	"strings"
@@ -267,7 +268,12 @@ func (prReviewer) ReviewPR(ctx stdctx.Context, req cli.PRReviewRequest) (cli.Rev
 	}
 
 	client := newGitHubClient(req.Token)
-	info, err := mgithub.FetchPR(ctx, client, ref)
+	var info *mgithub.PRInfo
+	err = retryTransient(ctx, maxGitHubAttempts, func() error {
+		var e error
+		info, e = mgithub.FetchPR(ctx, client, ref)
+		return e
+	})
 	if err != nil {
 		return cli.ReviewOutcome{}, err
 	}
@@ -528,46 +534,70 @@ func publishReview(ctx stdctx.Context, client mgithub.Client, runner *gitcmd.Run
 		ActionsOut: req.ActionsOut,
 	}
 
-	// nil summaryFn: inline comments only, NO review body. The summary lives solely
-	// in the upserted issue comment below (UpsertSummaryComment), so a re-run edits
-	// one comment instead of stacking a review per commit.
+	// renderSummary builds the summary body for a given omitted set. info.ReviewCount
+	// is already this run's number (FetchPR did the +1); the body's runs token seeds
+	// the next read.
+	renderSummary := func(omitted int, omittedFindings []engine.Finding) string {
+		return mgithub.RenderSummaryFull(info, res.Findings, res.Stats, omitted, omittedFindings, categoryURLs, mgithub.SummaryOptions{
+			Diffs:            diffs,
+			ReviewID:         res.ID,
+			Walkthrough:      res.Walkthrough,
+			FileSummaries:    res.FileSummaries,
+			Diagram:          res.Diagram,
+			Confidence:       res.Confidence,
+			ConfidenceReason: res.ConfidenceReason,
+			RuleCitations:    ruleCites,
+		})
+	}
+
+	// Post the summary FIRST on a non-fork PR so it anchors ABOVE the inline review in
+	// the PR timeline (an overview, then the details). The overflow block needs
+	// PostReview's omitted set, so it's filled in by a re-edit after. A fork PR would
+	// 403 on the issue comment, so it keeps the after-PostReview path (which degrades
+	// to ::error:: annotations).
+	summaryFirst := !info.IsFork
+	if summaryFirst {
+		if action, uerr := mgithub.UpsertSummaryComment(ctx, client, info, renderSummary(0, nil)); uerr != nil {
+			slog.Warn("summary upsert failed, continuing to inline review: " + config.RedactString(uerr.Error()))
+			prResult.SummaryAction = "failed"
+		} else {
+			prResult.SummaryAction = string(action)
+		}
+	}
+
+	// nil summaryFn: inline comments only, NO review body (the summary is the upserted
+	// issue comment), so a re-run edits one comment instead of stacking a review.
 	pr, err := mgithub.PostReview(ctx, client, info, res.Findings, diffs, nil, skip, opts)
 	if err != nil {
 		return err
 	}
 	prResult.Mode = "review"
 	prResult.FallbackAnnotations = pr.Fallback
-	// Fork-PR 403 fallback fired on inline: findings went to ::error:: workflow
-	// annotations. The summary issue comment would 403 the same way, so skip the
-	// upsert + store tracking.
+	// Fork-PR 403 fallback fired on inline: findings went to ::error:: annotations. The
+	// summary issue comment would 403 the same way (and we skipped it on the fork path).
 	if pr.Fallback > 0 {
 		prResult.Posted = false
 		prResult.SummaryAction = "fork_fallback"
 		return nil
 	}
 
-	// Render the summary AFTER PostReview returns so the overflow block lists the
-	// findings actually omitted past the inline cap (pr.Omitted/pr.OmittedFindings).
-	// info.ReviewCount is already this run's number (FetchPR did the +1); the body's
-	// runs token seeds the next read.
-	body := mgithub.RenderSummaryFull(info, res.Findings, res.Stats, pr.Omitted, pr.OmittedFindings, categoryURLs, mgithub.SummaryOptions{
-		Diffs:            diffs,
-		ReviewID:         res.ID,
-		Walkthrough:      res.Walkthrough,
-		FileSummaries:    res.FileSummaries,
-		Diagram:          res.Diagram,
-		Confidence:       res.Confidence,
-		ConfidenceReason: res.ConfidenceReason,
-		RuleCitations:    ruleCites,
-	})
-	action, err := mgithub.UpsertSummaryComment(ctx, client, info, body)
-	if err != nil {
-		// PostReview already succeeded (the inline review is live); a summary-upsert
-		// failure must not discard that outcome. Surface it via SummaryAction, continue.
-		slog.Warn("summary upsert failed, inline review still posted: " + config.RedactString(err.Error()))
-		prResult.SummaryAction = "failed"
+	if summaryFirst {
+		// Re-edit the already-posted summary with the accurate overflow set only when
+		// PostReview actually omitted findings (the common no-overflow case skips it).
+		if pr.Omitted > 0 {
+			if _, eerr := mgithub.UpsertSummaryComment(ctx, client, info, renderSummary(pr.Omitted, pr.OmittedFindings)); eerr != nil {
+				slog.Warn("summary overflow re-edit failed (review still posted): " + config.RedactString(eerr.Error()))
+			}
+		}
 	} else {
-		prResult.SummaryAction = string(action)
+		// Fork PR whose inline review did NOT 403 (PAT has base access): post the
+		// summary after, with the accurate overflow set.
+		if action, uerr := mgithub.UpsertSummaryComment(ctx, client, info, renderSummary(pr.Omitted, pr.OmittedFindings)); uerr != nil {
+			slog.Warn("summary upsert failed, inline review still posted: " + config.RedactString(uerr.Error()))
+			prResult.SummaryAction = "failed"
+		} else {
+			prResult.SummaryAction = string(action)
+		}
 	}
 
 	if prStore != nil {
@@ -849,4 +879,39 @@ func toEngineFindings(in []cli.ReviewFinding) []engine.Finding {
 		out = append(out, engine.Finding{File: f.File, Line: f.Line, Severity: f.Severity, Category: f.Category})
 	}
 	return out
+}
+
+// maxGitHubAttempts bounds the transient retry of a GitHub API call (first try plus
+// retries). 5 ≈ 0.5+1+2+4s of jittered backoff worst-case, enough to ride out a TLS
+// handshake / DNS blip without hanging on a genuine outage.
+const maxGitHubAttempts = 5
+
+// retryTransient retries fn while it returns a RETRYABLE CLIError (a network blip or
+// 5xx, classified by ghAPIError), with exponential backoff + equal jitter capped at
+// 8s, up to maxAttempts. A non-retryable error or success returns at once; ctx
+// cancellation aborts the wait so a caller timeout still wins.
+func retryTransient(ctx stdctx.Context, maxAttempts int, fn func() error) error {
+	const base, maxBackoff = 500 * time.Millisecond, 8 * time.Second
+	var err error
+	for attempt := 1; ; attempt++ {
+		if err = fn(); err == nil || attempt >= maxAttempts || !isRetryableErr(err) {
+			return err
+		}
+		d := base << (attempt - 1)
+		if d > maxBackoff {
+			d = maxBackoff
+		}
+		d = d/2 + time.Duration(rand.Int63n(int64(d/2)+1)) // equal jitter [d/2, d]
+		slog.Warn(fmt.Sprintf("miucr: %s; retry %d/%d in %s", config.RedactString(err.Error()), attempt, maxAttempts-1, d.Round(time.Millisecond)))
+		select {
+		case <-ctx.Done():
+			return err
+		case <-time.After(d):
+		}
+	}
+}
+
+func isRetryableErr(err error) bool {
+	var ce *cli.CLIError
+	return errors.As(err, &ce) && ce.Retry
 }

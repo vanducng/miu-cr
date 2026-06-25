@@ -188,7 +188,7 @@ func RenderSummaryFull(info *PRInfo, findings []engine.Finding, stats map[string
 
 	renderHandoffAndInternals(&b, info, stats, opts.Diffs)
 
-	fmt.Fprintf(&b, "\n<sub>Reviewed commit %s · Posted by miu-cr</sub>", commitRef(info))
+	fmt.Fprintf(&b, "\n<sub>Reviewed commit %s · Posted by [miu-cr](https://github.com/vanducng/miu-cr)</sub>", commitRef(info))
 	return b.String()
 }
 

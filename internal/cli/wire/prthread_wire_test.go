@@ -243,9 +243,9 @@ func TestPublishNoStoreUnchanged(t *testing.T) {
 	if err := publishReview(stdctx.Background(), client, runner, dir, info, res, pr, cli.PRReviewRequest{Gate: "high"}, nil, embedWriter{}, nil, nil); err != nil {
 		t.Fatalf("run 1: %v", err)
 	}
-	// list_review (ExistingFingerprints) → create_review (inline, no body) →
-	// list_issue (upsert scan) → create_issue (summary).
-	wantOrder1 := []string{"list_review", "create_review", "list_issue", "create_issue"}
+	// list_review (ExistingFingerprints) → list_issue (upsert scan) → create_issue
+	// (summary, posted FIRST so it anchors above the review) → create_review (inline).
+	wantOrder1 := []string{"list_review", "list_issue", "create_issue", "create_review"}
 	if !equalStr(fake.order, wantOrder1) {
 		t.Fatalf("run 1 call order = %v, want %v", fake.order, wantOrder1)
 	}

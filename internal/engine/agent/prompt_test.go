@@ -260,6 +260,7 @@ func TestSystemPromptPatchGuidanceIsModelControlled(t *testing.T) {
 		"grounded in a cited rule OR an obvious best practice",
 		"EVEN for high/critical findings",
 		"worse than none",
+		"NEVER put a value you cannot VERIFY",
 		"FULL replacement for the quoted line(s)",
 		"Worked example",
 		"val, ok := m[key]",
