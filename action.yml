@@ -111,15 +111,20 @@ runs:
         attempt=0; max=3
         while :; do
           attempt=$((attempt+1))
+          # Capture combined stdout+stderr: the JSON envelope is on stdout but we
+          # also surface stderr diagnostics in the log, and grep the envelope from
+          # whichever stream it lands on.
           set +e
-          out="$(miucr "${ARGS[@]}")"; rc=$?
+          out="$(miucr "${ARGS[@]}" 2>&1)"; rc=$?
           set -e
           printf '%s\n' "$out"
           [ "$rc" -eq 0 ] && break
-          if printf '%s' "$out" | grep -q '"retryable":true'; then
+          # Tolerate optional whitespace in the JSON (e.g. "retryable": true).
+          if printf '%s' "$out" | grep -qE '"retryable":[[:space:]]*true'; then
             if [ "$attempt" -lt "$max" ]; then
-              echo "::warning::miucr review hit a retryable provider error (attempt $attempt/$max); retrying in 30s"
-              sleep 30; continue
+              backoff=$(( attempt * 20 + RANDOM % 20 ))  # escalating + jittered: avoid a thundering herd
+              echo "::warning::miucr review hit a retryable provider error (attempt $attempt/$max); retrying in ${backoff}s"
+              sleep "$backoff"; continue
             fi
             echo "::warning::miucr review skipped: provider unavailable after $max attempts (transient upstream error, not a code issue)"
             exit 0
