@@ -209,15 +209,12 @@ func plural(n int) string {
 func renderHandoffAndInternals(b *strings.Builder, info *PRInfo, stats map[string]any, diffs []diff.Diff) {
 	b.WriteString("\n<details>\n<summary>Agent handoff & review internals</summary>\n\n")
 
-	// Handoff only makes sense for a real PR target (a re-run URL); the legacy non-PR
-	// body has neither a URL nor diffs, so it skips the handoff and keeps just internals.
-	if url := prURL(info); url != "" || len(diffs) > 0 {
+	// Handoff only makes sense with a real re-run URL; without one (the legacy non-PR
+	// body) skip it and keep just the internals. A bare `<pr-url>` placeholder is not
+	// actionable, so it is never emitted.
+	if url := prURL(info); url != "" {
 		b.WriteString("**Hand off to an agent** · pick up or re-run this review\n\n")
-		if url != "" {
-			fmt.Fprintf(b, "- Run locally: `miucr review --pr %s`\n", strings.ReplaceAll(url, "`", "'"))
-		} else {
-			b.WriteString("- Run locally: `miucr review --pr <pr-url>`\n")
-		}
+		fmt.Fprintf(b, "- Run locally: `miucr review --pr %s`\n", strings.ReplaceAll(url, "`", "'"))
 		b.WriteString("- MCP: call `review_run` from an agent host (add `-o json` for a machine-readable envelope).\n\n")
 	}
 

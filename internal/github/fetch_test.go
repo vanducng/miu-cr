@@ -524,3 +524,9 @@ func TestReviewCountIncrementChain(t *testing.T) {
 		prior = parseRunsCount(out) // next run reads what this run wrote
 	}
 }
+
+func TestFirstLineCRLF(t *testing.T) {
+	if got := firstLine("feat: x\r\nbody\r\n"); got != "feat: x" {
+		t.Fatalf("firstLine must strip a trailing CR: %q", got)
+	}
+}
