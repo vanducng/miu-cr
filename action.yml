@@ -104,4 +104,32 @@ runs:
         ARGS=(review --pr "$REF" --post --gate "$GATE" --filter-mode "$FILTER_MODE" --timeout 600s)
         if [ -n "$SARIF_FILE" ]; then ARGS+=(--sarif-out "$SARIF_FILE"); fi
         if [ "${SUGGEST:-}" = "true" ]; then ARGS+=(--suggest); fi
-        miucr "${ARGS[@]}"
+        # Retry on a RETRYABLE provider error (envelope retryable:true — e.g. a 529
+        # overloaded / rate-limit), then soft-pass: a transient upstream outage must
+        # not fail the check (it's not the PR's fault). A non-retryable error (or a
+        # gate failure, which is not retryable) still fails as before.
+        attempt=0; max=3
+        while :; do
+          attempt=$((attempt+1))
+          # Capture combined stdout+stderr: the JSON envelope is on stdout but we
+          # also surface stderr diagnostics in the log, and grep the envelope from
+          # whichever stream it lands on.
+          set +e
+          out="$(miucr "${ARGS[@]}" 2>&1)"; rc=$?
+          set -e
+          printf '%s\n' "$out"
+          [ "$rc" -eq 0 ] && break
+          # Retry only on a FAILURE envelope marked retryable (require "ok":false so a
+          # findings-mention of the literal "retryable":true can't trigger a false soft-pass);
+          # tolerate optional whitespace.
+          if printf '%s' "$out" | grep -q '"ok":[[:space:]]*false' && printf '%s' "$out" | grep -qE '"retryable":[[:space:]]*true'; then
+            if [ "$attempt" -lt "$max" ]; then
+              backoff=$(( attempt * 20 + RANDOM % 20 ))  # escalating + jittered: avoid a thundering herd
+              echo "::warning::miucr review hit a retryable provider error (attempt $attempt/$max); retrying in ${backoff}s"
+              sleep "$backoff"; continue
+            fi
+            echo "::warning::miucr review skipped: provider unavailable after $max attempts (transient upstream error, not a code issue)"
+            exit 0
+          fi
+          exit "$rc"
+        done
