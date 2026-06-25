@@ -152,6 +152,7 @@ func TestConformanceHistoryFieldsRoundTrip(t *testing.T) {
 				Transcript:  []byte(`[{"turn":1,"tool":"grep","args":"foo"}]`),
 				RawPrompt:   "review this diff",
 				RawResponse: "found one issue",
+				TraceJSON:   `{"system_prompt":"sys","user_prompt":"review this diff"}`,
 			}
 			id, err := b.rev.SaveReview(ctx, in)
 			if err != nil {
@@ -163,7 +164,8 @@ func TestConformanceHistoryFieldsRoundTrip(t *testing.T) {
 			}
 			if got.Owner != in.Owner || got.Repo != in.Repo || got.Number != in.Number ||
 				got.Provider != in.Provider || got.Model != in.Model ||
-				got.RawPrompt != in.RawPrompt || got.RawResponse != in.RawResponse {
+				got.RawPrompt != in.RawPrompt || got.RawResponse != in.RawResponse ||
+				got.TraceJSON != in.TraceJSON {
 				t.Fatalf("history scalar mismatch: %+v", got)
 			}
 			if string(got.Transcript) != string(in.Transcript) {

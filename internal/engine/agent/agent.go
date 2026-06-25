@@ -163,6 +163,8 @@ func (a *anthropicAgent) Review(ctx stdctx.Context, rc Context) (engine.ReviewOu
 	}
 
 	userPrompt := BuildUserPrompt(PromptParts{Rules: rc.Rules, SemanticContext: rc.SemanticContext, WantDiagram: rc.WantDiagram, Diff: rc.Text})
+	rc.Trace.SetSystemPrompt(systemPrompt)
+	rc.Trace.SetModel("anthropic", a.model)
 	rc.Trace.SetPrompt(userPrompt)
 	params := anthropic.MessageNewParams{
 		MaxTokens: maxTokens,

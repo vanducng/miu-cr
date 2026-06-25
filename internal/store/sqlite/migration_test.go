@@ -106,16 +106,22 @@ func TestOpen_MigratesPreHistoryReviewsTable(t *testing.T) {
 	if got.RepoDir != "/r" || got.Owner != "" || got.Number != 0 {
 		t.Fatalf("migrated old row wrong: %+v", got)
 	}
+	// Back-compat: a pre-trace_json row reads back with an empty trace.
+	if got.TraceJSON != "" {
+		t.Fatalf("old row TraceJSON = %q, want empty", got.TraceJSON)
+	}
 
 	if _, err := s.SaveReview(context.Background(), store.ReviewRecord{
 		ID: "new-1", RepoDir: "/r", Mode: "pr", Owner: "acme", Number: 7,
 		Transcript: []byte(`[{"turn":1}]`), RawPrompt: "p", RawResponse: "r",
+		TraceJSON: `{"system_prompt":"sys"}`,
 		CreatedAt: time.Now().UTC(),
 	}); err != nil {
 		t.Fatalf("SaveReview post-migrate: %v", err)
 	}
 	got, _ = s.GetReview(context.Background(), "new-1")
-	if got.Owner != "acme" || got.Number != 7 || string(got.Transcript) != `[{"turn":1}]` {
+	if got.Owner != "acme" || got.Number != 7 || string(got.Transcript) != `[{"turn":1}]` ||
+		got.TraceJSON != `{"system_prompt":"sys"}` {
 		t.Fatalf("post-migrate round-trip wrong: %+v", got)
 	}
 }

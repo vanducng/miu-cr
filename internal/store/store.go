@@ -5,10 +5,16 @@ package store
 
 import (
 	"context"
+	"errors"
 	"time"
 
 	"github.com/vanducng/miu-cr/internal/engine"
 )
+
+// ErrReviewNotFound is returned (wrapped) by GetReview when no review has the
+// given id — distinct from a transient store failure, so a caller can tell
+// "unknown id" from "store unavailable".
+var ErrReviewNotFound = errors.New("review not found")
 
 // ReviewRecord is one persisted review. Findings, Stats, and Transcript are
 // stored as JSON. No credential field exists or is ever written. Status is
@@ -34,6 +40,10 @@ type ReviewRecord struct {
 	Transcript  []byte // JSON per-turn tool calls; nil/empty when not captured
 	RawPrompt   string
 	RawResponse string
+	// TraceJSON is the full redacted review trace (system+user prompts, diff meta,
+	// selected files, injected rules, model/provider, final response) as JSON.
+	// LOCAL-only; never in the review envelope or a posted comment.
+	TraceJSON string
 }
 
 // ReviewSummary is the list row for `history` — the scalar columns only (no
