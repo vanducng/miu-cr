@@ -16,40 +16,33 @@ var severityOrder = []string{"critical", "high", "medium", "low", "info"}
 // low→🔵 P3, info→⚪ P4. An unknown/empty severity falls back to ⚪ P4 so a finding
 // never renders a blank badge. DISPLAY ONLY — severity stays the gate/SARIF
 // source-of-truth (severityOrder/severityRank are untouched).
-func priorityBadge(sev string) string {
+// severityMeta is the single source-of-truth severity→(emoji, P-level) map.
+// info + any unknown fold to ⚪ P4. priorityBadge + severityEmoji both derive from it.
+func severityMeta(sev string) (emoji, plevel string) {
 	switch strings.ToLower(strings.TrimSpace(sev)) {
 	case "critical":
-		return "🔴 **P0**"
+		return "🔴", "P0"
 	case "high":
-		return "🟠 **P1**"
+		return "🟠", "P1"
 	case "medium":
-		return "🟡 **P2**"
+		return "🟡", "P2"
 	case "low":
-		return "🔵 **P3**"
-	case "info":
-		return "⚪ **P4**"
-	default:
-		return "⚪ **P4**"
+		return "🔵", "P3"
+	default: // info + unknown
+		return "⚪", "P4"
 	}
+}
+
+func priorityBadge(sev string) string {
+	e, p := severityMeta(sev)
+	return e + " **" + p + "**"
 }
 
 // severityEmoji is the compact (emoji-only) form of priorityBadge for count
 // chips: critical→🔴, high→🟠, medium→🟡, low→🔵, info/unknown→⚪.
 func severityEmoji(sev string) string {
-	switch strings.ToLower(strings.TrimSpace(sev)) {
-	case "critical":
-		return "🔴"
-	case "high":
-		return "🟠"
-	case "medium":
-		return "🟡"
-	case "low":
-		return "🔵"
-	case "info":
-		return "⚪"
-	default:
-		return "⚪"
-	}
+	e, _ := severityMeta(sev)
+	return e
 }
 
 // severityCounts renders the emoji-count chips for findings, critical/high first
@@ -129,7 +122,7 @@ func RenderSummaryFull(info *PRInfo, findings []engine.Finding, stats map[string
 		fmt.Fprintf(&b, "Reviewed commit: `%s`\n\n", info.HeadSHA)
 	}
 
-	renderMetaQuote(&b, stats, opts.Diffs, findings)
+	renderMetaQuote(&b, stats, opts.Diffs)
 	renderConfidence(&b, opts.Confidence, opts.ConfidenceReason, findings)
 
 	renderWalkthrough(&b, opts.Walkthrough)
@@ -139,7 +132,7 @@ func RenderSummaryFull(info *PRInfo, findings []engine.Finding, stats map[string
 		b.WriteString("> Source: fork (comments posted to the base repo)\n\n")
 	}
 	if omittedInline > 0 {
-		fmt.Fprintf(&b, "> Omitted inline: %d finding(s) over the %d-comment limit were not posted inline\n\n", omittedInline, maxInlineComments)
+		fmt.Fprintf(&b, "> Omitted inline: %d finding%s over the %d-comment limit were not posted inline\n\n", omittedInline, plural(omittedInline), maxInlineComments)
 	}
 
 	if len(omitted) > 0 {
@@ -165,7 +158,7 @@ func plural(n int) string {
 // effort badge: `> <files> files · +<adds>/−<dels> · effort <L> · context <full>`.
 // File/churn/effort come from opts.Diffs; with no diffs it falls back to the
 // stats files_reviewed count and omits the churn/effort segments.
-func renderMetaQuote(b *strings.Builder, stats map[string]any, diffs []diff.Diff, findings []engine.Finding) {
+func renderMetaQuote(b *strings.Builder, stats map[string]any, diffs []diff.Diff) {
 	files, adds, dels := diffStats(diffs)
 	var seg []string
 	if files > 0 {
@@ -173,7 +166,8 @@ func renderMetaQuote(b *strings.Builder, stats map[string]any, diffs []diff.Diff
 		seg = append(seg, fmt.Sprintf("+%d/−%d", adds, dels))
 		seg = append(seg, fmt.Sprintf("effort %s", effortSize(files, adds+dels)))
 	} else {
-		seg = append(seg, fmt.Sprintf("%s files", statInt(stats, "files_reviewed")))
+		n := statIntVal(stats, "files_reviewed")
+		seg = append(seg, fmt.Sprintf("%d file%s", n, plural(n)))
 	}
 	seg = append(seg, fmt.Sprintf("context %s", truncationLevel(stats)))
 	fmt.Fprintf(b, "> %s\n\n", strings.Join(seg, " · "))
@@ -346,5 +340,20 @@ func statInt(stats map[string]any, key string) string {
 		return "0"
 	default:
 		return fmt.Sprintf("%v", v)
+	}
+}
+
+// statIntVal is the int form of statInt (for arithmetic/pluralization).
+func statIntVal(stats map[string]any, key string) int {
+	if stats == nil {
+		return 0
+	}
+	switch v := stats[key].(type) {
+	case float64:
+		return int(v)
+	case int:
+		return v
+	default:
+		return 0
 	}
 }
