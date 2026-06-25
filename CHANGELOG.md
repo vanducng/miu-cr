@@ -55,6 +55,13 @@ comment with a new marker); subsequent re-runs dedupe normally. On a
 first M5 review **manually** (or off-hours) to absorb the one-time re-post before
 the next scheduled run.
 
+## [0.36.0](https://github.com/vanducng/miu-cr/compare/v0.35.0...v0.36.0) (2026-06-25)
+
+
+### Features
+
+* **review:** combine agent-handoff + review-internals; cleaner no-issues badge ([5b4c16b](https://github.com/vanducng/miu-cr/commit/5b4c16bc5bc5cfb32320eb2ab3a763b1353dbd05))
+
 ## [0.35.0](https://github.com/vanducng/miu-cr/compare/v0.34.0...v0.35.0) (2026-06-25)
 
 
