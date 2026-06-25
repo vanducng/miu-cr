@@ -111,9 +111,6 @@ type SummaryOptions struct {
 	Walkthrough   string
 	FileSummaries map[string]string
 	Diagram       string
-	// Confidence (1-5) is the model's merge-safety confidence; 0 => derive from findings.
-	Confidence       int
-	ConfidenceReason string
 	// RuleCitations grounds an omitted finding's cited rule stem in the overflow
 	// list (validated/linked in the wire layer; an unmatched stem is dropped).
 	RuleCitations map[string]RuleCitation

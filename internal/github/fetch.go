@@ -40,10 +40,6 @@ type PRInfo struct {
 	// IS this run's number (>=1). The identity line renders it as-is; the upsert writes
 	// it straight back as the next runs token. First review = 1.
 	ReviewCount int
-	// HeadSubject is the head commit's message subject (first line), used to label the
-	// reviewed commit readably instead of a bare hash. Best-effort: "" when the commit
-	// fetch fails; UNTRUSTED text, escaped at render.
-	HeadSubject string
 }
 
 // blobURL builds a repo-relative blob permalink at info.HeadSHA for path/line.
@@ -94,11 +90,6 @@ func FetchPR(ctx stdctx.Context, client Client, ref PRRef) (*PRInfo, error) {
 		IsFork:            isFork(ref, pr),
 		AuthorAssociation: pr.GetAuthorAssociation(),
 		HTMLBase:          pr.GetBase().GetRepo().GetHTMLURL(),
-	}
-
-	// Best-effort head-commit subject for a readable commit label; bare SHA on error.
-	if c, cerr := client.GetCommit(ctx, ref.Owner, ref.Repo, info.HeadSHA); cerr == nil && c != nil {
-		info.HeadSubject = firstLine(c.GetMessage())
 	}
 
 	opts := &gh.ListOptions{PerPage: 100}
@@ -196,15 +187,6 @@ func FetchConversation(ctx stdctx.Context, client Client, info *PRInfo) string {
 		return ""
 	}
 	return capConversation(out)
-}
-
-// firstLine returns the first non-empty line of s, trimmed (the commit subject).
-func firstLine(s string) string {
-	s = strings.TrimSpace(s)
-	if i := strings.IndexByte(s, '\n'); i >= 0 {
-		s = s[:i]
-	}
-	return strings.TrimSpace(s)
 }
 
 // capConversation truncates s to maxConversationBytes (rune-safe), appending an

@@ -258,10 +258,8 @@ func TestRenderSummaryNoEmDash(t *testing.T) {
 	info := &PRInfo{HeadSHA: "deadbeef", ReviewCount: 5, HTMLBase: "https://github.com/o/r", Number: 1}
 	_, diffs, findings := presentationFixture()
 	out := RenderSummaryFull(info, findings, map[string]any{"truncation_level": "hunks"}, 0, nil, nil, SummaryOptions{
-		Diffs:            diffs,
-		Walkthrough:      "lead prose",
-		Confidence:       4,
-		ConfidenceReason: "looks fine",
+		Diffs:       diffs,
+		Walkthrough: "lead prose",
 	})
 	if strings.Contains(out, " — ") {
 		t.Fatalf("summary body must not contain an em dash:\n%s", out)
@@ -533,17 +531,15 @@ func TestMdProseEscapesBreakoutKeepsFormatting(t *testing.T) {
 	}
 }
 
-func TestRenderSummaryConfidence(t *testing.T) {
+func TestRenderSummaryNoConfidenceLine(t *testing.T) {
 	info, diffs, findings := presentationFixture() // findings include a high
-	// Confidence line removed; model confidence + reason must NOT render.
-	out := RenderSummaryFull(info, findings, nil, 0, nil, nil, SummaryOptions{Diffs: diffs, Confidence: 4, ConfidenceReason: "localized changes, well tested"})
-	if strings.Contains(out, "Confidence:") {
-		t.Fatalf("summary must no longer render a Confidence line:\n%s", out)
-	}
-	// derived fallback (Confidence 0): no findings -> no Confidence line either.
-	clean := RenderSummaryFull(info, nil, nil, 0, nil, nil, SummaryOptions{Diffs: diffs})
-	if strings.Contains(clean, "Confidence:") {
-		t.Fatalf("summary must no longer render a Confidence line:\n%s", clean)
+	// Confidence/ConfidenceReason were removed from SummaryOptions; the summary
+	// must never render a Confidence line, with or without findings.
+	for _, fc := range [][]engine.Finding{findings, nil} {
+		out := RenderSummaryFull(info, fc, nil, 0, nil, nil, SummaryOptions{Diffs: diffs})
+		if strings.Contains(out, "Confidence:") {
+			t.Fatalf("summary must not render a Confidence line: %s", out)
+		}
 	}
 }
 

@@ -539,14 +539,12 @@ func publishReview(ctx stdctx.Context, client mgithub.Client, runner *gitcmd.Run
 	// the next read.
 	renderSummary := func(omitted int, omittedFindings []engine.Finding) string {
 		return mgithub.RenderSummaryFull(info, res.Findings, res.Stats, omitted, omittedFindings, categoryURLs, mgithub.SummaryOptions{
-			Diffs:            diffs,
-			ReviewID:         res.ID,
-			Walkthrough:      res.Walkthrough,
-			FileSummaries:    res.FileSummaries,
-			Diagram:          res.Diagram,
-			Confidence:       res.Confidence,
-			ConfidenceReason: res.ConfidenceReason,
-			RuleCitations:    ruleCites,
+			Diffs:         diffs,
+			ReviewID:      res.ID,
+			Walkthrough:   res.Walkthrough,
+			FileSummaries: res.FileSummaries,
+			Diagram:       res.Diagram,
+			RuleCitations: ruleCites,
 		})
 	}
 
