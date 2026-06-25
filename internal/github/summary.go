@@ -150,7 +150,7 @@ func RenderSummaryFull(info *PRInfo, findings []engine.Finding, stats map[string
 	if lead != "" {
 		lead += fmt.Sprintf(" · %d finding%s", len(findings), plural(len(findings)))
 	} else {
-		lead = "✅ no findings"
+		lead = "<sub><sub>![no issues found](https://img.shields.io/badge/no_issues_found-brightgreen?style=flat)</sub></sub>"
 	}
 	fmt.Fprintf(&b, "> %s\n\n", lead)
 	renderConfidence(&b, opts.Confidence, opts.ConfidenceReason, findings)

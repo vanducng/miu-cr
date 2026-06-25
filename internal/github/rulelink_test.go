@@ -33,7 +33,7 @@ func TestSummaryOverflowCategoryLink(t *testing.T) {
 	}
 
 	plain := RenderSummaryWithOverflow(info, nil, nil, 1, omitted, nil)
-	if !strings.Contains(plain, "(Security)") || strings.Contains(plain, "](http") {
+	if !strings.Contains(plain, "(Security)") || strings.Contains(plain, "[Security](http") {
 		t.Fatalf("summary overflow unmapped category must render plain:\n%s", plain)
 	}
 }

@@ -117,14 +117,15 @@ an **identity line** (`**Reviews (N)** · Last reviewed commit: \`<sha>\``, wher
 review count read back from the prior summary comment; when there is no prior count it
 drops the `Reviews (` prefix and shows a bare `Last reviewed commit:`), then a subtle quote
 line of per-level **shields.io count badges** (the `Px` label in its severity color, the
-count neutral grey, critical/high first; zero findings → `✅ no findings`) plus the finding
+count neutral grey, critical/high first; zero findings → a green "no issues found" badge) plus the finding
 total, a **`Confidence: N/5`** line (the model's merge-safety confidence + a one-line
 reason; derived from findings when the model omits it), then the model's PR summary as lead
-prose - 3–6 key-point bullets, **no "Walkthrough" heading**. The collapsible **Important
+prose (3 to 6 key-point bullets, **no "Walkthrough" heading**). The collapsible **Important
 Files Changed** table (File · Δ · Findings · Overview, the Overview from the per-file
-digests), the omitted-inline note, the `<details>` overflow block, and the agent-handoff
-block follow. The verbose effort/context/files/churn metadata is moved into a **collapsed
-`<details>` "Review internals"** block near the bottom, closing with a footer
+digests), the omitted-inline note, and the `<details>` overflow block follow. The agent
+handoff (review_id, re-run command, MCP) and the verbose effort/context/files/churn metadata
+are combined into one **collapsed `<details>` "Agent handoff & review internals"** block near
+the bottom, closing with a footer
 (`Reviewed commit \`<sha>\` · Posted by miu-cr`). All model-supplied text is escaped at the
 render boundary.
 

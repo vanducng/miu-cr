@@ -177,7 +177,7 @@ func TestRenderSummaryNoFindings(t *testing.T) {
 	if !strings.HasPrefix(out, ReviewMarker) {
 		t.Fatal("body must lead with the review marker")
 	}
-	if !strings.Contains(out, "✅ no findings") {
+	if !strings.Contains(out, "no_issues_found-brightgreen") {
 		t.Errorf("want the no-findings header:\n%s", out)
 	}
 	if !strings.Contains(out, "- Context: full") {

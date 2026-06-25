@@ -73,8 +73,8 @@ func TestRenderSummaryNoOverflowWhenNoneOmitted(t *testing.T) {
 func TestRenderSummaryOverflowOmitsLinkWithoutBase(t *testing.T) {
 	out := RenderSummaryWithOverflow(&PRInfo{HeadSHA: "h"}, nil, nil, 1,
 		[]engine.Finding{{File: "a.go", Line: 4, Severity: "low", Rationale: "x"}}, nil)
-	if strings.Contains(out, "](http") {
-		t.Fatalf("no HTMLBase must fall back to a plain code-span location:\n%s", out)
+	if strings.Contains(out, "/blob/") {
+		t.Fatalf("no HTMLBase must fall back to a plain code-span location (no blob link):\n%s", out)
 	}
 	if !strings.Contains(out, "`a.go:4`") {
 		t.Fatalf("want a plain code-span file:line:\n%s", out)
@@ -160,7 +160,7 @@ func TestRenderSummaryHeaderNoFindings(t *testing.T) {
 	if !strings.Contains(out, "## Code Review\n") {
 		t.Fatalf("want a clean H2 header:\n%s", out)
 	}
-	if !strings.Contains(out, "> ✅ no findings") {
+	if !strings.Contains(out, "no_issues_found-brightgreen") {
 		t.Fatalf("zero findings must render the no-findings marker in the quote:\n%s", out)
 	}
 	if strings.Contains(out, "(0 finding") {
@@ -320,7 +320,7 @@ func TestRenderSummaryFullHandoffSkippedWithoutReviewID(t *testing.T) {
 func TestRenderSummaryFullEmptyFindingsStillClean(t *testing.T) {
 	info, diffs, _ := presentationFixture()
 	out := RenderSummaryFull(info, nil, nil, 0, nil, nil, SummaryOptions{Diffs: diffs, ReviewID: "rev_x"})
-	if !strings.Contains(out, "> ✅ no findings") {
+	if !strings.Contains(out, "no_issues_found-brightgreen") {
 		t.Fatalf("empty-findings review must still render a clean summary:\n%s", out)
 	}
 	if !strings.Contains(out, "Important Files Changed (2)") || !strings.Contains(out, "Hand off to an agent") {
