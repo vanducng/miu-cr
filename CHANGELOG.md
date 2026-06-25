@@ -55,6 +55,15 @@ comment with a new marker); subsequent re-runs dedupe normally. On a
 first M5 review **manually** (or off-hours) to absorb the one-time re-post before
 the next scheduled run.
 
+## [0.30.0](https://github.com/vanducng/miu-cr/compare/v0.29.0...v0.30.0) (2026-06-25)
+
+
+### Features
+
+* **config,auth:** config show + whoami/logout + richer [review] config + forceful patch prompt ([232d959](https://github.com/vanducng/miu-cr/commit/232d959ee286c2fe0cb09e1692776e866a1c1fd8))
+* **review:** Px-colored count badges, visible metadata line, auto-merge release PRs ([47be536](https://github.com/vanducng/miu-cr/commit/47be536558b1569d5ab844733a1ad991c13eaa2c))
+* **rules:** project review rules encoding miu-cr conventions ([25b3a64](https://github.com/vanducng/miu-cr/commit/25b3a64f6824a04f5d39fcd4bf8d0ff09d23c301))
+
 ## [0.29.0](https://github.com/vanducng/miu-cr/compare/v0.28.1...v0.29.0) (2026-06-25)
 
 
