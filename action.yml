@@ -53,6 +53,13 @@ inputs:
       Default true.
     required: false
     default: "true"
+  build-from-source:
+    description: >-
+      Build miucr from the checked-out source (CGO_ENABLED=0 go build ./cmd/miucr)
+      instead of installing the released binary. Used by miu-cr's own dogfood so a
+      PR is reviewed by ITS code, not the last release. Requires Go on the runner.
+    required: false
+    default: "false"
 
 runs:
   using: composite
@@ -61,12 +68,19 @@ runs:
       shell: bash
       env:
         MIUCR_VERSION: ${{ inputs.version }}
+        BUILD_FROM_SOURCE: ${{ inputs.build-from-source }}
         GITHUB_TOKEN: ${{ inputs.github-token }}
       run: |
         set -euo pipefail
         export MIUCR_INSTALL_DIR="$HOME/.local/bin"
         mkdir -p "$MIUCR_INSTALL_DIR"
-        curl -fsSL https://raw.githubusercontent.com/vanducng/miu-cr/main/install.sh | sh
+        if [ "${BUILD_FROM_SOURCE:-}" = "true" ]; then
+          # Self-review: build the PR's own code so the review reflects this PR,
+          # not the last release (Go must be set up by the caller).
+          CGO_ENABLED=0 go build -o "$MIUCR_INSTALL_DIR/miucr" ./cmd/miucr
+        else
+          curl -fsSL https://raw.githubusercontent.com/vanducng/miu-cr/main/install.sh | sh
+        fi
         echo "$MIUCR_INSTALL_DIR" >> "$GITHUB_PATH"
         export PATH="$MIUCR_INSTALL_DIR:$PATH"
         command -v miucr

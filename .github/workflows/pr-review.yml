@@ -20,6 +20,9 @@ jobs:
     if: ${{ github.event.pull_request.head.repo.fork != true && !startsWith(github.head_ref, 'release-please--') }}
     steps:
       - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
       - uses: ./
         with:
           # Reuse the z.ai token already in repo secrets (Bearer via base-url).
@@ -27,3 +30,6 @@ jobs:
           gate: none
           base-url: https://api.z.ai/api/anthropic
           model: glm-5.2
+          # Review this PR with ITS code, not the last release — so the review
+          # reflects presentation/behavior changes in the PR itself.
+          build-from-source: "true"

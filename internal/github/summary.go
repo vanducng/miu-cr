@@ -11,13 +11,10 @@ import (
 // severityOrder ranks severities high→low for a stable histogram.
 var severityOrder = []string{"critical", "high", "medium", "low", "info"}
 
-// priorityBadge maps an internal severity to the display-only emoji + P-level
-// badge (Codex/Graphite convention): critical→🔴 P0, high→🟠 P1, medium→🟡 P2,
-// low→🔵 P3, info→⚪ P4. An unknown/empty severity falls back to ⚪ P4 so a finding
-// never renders a blank badge. DISPLAY ONLY — severity stays the gate/SARIF
-// source-of-truth (severityOrder/severityRank are untouched).
 // severityMeta is the single source-of-truth severity→(emoji, P-level, shields color)
-// map. info + any unknown fold to ⚪ P4. priorityBadge + severityEmoji derive from it.
+// map: critical→P0/red, high→P1/orange, medium→P2/yellow, low→P3/blue, info+unknown→
+// P4/grey. DISPLAY ONLY — severity stays the gate/SARIF source (severityOrder/
+// severityRank untouched). priorityBadge + severityCountBadge derive from it.
 func severityMeta(sev string) (emoji, plevel, color string) {
 	switch strings.ToLower(strings.TrimSpace(sev)) {
 	case "critical":
@@ -71,9 +68,10 @@ func severityCounts(findings []engine.Finding) string {
 
 // RenderSummary builds the PR summary that becomes the CreateReview BODY: it leads
 // with ReviewMarker (identifies the review as ours for alreadyPostedAtSHA) and a
-// Codex-style `Reviewed commit` line, then an emoji-severity header + count, a
-// compact metadata quote, confidence, the walkthrough prose, the Important Files
-// Changed table, an optional omitted-inline note, and a per-commit footer.
+// Codex-style `Reviewed commit` line, then a clean `## Code Review` header, a compact
+// metadata quote carrying the shields severity count badges + total, confidence, the
+// walkthrough prose, the Important Files Changed table, an optional omitted-inline
+// note, and a per-commit footer.
 func RenderSummary(info *PRInfo, findings []engine.Finding, stats map[string]any, omittedInline int) string {
 	return RenderSummaryWithOverflow(info, findings, stats, omittedInline, nil, nil)
 }
