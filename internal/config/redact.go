@@ -41,6 +41,14 @@ func RedactConfig(cfg Config) Config {
 		}
 		out.Providers[name] = p
 	}
+	// Clone the only other nested reference field so the returned config never shares
+	// a backing map with the input (out := cfg is a shallow struct copy).
+	if cfg.Review.CategoryURLs != nil {
+		out.Review.CategoryURLs = make(map[string]string, len(cfg.Review.CategoryURLs))
+		for k, v := range cfg.Review.CategoryURLs {
+			out.Review.CategoryURLs[k] = v
+		}
+	}
 	if out.Store.DSN != "" {
 		out.Store.DSN = redactedMask
 	}

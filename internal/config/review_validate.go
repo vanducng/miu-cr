@@ -49,7 +49,7 @@ func ValidateReview(r Review) error {
 func invalidReview(field, value, want string) error {
 	return &clierr.CLIError{
 		Code:    "config.invalid",
-		Message: fmt.Sprintf("[review].%s %q is invalid: want %s", field, value, want),
+		Message: fmt.Sprintf("[review].%s %q is invalid: want %s", field, RedactString(value), want),
 		Hint:    "fix [review]." + field + " in " + FilePathOrEmpty(),
 		Exit:    2,
 	}

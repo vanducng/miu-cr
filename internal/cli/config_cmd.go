@@ -1,7 +1,6 @@
 package cli
 
 import (
-	"fmt"
 	"io"
 
 	toml "github.com/pelletier/go-toml/v2"
@@ -70,11 +69,11 @@ func configView(safe config.Config, all bool) any {
 func configData(view any) (map[string]any, error) {
 	raw, err := toml.Marshal(view)
 	if err != nil {
-		return nil, &CLIError{Code: "config.render_failed", Message: "render config: " + err.Error(), Exit: 1}
+		return nil, &CLIError{Code: "config.render_failed", Message: "render config: " + config.RedactString(err.Error()), Exit: 1}
 	}
 	out := map[string]any{}
 	if err := toml.Unmarshal(raw, &out); err != nil {
-		return nil, &CLIError{Code: "config.render_failed", Message: "render config: " + err.Error(), Exit: 1}
+		return nil, &CLIError{Code: "config.render_failed", Message: "render config: " + config.RedactString(err.Error()), Exit: 1}
 	}
 	return out, nil
 }
@@ -84,10 +83,10 @@ func configData(view any) (map[string]any, error) {
 func renderConfigPretty(w io.Writer, view any) error {
 	raw, err := toml.Marshal(view)
 	if err != nil {
-		return &CLIError{Code: "config.render_failed", Message: "render config: " + err.Error(), Exit: 1}
+		return &CLIError{Code: "config.render_failed", Message: "render config: " + config.RedactString(err.Error()), Exit: 1}
 	}
-	if _, err := fmt.Fprint(w, string(raw)); err != nil {
-		return err
+	if _, err := w.Write(raw); err != nil {
+		return &CLIError{Code: "config.write_failed", Message: "write config: " + config.RedactString(err.Error()), Exit: 1}
 	}
 	return nil
 }
