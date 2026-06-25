@@ -22,14 +22,14 @@ const (
 // Grep searches the reviewed revision for a fixed-string pattern via `git grep`.
 // An empty rev means the staged index (git grep --cached). Output is grouped by
 // file with "N|line" rows; results are bounded by grepMaxCount per file.
-func Grep(ctx context.Context, repoDir, rev, pattern string, runner *gitcmd.Runner) (string, error) {
+func Grep(ctx context.Context, repoDir, rev, pattern string, runner *gitcmd.Runner, paths ...string) (string, error) {
 	if strings.TrimSpace(pattern) == "" {
 		return "", nil
 	}
 	if runner == nil {
 		runner = gitcmd.New()
 	}
-	out, err := gitGrep(ctx, repoDir, rev, pattern, runner)
+	out, err := gitGrep(ctx, repoDir, rev, pattern, runner, cleanPathspecs(paths))
 	if err != nil {
 		return "", err
 	}
@@ -39,16 +39,34 @@ func Grep(ctx context.Context, repoDir, rev, pattern string, runner *gitcmd.Runn
 // gitGrep runs `git grep -n -F --max-count <N>` against the reviewed revision
 // (or the staged index via --cached when rev is empty). All M1 modes are
 // revision-pinned, so the live working tree is never searched.
-func gitGrep(ctx context.Context, repoDir, rev, pattern string, runner *gitcmd.Runner) (string, error) {
+func gitGrep(ctx context.Context, repoDir, rev, pattern string, runner *gitcmd.Runner, paths []string) (string, error) {
+	args := []string{"--no-pager", "grep", "-n", "-F", "--no-color", "--max-count", strconv.Itoa(grepMaxCount)}
 	if rev == "" {
-		out, err := runner.Output(ctx, repoDir, "--no-pager", "grep", "-n", "-F",
-			"--no-color", "--max-count", strconv.Itoa(grepMaxCount), "--cached", "-e", pattern)
+		args = append(args, "--cached", "-e", pattern)
+		if len(paths) > 0 {
+			args = append(args, "--")
+			args = append(args, paths...)
+		}
+		out, err := runner.Output(ctx, repoDir, args...)
 		return string(out), grepErr(err, string(out))
 	}
-	out, err := runner.Output(ctx, repoDir, "--no-pager", "grep", "-n", "-F",
-		"--no-color", "--max-count", strconv.Itoa(grepMaxCount), "-e", pattern,
-		"--end-of-options", rev)
+	args = append(args, "-e", pattern, "--end-of-options", rev)
+	if len(paths) > 0 {
+		args = append(args, "--")
+		args = append(args, paths...)
+	}
+	out, err := runner.Output(ctx, repoDir, args...)
 	return string(out), grepErr(err, string(out))
+}
+
+func cleanPathspecs(paths []string) []string {
+	out := make([]string, 0, len(paths))
+	for _, p := range paths {
+		if p = strings.TrimSpace(p); p != "" {
+			out = append(out, p)
+		}
+	}
+	return out
 }
 
 // grepErr treats grep's exit-1 (no matches) as success.

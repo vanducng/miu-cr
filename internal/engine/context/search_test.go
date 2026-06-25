@@ -119,6 +119,24 @@ func TestGrep_SameRevision_CommitMode(t *testing.T) {
 	}
 }
 
+func TestGrep_FileScoped(t *testing.T) {
+	repo := initRepo(t)
+	writeFile(t, repo, "f.go", "package main\nvar Token = \"wanted\"\n")
+	writeFile(t, repo, "other.go", "package main\nvar Token = \"other\"\n")
+	sha := commit(t, repo, "v1")
+
+	out, err := Grep(context.Background(), repo, sha, "Token", gitcmd.New(), "f.go")
+	if err != nil {
+		t.Fatalf("Grep: %v", err)
+	}
+	if !strings.Contains(out, "wanted") {
+		t.Fatalf("expected scoped match, got %q", out)
+	}
+	if strings.Contains(out, "other") || strings.Contains(out, "File: other.go") {
+		t.Fatalf("file-scoped grep leaked sibling match: %q", out)
+	}
+}
+
 func TestGrep_StagedMode_ReadsIndexNotWorktree(t *testing.T) {
 	repo := initRepo(t)
 	writeFile(t, repo, "f.go", "package main\nvar Marker = \"staged\"\n")

@@ -81,6 +81,7 @@ func openAITools() []openai.ChatCompletionToolUnionParam {
 		"type": "object",
 		"properties": map[string]any{
 			"pattern": map[string]any{"type": "string", "description": "fixed string to search for"},
+			"file":    map[string]any{"type": "string", "description": "optional file path to limit the search"},
 		},
 		"required": []string{"pattern"},
 	}

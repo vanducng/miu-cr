@@ -29,6 +29,9 @@ func runToolRepo(t *testing.T) (string, string) {
 	if err := os.WriteFile(filepath.Join(repo, "main.go"), []byte("package main\nfunc Foo() {}\nfunc Bar() {}\n"), 0o644); err != nil {
 		t.Fatalf("write: %v", err)
 	}
+	if err := os.WriteFile(filepath.Join(repo, "other.go"), []byte("package main\nfunc Bar() {}\n"), 0o644); err != nil {
+		t.Fatalf("write: %v", err)
+	}
 	run("add", "-A")
 	run("commit", "-q", "-m", "init")
 	out, err := exec.Command("git", "-C", repo, "rev-parse", "HEAD").Output()
@@ -66,6 +69,11 @@ func TestRunTool_FileReadAndGrep(t *testing.T) {
 	out, isErr = runTool(ctx, rc, 0, "grep", json.RawMessage(`{"pattern":"func Bar"}`))
 	if isErr || !strings.Contains(out, "Bar") {
 		t.Errorf("grep match: got %q isErr=%v", out, isErr)
+	}
+
+	out, isErr = runTool(ctx, rc, 0, "grep", json.RawMessage(`{"pattern":"func Bar","file":"other.go"}`))
+	if isErr || !strings.Contains(out, "File: other.go") || strings.Contains(out, "File: main.go") {
+		t.Errorf("grep file scope: got %q isErr=%v", out, isErr)
 	}
 
 	out, isErr = runTool(ctx, rc, 0, "grep", json.RawMessage(`{"pattern":"zzz_no_such_symbol"}`))
