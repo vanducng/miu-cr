@@ -1,6 +1,6 @@
 ---
 title: System Architecture
-description: How miucr's delivery surfaces funnel into one deterministic review engine: the data flow, the store-swap seam, and the serve, dedupe, write-action, poll, and REST/App-auth security models.
+description: "How miucr's delivery surfaces funnel into one deterministic review engine: the data flow, the store-swap seam, and the serve, dedupe, write-action, poll, and REST/App-auth security models."
 ---
 
 miucr is a pure-Go (`CGO_ENABLED=0`) static binary. The review engine is **owned
