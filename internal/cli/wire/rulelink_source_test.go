@@ -66,10 +66,10 @@ func TestCategoryLinkMapNotSourcedFromRepoRules(t *testing.T) {
 		t.Fatalf("want 1 posted inline comment, got %d", len(fake.reviewComments))
 	}
 	body := fake.reviewComments[0].GetBody()
-	if strings.Contains(body, "evil.example") || strings.Contains(body, "](http") {
+	if strings.Contains(body, "evil.example") || strings.Contains(body, "[security](") {
 		t.Fatalf("repo rule must NOT inject a category link:\n%s", body)
 	}
-	if !strings.Contains(body, "🟠 **P1** · security") {
+	if !strings.Contains(body, "<sub><sub>![P1](https://img.shields.io/badge/P1-orange?style=flat)</sub></sub> · security") {
 		t.Fatalf("category must render PLAIN when no trusted map is set:\n%s", body)
 	}
 }

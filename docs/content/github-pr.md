@@ -89,10 +89,10 @@ With `--post`, inline comments are filtered to lines **inside the PR's diff
 hunks** (re-derived deterministically from the same diff the engine anchored
 against), so GitHub never 422s on an out-of-hunk line. Each inline comment uses
 the modern comfort-fade API (`Side: RIGHT`, `Line`) and the review is anchored
-to the **head SHA**. Each inline comment leads with a display-only priority
-badge — 🔴 **P0** (critical) · 🟠 **P1** (high) · 🟡 **P2** (medium) · 🔵 **P3**
-(low) · ⚪ **P4** (info) — followed by the category and any `(per <rule>)`
-citation; the underlying severity (used for the gate and SARIF) is unchanged. By
+to the **head SHA**. Each inline comment leads with a display-only shields.io
+priority badge — `P0` (red, critical) · `P1` (orange, high) · `P2` (yellow, medium)
+· `P3` (blue, low) · `P4` (grey, info) — followed by the category and any `(per
+<rule>)` citation; the underlying severity (used for the gate and SARIF) is unchanged. By
 default the review uses `Event: COMMENT` and never
 approves or requests changes; two opt-in write-actions (`--suggest`,
 `--approve-clean`, both default OFF) are described under **Opt-in write-actions**
@@ -112,10 +112,11 @@ hunks or runs off the diff is rejected, so any finding that fails the proof
 **falls back to a single-line comment** on its anchor line. Single-line findings
 are unaffected.
 
-The **summary body** leads with an emoji-severity header
-(`## Code Review · 🟠 2 · 🟡 1  (3 findings)`, critical/high first; zero findings →
-`## Code Review · ✅ no findings`), a compact one-line metadata quote
-(`> N files · +adds/−dels · effort S · context full`), a **`Confidence: N/5`** line
+The **summary body** leads with a clean `## Code Review` header (no severity on the
+H2 — it stays small), then a compact one-line metadata quote that carries the
+per-level **shields.io count badges** (`P1 | 2`, `P2 | 1`, …, critical/high first;
+zero findings → `✅ no findings`) plus `N findings · N files · +adds/−dels · effort S
+· context full`, a **`Confidence: N/5`** line
 (the model's merge-safety confidence + a one-line reason; derived from findings when
 the model omits it), then the model's PR summary as lead prose — 3–6 key-point bullets,
 **no "Walkthrough" heading**. The collapsible **Important Files Changed** table

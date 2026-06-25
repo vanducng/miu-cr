@@ -31,7 +31,7 @@ func TestRuleCitationUserTextOnly(t *testing.T) {
 	if !strings.Contains(body, "(per team)") {
 		t.Fatalf("user rule must be cited as text:\n%s", body)
 	}
-	if strings.Contains(body, "](") || strings.Contains(body, "blob/") {
+	if strings.Contains(body, "(per [") || strings.Contains(body, "blob/") {
 		t.Fatalf("user rule must NOT be linked:\n%s", body)
 	}
 }

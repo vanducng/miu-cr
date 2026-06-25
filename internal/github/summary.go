@@ -11,43 +11,43 @@ import (
 // severityOrder ranks severities high→low for a stable histogram.
 var severityOrder = []string{"critical", "high", "medium", "low", "info"}
 
-// priorityBadge maps an internal severity to the display-only emoji + P-level
-// badge (Codex/Graphite convention): critical→🔴 P0, high→🟠 P1, medium→🟡 P2,
-// low→🔵 P3, info→⚪ P4. An unknown/empty severity falls back to ⚪ P4 so a finding
-// never renders a blank badge. DISPLAY ONLY — severity stays the gate/SARIF
-// source-of-truth (severityOrder/severityRank are untouched).
-// severityMeta is the single source-of-truth severity→(emoji, P-level) map.
-// info + any unknown fold to ⚪ P4. priorityBadge + severityEmoji both derive from it.
-func severityMeta(sev string) (emoji, plevel string) {
+// severityMeta is the single source-of-truth severity→(emoji, P-level, shields color)
+// map: critical→P0/red, high→P1/orange, medium→P2/yellow, low→P3/blue, info+unknown→
+// P4/grey. DISPLAY ONLY — severity stays the gate/SARIF source (severityOrder/
+// severityRank untouched). priorityBadge + severityCountBadge derive from it.
+func severityMeta(sev string) (emoji, plevel, color string) {
 	switch strings.ToLower(strings.TrimSpace(sev)) {
 	case "critical":
-		return "🔴", "P0"
+		return "🔴", "P0", "red"
 	case "high":
-		return "🟠", "P1"
+		return "🟠", "P1", "orange"
 	case "medium":
-		return "🟡", "P2"
+		return "🟡", "P2", "yellow"
 	case "low":
-		return "🔵", "P3"
+		return "🔵", "P3", "blue"
 	default: // info + unknown
-		return "⚪", "P4"
+		return "⚪", "P4", "lightgrey"
 	}
 }
 
+// priorityBadge renders the inline-finding P-level as a small shields.io badge
+// (Codex-style), degrading to the alt text if shields is unreachable. P-level +
+// color are fixed internal constants (no user input → no escaping needed).
 func priorityBadge(sev string) string {
-	e, p := severityMeta(sev)
-	return e + " **" + p + "**"
+	_, p, color := severityMeta(sev)
+	return fmt.Sprintf("<sub><sub>![%s](https://img.shields.io/badge/%s-%s?style=flat)</sub></sub>", p, p, color)
 }
 
-// severityEmoji is the compact (emoji-only) form of priorityBadge for count
-// chips: critical→🔴, high→🟠, medium→🟡, low→🔵, info/unknown→⚪.
-func severityEmoji(sev string) string {
-	e, _ := severityMeta(sev)
-	return e
+// severityCountBadge renders a small shields.io "P1 | N" count badge for the
+// summary chips (same style as the inline priorityBadge, with the count as message).
+func severityCountBadge(sev string, n int) string {
+	_, p, color := severityMeta(sev)
+	return fmt.Sprintf("<sub><sub>![%s %d](https://img.shields.io/badge/%s-%d-%s?style=flat)</sub></sub>", p, n, p, n, color)
 }
 
-// severityCounts renders the emoji-count chips for findings, critical/high first
-// (severityOrder), e.g. "🟡 2 · 🔵 1". Unknown severities fold into the info (⚪)
-// chip. Returns "" when there are no findings so callers can omit the chip line.
+// severityCounts renders the per-level shields count badges for findings, critical/
+// high first (severityOrder), e.g. "![P1 2] ![P3 1]". Unknown severities fold into
+// the info (P4) chip. Returns "" when there are no findings so callers omit the line.
 func severityCounts(findings []engine.Finding) string {
 	counts := map[string]int{}
 	for _, f := range findings {
@@ -60,17 +60,18 @@ func severityCounts(findings []engine.Finding) string {
 	var chips []string
 	for _, sev := range severityOrder {
 		if n := counts[sev]; n > 0 {
-			chips = append(chips, fmt.Sprintf("%s %d", severityEmoji(sev), n))
+			chips = append(chips, severityCountBadge(sev, n))
 		}
 	}
-	return strings.Join(chips, " · ")
+	return strings.Join(chips, " ")
 }
 
 // RenderSummary builds the PR summary that becomes the CreateReview BODY: it leads
 // with ReviewMarker (identifies the review as ours for alreadyPostedAtSHA) and a
-// Codex-style `Reviewed commit` line, then an emoji-severity header + count, a
-// compact metadata quote, confidence, the walkthrough prose, the Important Files
-// Changed table, an optional omitted-inline note, and a per-commit footer.
+// Codex-style `Reviewed commit` line, then a clean `## Code Review` header, a compact
+// metadata quote carrying the shields severity count badges + total, confidence, the
+// walkthrough prose, the Important Files Changed table, an optional omitted-inline
+// note, and a per-commit footer.
 func RenderSummary(info *PRInfo, findings []engine.Finding, stats map[string]any, omittedInline int) string {
 	return RenderSummaryWithOverflow(info, findings, stats, omittedInline, nil, nil)
 }
@@ -113,17 +114,20 @@ func RenderSummaryFull(info *PRInfo, findings []engine.Finding, stats map[string
 
 	b.WriteString(ReviewMarker + "\n")
 
-	if chips := severityCounts(findings); chips != "" {
-		fmt.Fprintf(&b, "## Code Review · %s  (%d finding%s)\n\n", chips, len(findings), plural(len(findings)))
-	} else {
-		b.WriteString("## Code Review · ✅ no findings\n\n")
-	}
+	// Keep the H2 small — severity chips ride the compact quote line below, not the header.
+	b.WriteString("## Code Review\n\n")
 
 	if info.HeadSHA != "" {
 		fmt.Fprintf(&b, "Reviewed commit: `%s`\n\n", info.HeadSHA)
 	}
 
-	renderMetaQuote(&b, stats, opts.Diffs)
+	lead := severityCounts(findings)
+	if lead != "" {
+		lead += fmt.Sprintf(" · %d finding%s", len(findings), plural(len(findings)))
+	} else {
+		lead = "✅ no findings"
+	}
+	renderMetaQuote(&b, stats, opts.Diffs, lead)
 	renderConfidence(&b, opts.Confidence, opts.ConfidenceReason, findings)
 
 	renderWalkthrough(&b, opts.Walkthrough)
@@ -159,9 +163,12 @@ func plural(n int) string {
 // effort badge: `> <files> files · +<adds>/−<dels> · effort <L> · context <full>`.
 // File/churn/effort come from opts.Diffs; with no diffs it falls back to the
 // stats files_reviewed count and omits the churn/effort segments.
-func renderMetaQuote(b *strings.Builder, stats map[string]any, diffs []diff.Diff) {
+func renderMetaQuote(b *strings.Builder, stats map[string]any, diffs []diff.Diff, lead string) {
 	files, adds, dels := diffStats(diffs)
 	var seg []string
+	if lead != "" {
+		seg = append(seg, lead)
+	}
 	if files > 0 {
 		seg = append(seg, fmt.Sprintf("%d file%s", files, plural(files)))
 		seg = append(seg, fmt.Sprintf("+%d/−%d", adds, dels))
