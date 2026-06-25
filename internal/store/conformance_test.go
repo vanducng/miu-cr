@@ -277,7 +277,7 @@ func TestConformancePruneReviews(t *testing.T) {
 // together, asserting OR semantics: a row is deleted if it is beyond the
 // newest-Keep OR older than the cutoff; it survives only if in the newest-Keep
 // AND newer than the cutoff (so a row in the newest-Keep but older than the
-// cutoff is still deleted — which is where OR differs from AND).
+// cutoff is still deleted, which is where OR differs from AND).
 func TestConformancePruneReviewsKeepAndOlderThan(t *testing.T) {
 	for _, b := range backends(t) {
 		t.Run(b.name, func(t *testing.T) {

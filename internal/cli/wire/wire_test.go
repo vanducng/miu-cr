@@ -192,7 +192,7 @@ func TestPublishReviewWireFlow(t *testing.T) {
 	if fake.createIssueN != 1 || fake.editN != 0 {
 		t.Fatalf("first run must CREATE the summary issue comment: create=%d edit=%d", fake.createIssueN, fake.editN)
 	}
-	// The review body must be EMPTY — the summary leaves the body entirely.
+	// The review body must be EMPTY, the summary leaves the body entirely.
 	if b := fake.lastReviewed.GetBody(); strings.TrimSpace(b) != "" {
 		t.Fatalf("review body must be empty (summary lives in the issue comment), got:\n%s", b)
 	}

@@ -141,7 +141,7 @@ func TestResolveLineNumbers_EmptyInputs(t *testing.T) {
 
 // Red-team CRITICAL: the engine must ALWAYS re-anchor from QuotedCode and never
 // trust a model-supplied line number. A wrong non-zero line + a bad quote must
-// still resolve to Line==0 (dropped) — proving the model's line can't smuggle
+// still resolve to Line==0 (dropped), proving the model's line can't smuggle
 // past drift-reject. A correct quote with a wrong line must be recomputed.
 func TestResolveLineNumbers_HallucinatedLineCannotBypassDriftReject(t *testing.T) {
 	diffs := []diff.Diff{{NewPath: "pkg/example/handler.go", Diff: testDiff}}
@@ -452,7 +452,7 @@ func TestResolveLineNumbers_MixedStrategies(t *testing.T) {
 // Regression: a multi-line QuotedCode spanning an interior blank line must still
 // anchor. splitAndNormalize drops the blank from the target, so both the hunk side
 // and the file-content side must drop their blanks too (preserving real line
-// numbers) — otherwise the quote never matches consecutively and is drift-rejected.
+// numbers), otherwise the quote never matches consecutively and is drift-rejected.
 func TestResolveLineNumbers_InteriorBlankLine(t *testing.T) {
 	hunkBlank := `diff --git a/test.go b/test.go
 --- a/test.go

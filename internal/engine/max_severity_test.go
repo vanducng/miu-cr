@@ -3,7 +3,7 @@ package engine
 import "testing"
 
 // Regression: stats.max_severity must equal the highest-ranked finding's
-// severity whenever findings exist, and "none" for the empty set — the bug was
+// severity whenever findings exist, and "none" for the empty set, the bug was
 // it coming back empty even with findings present.
 func TestMaxSeverityHighestWins(t *testing.T) {
 	cases := []struct {

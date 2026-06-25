@@ -15,7 +15,7 @@ import (
 // userHomeDir is a seam so tests can point config/state resolution at a temp dir.
 var userHomeDir = os.UserHomeDir
 
-// Dir is the single miu-cr config/state directory, ~/.config/miu/cr — matching
+// Dir is the single miu-cr config/state directory, ~/.config/miu/cr, matching
 // the miu family convention (miu-db uses ~/.config/miu/db). Deliberately NOT
 // os.UserConfigDir(), which on macOS resolves to ~/Library/Application Support.
 func Dir() (string, error) {
@@ -221,7 +221,7 @@ func mergeStore(base, file Store) Store {
 }
 
 // mergeProvider overlays non-empty file fields onto base. An empty string in the
-// file means "inherit base" — you cannot clear a built-in field to empty via
+// file means "inherit base", you cannot clear a built-in field to empty via
 // config (and resolve falls back to defaults for empty fields anyway).
 func mergeProvider(base, file Provider) Provider {
 	out := base

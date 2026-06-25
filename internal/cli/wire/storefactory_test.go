@@ -38,7 +38,7 @@ func TestResolveBackendPrecedence(t *testing.T) {
 
 // validateBackend accepts the known backends (empty/unset -> sqlite) and rejects
 // an unrecognized explicit value with a typed config.invalid CLIError that names
-// the bad value — never a silent sqlite fallback.
+// the bad value, never a silent sqlite fallback.
 func TestValidateBackend(t *testing.T) {
 	cases := []struct {
 		name    string
@@ -84,7 +84,7 @@ func TestValidateBackend(t *testing.T) {
 }
 
 // A backend=postgres open failure surfaces a typed, redacted store.unavailable
-// from both factory entry points — never a panic, never a silent nil.
+// from both factory entry points, never a panic, never a silent nil.
 func TestOpenStorePostgresFailureSurfaces(t *testing.T) {
 	t.Setenv("MIUCR_STORE_BACKEND", "postgres")
 	t.Setenv("MIUCR_PG_DSN", badPGDSN)

@@ -91,7 +91,7 @@ func TestPostChecksSkipsNonPositiveLineAnnotations(t *testing.T) {
 			t.Fatalf("invalid annotation range start=%d end=%d", a.GetStartLine(), a.GetEndLine())
 		}
 	}
-	// All three findings are still summarized — the histogram keys on every finding.
+	// All three findings are still summarized, the histogram keys on every finding.
 	if s := c.gotCheck.Output.GetSummary(); !strings.Contains(s, "3 finding(s)") {
 		t.Fatalf("summary must count unanchored findings too: %q", s)
 	}

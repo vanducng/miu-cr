@@ -1,7 +1,7 @@
 // Package sarif emits SARIF 2.1.0 from review findings so code-scanning tools
 // (GitHub Security tab via github/codeql-action/upload-sarif, IDEs) can ingest
 // them. It is a leaf package: stdlib encoding/json only, its own Finding input
-// shape (no engine/cli import), and repo-RELATIVE URIs only — never an absolute
+// shape (no engine/cli import), and repo-RELATIVE URIs only, never an absolute
 // or secret path.
 package sarif
 

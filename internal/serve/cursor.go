@@ -20,7 +20,7 @@ const pruneAge = 14 * 24 * time.Hour
 // Cursor is the restart-safe poll dedup state. Seen maps a PR ref
 // (owner/repo#N) to the head SHA last reviewed successfully; NotifSeen maps a
 // ref to the notification updated_at last observed (the pre-GetPR cost guard).
-// The GitHub token is NEVER a field here — it is resolved per-tick in memory.
+// The GitHub token is NEVER a field here, it is resolved per-tick in memory.
 type Cursor struct {
 	Since     time.Time            `json:"since"`
 	Seen      map[string]string    `json:"seen"`
@@ -93,7 +93,7 @@ func loadCursor(path string, log *slog.Logger) *Cursor {
 		c.NotifSeen = map[string]string{}
 	}
 	// Deferred: touched is in-memory only, so the staleness clock resets each
-	// restart — abandoned entries can outlive pruneAge across frequent restarts.
+	// restart, abandoned entries can outlive pruneAge across frequent restarts.
 	// Acceptable: prune is best-effort dedup hygiene, not a correctness boundary.
 	c.touched = map[string]time.Time{}
 	now := time.Now()

@@ -109,7 +109,7 @@ func TestTraceShowOrderedSteps(t *testing.T) {
 	}
 }
 
-// Proves the pretty renderer's []engine.TurnRecord case is REACHABLE — the
+// Proves the pretty renderer's []engine.TurnRecord case is REACHABLE, the
 // historical tool_calls step renders its turns (not just the JSON path).
 func TestTraceShowPrettyRendersToolCalls(t *testing.T) {
 	tr := engine.ReviewTrace{

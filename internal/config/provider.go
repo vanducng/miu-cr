@@ -31,7 +31,7 @@ const (
 // flags still override a profile credential.
 //
 // Precedence when both are set: AuthToken (the literal) wins over AuthEnv (see
-// resolve's profileSecret). Prefer AuthEnv — it keeps the secret out of the
+// resolve's profileSecret). Prefer AuthEnv, it keeps the secret out of the
 // plaintext config file.
 type Provider struct {
 	Kind      Kind   `toml:"kind"`
@@ -65,7 +65,7 @@ const (
 )
 
 // Embedding configures the opt-in semantic-recall layer (M7). It is OFF unless
-// Enabled is explicitly true AND the store backend is postgres — never enabled
+// Enabled is explicitly true AND the store backend is postgres, never enabled
 // by provider-presence, so copying an example config cannot silently start
 // sending code-derived text off-box. The credential is resolved at runtime from
 // the same env/flag chain as the LLM provider and is never persisted/redacted;
@@ -81,7 +81,7 @@ type Embedding struct {
 // Github configures GitHub authentication. Mode defaults to "pat" (the
 // pre-M8 PAT/anonymous behavior). Mode "app" opts into GitHub App installation
 // auth: AppID + InstallationID + PrivateKeyPath. PrivateKeyPath is a PATH to a
-// PEM file (never inline PEM — RedactString cannot mask a multi-line key); the
+// PEM file (never inline PEM, RedactString cannot mask a multi-line key); the
 // key is read at startup, parsed, and the raw bytes zeroed, and is never logged.
 type Github struct {
 	Mode           string `toml:"mode,omitempty"`             // "pat" (default) | "app"
@@ -113,7 +113,7 @@ func (h History) On() bool { return h.Enabled == nil || *h.Enabled }
 // CategoryURLs maps a finding Category (matched case-insensitively) to a docs URL
 // so a mapped category renders as a clickable link in PR comments/summary and
 // sets the SARIF helpUri. This struct is TRUSTED config only (user file +
-// built-in defaults) — never sourced from repo .miu/cr/rules, so a fork-PR rule
+// built-in defaults), never sourced from repo .miu/cr/rules, so a fork-PR rule
 // cannot inject a link or override a review default.
 type Review struct {
 	Gate         string            `toml:"gate,omitempty"`
@@ -138,7 +138,7 @@ type Config struct {
 
 // Defaults returns the built-in configuration: the two first-class kinds as
 // like-named profiles. Specific vendors (z.ai/GLM, etc.) are intentionally NOT
-// baked in here — add them via the config file (see docs).
+// baked in here, add them via the config file (see docs).
 func Defaults() Config {
 	return Config{
 		DefaultProvider: string(KindAnthropic),

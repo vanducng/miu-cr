@@ -106,7 +106,7 @@ func (s *Server) handleWebhook(w http.ResponseWriter, r *http.Request) {
 	// and GitHub's delivery budget is never spent on the LLM. GitHub will not
 	// redeliver a delivery once it has been 200'd, so this is a deliberate
 	// respond-fast tradeoff: a subsequent dropped Submit (full queue) is loud-logged
-	// + counted (Pool.drops) rather than retried — the next push to the PR fires a
+	// + counted (Pool.drops) rather than retried, the next push to the PR fires a
 	// fresh webhook that re-triggers the review.
 	writeJSON(w, http.StatusOK, `{"status":"accepted"}`)
 

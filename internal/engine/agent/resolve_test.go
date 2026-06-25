@@ -332,7 +332,7 @@ func TestResolveOpenAIGatewayKeyRequiresBaseURL(t *testing.T) {
 	}
 }
 
-// The same custom profile PASSES once base_url is set — the guard only blocks the
+// The same custom profile PASSES once base_url is set, the guard only blocks the
 // no-base_url case, never a legit gateway.
 func TestResolveOpenAIGatewayWithBaseURLPasses(t *testing.T) {
 	clearProviderEnv(t)
@@ -412,7 +412,7 @@ func TestResolveCodexHonorsExplicitConfigModel(t *testing.T) {
 	}
 }
 
-// codex path: the merged gpt-4o default must NEVER leak to the codex backend —
+// codex path: the merged gpt-4o default must NEVER leak to the codex backend -
 // it is filtered and falls through to DefaultCodexModel (the gpt-4o-rejection bug).
 func TestResolveCodexFiltersGPT4oDefault(t *testing.T) {
 	clearProviderEnv(t)

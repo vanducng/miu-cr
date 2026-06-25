@@ -23,7 +23,7 @@ const refreshSkew = 5 * time.Minute
 
 // Meta is the per-provider routing the resolver needs, supplied by the cli layer
 // (so this package need not import the cli provider registry). It carries no
-// secret — only the token endpoint, OAuth client id, and the backend host.
+// secret, only the token endpoint, OAuth client id, and the backend host.
 type Meta struct {
 	Provider       string
 	TokenURL       string
@@ -104,7 +104,7 @@ func refresh(ctx stdctx.Context, meta Meta, rec config.OAuthRecord, httpClient *
 	req.Header.Set("Content-Type", "application/json")
 	resp, err := httpClient.Do(req)
 	if err != nil {
-		// Network/DNS failure reaching the token endpoint — transient: the cached
+		// Network/DNS failure reaching the token endpoint, transient: the cached
 		// credential may still be valid once connectivity returns. Retry-typed so the
 		// review layer surfaces it as retryable, not as a stale-credential re-login.
 		return config.OAuthRecord{}, &clierr.CLIError{

@@ -10,7 +10,7 @@ import (
 )
 
 // For --provider openai the menu must offer browser login (OAuth, ChatGPT plan)
-// as option 1 — before the API-key paths — so the no-key path is the default.
+// as option 1, before the API-key paths, so the no-key path is the default.
 func TestChooseAuthOpenAIOffersOAuthFirst(t *testing.T) {
 	var out bytes.Buffer
 	prof := config.Provider{Kind: config.KindOpenAI}

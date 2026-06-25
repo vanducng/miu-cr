@@ -13,7 +13,7 @@ import (
 )
 
 // ctxRecordingStore records the last persisted status and whether the ctx handed
-// to UpsertReview was already canceled — the signal that the write rode the
+// to UpsertReview was already canceled, the signal that the write rode the
 // (timed-out) jobCtx instead of a fresh one.
 type ctxRecordingStore struct {
 	mu             sync.Mutex
@@ -51,7 +51,7 @@ func (timeoutPRReviewer) ReviewPR(ctx stdctx.Context, _ PRReviewRequest) (Review
 func (timeoutPRReviewer) GateFailed([]ReviewFinding, string) bool { return false }
 
 // TestBuildServeReviewFn_TimedOutStillPersistsFailed proves a review that fails by
-// timeout still records status=failed — and does so on a FRESH context, not the
+// timeout still records status=failed, and does so on a FRESH context, not the
 // already-canceled jobCtx (which would strand the record at pending forever).
 func TestBuildServeReviewFn_TimedOutStillPersistsFailed(t *testing.T) {
 	prev := prReviewer

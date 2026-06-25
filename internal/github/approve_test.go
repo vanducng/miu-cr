@@ -313,7 +313,7 @@ func TestPostReviewApproveRealErrorSurfaces(t *testing.T) {
 
 func TestAlreadyApprovedIgnoresEmptyCommitAgainstEmptyHead(t *testing.T) {
 	// A malformed review (APPROVED, empty CommitID) must NOT match an empty
-	// HeadSHA — otherwise "" == "" falsely blocks a needed APPROVE.
+	// HeadSHA, otherwise "" == "" falsely blocks a needed APPROVE.
 	c := &recordClient{
 		reviews: []*gh.PullRequestReview{
 			{State: gh.Ptr("APPROVED"), CommitID: gh.Ptr("")},
@@ -369,7 +369,7 @@ func TestPostReviewApprove422CommentRetryFailureZeroesPostedAndErrors(t *testing
 
 func TestPostReviewApprove422EmptyDegradeSkipsPost(t *testing.T) {
 	// APPROVE 422s, but with 0 inline comments AND no summary there is nothing to
-	// post — skip the empty COMMENT review (GitHub would 422 it anyway).
+	// post, skip the empty COMMENT review (GitHub would 422 it anyway).
 	c := &recordClient{createReviewErrFirst: selfApprove422()}
 	res, err := PostReview(stdctx.Background(), c, approveInfo(), nil, nil, staticSummary(""), nil, approveOpts())
 	if err != nil {

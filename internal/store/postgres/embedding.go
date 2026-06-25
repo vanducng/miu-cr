@@ -98,7 +98,7 @@ func (s *Store) Embedding() store.EmbeddingStore { return s }
 // UpsertFindingEmbedding writes one finding code-anchor embedding, keyed by
 // (repo, fingerprint, model). On conflict it refreshes the vector and advisory
 // columns (a re-review may sharpen the rationale). The vector is bound as a raw
-// '[…]'::vector text cast — zero new modules.
+// '[…]'::vector text cast, zero new modules.
 //
 // MVP (deferred): ON CONFLICT is idempotent, so re-embedding a byte-identical
 // anchor is wasteful but correct; a content_hash-skip is a future cost opt.

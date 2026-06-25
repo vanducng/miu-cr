@@ -47,7 +47,7 @@ func PostChecks(ctx stdctx.Context, client Client, info *PRInfo, findings []engi
 
 	// Checks API requires start_line/end_line >= 1 and has no file-level annotation;
 	// an unanchored finding (Line<=0) would 422 the whole CheckRun. Drop it from the
-	// annotation list here (defense-in-depth — the diff filter already excludes it);
+	// annotation list here (defense-in-depth, the diff filter already excludes it);
 	// it still counts in the summary histogram below, which keys on all findings.
 	anchored := make([]engine.Finding, 0, len(eligible))
 	for _, f := range eligible {
@@ -89,7 +89,7 @@ func PostChecks(ctx stdctx.Context, client Client, info *PRInfo, findings []engi
 
 	// GitHub only auto-dedups check runs by (app, name, head_sha) for GitHub App
 	// tokens; with a PAT a same-SHA re-run would spawn a duplicate "miu-cr" run.
-	// Reuse an existing run via UpdateCheckRun so a re-run shows ONE check run —
+	// Reuse an existing run via UpdateCheckRun so a re-run shows ONE check run -
 	// accepting that GitHub appends this run's annotations onto the prior run's
 	// (there is no replace-annotations API).
 	runID, err := existingCheckRunID(ctx, client, info)
@@ -120,7 +120,7 @@ func PostChecks(ctx stdctx.Context, client Client, info *PRInfo, findings []engi
 	}
 
 	// GitHub APPENDS annotations on each UpdateCheckRun (it does NOT replace the
-	// array), so these batches MUST be disjoint slices — sending cumulative
+	// array), so these batches MUST be disjoint slices, sending cumulative
 	// slices would duplicate. The create/reuse carried [0:50]; each update appends
 	// the next 50.
 	for start := maxAnnotationsPerBatch; start < len(anns); start += maxAnnotationsPerBatch {
@@ -163,7 +163,7 @@ func existingCheckRunID(ctx stdctx.Context, client Client, info *PRInfo) (int64,
 
 // annotationFor maps one finding to a CheckRunAnnotation: repo-relative path,
 // start/end line from the anchor, annotation_level from severity, message from
-// rationale (finding text only — never a token).
+// rationale (finding text only, never a token).
 func annotationFor(f engine.Finding) *gh.CheckRunAnnotation {
 	start := f.Line
 	end := f.EndLine

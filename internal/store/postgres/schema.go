@@ -4,7 +4,7 @@ import "fmt"
 
 // SchemaSQL is the idempotent Postgres schema, mirroring sqlite.SchemaSQL
 // table-for-table and column-for-column (types modulo dialect; time stays TEXT
-// for byte-parity with the SQLite rows). No vector/embeddings column — that is
+// for byte-parity with the SQLite rows). No vector/embeddings column, that is
 // M7. A schema-parity test asserts both backends define the same shape.
 const SchemaSQL = `
 CREATE TABLE IF NOT EXISTS reviews (
@@ -45,7 +45,7 @@ CREATE TABLE IF NOT EXISTS pr_findings (
 // category/rationale columns carry the advisory prose so SimilarFindings needs no
 // join. created_at stays TEXT for byte-parity with the other tables.
 //
-// MVP (deferred): no ivfflat/hnsw ANN index — a seq scan is fine at the small
+// MVP (deferred): no ivfflat/hnsw ANN index, a seq scan is fine at the small
 // per-repo corpus M7 targets; an index is a future scale opt (YAGNI).
 const embeddingSchemaTemplate = `
 CREATE EXTENSION IF NOT EXISTS vector;

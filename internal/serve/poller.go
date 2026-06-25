@@ -47,7 +47,7 @@ var subjectURLRe = regexp.MustCompile(`/repos/([^/]+)/([^/]+)/pulls/(\d+)`)
 
 // notifGetter is the NARROW serve-local GitHub surface the poller needs. It is
 // deliberately NOT the shared github.Client (which has 3 fakes that would break
-// if widened) — the ghNotifGetter adapter wraps *github.Client directly and unit
+// if widened), the ghNotifGetter adapter wraps *github.Client directly and unit
 // tests fake this interface.
 type notifGetter interface {
 	ListNotifications(ctx stdctx.Context, opts *github.NotificationListOptions) ([]*github.Notification, *github.Response, error)
@@ -96,7 +96,7 @@ type PollConfig struct {
 
 // Poller is the poll-mode trigger: a ticker loop that enumerates candidates,
 // dedups per head SHA via a restart-safe cursor, and dispatches NEW/UPDATED PRs
-// to the same Dispatcher (the serve Pool in P2). It is trigger-only — it never
+// to the same Dispatcher (the serve Pool in P2). It is trigger-only, it never
 // touches the review/publish engine and never Drains the pool.
 type Poller struct {
 	src          pollSource
@@ -171,7 +171,7 @@ func (p *Poller) Run(ctx stdctx.Context) {
 				return
 			}
 			backoff = p.handleErr(ctx, err, backoff)
-			if backoff == 0 { // slept already (rate limit) — loop immediately
+			if backoff == 0 { // slept already (rate limit), loop immediately
 				if ctx.Err() != nil { // unless the rate-limit sleep was cancelled (shutdown)
 					return
 				}

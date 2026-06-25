@@ -269,7 +269,7 @@ func TestReviewPersistsRedactedTrace(t *testing.T) {
 	git(t, dir, "commit", "-q", "-m", "base")
 	// The reviewed diff + the finding's QuotedCode carry a token; assert it doesn't leak into
 	// trace_json. (This is the plumbing + == invariant test; the AUTHORITATIVE free-text
-	// redaction proof — tokens injected directly into trace prompt fields + a DSN — is in
+	// redaction proof, tokens injected directly into trace prompt fields + a DSN, is in
 	// trace_test.go, where redacted-trace is EXPECTED to diverge from the raw prompt.)
 	writeFile(t, dir, "app.go", "package app\n\nfunc Risky() {\n\tkey := \"x_api_key="+tok+"\"\n\t_ = key\n}\n")
 	git(t, dir, "add", "app.go")
@@ -308,7 +308,7 @@ func TestReviewPersistsRedactedTrace(t *testing.T) {
 }
 
 // Provider/Model/Owner/Repo/Number from the Request flow into the PersistRecord
-// (no secrets — those fields are non-secret context only).
+// (no secrets, those fields are non-secret context only).
 func TestReviewPersistsRequestContext(t *testing.T) {
 	dir, findings := semanticDir(t)
 	fa := &fakeAgent{findings: findings}

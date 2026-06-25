@@ -25,7 +25,7 @@ func SetReviewValidators(gate, filterMode, minSeverity func(string) bool) {
 }
 
 // ValidateReview rejects an out-of-set [review] enum or an unparsable timeout,
-// returning a typed config.invalid CLIError (Exit 2) — the right namespace for a
+// returning a typed config.invalid CLIError (Exit 2), the right namespace for a
 // config-sourced value (not flags.invalid_*). An empty field is the documented
 // "no default" and passes. Only validates fields a config can set.
 func ValidateReview(r Review) error {

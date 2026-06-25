@@ -102,12 +102,12 @@ func renderRule(r Rule, allowContextFiles bool, totalContext *int) string {
 // inlineContextFile resolves cf relative to the rule file, rejecting absolute and
 // `..`-escaping paths, then inlines the file content under per-file and total byte
 // caps. The file is opened via openNoFollow, which refuses a symlinked final
-// component (atomically on unix) — this replaces the EvalSymlinks-then-open dance
+// component (atomically on unix), this replaces the EvalSymlinks-then-open dance
 // and closes its TOCTOU (an attacker can't swap a regular file for a symlink
 // between the check and the read). An oversized file is REJECTED with a warning rather
 // than silently truncated, so the model never sees a partial file that looks
-// complete. Missing or rejected files become a one-line warning comment — never
-// carrying an absolute path — so the model knows the hint was attempted but
+// complete. Missing or rejected files become a one-line warning comment, never
+// carrying an absolute path, so the model knows the hint was attempted but
 // skipped.
 func inlineContextFile(r Rule, cf string, totalContext *int) string {
 	if cf == "" {

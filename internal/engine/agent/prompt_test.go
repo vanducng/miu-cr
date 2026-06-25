@@ -233,7 +233,7 @@ func TestSystemPromptConventionGuidance(t *testing.T) {
 }
 
 func TestConventionCitationRidesRationale(t *testing.T) {
-	// A rationale citing a sibling rides the existing rationale field verbatim —
+	// A rationale citing a sibling rides the existing rationale field verbatim -
 	// no new finding field, contract unchanged.
 	const cite = `differs from mapWriteError, which sets the wrapped sql code`
 	body := `{"findings":[{"file":"a.go","existing_code":"return err","severity":"low","category":"maintainability","rationale":"` + cite + `"}]}`

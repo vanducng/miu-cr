@@ -16,7 +16,7 @@ import (
 
 // ReadPrivateKeyFile reads a GitHub App private key from a PEM file at path,
 // parses it (PKCS#1 or PKCS#8 RSA), and zeroes the raw PEM bytes before
-// returning — the key never lingers in a buffer and is never logged.
+// returning, the key never lingers in a buffer and is never logged.
 func ReadPrivateKeyFile(path string) (*rsa.PrivateKey, error) {
 	raw, err := os.ReadFile(path)
 	if err != nil {
@@ -33,7 +33,7 @@ func ReadPrivateKeyFile(path string) (*rsa.PrivateKey, error) {
 }
 
 // TokenSource yields the bearer token NewClient/WithAuthToken authenticates with.
-// staticTokenSource returns a fixed PAT (or "" anonymous) — today's behavior;
+// staticTokenSource returns a fixed PAT (or "" anonymous), today's behavior;
 // appTokenSource mints+caches a GitHub App installation token.
 type TokenSource interface {
 	Token(ctx stdctx.Context) (string, error)

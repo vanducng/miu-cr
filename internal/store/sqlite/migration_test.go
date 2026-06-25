@@ -16,7 +16,7 @@ import (
 func TestOpen_MigratesPreStatusReviewsTable(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "state.db")
 
-	// Seed a pre-status reviews table directly — the old schema, no status column.
+	// Seed a pre-status reviews table directly, the old schema, no status column.
 	raw, err := sql.Open("sqlite", dsn(path))
 	if err != nil {
 		t.Fatalf("open raw: %v", err)

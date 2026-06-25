@@ -8,7 +8,7 @@ import (
 
 // newProgress: -q always silences; -v always emits "miu-cr: <msg>" to the given
 // writer; with neither flag the default is driven by the TTY check. Under `go
-// test` stderr is not a char device, so the no-flag default is silent — exactly
+// test` stderr is not a char device, so the no-flag default is silent, exactly
 // the piped/CI behavior that keeps the stdout envelope and its parsers untouched.
 func TestNewProgress(t *testing.T) {
 	t.Run("quiet wins", func(t *testing.T) {
@@ -40,7 +40,7 @@ func TestNewProgress(t *testing.T) {
 }
 
 // With --verbose, progress (the final "done" milestone) must land on STDERR while
-// stdout carries only the clean miucr.cli/v1 envelope — never a "miu-cr:" line.
+// stdout carries only the clean miucr.cli/v1 envelope, never a "miu-cr:" line.
 func TestReviewVerboseProgressToStderrOnly(t *testing.T) {
 	t.Setenv("ANTHROPIC_API_KEY", "synthetic-test-key")
 	r := &fakeReviewer{outcome: ReviewOutcome{Findings: []ReviewFinding{{File: "a.go", Line: 1, Severity: "low"}}}}

@@ -11,7 +11,7 @@ import (
 const suggestionSeverityFloor = "medium"
 
 // severityRankOf returns the engine's (low→critical) numeric rank of a severity,
-// the same scale GateFailed uses — NOT the inverted github.severityRank.
+// the same scale GateFailed uses, NOT the inverted github.severityRank.
 func severityRankOf(sev string) int {
 	return engine.MaxSeverityRank([]engine.Finding{{Severity: sev}})
 }
@@ -40,7 +40,7 @@ func normalizeLine(s string) string {
 // anchor is QuotedCode-proven a multi-line patch is a safe in-place expansion.
 //
 // Best-effort: the engine offers NO guarantee that SuggestedPatch corresponds to
-// the anchored range — it is a free-form model field. The safe fallback for every
+// the anchored range, it is a free-form model field. The safe fallback for every
 // rejected case is the plain fenced hint. ok is true ONLY when ALL hold:
 //   - single-line anchor: EndLine==0 || EndLine==Line
 //   - SuggestedPatch is non-empty (it may be a single line OR a multi-line block)
