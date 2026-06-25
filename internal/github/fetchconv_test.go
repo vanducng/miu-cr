@@ -50,16 +50,14 @@ func convInfo() *PRInfo {
 
 func TestFetchConversationRendersSections(t *testing.T) {
 	c := &convClient{
-		reviews: []*gh.PullRequestReview{
-			{Body: gh.Ptr(ReviewMarker + "\nReview summary: 2 findings.")},
-			{Body: gh.Ptr("a human review, no marker")}, // skipped: not miucr's
-		},
 		reviewComment: []*gh.PullRequestComment{
 			{Path: gh.Ptr("src/auth.go"), Body: gh.Ptr("Unchecked error on token parse")},
 		},
 		issueComments: []*gh.IssueComment{
-			{Body: gh.Ptr("I disagree, that path is unreachable")},
-			{Body: gh.Ptr(ReviewMarker + "\nmiucr own summary comment")}, // skipped: bot
+			// miucr's summary now lives in a marker-bearing ISSUE COMMENT (not a review
+			// body) — fetchPriorSummaries reads it from here.
+			{Body: gh.Ptr(ReviewMarker + "\nReview summary: 2 findings.")},
+			{Body: gh.Ptr("I disagree, that path is unreachable")}, // developer reply
 		},
 	}
 
@@ -77,11 +75,10 @@ func TestFetchConversationRendersSections(t *testing.T) {
 			t.Fatalf("output missing %q\n--- got ---\n%s", want, out)
 		}
 	}
-	if strings.Contains(out, "a human review, no marker") {
-		t.Fatalf("non-miucr review leaked into summaries:\n%s", out)
-	}
-	if strings.Contains(out, "miucr own summary comment") {
-		t.Fatalf("miucr's own issue comment leaked into developer replies:\n%s", out)
+	// The marker-bearing summary comment must NOT leak into developer replies (bot
+	// loop-guard).
+	if strings.Count(out, "Review summary: 2 findings.") != 1 {
+		t.Fatalf("summary comment must appear once (as a prior summary, not a dev reply):\n%s", out)
 	}
 }
 

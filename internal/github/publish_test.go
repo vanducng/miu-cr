@@ -3,6 +3,7 @@ package github
 import (
 	stdctx "context"
 	"fmt"
+	"sort"
 	"strings"
 	"testing"
 
@@ -38,6 +39,13 @@ type recordClient struct {
 	createReviewN int
 	createIssueN  int
 	editN         int
+
+	// Stateful issue-comment store for the upsert invariant: when non-nil it backs
+	// ListIssueComments (sorted by id) and is mutated by Create (append, next id) /
+	// Edit (replace body by id). Existing page-based tests leave it nil and use the
+	// issueComments [][] pages above unchanged.
+	issueStore []*gh.IssueComment
+	issueIDSeq int64
 
 	createCheckErr error
 	gotCheck       *gh.CreateCheckRunOptions
@@ -89,6 +97,11 @@ func (c *recordClient) ListIssueComments(_ stdctx.Context, _, _ string, _ int, o
 	if c.listIssueErr != nil {
 		return nil, nil, c.listIssueErr
 	}
+	if c.issueStore != nil {
+		sorted := append([]*gh.IssueComment(nil), c.issueStore...)
+		sort.SliceStable(sorted, func(i, j int) bool { return sorted[i].GetID() < sorted[j].GetID() })
+		return sorted, &gh.Response{}, nil
+	}
 	idx := 0
 	if opts != nil && opts.Page > 0 {
 		idx = opts.Page
@@ -106,14 +119,28 @@ func (c *recordClient) ListIssueComments(_ stdctx.Context, _, _ string, _ int, o
 func (c *recordClient) CreateIssueComment(_ stdctx.Context, _, _ string, _ int, com *gh.IssueComment) (*gh.IssueComment, error) {
 	c.createIssueN++
 	c.createdIssue = com
-	return com, c.createIssueErr
+	if c.createIssueErr != nil {
+		return nil, c.createIssueErr
+	}
+	c.issueIDSeq++
+	stored := &gh.IssueComment{ID: gh.Ptr(c.issueIDSeq), Body: gh.Ptr(com.GetBody())}
+	c.issueStore = append(c.issueStore, stored)
+	return stored, nil
 }
 
 func (c *recordClient) EditIssueComment(_ stdctx.Context, _, _ string, id int64, com *gh.IssueComment) (*gh.IssueComment, error) {
 	c.editN++
 	c.editedID = id
 	c.editedBody = com.GetBody()
-	return com, c.editErr
+	if c.editErr != nil {
+		return nil, c.editErr
+	}
+	for _, ic := range c.issueStore {
+		if ic.GetID() == id {
+			ic.Body = gh.Ptr(com.GetBody())
+		}
+	}
+	return com, nil
 }
 
 func (c *recordClient) CreateCheckRun(_ stdctx.Context, _, _ string, opts gh.CreateCheckRunOptions) (*gh.CheckRun, error) {
@@ -415,8 +442,10 @@ func TestExistingFingerprints(t *testing.T) {
 	}
 }
 
-// Codex pattern: the rendered summary lands in the CreateReview BODY (with the
-// marker + reviewed-commit lead-in), and no issue comment is created.
+// PostReview primitive: a non-nil summaryFn renders into the CreateReview BODY
+// (marker + reviewed-commit lead-in), and no issue comment is touched. The wire
+// layer now passes nil (summary upserts as an issue comment instead); this asserts
+// the primitive's body path still works for any caller that wants it.
 func TestPostReviewSummaryIsReviewBody(t *testing.T) {
 	c := &recordClient{}
 	info := &PRInfo{Owner: "o", Repo: "r", Number: 1, HeadSHA: "deadbeef"}
@@ -434,42 +463,11 @@ func TestPostReviewSummaryIsReviewBody(t *testing.T) {
 	if !strings.Contains(r.GetBody(), ReviewMarker) {
 		t.Errorf("review body must contain the marker:\n%s", r.GetBody())
 	}
-	if !strings.Contains(r.GetBody(), "Reviewed commit: `deadbeef`") {
-		t.Errorf("review body must contain the reviewed-commit lead-in:\n%s", r.GetBody())
+	if !strings.Contains(r.GetBody(), "Last reviewed commit: `deadbeef`") {
+		t.Errorf("review body must contain the last-reviewed-commit identity line:\n%s", r.GetBody())
 	}
 	if c.createIssueN != 0 || c.editN != 0 {
 		t.Errorf("no issue comment must be created/edited (Codex pattern), got create=%d edit=%d", c.createIssueN, c.editN)
-	}
-}
-
-// alreadyPostedAtSHA detects our own review (marker + matching CommitID) so a
-// same-SHA re-run can skip; a new SHA / a non-miucr review must not match.
-func TestAlreadyPostedAtSHA(t *testing.T) {
-	info := &PRInfo{Owner: "o", Repo: "r", Number: 1, HeadSHA: "abc"}
-
-	posted := &recordClient{reviews: []*gh.PullRequestReview{
-		{CommitID: gh.Ptr("abc"), Body: gh.Ptr(ReviewMarker + "\n## Code Review")},
-	}}
-	if ok, err := AlreadyPostedAtSHA(stdctx.Background(), posted, info); err != nil || !ok {
-		t.Fatalf("want posted=true for our review at the head SHA, got %v err=%v", ok, err)
-	}
-
-	newSHA := &recordClient{reviews: []*gh.PullRequestReview{
-		{CommitID: gh.Ptr("old"), Body: gh.Ptr(ReviewMarker)},
-	}}
-	if ok, _ := AlreadyPostedAtSHA(stdctx.Background(), newSHA, info); ok {
-		t.Error("a review at a DIFFERENT SHA must not count as posted")
-	}
-
-	foreign := &recordClient{reviews: []*gh.PullRequestReview{
-		{CommitID: gh.Ptr("abc"), Body: gh.Ptr("someone else's review")},
-	}}
-	if ok, _ := AlreadyPostedAtSHA(stdctx.Background(), foreign, info); ok {
-		t.Error("a non-miucr review (no marker) must not count as posted")
-	}
-
-	if ok, _ := AlreadyPostedAtSHA(stdctx.Background(), &recordClient{}, info); ok {
-		t.Error("no reviews → not posted")
 	}
 }
 
@@ -809,21 +807,6 @@ func TestSuggestSeverityFloorUsesEngineRank(t *testing.T) {
 func TestExistingFingerprintsRateLimitMapped(t *testing.T) {
 	c := &recordClient{listRevErr: &gh.RateLimitError{Message: "rate limited"}}
 	_, err := ExistingFingerprints(stdctx.Background(), c, &PRInfo{Owner: "o", Repo: "r", Number: 1})
-	if err == nil {
-		t.Fatal("want rate-limit error")
-	}
-	var ce *clierr.CLIError
-	if !asCLIErr(err, &ce) || ce.Code != "github.rate_limited" {
-		t.Fatalf("want github.rate_limited, got %v", err)
-	}
-	if !ce.Retry {
-		t.Error("list rate-limit error must be retryable")
-	}
-}
-
-func TestAlreadyPostedListRateLimitMapped(t *testing.T) {
-	c := &recordClient{listReviewsErr: &gh.RateLimitError{Message: "rate limited"}}
-	_, err := AlreadyPostedAtSHA(stdctx.Background(), c, &PRInfo{Owner: "o", Repo: "r", Number: 1, HeadSHA: "h"})
 	if err == nil {
 		t.Fatal("want rate-limit error")
 	}

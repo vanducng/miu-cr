@@ -84,12 +84,11 @@ func commitRef(info *PRInfo) string {
 	return "`" + short + "`"
 }
 
-// RenderSummary builds the PR summary that becomes the CreateReview BODY: it leads
-// with ReviewMarker (identifies the review as ours for alreadyPostedAtSHA) and a
-// Codex-style `Reviewed commit` line, then a clean `## Code Review` header, a compact
-// metadata quote carrying the shields severity count badges + total, confidence, the
-// walkthrough prose, the Important Files Changed table, an optional omitted-inline
-// note, and a per-commit footer.
+// RenderSummary builds the PR summary upserted as the single miucr issue comment:
+// it leads with ReviewMarker (the owning sentinel) + the hidden runs token, then a
+// `## Code Review` header, the Reviews-(N)/last-commit identity line, the shields
+// severity badges, confidence, walkthrough prose, Important Files Changed, the
+// collapsed Review internals details, and a footer.
 func RenderSummary(info *PRInfo, findings []engine.Finding, stats map[string]any, omittedInline int) string {
 	return RenderSummaryWithOverflow(info, findings, stats, omittedInline, nil, nil)
 }
@@ -131,12 +130,20 @@ func RenderSummaryFull(info *PRInfo, findings []engine.Finding, stats map[string
 	var b strings.Builder
 
 	b.WriteString(ReviewMarker + "\n")
+	// Hidden runs counter for the next upsert. ReviewCount is already this run's number
+	// (FetchPR did the +1), so write it straight back; max(,1) only guards a direct
+	// render with an unset ReviewCount (no FetchPR), which still seeds N=1.
+	b.WriteString(runsCountToken(max(info.ReviewCount, 1)) + "\n")
 
 	// Keep the H2 small — severity chips ride the compact quote line below, not the header.
 	b.WriteString("## Code Review\n\n")
 
 	if info.HeadSHA != "" {
-		fmt.Fprintf(&b, "Reviewed commit: %s\n\n", commitRef(info))
+		if info.ReviewCount > 0 {
+			fmt.Fprintf(&b, "**Reviews (%d)** · Last reviewed commit: %s\n\n", info.ReviewCount, commitRef(info))
+		} else {
+			fmt.Fprintf(&b, "Last reviewed commit: %s\n\n", commitRef(info))
+		}
 	}
 
 	lead := severityCounts(findings)
@@ -146,7 +153,6 @@ func RenderSummaryFull(info *PRInfo, findings []engine.Finding, stats map[string
 		lead = "✅ no findings"
 	}
 	fmt.Fprintf(&b, "> %s\n\n", lead)
-	renderMetaLine(&b, stats, opts.Diffs)
 	renderConfidence(&b, opts.Confidence, opts.ConfidenceReason, findings)
 
 	renderWalkthrough(&b, opts.Walkthrough)
@@ -165,6 +171,8 @@ func RenderSummaryFull(info *PRInfo, findings []engine.Finding, stats map[string
 
 	renderPresentation(&b, info, findings, opts.Diffs, opts.ReviewID, opts.FileSummaries)
 
+	renderReviewInternals(&b, stats, opts.Diffs)
+
 	fmt.Fprintf(&b, "\n<sub>Reviewed commit %s · Posted by miu-cr</sub>", commitRef(info))
 	return b.String()
 }
@@ -177,28 +185,23 @@ func plural(n int) string {
 	return "s"
 }
 
-// renderMetaQuote writes the compact one-line metadata blockquote relocating the
-// effort/size/files/churn/context that previously lived in the severity list +
-// effort badge: `> <files> files · +<adds>/−<dels> · effort <L> · context <full>`.
-// File/churn/effort come from opts.Diffs; with no diffs it falls back to the
-// stats files_reviewed count and omits the churn/effort segments.
-// renderMetaLine writes the PR-shape metadata as a normal (non-blockquote) line so it
-// stays visible — `**N files** · +adds/−dels · effort L · context full` — with the file
-// count bolded. File/churn/effort come from diffs; with no diffs it falls back to the
-// stats files_reviewed count and omits churn/effort.
-func renderMetaLine(b *strings.Builder, stats map[string]any, diffs []diff.Diff) {
+// renderReviewInternals writes the verbose PR metadata into a COLLAPSED
+// <details>Review internals</details> bullet list near the footer (off the
+// scannable top): Files, Churn (+adds/−dels), Effort, Context. File/churn/effort
+// come from diffs; with no diffs it falls back to the stats files_reviewed count
+// and omits the churn/effort bullets. All values are trusted (ints + fixed labels).
+func renderReviewInternals(b *strings.Builder, stats map[string]any, diffs []diff.Diff) {
 	files, adds, dels := diffStats(diffs)
-	var seg []string
+	b.WriteString("\n<details>\n<summary>Review internals</summary>\n\n")
 	if files > 0 {
-		seg = append(seg, fmt.Sprintf("**%d file%s**", files, plural(files)))
-		seg = append(seg, fmt.Sprintf("+%d/−%d", adds, dels))
-		seg = append(seg, fmt.Sprintf("effort %s", effortSize(files, adds+dels)))
+		fmt.Fprintf(b, "- Files: **%d**\n", files)
+		fmt.Fprintf(b, "- Churn: +%d/−%d\n", adds, dels)
+		fmt.Fprintf(b, "- Effort: %s\n", effortSize(files, adds+dels))
 	} else {
-		n := statIntVal(stats, "files_reviewed")
-		seg = append(seg, fmt.Sprintf("**%d file%s**", n, plural(n)))
+		fmt.Fprintf(b, "- Files: **%d**\n", statIntVal(stats, "files_reviewed"))
 	}
-	seg = append(seg, fmt.Sprintf("context %s", truncationLevel(stats)))
-	fmt.Fprintf(b, "%s\n\n", strings.Join(seg, " · "))
+	fmt.Fprintf(b, "- Context: %s\n", truncationLevel(stats))
+	b.WriteString("\n</details>\n")
 }
 
 // diffStats sums the changed-file count and total insertions/deletions, skipping

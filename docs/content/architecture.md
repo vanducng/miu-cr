@@ -84,7 +84,7 @@ flowchart TD
     H --> I{"Worst severity<br/>reaches --gate?"}
     I -->|"yes"| Gate["gate status set — review exits 2"]
     I -->|"no"| Pass["gate clean"]
-    Gate --> P["Publish (--post)<br/>one review per commit: summary body + nested inline"]
+    Gate --> P["Publish (--post)<br/>upsert ONE summary issue comment + inline review comments"]
     Pass --> P
 ```
 
@@ -100,10 +100,12 @@ of `rationale + suggested_patch`, then the gate ranks severities
 (`info < low < medium < high < critical`); an unrecognized gate fails loudly so a
 misconfigured run never silently passes.
 
-Publishing is **one head-SHA-anchored review per commit** (Codex-style): the
-summary is the review body, inline comments nested under it. A same-commit re-run
-is skipped (reviews aren't editable); a new commit gets a fresh review. See
-[How it works](/how-it-works/) for the per-stage detail.
+Publishing keeps the summary and the inline findings in **separate homes**: inline
+comments post as a PR review (body left empty), and the summary is **ONE issue
+comment that is upserted** - miu-cr lists the PR's issue comments, finds the one
+carrying the `<!-- miu-cr-review -->` marker, and edits it in place (else creates
+it). A re-run **updates the single summary** instead of stacking a review per
+commit. See [How it works](/how-it-works/) for the per-stage detail.
 
 ### Project-rules injection seam
 

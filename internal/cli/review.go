@@ -105,9 +105,10 @@ type ReviewOutcome struct {
 // PRResult is the typed PR summary for the data.pr envelope block on the --pr
 // path. The token is never carried here (or anywhere in the envelope).
 // PostedInline is the count of inline comments posted THIS run (0 on --no-post
-// and on re-runs where everything was already posted); SummaryAction is
-// review|skipped|fork_fallback on --post (the summary is the review body), "none"
-// on --no-post.
+// and on re-runs where everything was already posted); SummaryAction reports the
+// fate of the single upserted summary issue comment:
+// none|created|edited|fork_fallback ("none" on --no-post, checks mode, or a clean
+// no-summary run; created vs edited on --post).
 type PRResult struct {
 	Owner         string `json:"owner"`
 	Repo          string `json:"repo"`

@@ -65,8 +65,8 @@ func TestRenderSummaryOverflowListsOmittedWithPermalinks(t *testing.T) {
 
 func TestRenderSummaryNoOverflowWhenNoneOmitted(t *testing.T) {
 	out := RenderSummary(&PRInfo{HeadSHA: "h"}, nil, nil, 0)
-	if strings.Contains(out, "<details>") {
-		t.Fatalf("no omitted findings must not emit a details block:\n%s", out)
+	if strings.Contains(out, "Omitted inline findings") {
+		t.Fatalf("no omitted findings must not emit the overflow details block:\n%s", out)
 	}
 }
 
@@ -112,12 +112,24 @@ func TestRenderSummaryFullChangesTable(t *testing.T) {
 	}
 }
 
-func TestRenderSummaryFullMetaQuote(t *testing.T) {
+func TestRenderSummaryFullReviewInternals(t *testing.T) {
 	info, diffs, findings := presentationFixture()
 	out := RenderSummaryFull(info, findings, nil, 0, nil, nil, SummaryOptions{Diffs: diffs})
-	// The metadata is its own visible (non-quoted) line with a bold file count.
-	if !strings.Contains(out, "**2 files** · +12/−4 · effort S · context full") {
-		t.Fatalf("want the bold metadata line:\n%s", out)
+	// Metadata now lives in a collapsed Review internals details as bullets.
+	for _, want := range []string{
+		"<summary>Review internals</summary>",
+		"- Files: **2**",
+		"- Churn: +12/−4",
+		"- Effort: S",
+		"- Context: full",
+	} {
+		if !strings.Contains(out, want) {
+			t.Fatalf("want %q in the Review internals block:\n%s", want, out)
+		}
+	}
+	// The old visible meta line must be gone.
+	if strings.Contains(out, "**2 files** · ") {
+		t.Fatalf("the old visible meta line must be gone:\n%s", out)
 	}
 }
 
@@ -168,6 +180,89 @@ func TestRenderSummaryFooterReviewedCommit(t *testing.T) {
 	// Head/files/context no longer render as a bulleted list.
 	if strings.Contains(out, "- Head: `") || strings.Contains(out, "- Files reviewed:") {
 		t.Fatalf("metadata must move to the quote/footer, not a bullet list:\n%s", out)
+	}
+}
+
+// indexAfter returns the index of needle at/after from, or -1 (with from=len so a
+// later lookup also fails). Used to assert strict top-to-bottom render ordering.
+func mustOrder(t *testing.T, body string, seq []string) {
+	t.Helper()
+	from := 0
+	for _, s := range seq {
+		i := strings.Index(body[from:], s)
+		if i < 0 {
+			t.Fatalf("missing %q (or out of order) at/after offset %d:\n%s", s, from, body)
+		}
+		from += i + len(s)
+	}
+}
+
+func TestRenderSummaryFullOrder(t *testing.T) {
+	info := &PRInfo{Owner: "o", Repo: "r", Number: 1, HeadSHA: "deadbeef", ReviewCount: 2}
+	findings := []engine.Finding{{Severity: "high", Rationale: "x"}}
+	out := RenderSummaryFull(info, findings, map[string]any{"truncation_level": "full"}, 0, nil, nil, SummaryOptions{
+		Walkthrough: "this is the walkthrough lead prose",
+	})
+	mustOrder(t, out, []string{
+		ReviewMarker,
+		"<!-- miu-cr-runs:",
+		"## Code Review",
+		"**Reviews (2)** · Last reviewed commit",
+		"> ", // severity blockquote
+		"Confidence:",
+		"this is the walkthrough lead prose",
+		"<summary>Review internals</summary>",
+		"<sub>Reviewed commit",
+	})
+}
+
+func TestRenderSummaryReviewCountIdentity(t *testing.T) {
+	// Zero ReviewCount: bare "Last reviewed commit", no "Reviews (" prefix, token seeded to 1.
+	zero := RenderSummaryFull(&PRInfo{HeadSHA: "abc"}, nil, nil, 0, nil, nil, SummaryOptions{})
+	if strings.Contains(zero, "Reviews (") {
+		t.Fatalf("zero ReviewCount must not render a Reviews (N) prefix:\n%s", zero)
+	}
+	if !strings.Contains(zero, "Last reviewed commit:") {
+		t.Fatalf("zero ReviewCount must still render the identity line:\n%s", zero)
+	}
+	if !strings.Contains(zero, runsCountToken(1)) {
+		t.Fatalf("zero ReviewCount must seed the runs token to 1:\n%s", zero)
+	}
+
+	// ReviewCount=3: identity prefix present, token carries 3.
+	three := RenderSummaryFull(&PRInfo{HeadSHA: "abc", ReviewCount: 3}, nil, nil, 0, nil, nil, SummaryOptions{})
+	if !strings.Contains(three, "**Reviews (3)** · Last reviewed commit:") {
+		t.Fatalf("ReviewCount=3 must render the Reviews (3) identity prefix:\n%s", three)
+	}
+	if !strings.Contains(three, runsCountToken(3)) {
+		t.Fatalf("ReviewCount=3 must carry runs token 3:\n%s", three)
+	}
+}
+
+func TestRenderSummaryInternalsOmitsChurnWithoutDiffs(t *testing.T) {
+	out := RenderSummaryFull(&PRInfo{HeadSHA: "abc"}, nil, map[string]any{"files_reviewed": float64(4)}, 0, nil, nil, SummaryOptions{})
+	if !strings.Contains(out, "- Files: **4**") {
+		t.Fatalf("no-diffs internals must keep the files-reviewed fallback:\n%s", out)
+	}
+	if !strings.Contains(out, "- Context: full") {
+		t.Fatalf("no-diffs internals must keep Context:\n%s", out)
+	}
+	if strings.Contains(out, "- Churn:") || strings.Contains(out, "- Effort:") {
+		t.Fatalf("no-diffs internals must omit Churn/Effort bullets:\n%s", out)
+	}
+}
+
+func TestRenderSummaryNoEmDash(t *testing.T) {
+	info := &PRInfo{HeadSHA: "deadbeef", ReviewCount: 5, HTMLBase: "https://github.com/o/r", Number: 1}
+	_, diffs, findings := presentationFixture()
+	out := RenderSummaryFull(info, findings, map[string]any{"truncation_level": "hunks"}, 0, nil, nil, SummaryOptions{
+		Diffs:            diffs,
+		Walkthrough:      "lead prose",
+		Confidence:       4,
+		ConfidenceReason: "looks fine",
+	})
+	if strings.Contains(out, " — ") {
+		t.Fatalf("summary body must not contain an em dash:\n%s", out)
 	}
 }
 

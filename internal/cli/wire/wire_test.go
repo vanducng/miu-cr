@@ -2,6 +2,7 @@ package wire
 
 import (
 	stdctx "context"
+	"net/http"
 	"os"
 	"path/filepath"
 	"strings"
@@ -28,11 +29,12 @@ type fakeGitHub struct {
 	createIssueN  int
 	editN         int
 
-	headSHA      string                       // re-fetched head SHA returned by GetPR (defaults to "headsha")
-	reviews      []*gh.PullRequestReview      // existing reviews returned by ListReviews
-	lastReviewed *gh.PullRequestReviewRequest // last CreateReview request, for Event assertions
-	lastCheck    *gh.CreateCheckRunOptions    // last CreateCheckRun opts, for --mode checks assertions
-	checkRunN    int
+	headSHA         string                       // re-fetched head SHA returned by GetPR (defaults to "headsha")
+	reviews         []*gh.PullRequestReview      // existing reviews returned by ListReviews
+	lastReviewed    *gh.PullRequestReviewRequest // last CreateReview request, for Event assertions
+	lastCheck       *gh.CreateCheckRunOptions    // last CreateCheckRun opts, for --mode checks assertions
+	checkRunN       int
+	createReviewErr error // injected CreateReview failure (e.g. fork 403)
 }
 
 func (f *fakeGitHub) GetPR(stdctx.Context, string, string, int) (*gh.PullRequest, error) {
@@ -53,6 +55,9 @@ func (f *fakeGitHub) ListReviews(stdctx.Context, string, string, int, *gh.ListOp
 func (f *fakeGitHub) CreateReview(_ stdctx.Context, _, _ string, _ int, r *gh.PullRequestReviewRequest) (*gh.PullRequestReview, error) {
 	f.order = append(f.order, "create_review")
 	f.lastReviewed = r
+	if f.createReviewErr != nil {
+		return nil, f.createReviewErr
+	}
 	f.createReviewN++
 	for _, dc := range r.Comments {
 		f.nextID++
@@ -161,7 +166,9 @@ func TestPublishReviewWireFlow(t *testing.T) {
 	t.Cleanup(func() { newGitHubClient = restore })
 	client := newGitHubClient("")
 
-	info := &mgithub.PRInfo{Owner: "o", Repo: "r", Number: 7, HeadSHA: head, BaseSHA: base, BaseBranch: "main"}
+	// ReviewCount is set by FetchPR in production (prior runs token + 1); publishReview
+	// is called directly here, so mirror that: 1 for the first run.
+	info := &mgithub.PRInfo{Owner: "o", Repo: "r", Number: 7, HeadSHA: head, BaseSHA: base, BaseBranch: "main", ReviewCount: 1}
 	res := engine.ReviewResult{
 		Findings: []engine.Finding{
 			// Anchored to the added line (new-side line 4) so it lands in a diff hunk.
@@ -170,8 +177,8 @@ func TestPublishReviewWireFlow(t *testing.T) {
 		Stats: map[string]any{"truncation_level": "full", "files_reviewed": float64(1)},
 	}
 
-	// Codex pattern: one inline posted, nested under a review whose BODY is the
-	// summary (marker + reviewed-commit lead-in); no issue comment.
+	// Upsert model: one inline posted via CreateReview with NO body; the summary is a
+	// separate issue comment CREATED on the first run.
 	pr := &cli.PRResult{SummaryAction: "none"}
 	if err := publishReview(stdctx.Background(), client, runner, dir, info, res, pr, cli.PRReviewRequest{Gate: "high"}, nil, embedWriter{}, nil, nil); err != nil {
 		t.Fatalf("publishReview: %v", err)
@@ -179,22 +186,39 @@ func TestPublishReviewWireFlow(t *testing.T) {
 	if pr.PostedInline != 1 {
 		t.Fatalf("first run: want 1 inline posted, got %d", pr.PostedInline)
 	}
-	if pr.SummaryAction != "review" {
-		t.Fatalf("first run: want summary action review, got %q", pr.SummaryAction)
+	if pr.SummaryAction != "created" {
+		t.Fatalf("first run: want summary action created, got %q", pr.SummaryAction)
 	}
-	if fake.createIssueN != 0 || fake.editN != 0 {
-		t.Fatalf("Codex pattern must not create/edit an issue comment: create=%d edit=%d", fake.createIssueN, fake.editN)
+	if fake.createIssueN != 1 || fake.editN != 0 {
+		t.Fatalf("first run must CREATE the summary issue comment: create=%d edit=%d", fake.createIssueN, fake.editN)
+	}
+	// The review body must be EMPTY — the summary leaves the body entirely.
+	if b := fake.lastReviewed.GetBody(); strings.TrimSpace(b) != "" {
+		t.Fatalf("review body must be empty (summary lives in the issue comment), got:\n%s", b)
+	}
+	// The summary issue comment carries the marker + this run's Reviews (1) line.
+	if len(fake.issueComments) != 1 {
+		t.Fatalf("want one summary issue comment, have %d", len(fake.issueComments))
+	}
+	summary := fake.issueComments[0].GetBody()
+	if !strings.Contains(summary, mgithub.ReviewMarker) {
+		t.Fatalf("summary comment must carry the marker:\n%s", summary)
+	}
+	if !strings.Contains(summary, "Reviews (1)") {
+		t.Fatalf("first-run summary must show Reviews (1):\n%s", summary)
 	}
 	if le, ri := indexOf(fake.order, "list_review"), indexOf(fake.order, "create_review"); le < 0 || ri < 0 || le > ri {
 		t.Fatalf("ExistingFingerprints (list_review) must run before the review; order=%v", fake.order)
 	}
-	if fake.lastReviewed.GetBody() == "" || !strings.Contains(fake.lastReviewed.GetBody(), mgithub.ReviewMarker) {
-		t.Fatalf("review body must carry the summary + marker:\n%s", fake.lastReviewed.GetBody())
+	// Inline review must be posted BEFORE the summary upsert.
+	if cr, ci := indexOf(fake.order, "create_review"), indexOf(fake.order, "create_issue"); cr < 0 || ci < 0 || cr > ci {
+		t.Fatalf("inline review (create_review) must precede the summary upsert (create_issue); order=%v", fake.order)
 	}
 
-	// Re-run (publishReview bypasses the wire-layer AlreadyPostedAtSHA skip): 0 new
-	// inline (fingerprint dedupe), no inline-comment duplication.
+	// Re-run at the same SHA: 0 new inline (fingerprint dedupe), the summary comment
+	// is EDITED in place (not stacked), and the count advances to Reviews (2).
 	fake.order = nil
+	info.ReviewCount = 2 // FetchPR would read the prior token (1) and +1
 	pr2 := &cli.PRResult{SummaryAction: "none"}
 	if err := publishReview(stdctx.Background(), client, runner, dir, info, res, pr2, cli.PRReviewRequest{Gate: "high"}, nil, embedWriter{}, nil, nil); err != nil {
 		t.Fatalf("publishReview re-run: %v", err)
@@ -202,8 +226,58 @@ func TestPublishReviewWireFlow(t *testing.T) {
 	if pr2.PostedInline != 0 {
 		t.Fatalf("re-run: want 0 new inline, got %d", pr2.PostedInline)
 	}
+	if pr2.SummaryAction != "edited" {
+		t.Fatalf("re-run: want summary action edited, got %q", pr2.SummaryAction)
+	}
 	if len(fake.reviewComments) != 1 {
 		t.Errorf("re-run must not duplicate inline comments, have %d", len(fake.reviewComments))
+	}
+	if fake.createIssueN != 1 || fake.editN != 1 {
+		t.Fatalf("re-run must EDIT (not stack) the summary: create=%d edit=%d", fake.createIssueN, fake.editN)
+	}
+	if len(fake.issueComments) != 1 {
+		t.Fatalf("re-run must not create a second summary comment, have %d", len(fake.issueComments))
+	}
+	if got := fake.issueComments[0].GetBody(); !strings.Contains(got, "Reviews (2)") {
+		t.Fatalf("re-run summary must advance to Reviews (2):\n%s", got)
+	}
+}
+
+// TestPublishReviewForkFallback: a fork PR whose inline CreateReview 403s under
+// Actions degrades to ::error:: annotations; publishReview returns fork_fallback,
+// posts nothing, and does NOT attempt the summary upsert (it would 403 too).
+func TestPublishReviewForkFallback(t *testing.T) {
+	t.Setenv("GITHUB_ACTIONS", "true")
+	runner := gitcmd.New()
+	dir, base, head := setupRepo(t, runner)
+
+	fake := &fakeGitHub{createReviewErr: &gh.ErrorResponse{
+		Response: &http.Response{StatusCode: 403},
+		Message:  "Resource not accessible by integration",
+	}}
+	restore := newGitHubClient
+	newGitHubClient = func(string) mgithub.Client { return fake }
+	t.Cleanup(func() { newGitHubClient = restore })
+	client := newGitHubClient("")
+
+	var actionsOut strings.Builder
+	info := &mgithub.PRInfo{Owner: "o", Repo: "r", Number: 7, HeadSHA: head, BaseSHA: base, BaseBranch: "main", IsFork: true, ReviewCount: 1}
+	res := engine.ReviewResult{
+		Findings: []engine.Finding{findingB()},
+		Stats:    map[string]any{"truncation_level": "full", "files_reviewed": float64(1)},
+	}
+	pr := &cli.PRResult{SummaryAction: "none"}
+	if err := publishReview(stdctx.Background(), client, runner, dir, info, res, pr, cli.PRReviewRequest{Gate: "high", ActionsOut: &actionsOut}, nil, embedWriter{}, nil, nil); err != nil {
+		t.Fatalf("fork fallback must not hard-fail: %v", err)
+	}
+	if pr.SummaryAction != "fork_fallback" || pr.Posted {
+		t.Fatalf("want fork_fallback/not-posted, got action=%q posted=%v", pr.SummaryAction, pr.Posted)
+	}
+	if pr.FallbackAnnotations == 0 {
+		t.Fatalf("fork fallback must emit ::error:: annotations, got %d", pr.FallbackAnnotations)
+	}
+	if fake.createIssueN != 0 || fake.editN != 0 {
+		t.Fatalf("fork fallback must NOT attempt the summary upsert: create=%d edit=%d", fake.createIssueN, fake.editN)
 	}
 }
 
@@ -320,6 +394,13 @@ func TestPublishReviewApproveClean(t *testing.T) {
 	if fake.lastReviewed == nil || fake.lastReviewed.GetEvent() != "APPROVE" {
 		t.Fatalf("CreateReview Event must be APPROVE, got %v", fake.lastReviewed)
 	}
+	// The APPROVE review carries no body; the summary still upserts as an issue comment.
+	if strings.TrimSpace(fake.lastReviewed.GetBody()) != "" {
+		t.Fatalf("APPROVE review body must be empty (summary lives in the issue comment), got:\n%s", fake.lastReviewed.GetBody())
+	}
+	if pr.SummaryAction != "created" || fake.createIssueN != 1 {
+		t.Fatalf("clean approve must still upsert the summary: action=%q create=%d", pr.SummaryAction, fake.createIssueN)
+	}
 }
 
 func TestPublishReviewApproveDegradesFork(t *testing.T) {
@@ -384,6 +465,14 @@ func TestPublishReviewApproveDefaultOff(t *testing.T) {
 	}
 	if pr.ApproveAction != "commented" || pr.ApproveReason != "not_requested" {
 		t.Fatalf("flag off must be commented/not_requested, got action=%q reason=%q", pr.ApproveAction, pr.ApproveReason)
+	}
+	// Empty review (no inline, no body, COMMENT): the empty-review guard skips
+	// CreateReview entirely (no 422), but the summary still upserts.
+	if fake.createReviewN != 0 {
+		t.Fatalf("a no-inline COMMENT review must not call CreateReview (empty-guard), got %d", fake.createReviewN)
+	}
+	if pr.SummaryAction != "created" || fake.createIssueN != 1 {
+		t.Fatalf("empty review must still upsert the summary: action=%q create=%d", pr.SummaryAction, fake.createIssueN)
 	}
 }
 

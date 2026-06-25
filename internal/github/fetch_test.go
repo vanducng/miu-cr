@@ -2,6 +2,8 @@ package github
 
 import (
 	stdctx "context"
+	"errors"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"net/url"
@@ -385,5 +387,104 @@ func TestFetchPRDoesNotLeakToken(t *testing.T) {
 	}
 	if strings.Contains(err.Error(), "ghp_AAAABBBBCCCCDDDDEEEE1234") {
 		t.Fatalf("token leaked into message: %q", err.Error())
+	}
+}
+
+func TestParseRunsCount(t *testing.T) {
+	tests := []struct {
+		name string
+		body string
+		want int
+	}{
+		{"present", ReviewMarker + "\n" + runsCountToken(3) + "\n## Code Review", 3},
+		{"zero", runsCountToken(0), 0},
+		{"missing", ReviewMarker + "\n## Code Review", 0},
+		{"garbled", "<!-- miu-cr-runs:abc -->", 0},
+		{"first of multiple", runsCountToken(1) + "\n" + runsCountToken(9), 1},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := parseRunsCount(tt.body); got != tt.want {
+				t.Fatalf("parseRunsCount(%q) = %d, want %d", tt.body, got, tt.want)
+			}
+		})
+	}
+}
+
+func TestPriorRunsCount(t *testing.T) {
+	marked := func(id int64, body string) *gh.IssueComment {
+		return &gh.IssueComment{ID: gh.Ptr(id), Body: gh.Ptr(body)}
+	}
+	tests := []struct {
+		name     string
+		comments []*gh.IssueComment
+		err      error
+		want     int
+	}{
+		{"no marked comment", []*gh.IssueComment{marked(1, "just a human comment")}, nil, 0},
+		{
+			"token present",
+			[]*gh.IssueComment{marked(5, ReviewMarker+"\n"+runsCountToken(4))},
+			nil, 4,
+		},
+		{
+			"marked but no token",
+			[]*gh.IssueComment{marked(5, ReviewMarker+"\n## Code Review")},
+			nil, 0,
+		},
+		{
+			"lowest-id wins on duplicates",
+			[]*gh.IssueComment{
+				marked(9, ReviewMarker+"\n"+runsCountToken(9)),
+				marked(3, ReviewMarker+"\n"+runsCountToken(2)),
+			},
+			nil, 2,
+		},
+		{"list error degrades to 0", nil, errors.New("boom"), 0},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			c := &convClient{issueComments: tt.comments, issueCmtErr: tt.err}
+			if got := priorRunsCount(stdctx.Background(), c, convInfo()); got != tt.want {
+				t.Fatalf("priorRunsCount = %d, want %d", got, tt.want)
+			}
+		})
+	}
+}
+
+// TestReviewCountIncrementChain exercises the TRUE render-path increment that the
+// storeless round-trip test misses: feed a prior runs token through FetchPR (read
+// + the +1) and RenderSummaryFull (display + re-write the token), then re-parse the
+// rendered token to confirm it advances by exactly one each run and the displayed N
+// matches. Guards the "Reviews(N) increments not double-counts" invariant.
+func TestReviewCountIncrementChain(t *testing.T) {
+	ref := PRRef{Owner: "vanducng", Repo: "miu-cr", Number: 1}
+	prior := -1 // -1 => no prior comment (first run); >=0 => stored runs token
+	for run := 1; run <= 3; run++ {
+		var comments []*gh.IssueComment
+		if prior >= 0 {
+			comments = []*gh.IssueComment{
+				{ID: gh.Ptr(int64(5)), Body: gh.Ptr(ReviewMarker + "\n" + runsCountToken(prior))},
+			}
+		}
+		c := &convClient{
+			fakeClient:    fakeClient{pr: prFixture("vanducng", "miu-cr", "headsha", "basesha", "main")},
+			issueComments: comments,
+		}
+		info, err := FetchPR(stdctx.Background(), c, ref)
+		if err != nil {
+			t.Fatalf("run %d FetchPR: %v", run, err)
+		}
+		if info.ReviewCount != run {
+			t.Fatalf("run %d: ReviewCount = %d, want %d (prior+1, not stuck/off-by-one)", run, info.ReviewCount, run)
+		}
+		out := RenderSummaryFull(info, nil, nil, 0, nil, nil, SummaryOptions{})
+		if !strings.Contains(out, fmt.Sprintf("**Reviews (%d)**", run)) {
+			t.Fatalf("run %d: displayed N must equal %d:\n%s", run, run, out)
+		}
+		if got := parseRunsCount(out); got != run {
+			t.Fatalf("run %d: rendered token = %d, want %d (must feed next run as %d)", run, got, run, run+1)
+		}
+		prior = parseRunsCount(out) // next run reads what this run wrote
 	}
 }

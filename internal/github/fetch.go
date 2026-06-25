@@ -36,6 +36,10 @@ type PRInfo struct {
 	// HTMLBase is the BASE repo's HTML URL (e.g. https://github.com/owner/repo),
 	// used to build repo-relative blob permalinks. Never contains a token.
 	HTMLBase string
+	// ReviewCount is the storeless "Nth review" counter: prior runs token + 1, so it
+	// IS this run's number (>=1). The identity line renders it as-is; the upsert writes
+	// it straight back as the next runs token. First review = 1.
+	ReviewCount int
 }
 
 // blobURL builds a repo-relative blob permalink at info.HeadSHA for path/line.
@@ -104,7 +108,39 @@ func FetchPR(ctx stdctx.Context, client Client, ref PRRef) (*PRInfo, error) {
 		}
 		opts.Page = resp.NextPage
 	}
+	info.ReviewCount = priorRunsCount(ctx, client, info) + 1 // include this in-flight run; first review = 1
 	return info, nil
+}
+
+// priorRunsCount reads the runs token from the lowest-id miucr summary issue
+// comment (the upsert's edit target), returning N (0 when no marked comment or
+// the token is absent/garbled). Best-effort: any list error → 0 so the count
+// never blocks the review. Storeless: the count lives in the comment body.
+func priorRunsCount(ctx stdctx.Context, client Client, info *PRInfo) int {
+	opts := &gh.IssueListCommentsOptions{ListOptions: gh.ListOptions{PerPage: 100}}
+	lowestID := int64(0)
+	count := 0
+	for page := 0; page < maxConvPages; page++ {
+		comments, resp, err := client.ListIssueComments(ctx, info.Owner, info.Repo, info.Number, opts)
+		if err != nil {
+			return 0
+		}
+		for _, c := range comments {
+			body := c.GetBody()
+			if !strings.Contains(body, ReviewMarker) {
+				continue
+			}
+			if id := c.GetID(); lowestID == 0 || id < lowestID {
+				lowestID = id
+				count = parseRunsCount(body)
+			}
+		}
+		if resp == nil || resp.NextPage == 0 {
+			break
+		}
+		opts.Page = resp.NextPage
+	}
+	return count
 }
 
 // maxConversationBytes caps the rendered conversation block. Mirrors the rules
@@ -172,19 +208,21 @@ func capConversation(s string) string {
 	return s[:budget] + conversationTruncated
 }
 
-// fetchPriorSummaries returns miucr's own prior review summary bodies (those
-// carrying ReviewMarker), newest pages last. "" on any list error.
+// fetchPriorSummaries returns miucr's own prior review summary (the marker-bearing
+// ISSUE COMMENT — the upsert target, not a review body), newest pages last. "" on
+// any list error. The summary moved out of the review body to a single upserted
+// issue comment, so --conversation scans issue comments here to surface it.
 func fetchPriorSummaries(ctx stdctx.Context, client Client, info *PRInfo) string {
 	var b strings.Builder
-	opts := &gh.ListOptions{PerPage: 100}
+	opts := &gh.IssueListCommentsOptions{ListOptions: gh.ListOptions{PerPage: 100}}
 	for page := 0; page < maxConvPages; page++ {
-		reviews, resp, err := client.ListReviews(ctx, info.Owner, info.Repo, info.Number, opts)
+		comments, resp, err := client.ListIssueComments(ctx, info.Owner, info.Repo, info.Number, opts)
 		if err != nil {
-			os.Stderr.WriteString(config.RedactString("miucr: conversation fetch (reviews) skipped: "+err.Error()) + "\n")
+			os.Stderr.WriteString(config.RedactString("miucr: conversation fetch (summary comment) skipped: "+err.Error()) + "\n")
 			return ""
 		}
-		for _, r := range reviews {
-			body := strings.TrimSpace(r.GetBody())
+		for _, c := range comments {
+			body := strings.TrimSpace(c.GetBody())
 			if body != "" && strings.Contains(body, ReviewMarker) {
 				b.WriteString("- ")
 				b.WriteString(body)

@@ -1,13 +1,12 @@
 ---
 title: GitHub PR review
-description: Review a GitHub pull request and optionally publish one head-SHA-anchored review per commit (summary body + nested inline comments).
+description: Review a GitHub pull request and optionally publish ONE upserted summary issue comment plus head-SHA-anchored inline review comments.
 ---
 
 `miucr review --pr <ref>` fetches a GitHub pull request, runs the same review
 engine the local modes use against the PR's three-dot diff, and (with `--post`)
-publishes **one PR review per commit** (Codex-style): the summary is the review
-**body**, with the inline comments nested under it, all anchored to the head
-commit.
+publishes **ONE summary issue comment that is upserted** (edited in place on
+re-runs) plus the inline findings as a PR review, all anchored to the head commit.
 
 ## Reference forms
 
@@ -112,45 +111,53 @@ hunks or runs off the diff is rejected, so any finding that fails the proof
 **falls back to a single-line comment** on its anchor line. Single-line findings
 are unaffected.
 
-The **summary body** leads with a clean `## Code Review` header (no severity on the
-H2 — it stays small), then a subtle quote line of per-level **shields.io count badges**
-(the `Px` label in its severity color, the count neutral grey, critical/high first;
-zero findings → `✅ no findings`) plus the finding total, then a visible **metadata
-line** (`**N files** · +adds/−dels · effort L · context full`), a **`Confidence: N/5`** line
-(the model's merge-safety confidence + a one-line reason; derived from findings when
-the model omits it), then the model's PR summary as lead prose — 3–6 key-point bullets,
-**no "Walkthrough" heading**. The collapsible **Important Files Changed** table
-(File · Δ · Findings · Overview, the Overview from the per-file digests), the
-omitted-inline note, the `<details>` overflow block, and the agent-handoff block
-follow, closing with a per-commit footer (`Reviewed commit \`<sha>\` · Posted by
-miu-cr`). All model-supplied text is escaped at the render boundary.
+The **summary issue comment** leads, top to bottom, with a hidden `<!-- miu-cr-review -->`
+marker line, a clean `## Code Review` header (no severity on the H2 - it stays small),
+an **identity line** (`**Reviews (N)** · Last reviewed commit: \`<sha>\``, where N is the
+review count read back from the prior summary comment; when there is no prior count it
+drops the `Reviews (` prefix and shows a bare `Last reviewed commit:`), then a subtle quote
+line of per-level **shields.io count badges** (the `Px` label in its severity color, the
+count neutral grey, critical/high first; zero findings → `✅ no findings`) plus the finding
+total, a **`Confidence: N/5`** line (the model's merge-safety confidence + a one-line
+reason; derived from findings when the model omits it), then the model's PR summary as lead
+prose - 3–6 key-point bullets, **no "Walkthrough" heading**. The collapsible **Important
+Files Changed** table (File · Δ · Findings · Overview, the Overview from the per-file
+digests), the omitted-inline note, the `<details>` overflow block, and the agent-handoff
+block follow. The verbose effort/context/files/churn metadata is moved into a **collapsed
+`<details>` "Review internals"** block near the bottom, closing with a footer
+(`Reviewed commit \`<sha>\` · Posted by miu-cr`). All model-supplied text is escaped at the
+render boundary.
 
-The summary is the review **body**. Its first line is a hidden marker that
-identifies the review as miucr-authored, and it leads with the reviewed commit:
+The summary lives **solely in ONE issue comment** (not the review body). Its first line is
+a hidden marker that identifies the comment as miucr-authored:
 
 ```
 <!-- miu-cr-review -->
-## Code Review · 🟡 2 · 🔵 1  (3 findings)
+## Code Review
 
-Reviewed commit: `<sha>`
+**Reviews (2)** · Last reviewed commit: `<sha>`
+
+> 🟡 2 · 🔵 1 · 3 findings
 ```
 
-## Per-commit reviews & re-runs
+## One upserted summary & re-runs
 
-`--post` posts one review per commit and is safe to re-run:
+`--post` keeps the summary and the inline findings in **separate homes** and is safe to
+re-run:
 
-- A **same-commit re-run is skipped**. GitHub reviews aren't editable, so a
-  duplicate review would clutter the thread. miucr checks the PR's reviews via the
-  API and, if it already posted a review (carrying the `<!-- miu-cr-review -->`
-  marker) at the current head SHA, short-circuits (`summary_action: skipped`).
-  Pass `--force` to re-post.
-- A **new commit** (changed head SHA) gets a **fresh review** — agents follow the
-  thread, and the latest review is the current commit's findings.
-- Each **inline** comment carries a hidden fingerprint (`<!-- miucr:fp=... -->`),
-  so even when a review is posted for a new commit, a finding already commented in
-  a prior review is not duplicated inline.
-
-When a review is posted, `summary_action` is `review`.
+- The **summary is ONE upserted issue comment**. miucr lists the PR's issue comments, finds
+  the lowest-id one carrying the `<!-- miu-cr-review -->` marker, and **edits it in place**;
+  if none exists it creates one. So a re-run **updates the single summary** rather than
+  stacking a review per commit. `summary_action` is `created` the first time and `edited`
+  on every re-run.
+- Inline findings post as a PR **review** with an **empty body** (the summary moved out),
+  so a no-inline-comment run never trips an empty-review 422 while the summary comment still
+  upserts (and `--approve-clean` still submits APPROVE).
+- A **same-commit `--post` re-run edits** the summary in place (no longer skipped - that was
+  the old per-commit model). The history-store dry-run (`--no-post`) perf skip and `--force`
+  bypass are unchanged.
+- Each **inline** comment carries a hidden fingerprint (`<!-- miucr:fp=... -->`), so a
+  finding already commented in a prior run is not duplicated inline across commits.
 
 ## Incremental re-review (unchanged head SHA)
 
@@ -257,8 +264,8 @@ block (a start-keyword sanity check gates the fenced render).
 `--mode` selects how findings reach the PR on `--post` (it only steers the PR
 path — it's inert for a local review):
 
-- **`--mode review`** (default) — one PR review per commit (summary body + nested
-  inline comments) described above.
+- **`--mode review`** (default) - ONE upserted summary issue comment + inline review
+  comments described above.
 - **`--mode checks`** — a single GitHub **Check Run** named `miu-cr` carrying one
   annotation per diff-eligible finding (same `--filter-mode` eligibility as the
   review path). The annotation level maps from severity (critical/high →
@@ -353,7 +360,9 @@ Actions) and **falls back to workflow annotations** — it prints one
 `::error file=…,line=…,endLine=…::<rationale>` command per finding to stdout, so
 findings still surface as annotations on the PR's "Files changed" tab instead of
 hard-failing the run. The count is reported as `fallback_annotations` in the
-`data.pr` block. For a first-class fork experience, prefer the [Check Run
+`data.pr` block. The summary issue comment's `CreateIssueComment` 403s the same way
+on a fork; it degrades identically (no hard fail) and reports
+`summary_action: fork_fallback`. For a first-class fork experience, prefer the [Check Run
 reporter](#check-run-reporter) (`--mode checks`), which needs no comment-write
 scope at all.
 
