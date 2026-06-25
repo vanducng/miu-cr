@@ -316,8 +316,8 @@ func TestPostReviewMinSeverityFloor(t *testing.T) {
 	}
 	// The below-threshold finding still reaches the summary header counts.
 	summary := RenderSummary(info, findings, nil, 0)
-	if !strings.Contains(summary, "🟠 1 · 🔵 1") || !strings.Contains(summary, "(2 findings)") {
-		t.Fatalf("both findings must appear in the summary header counts:\n%s", summary)
+	if !strings.Contains(summary, shieldsCount("P1", 1, "orange")) || !strings.Contains(summary, shieldsCount("P3", 1, "blue")) || !strings.Contains(summary, "2 findings") {
+		t.Fatalf("both findings must appear in the summary count badges:\n%s", summary)
 	}
 }
 

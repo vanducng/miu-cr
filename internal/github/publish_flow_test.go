@@ -159,7 +159,7 @@ func TestRenderSummaryShape(t *testing.T) {
 	// Header chips high-first (empty severity folds to ⚪), finding count, the
 	// reviewed-commit lead-in, quote-line context + files-reviewed fallback (no
 	// diffs), fork note, footer SHA.
-	for _, want := range []string{"🟠 2 · 🔵 1 · ⚪ 1", "(4 findings)", "Reviewed commit: `deadbeef`", "context hunks", "3 files", "fork"} {
+	for _, want := range []string{shieldsCount("P1", 2, "orange"), shieldsCount("P3", 1, "blue"), "4 findings", "Reviewed commit: `deadbeef`", "context hunks", "3 files", "fork"} {
 		if !strings.Contains(out, want) {
 			t.Errorf("summary missing %q:\n%s", want, out)
 		}

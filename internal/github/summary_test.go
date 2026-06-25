@@ -115,8 +115,9 @@ func TestRenderSummaryFullChangesTable(t *testing.T) {
 func TestRenderSummaryFullMetaQuote(t *testing.T) {
 	info, diffs, findings := presentationFixture()
 	out := RenderSummaryFull(info, findings, nil, 0, nil, nil, SummaryOptions{Diffs: diffs})
-	if !strings.Contains(out, "> 2 files · +12/−4 · effort S · context full") {
-		t.Fatalf("want a compact metadata quote line:\n%s", out)
+	// The metadata segments follow the severity count-badge lead on the quote line.
+	if !strings.Contains(out, "2 files · +12/−4 · effort S · context full") {
+		t.Fatalf("want the compact metadata segments on the quote line:\n%s", out)
 	}
 }
 
@@ -126,11 +127,17 @@ func TestRenderSummaryHeaderCountsHighFirst(t *testing.T) {
 		{Severity: "low"}, {Severity: "high"}, {Severity: "high"}, {Severity: "medium"},
 	}
 	out := RenderSummaryFull(info, findings, nil, 0, nil, nil, SummaryOptions{})
-	// High-first chips, then the finding count.
-	if !strings.Contains(out, "## Code Review · 🟠 2 · 🟡 1 · 🔵 1  (4 findings)") {
-		t.Fatalf("want emoji-severity counts (high-first) + finding count:\n%s", out)
+	// The H2 header is clean; severity count badges + total ride the compact quote line.
+	if !strings.Contains(out, "## Code Review\n") {
+		t.Fatalf("want a clean H2 header:\n%s", out)
 	}
-	// The severity histogram list is gone from the body.
+	if strings.Contains(out, "## Code Review · ") {
+		t.Fatalf("severity must NOT be on the H2 header:\n%s", out)
+	}
+	want := "> " + shieldsCount("P1", 2, "orange") + " " + shieldsCount("P2", 1, "yellow") + " " + shieldsCount("P3", 1, "blue") + " · 4 findings"
+	if !strings.Contains(out, want) {
+		t.Fatalf("want count badges (high-first) + total in the quote:\n%s", out)
+	}
 	if strings.Contains(out, "- high: 2") {
 		t.Fatalf("the old per-severity list must be gone:\n%s", out)
 	}
@@ -138,11 +145,14 @@ func TestRenderSummaryHeaderCountsHighFirst(t *testing.T) {
 
 func TestRenderSummaryHeaderNoFindings(t *testing.T) {
 	out := RenderSummaryFull(&PRInfo{HeadSHA: "h"}, nil, nil, 0, nil, nil, SummaryOptions{})
-	if !strings.Contains(out, "## Code Review · ✅ no findings") {
-		t.Fatalf("zero findings must render the no-findings header:\n%s", out)
+	if !strings.Contains(out, "## Code Review\n") {
+		t.Fatalf("want a clean H2 header:\n%s", out)
+	}
+	if !strings.Contains(out, "> ✅ no findings") {
+		t.Fatalf("zero findings must render the no-findings marker in the quote:\n%s", out)
 	}
 	if strings.Contains(out, "(0 finding") {
-		t.Fatalf("no-findings header must not append a count:\n%s", out)
+		t.Fatalf("no-findings must not append a count:\n%s", out)
 	}
 }
 
@@ -215,7 +225,7 @@ func TestRenderSummaryFullHandoffSkippedWithoutReviewID(t *testing.T) {
 func TestRenderSummaryFullEmptyFindingsStillClean(t *testing.T) {
 	info, diffs, _ := presentationFixture()
 	out := RenderSummaryFull(info, nil, nil, 0, nil, nil, SummaryOptions{Diffs: diffs, ReviewID: "rev_x"})
-	if !strings.Contains(out, "## Code Review · ✅ no findings") {
+	if !strings.Contains(out, "> ✅ no findings") {
 		t.Fatalf("empty-findings review must still render a clean summary:\n%s", out)
 	}
 	if !strings.Contains(out, "Important Files Changed (2)") || !strings.Contains(out, "Hand off to an agent") {
