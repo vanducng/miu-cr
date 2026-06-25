@@ -55,6 +55,13 @@ comment with a new marker); subsequent re-runs dedupe normally. On a
 first M5 review **manually** (or off-hours) to absorb the one-time re-post before
 the next scheduled run.
 
+## [0.33.1](https://github.com/vanducng/miu-cr/compare/v0.33.0...v0.33.1) (2026-06-25)
+
+
+### Bug Fixes
+
+* **agent:** scoped grep tool to one file ([#92](https://github.com/vanducng/miu-cr/issues/92)) ([b2df14b](https://github.com/vanducng/miu-cr/commit/b2df14b69d500525f4e75195f77e7e3fd732e3ae))
+
 ## [0.33.0](https://github.com/vanducng/miu-cr/compare/v0.32.0...v0.33.0) (2026-06-25)
 
 
