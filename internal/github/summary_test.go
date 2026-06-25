@@ -104,8 +104,8 @@ func TestRenderSummaryFullChangesTable(t *testing.T) {
 	if !strings.Contains(out, "| +10/-4 | 1 high, 1 low |") {
 		t.Fatalf("want per-file +/- + severity-ordered finding counts for a.go:\n%s", out)
 	}
-	if !strings.Contains(out, "| +2/-0 | — |") {
-		t.Fatalf("want an em-dash for a file with no findings:\n%s", out)
+	if !strings.Contains(out, "| +2/-0 | - |") {
+		t.Fatalf("want a hyphen for a file with no findings:\n%s", out)
 	}
 	if !strings.Contains(out, "https://github.com/o/r/blob/abc123/pkg/a.go") {
 		t.Fatalf("want a blob permalink for the file cell:\n%s", out)
@@ -311,9 +311,9 @@ func TestRenderSummaryFullPerFileDigest(t *testing.T) {
 	if !strings.Contains(out, "adds a leak guard") {
 		t.Fatalf("want the per-file digest in the row:\n%s", out)
 	}
-	// A file without a digest renders an em-dash in the Summary cell.
-	if !strings.Contains(out, "| +2/-0 | — | — |") {
-		t.Fatalf("want an em-dash digest for a file with no summary:\n%s", out)
+	// A file without a digest renders a hyphen in the Overview cell.
+	if !strings.Contains(out, "| +2/-0 | - | - |") {
+		t.Fatalf("want a hyphen for a file with no summary:\n%s", out)
 	}
 }
 
