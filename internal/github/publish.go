@@ -731,17 +731,28 @@ func fenceFor(s string) string {
 // alreadyPostedAtSHA reports whether a miucr-authored review (its body carries
 // ReviewMarker) already exists at the current head SHA, so a same-commit re-run
 // skips rather than posting a duplicate review (GitHub reviews aren't editable).
-// Mirrors alreadyApproved: first page only (PerPage:100). A reviewed-but-unposted
+// Paginates (bounded) so our review is found even on a PR with many reviews — our
+// own review is the most recent and lands on a later page. A reviewed-but-unposted
 // prior leaves no such review, so it still posts.
 func AlreadyPostedAtSHA(ctx stdctx.Context, client Client, info *PRInfo) (bool, error) {
-	reviews, _, err := client.ListReviews(ctx, info.Owner, info.Repo, info.Number, &gh.ListOptions{PerPage: 100})
-	if err != nil {
-		return false, mapWriteError("github.list_reviews_failed", "listing reviews", err)
+	if info.HeadSHA == "" {
+		return false, nil
 	}
-	for _, r := range reviews {
-		if info.HeadSHA != "" && r.GetCommitID() == info.HeadSHA && strings.Contains(r.GetBody(), ReviewMarker) {
-			return true, nil
+	opt := &gh.ListOptions{PerPage: 100}
+	for page := 0; page < 10; page++ { // bounded at 1000 reviews — pathological PRs don't loop forever
+		reviews, resp, err := client.ListReviews(ctx, info.Owner, info.Repo, info.Number, opt)
+		if err != nil {
+			return false, mapWriteError("github.list_reviews_failed", "listing reviews", err)
 		}
+		for _, r := range reviews {
+			if r.GetCommitID() == info.HeadSHA && strings.Contains(r.GetBody(), ReviewMarker) {
+				return true, nil
+			}
+		}
+		if resp == nil || resp.NextPage == 0 {
+			break
+		}
+		opt.Page = resp.NextPage
 	}
 	return false, nil
 }
