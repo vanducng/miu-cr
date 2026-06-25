@@ -60,11 +60,12 @@ func newCodexAgent(creds Credentials, timeout time.Duration) *codexAgent {
 // codexReq is the Responses API request body. store:false keeps the call
 // stateless (no server-side session); tools mirror the Anthropic/OpenAI loop.
 type codexReq struct {
-	Model        string      `json:"model"`
-	Instructions string      `json:"instructions"`
-	Input        []codexItem `json:"input"`
-	Tools        []codexTool `json:"tools,omitempty"`
-	Store        bool        `json:"store"`
+	Model           string      `json:"model"`
+	Instructions    string      `json:"instructions"`
+	Input           []codexItem `json:"input"`
+	Tools           []codexTool `json:"tools,omitempty"`
+	Store           bool        `json:"store"`
+	MaxOutputTokens int         `json:"max_output_tokens,omitempty"`
 	// The codex backend requires stream:true ("Stream must be set to true"); the
 	// response is an SSE stream parsed in post().
 	Stream bool `json:"stream"`
@@ -167,8 +168,9 @@ func (a *codexAgent) RepairPatch(ctx stdctx.Context, rr RepairRequest) (string, 
 			Role:    "user",
 			Content: []codexContent{{Type: "input_text", Text: BuildRepairPrompt(rr)}},
 		}},
-		Store:  false,
-		Stream: true,
+		Store:           false,
+		Stream:          true,
+		MaxOutputTokens: repairMaxTokens,
 	})
 	if err != nil {
 		return "", err

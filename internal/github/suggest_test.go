@@ -34,7 +34,7 @@ func TestClassifyReplacement(t *testing.T) {
 			f:          engine.Finding{Line: 3, EndLine: 2, SuggestedPatch: "x"},
 			content:    content,
 			wantReason: reasonGarbledSpan,
-			wantRepair: true,
+			wantRepair: false, // structural (EndLine), not fixable by re-prompting
 		},
 		{
 			name:       "empty patch",

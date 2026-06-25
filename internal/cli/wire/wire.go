@@ -11,6 +11,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/vanducng/miu-cr/internal/cli"
@@ -724,7 +725,7 @@ type mcpServerImpl struct{}
 
 func (mcpServerImpl) Serve(ctx stdctx.Context, req cli.MCPRequest) error {
 	runner := gitcmd.New()
-	eng := engine.New(lazyAgent{timeout: req.Timeout}, runner)
+	eng := engine.New(&lazyAgent{timeout: req.Timeout}, runner)
 
 	cfg, lerr := config.Load()
 	if lerr != nil {
@@ -767,33 +768,49 @@ func (mcpServerImpl) Serve(ctx stdctx.Context, req cli.MCPRequest) error {
 }
 
 // lazyAgent resolves Anthropic credentials only when a review actually runs, so
-// the MCP server can start (and answer initialize/tools-list) without a key.
-type lazyAgent struct{ timeout time.Duration }
-
-func (l lazyAgent) Review(ctx stdctx.Context, rc engine.AgentContext) (engine.ReviewOutput, error) {
-	creds, err := agent.Resolve(agent.ResolveInput{Ctx: ctx, OAuthResolver: oauthResolver()})
-	if err != nil {
-		return engine.ReviewOutput{}, err
-	}
-	llm, err := agent.New(creds, l.timeout)
-	if err != nil {
-		return engine.ReviewOutput{}, err
-	}
-	return agentAdapter{inner: llm}.Review(ctx, rc)
+// the MCP server can start (and answer initialize/tools-list) without a key. The
+// resolution is memoized (sync.Once), so a review plus its per-finding repair calls
+// resolve credentials + build the client exactly once.
+type lazyAgent struct {
+	timeout time.Duration
+	once    sync.Once
+	inner   agentAdapter
+	err     error
 }
 
-// RepairPatch resolves credentials lazily then delegates to agentAdapter
-// (mirroring Review) — lockstep with the engine.Agent interface.
-func (l lazyAgent) RepairPatch(ctx stdctx.Context, rr engine.RepairRequest) (string, error) {
-	creds, err := agent.Resolve(agent.ResolveInput{Ctx: ctx, OAuthResolver: oauthResolver()})
+func (l *lazyAgent) resolve(ctx stdctx.Context) (agentAdapter, error) {
+	l.once.Do(func() {
+		creds, err := agent.Resolve(agent.ResolveInput{Ctx: ctx, OAuthResolver: oauthResolver()})
+		if err != nil {
+			l.err = err
+			return
+		}
+		llm, err := agent.New(creds, l.timeout)
+		if err != nil {
+			l.err = err
+			return
+		}
+		l.inner = agentAdapter{inner: llm}
+	})
+	return l.inner, l.err
+}
+
+func (l *lazyAgent) Review(ctx stdctx.Context, rc engine.AgentContext) (engine.ReviewOutput, error) {
+	a, err := l.resolve(ctx)
+	if err != nil {
+		return engine.ReviewOutput{}, err
+	}
+	return a.Review(ctx, rc)
+}
+
+// RepairPatch reuses the memoized agent (mirroring Review) — lockstep with the
+// engine.Agent interface.
+func (l *lazyAgent) RepairPatch(ctx stdctx.Context, rr engine.RepairRequest) (string, error) {
+	a, err := l.resolve(ctx)
 	if err != nil {
 		return "", err
 	}
-	llm, err := agent.New(creds, l.timeout)
-	if err != nil {
-		return "", err
-	}
-	return agentAdapter{inner: llm}.RepairPatch(ctx, rr)
+	return a.RepairPatch(ctx, rr)
 }
 
 func modeFor(req cli.ReviewRequest) diff.Mode {

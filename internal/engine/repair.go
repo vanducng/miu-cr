@@ -40,9 +40,11 @@ func (e *Engine) repairPatches(ctx stdctx.Context, kept []Finding, selected []di
 		rank int
 	}
 	var cands []candidate
+	floor := rankOf("medium")
 	for i := range kept {
 		f := kept[i]
-		if rankOf(f.Severity) < rankOf("medium") {
+		rank := rankOf(f.Severity)
+		if rank < floor {
 			continue
 		}
 		if f.Line <= 0 {
@@ -65,7 +67,7 @@ func (e *Engine) repairPatches(ctx stdctx.Context, kept []Finding, selected []di
 		if len([]rune(span)) > repairSpanRuneCap {
 			continue
 		}
-		cands = append(cands, candidate{idx: i, span: span, rank: rankOf(f.Severity)})
+		cands = append(cands, candidate{idx: i, span: span, rank: rank})
 	}
 
 	limit := req.MaxRepair

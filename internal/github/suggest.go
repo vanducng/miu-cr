@@ -67,7 +67,9 @@ func (r repairReason) String() string {
 // anchoring bug, not a patch problem, so it is NOT repairable.
 func (r repairReason) repairable() bool {
 	switch r {
-	case reasonEmpty, reasonNoOp, reasonGarbledSpan, reasonLengthMismatch:
+	// A garbled span (EndLine set but != Line) is structural: it lives in the
+	// finding's EndLine, which repair never changes, so re-prompting can't fix it.
+	case reasonEmpty, reasonNoOp, reasonLengthMismatch:
 		return true
 	default:
 		return false

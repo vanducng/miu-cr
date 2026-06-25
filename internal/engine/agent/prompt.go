@@ -90,9 +90,15 @@ func BuildRepairPrompt(rr RepairRequest) string {
 	cat := strings.TrimSpace(rr.Category)
 	sev := strings.TrimSpace(rr.Severity)
 	if cat != "" || sev != "" {
+		label := cat
+		if cat != "" && sev != "" {
+			label = cat + " / " + sev
+		} else if sev != "" {
+			label = sev
+		}
 		sb.WriteString(repairCategoryHeader)
 		sb.WriteString("\n```\n")
-		sb.WriteString(fenceSafe(strings.TrimSpace(cat + " / " + sev)))
+		sb.WriteString(fenceSafe(label))
 		sb.WriteString("\n```\n\n")
 	}
 	if strings.TrimSpace(rr.Rationale) != "" {
