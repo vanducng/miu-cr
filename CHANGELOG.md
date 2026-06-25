@@ -55,6 +55,13 @@ comment with a new marker); subsequent re-runs dedupe normally. On a
 first M5 review **manually** (or off-hours) to absorb the one-time re-post before
 the next scheduled run.
 
+## [0.35.0](https://github.com/vanducng/miu-cr/compare/v0.34.0...v0.35.0) (2026-06-25)
+
+
+### Features
+
+* **review:** upsert one summary issue-comment (greptile-style), demote metadata to collapsed details ([453d665](https://github.com/vanducng/miu-cr/commit/453d665a26bc34fbb994f6270aca22ee918c2afc))
+
 ## [0.34.0](https://github.com/vanducng/miu-cr/compare/v0.33.1...v0.34.0) (2026-06-25)
 
 
