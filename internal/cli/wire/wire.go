@@ -193,6 +193,7 @@ func (engineReviewer) Review(ctx stdctx.Context, req cli.ReviewRequest) (cli.Rev
 		RulesFork:        false,
 		RulesTokenBudget: defaultRulesTokenBudget,
 		WantDiagram:      req.WantDiagram,
+		Instruction:      req.Instruction,
 		Progress:         req.Progress,
 		TraceSink:        req.TraceSink,
 	})
@@ -248,6 +249,11 @@ type prReviewer struct{}
 func (prReviewer) GateFailed(findings []cli.ReviewFinding, gate string) bool {
 	return engine.GateFailed(toEngineFindings(findings), gate)
 }
+
+// wantConversation gates the opt-in PR-conversation fetch: requested AND not a
+// fork. Untrusted participant text gains no injection channel on fork PRs,
+// mirroring fork-dropped repo rules.
+func wantConversation(requested, isFork bool) bool { return requested && !isFork }
 
 func (prReviewer) ReviewPR(ctx stdctx.Context, req cli.PRReviewRequest) (cli.ReviewOutcome, error) {
 	ref, err := mgithub.ParseRef(req.Ref)
@@ -346,6 +352,13 @@ func (prReviewer) ReviewPR(ctx stdctx.Context, req cli.PRReviewRequest) (cli.Rev
 	// Hoisted so the same loaded (fork-dropped) rule set feeds BOTH the engine
 	// (injection) and the publish-layer citation map (validation/linking).
 	loaded := loadRules(dir, !info.IsFork)
+	// Opt-in conversation context: fetched only with --conversation. Dropped on fork
+	// PRs (Untrusted participant text gains no injection channel), mirroring the
+	// fork-dropped repo rules above. Best-effort: FetchConversation degrades to "".
+	conversation := ""
+	if wantConversation(req.Conversation, info.IsFork) {
+		conversation = mgithub.FetchConversation(ctx, client, info)
+	}
 	res, err := eng.Review(ctx, engine.Request{
 		Mode:         diff.ModeRange,
 		From:         info.BaseSHA,
@@ -368,6 +381,8 @@ func (prReviewer) ReviewPR(ctx stdctx.Context, req cli.PRReviewRequest) (cli.Rev
 		RulesTokenBudget: defaultRulesTokenBudget,
 		Retriever:        retr,
 		WantDiagram:      req.WantDiagram,
+		Instruction:      req.Instruction,
+		Conversation:     conversation,
 		Progress:         req.Progress,
 		TraceSink:        req.TraceSink,
 	})
@@ -675,6 +690,8 @@ func (a agentAdapter) Review(ctx stdctx.Context, rc engine.AgentContext) (engine
 		Rules:           rc.Rules,           // lockstep: forgetting this silently drops all rules
 		SemanticContext: rc.SemanticContext, // lockstep: forgetting this silently drops M7 advisory
 		WantDiagram:     rc.WantDiagram,     // lockstep: forgetting this silently drops the diagram opt-in
+		Instruction:     rc.Instruction,     // lockstep: forgetting this silently drops the developer steer
+		Conversation:    rc.Conversation,    // lockstep: forgetting this silently drops the PR conversation
 		RepoDir:         rc.RepoDir,
 		Rev:             rc.Rev,
 		Runner:          rc.Runner,

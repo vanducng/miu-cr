@@ -11,6 +11,7 @@ self-contained — read its header comment, copy it into your repo, and adjust.
 | [`rules/python-data.md`](rules/python-data.md) | Review context for Python data/ML pipelines — correctness, reproducibility. |
 | [`github-action/code-review.yml`](github-action/code-review.yml) | Reusable workflow that reviews every PR via the composite action (fork-safe). |
 | [`github-action/code-review-sarif.yml`](github-action/code-review-sarif.yml) | Inline review **plus** a SARIF 2.1.0 upload to the code-scanning Security tab. |
+| [`workflows/miucr-review.yml`](workflows/miucr-review.yml) | Dual-trigger workflow: reviews every PR **and** lets a write-collaborator post `/miucr review <prompt>` to steer a re-review (gated, ack'd, injection-safe). |
 | [`mcp-setup/`](mcp-setup/README-mcp.md) | Wire `miucr mcp` into Claude Code, Cursor, or Codex CLI. |
 | [`docker/Dockerfile`](docker/Dockerfile) | Multi-stage, pure-Go (`CGO_ENABLED=0`) distroless image for `miucr serve`. |
 | [`docker/docker-compose.yml`](docker/docker-compose.yml) | Local stand-in for a server deploy (webhook or poll mode). |
@@ -38,6 +39,13 @@ Copy `github-action/code-review.yml` to `.github/workflows/` and add
 `ANTHROPIC_API_KEY` to your repo secrets. It uses `pull_request_target` so
 fork PRs still get reviewed — miucr fetches the diff via the API and never
 runs fork code.
+
+For the conversational `/miucr review <prompt>` comment flow, copy
+`workflows/miucr-review.yml` instead. It adds an `issue_comment` trigger that a
+write-collaborator uses to steer a re-review with free text. The job self-gates
+(write|admin via API, not `author_association` alone), acks with a 👀 reaction,
+guards against bot/echo loops, and passes the comment body via an env var so it
+can never be injected into a shell line.
 
 ## MCP
 

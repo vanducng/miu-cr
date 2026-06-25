@@ -22,10 +22,12 @@ func TestAgentAdapterForwardsRules(t *testing.T) {
 	ca := &captureAgent{}
 	a := agentAdapter{inner: ca}
 	_, err := a.Review(stdctx.Background(), engine.AgentContext{
-		Text:    "diff text",
-		Rules:   "RULES_SECTION_MARKER",
-		RepoDir: "/repo",
-		Rev:     "abc",
+		Text:         "diff text",
+		Rules:        "RULES_SECTION_MARKER",
+		Instruction:  "INSTRUCTION_MARKER",
+		Conversation: "CONVERSATION_MARKER",
+		RepoDir:      "/repo",
+		Rev:          "abc",
 	})
 	if err != nil {
 		t.Fatalf("Review: %v", err)
@@ -33,7 +35,28 @@ func TestAgentAdapterForwardsRules(t *testing.T) {
 	if ca.got.Rules != "RULES_SECTION_MARKER" {
 		t.Errorf("adapter dropped Rules: got %q", ca.got.Rules)
 	}
+	if ca.got.Instruction != "INSTRUCTION_MARKER" {
+		t.Errorf("adapter dropped Instruction: got %q", ca.got.Instruction)
+	}
+	if ca.got.Conversation != "CONVERSATION_MARKER" {
+		t.Errorf("adapter dropped Conversation: got %q", ca.got.Conversation)
+	}
 	if ca.got.Text != "diff text" || ca.got.RepoDir != "/repo" || ca.got.Rev != "abc" {
 		t.Errorf("adapter mangled other fields: %+v", ca.got)
+	}
+}
+
+func TestWantConversationDropsOnFork(t *testing.T) {
+	for _, tc := range []struct {
+		requested, isFork, want bool
+	}{
+		{true, false, true},
+		{true, true, false}, // dropped on fork PRs (Untrusted participant text)
+		{false, false, false},
+		{false, true, false},
+	} {
+		if got := wantConversation(tc.requested, tc.isFork); got != tc.want {
+			t.Errorf("wantConversation(requested=%v, fork=%v)=%v, want %v", tc.requested, tc.isFork, got, tc.want)
+		}
 	}
 }

@@ -106,6 +106,148 @@ func FetchPR(ctx stdctx.Context, client Client, ref PRRef) (*PRInfo, error) {
 	return info, nil
 }
 
+// maxConversationBytes caps the rendered conversation block. Mirrors the rules
+// token budget (defaultRulesTokenBudget=4096) so injected untrusted participant
+// text can't starve the diff; over-cap content is truncated with an ellipsis marker.
+const maxConversationBytes = 4096
+
+const conversationTruncated = "\n…(conversation truncated)"
+
+// FetchConversation paginates the PR's prior miucr review summaries, inline
+// finding threads, and developer issue replies into one labeled, byte-capped
+// advisory string for the USER turn. It is best-effort: any list error is logged
+// (redacted) and returns "" — a conversation fetch never fails the review (mirrors
+// skipUnchanged's degrade-to-default). The caller drops it on fork PRs; this
+// helper does no trust decision. Returns "" when there is nothing to inject.
+func FetchConversation(ctx stdctx.Context, client Client, info *PRInfo) string {
+	var b strings.Builder
+
+	if summaries := fetchPriorSummaries(ctx, client, info); summaries != "" {
+		b.WriteString("Prior miucr review summaries:\n")
+		b.WriteString(summaries)
+		b.WriteString("\n")
+	}
+	if threads := fetchInlineThreads(ctx, client, info); threads != "" {
+		b.WriteString("Inline finding threads:\n")
+		b.WriteString(threads)
+		b.WriteString("\n")
+	}
+	if replies := fetchDeveloperReplies(ctx, client, info); replies != "" {
+		b.WriteString("Developer replies:\n")
+		b.WriteString(replies)
+		b.WriteString("\n")
+	}
+
+	out := strings.TrimSpace(b.String())
+	if out == "" {
+		return ""
+	}
+	return capConversation(out)
+}
+
+// capConversation truncates s to maxConversationBytes (rune-safe), appending an
+// ellipsis marker when it cuts. Empty stays empty.
+func capConversation(s string) string {
+	if len(s) <= maxConversationBytes {
+		return s
+	}
+	r := []rune(s)
+	keep := maxConversationBytes - len(conversationTruncated)
+	if keep < 0 {
+		keep = 0
+	}
+	if len(r) <= keep {
+		return s
+	}
+	return string(r[:keep]) + conversationTruncated
+}
+
+// fetchPriorSummaries returns miucr's own prior review summary bodies (those
+// carrying ReviewMarker), newest pages last. "" on any list error.
+func fetchPriorSummaries(ctx stdctx.Context, client Client, info *PRInfo) string {
+	var b strings.Builder
+	opts := &gh.ListOptions{PerPage: 100}
+	for {
+		reviews, resp, err := client.ListReviews(ctx, info.Owner, info.Repo, info.Number, opts)
+		if err != nil {
+			os.Stderr.WriteString(config.RedactString("miucr: conversation fetch (reviews) skipped: "+err.Error()) + "\n")
+			return ""
+		}
+		for _, r := range reviews {
+			body := strings.TrimSpace(r.GetBody())
+			if body != "" && strings.Contains(body, ReviewMarker) {
+				b.WriteString("- ")
+				b.WriteString(body)
+				b.WriteString("\n")
+			}
+		}
+		if resp == nil || resp.NextPage == 0 {
+			break
+		}
+		opts.Page = resp.NextPage
+	}
+	return strings.TrimSpace(b.String())
+}
+
+// fetchInlineThreads returns the bodies of inline review comments (finding
+// threads). "" on any list error.
+func fetchInlineThreads(ctx stdctx.Context, client Client, info *PRInfo) string {
+	var b strings.Builder
+	opts := &gh.PullRequestListCommentsOptions{ListOptions: gh.ListOptions{PerPage: 100}}
+	for {
+		comments, resp, err := client.ListReviewComments(ctx, info.Owner, info.Repo, info.Number, opts)
+		if err != nil {
+			os.Stderr.WriteString(config.RedactString("miucr: conversation fetch (review comments) skipped: "+err.Error()) + "\n")
+			return ""
+		}
+		for _, c := range comments {
+			body := strings.TrimSpace(c.GetBody())
+			if body == "" {
+				continue
+			}
+			if path := c.GetPath(); path != "" {
+				fmt.Fprintf(&b, "- [%s] %s\n", path, body)
+			} else {
+				fmt.Fprintf(&b, "- %s\n", body)
+			}
+		}
+		if resp == nil || resp.NextPage == 0 {
+			break
+		}
+		opts.Page = resp.NextPage
+	}
+	return strings.TrimSpace(b.String())
+}
+
+// fetchDeveloperReplies returns top-level issue comments that are NOT miucr's own
+// posts (a miucr summary carries ReviewMarker), so developer pushback is surfaced
+// while the bot's own chatter is skipped (loop-guard). "" on any list error.
+func fetchDeveloperReplies(ctx stdctx.Context, client Client, info *PRInfo) string {
+	var b strings.Builder
+	opts := &gh.IssueListCommentsOptions{ListOptions: gh.ListOptions{PerPage: 100}}
+	for {
+		comments, resp, err := client.ListIssueComments(ctx, info.Owner, info.Repo, info.Number, opts)
+		if err != nil {
+			os.Stderr.WriteString(config.RedactString("miucr: conversation fetch (issue comments) skipped: "+err.Error()) + "\n")
+			return ""
+		}
+		for _, c := range comments {
+			body := strings.TrimSpace(c.GetBody())
+			if body == "" || strings.Contains(body, ReviewMarker) {
+				continue
+			}
+			b.WriteString("- ")
+			b.WriteString(body)
+			b.WriteString("\n")
+		}
+		if resp == nil || resp.NextPage == 0 {
+			break
+		}
+		opts.Page = resp.NextPage
+	}
+	return strings.TrimSpace(b.String())
+}
+
 // isFork reports whether the head lives outside the base repo. A deleted head
 // repo (Head.Repo == nil) is treated as a fork: we never assume same-repo.
 func isFork(ref PRRef, pr *gh.PullRequest) bool {

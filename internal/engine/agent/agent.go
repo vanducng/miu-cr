@@ -49,10 +49,17 @@ type Context struct {
 	// is byte-identical and the prompt cache is preserved). LOCKSTEP: thread it from
 	// engine.AgentContext into BuildUserPrompt in agent.go/openai.go/codex.go.
 	WantDiagram bool
-	RepoDir     string
-	Rev         string
-	Runner      *gitcmd.Runner
-	Progress    func(string) // nil = silent; milestone/tool strings only, never secrets
+	// Instruction is the optional per-review developer steer. LOCKSTEP: mirror Rules —
+	// thread it engine.AgentContext -> here -> PromptParts -> BuildUserPrompt in ALL
+	// three backends (agent.go/openai.go/codex.go), or it is silently dropped.
+	Instruction string
+	// Conversation is the optional fetched PR conversation (UNTRUSTED). LOCKSTEP:
+	// mirror Instruction in ALL three backends or it is silently dropped.
+	Conversation string
+	RepoDir      string
+	Rev          string
+	Runner       *gitcmd.Runner
+	Progress     func(string) // nil = silent; milestone/tool strings only, never secrets
 	// Trace, when non-nil, accumulates the raw prompt, per-turn tool calls, and
 	// raw final response for persistence. nil = no capture (mirrors Progress).
 	Trace *engine.ReviewTrace
@@ -163,7 +170,7 @@ func (a *anthropicAgent) Review(ctx stdctx.Context, rc Context) (engine.ReviewOu
 		rc.Runner = gitcmd.New()
 	}
 
-	userPrompt := BuildUserPrompt(PromptParts{Rules: rc.Rules, SemanticContext: rc.SemanticContext, WantDiagram: rc.WantDiagram, Diff: rc.Text})
+	userPrompt := BuildUserPrompt(PromptParts{Rules: rc.Rules, SemanticContext: rc.SemanticContext, WantDiagram: rc.WantDiagram, Instruction: rc.Instruction, Conversation: rc.Conversation, Diff: rc.Text})
 	rc.Trace.SetSystemPrompt(systemPrompt)
 	rc.Trace.SetModel("anthropic", a.model)
 	rc.Trace.SetPrompt(userPrompt)
