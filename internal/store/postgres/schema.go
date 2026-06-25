@@ -23,7 +23,8 @@ CREATE TABLE IF NOT EXISTS reviews (
 	model           TEXT NOT NULL DEFAULT '',
 	transcript_json TEXT NOT NULL DEFAULT '',
 	raw_prompt      TEXT NOT NULL DEFAULT '',
-	raw_response    TEXT NOT NULL DEFAULT ''
+	raw_response    TEXT NOT NULL DEFAULT '',
+	trace_json      TEXT NOT NULL DEFAULT ''
 );
 CREATE TABLE IF NOT EXISTS pr_findings (
 	owner       TEXT NOT NULL,

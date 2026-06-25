@@ -27,6 +27,7 @@ never enter the prompt, the diff, or the record.
 | `findings`, `stats` | The full review result |
 | `transcript` | Per-turn tool calls the reviewer made |
 | `raw_prompt`, `raw_response` | The verbatim LLM I/O (audit trail) |
+| `trace` | The full redacted trace (system prompt, diff meta, selected files, injected rules, prompts, response) — view with `miucr trace <id>` |
 
 ## Opting out per run
 
@@ -53,6 +54,35 @@ miucr history show <id> -o pretty --raw          # pretty, with the raw prompt/r
 
 `history` emits the `history.list` envelope kind; `show` emits `history.record`
 (404s with a typed `history.not_found` on an unknown id).
+
+## Inspecting the trace
+
+Alongside the record, every review keeps a **redacted trace** — the ordered steps
+of the pipeline: the **system prompt**, the **diff identification** (base/head +
+how it was computed), the **selected files**, the **injected rules** (stem +
+provenance), the **user prompt**, the **model/provider**, the **raw response**,
+and the **tool calls**. View any past review's trace:
+
+```sh
+miucr trace <id>                 # ordered steps (kind: trace.show)
+miucr trace <id> -o pretty       # a readable per-step view
+```
+
+`trace.show` data is `{id, steps:[{step, payload}]}`. An unknown id returns a
+typed `trace.not_found`; an old review with no trace renders empty.
+
+For a **live** trace, pass `--trace` to `review`: each capture seam streams one
+NDJSON line (`{"step":...,"payload":...}`) to **stderr** as the run proceeds —
+distinct from `--verbose` progress. The stdout result envelope is unchanged.
+
+```sh
+miucr review --staged --trace 2> trace.ndjson    # live steps on stderr; envelope on stdout
+```
+
+The trace holds the prompt (your own code), so it is **local only** — read from
+the local store, never re-fetched from a provider, never posted, and never in the
+`review.result` envelope. Secrets (tokens, DSNs) are redacted at persist and in
+the live stream.
 
 ## Pruning
 

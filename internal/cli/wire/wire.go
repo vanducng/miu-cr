@@ -194,6 +194,7 @@ func (engineReviewer) Review(ctx stdctx.Context, req cli.ReviewRequest) (cli.Rev
 		RulesTokenBudget: defaultRulesTokenBudget,
 		WantDiagram:      req.WantDiagram,
 		Progress:         req.Progress,
+		TraceSink:        req.TraceSink,
 	})
 	if err != nil {
 		return cli.ReviewOutcome{}, err
@@ -364,6 +365,7 @@ func (prReviewer) ReviewPR(ctx stdctx.Context, req cli.PRReviewRequest) (cli.Rev
 		Retriever:        retr,
 		WantDiagram:      req.WantDiagram,
 		Progress:         req.Progress,
+		TraceSink:        req.TraceSink,
 	})
 	if err != nil {
 		return cli.ReviewOutcome{}, err

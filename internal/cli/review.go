@@ -76,6 +76,11 @@ type ReviewRequest struct {
 	WantDiagram  bool         // opt into the mermaid change diagram (default off)
 	NoSave       bool         // opt out of persisting this run to the local history store
 	Progress     func(string) // nil = silent; stderr milestones, never the stdout envelope
+	// TraceSink, when non-nil, streams each captured trace step (system prompt, diff
+	// meta, selected files, injected rules, prompts, response, tool calls) live to
+	// stderr as NDJSON (--trace). Local-only; distinct from Progress; the stdout
+	// result envelope is untouched.
+	TraceSink func(step string, payload any)
 }
 
 // ReviewOutcome is the Reviewer's result: anchored findings plus run stats. PR
@@ -184,6 +189,8 @@ type PRReviewRequest struct {
 	NoSave       bool         // opt out of persisting this run to the local history store
 	Force        bool         // re-review even when the head SHA is unchanged since the last review (bypass the incremental skip)
 	Progress     func(string) // nil = silent; stderr milestones, never the stdout envelope
+	// TraceSink streams live trace steps to stderr as NDJSON (--trace); nil = off.
+	TraceSink func(step string, payload any)
 	// ActionsOut is the command's stdout writer (cmd.OutOrStdout()), used ONLY by the
 	// fork-PR 403 fallback to emit ::error:: workflow commands on the same stream as
 	// the JSON envelope (GitHub parses workflow commands only from stdout). nil →
@@ -301,6 +308,7 @@ func reviewCommand(opts *options) *cobra.Command {
 		force        bool
 		verbose      bool
 		quiet        bool
+		traceLive    bool
 	)
 
 	cmd := &cobra.Command{
@@ -330,6 +338,10 @@ func reviewCommand(opts *options) *cobra.Command {
 				opts.timeout = 300 * time.Second
 			}
 			prog := newProgress(cmd.ErrOrStderr(), verbose, quiet)
+			var traceSink func(step string, payload any)
+			if traceLive {
+				traceSink = newTraceSink(cmd.ErrOrStderr())
+			}
 			if pr != "" {
 				return runPRReview(cmd, prRunArgs{
 					ref:          pr,
@@ -357,6 +369,7 @@ func reviewCommand(opts *options) *cobra.Command {
 					noSave:       noSave,
 					force:        force,
 					progress:     prog,
+					traceSink:    traceSink,
 				})
 			}
 			if err := nudgeIfUnconfigured(apiKey, authToken); err != nil {
@@ -387,6 +400,7 @@ func reviewCommand(opts *options) *cobra.Command {
 				WantDiagram:  wantDiagram,
 				NoSave:       noSave,
 				Progress:     prog,
+				TraceSink:    traceSink,
 			}
 			ctx := cmd.Context()
 			if opts.timeout > 0 {
@@ -460,6 +474,7 @@ func reviewCommand(opts *options) *cobra.Command {
 	f.BoolVar(&force, "force", false, "On --pr, re-review even when the head SHA is unchanged since the last saved review (default: an unchanged head SHA short-circuits with skipped_unchanged, no LLM pass)")
 	f.BoolVarP(&verbose, "verbose", "v", false, "Print progress to stderr (default when stderr is a terminal; stdout envelope unchanged)")
 	f.BoolVarP(&quiet, "quiet", "q", false, "Silence progress output (overrides --verbose and TTY auto-detect)")
+	f.BoolVar(&traceLive, "trace", false, "Stream the live review trace (system prompt, diff, rules, prompts, response) as NDJSON to stderr; local-only, distinct from --verbose; the stdout result envelope is unchanged")
 
 	cmd.MarkFlagsRequiredTogether("from", "to")
 	cmd.MarkFlagsMutuallyExclusive("verbose", "quiet")
@@ -494,6 +509,7 @@ type prRunArgs struct {
 	noSave      bool
 	force       bool
 	progress    func(string)
+	traceSink   func(step string, payload any)
 }
 
 // runPRReview drives the --pr path: resolve the GitHub token (empty-tolerant for
@@ -545,6 +561,7 @@ func runPRReview(cmd *cobra.Command, a prRunArgs) error {
 		NoSave:       a.noSave,
 		Force:        a.force,
 		Progress:     a.progress,
+		TraceSink:    a.traceSink,
 		ActionsOut:   cmd.OutOrStdout(),
 	})
 	if err != nil {

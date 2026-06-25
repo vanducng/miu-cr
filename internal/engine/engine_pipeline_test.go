@@ -7,6 +7,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"github.com/vanducng/miu-cr/internal/engine"
@@ -34,6 +35,8 @@ func (f *fakeAgent) Review(_ stdctx.Context, rc engine.AgentContext) (engine.Rev
 	if rc.Progress != nil {
 		rc.Progress("agent ran")
 	}
+	rc.Trace.SetSystemPrompt("fake system prompt")
+	rc.Trace.SetModel("fakeprov", "fake-model")
 	rc.Trace.SetPrompt("fake prompt")
 	rc.Trace.RecordTool(0, "grep", "Risky")
 	rc.Trace.RecordTool(1, "file_read", "app.go:1-5")
@@ -208,6 +211,56 @@ func TestReviewCollectsTrace(t *testing.T) {
 	}
 	if len(turns) != 2 || turns[0].Tool != "grep" || turns[1].Tool != "file_read" {
 		t.Errorf("transcript turns: %+v", turns)
+	}
+}
+
+// The persisted trace_json captures the system prompt (the bug fix), diff meta,
+// selected files, injected rules' model/provider; trace_json.user_prompt is the
+// SAME source of truth as raw_prompt; and a token embedded in the reviewed diff
+// is redacted out of trace_json (the diff free-text path).
+func TestReviewPersistsRedactedTrace(t *testing.T) {
+	const tok = "sk-ant-tokenABCDEFGH123456789"
+	dir := initRepo(t)
+	writeFile(t, dir, "app.go", "package app\n")
+	git(t, dir, "add", ".")
+	git(t, dir, "commit", "-q", "-m", "base")
+	// The reviewed diff + the finding's QuotedCode carry a token; assert it doesn't leak into
+	// trace_json. (This is the plumbing + == invariant test; the AUTHORITATIVE free-text
+	// redaction proof — tokens injected directly into trace prompt fields + a DSN — is in
+	// trace_test.go, where redacted-trace is EXPECTED to diverge from the raw prompt.)
+	writeFile(t, dir, "app.go", "package app\n\nfunc Risky() {\n\tkey := \"x_api_key="+tok+"\"\n\t_ = key\n}\n")
+	git(t, dir, "add", "app.go")
+
+	fa := &fakeAgent{findings: []engine.Finding{{File: "app.go", Severity: "high", Category: "security", Rationale: "x", QuotedCode: "key := \"x_api_key=" + tok + "\""}}}
+	eng := engine.New(fa, gitcmd.New())
+	cs := &captureStore{}
+	eng.Store = cs
+
+	_, err := eng.Review(stdctx.Background(), engine.Request{Mode: 0, RepoDir: dir, Gate: "high", Extensions: []string{"go"}})
+	if err != nil {
+		t.Fatalf("Review: %v", err)
+	}
+	if cs.rec.TraceJSON == "" {
+		t.Fatal("trace_json must be persisted")
+	}
+	var tr engine.ReviewTrace
+	if err := json.Unmarshal([]byte(cs.rec.TraceJSON), &tr); err != nil {
+		t.Fatalf("trace_json invalid: %v", err)
+	}
+	if tr.SystemPrompt == "" {
+		t.Error("trace must capture a non-empty system prompt (the headline gap)")
+	}
+	if tr.Provider != "fakeprov" || tr.Model != "fake-model" {
+		t.Errorf("model/provider not captured: %q/%q", tr.Provider, tr.Model)
+	}
+	if tr.DiffMeta.Source != "staged" || len(tr.SelectedFiles) == 0 {
+		t.Errorf("diff meta / selected files not captured: %+v", tr)
+	}
+	if tr.UserPrompt != cs.rec.RawPrompt {
+		t.Errorf("trace user_prompt must equal raw_prompt:\n trace=%q\n raw  =%q", tr.UserPrompt, cs.rec.RawPrompt)
+	}
+	if strings.Contains(cs.rec.TraceJSON, tok) {
+		t.Fatalf("token from the reviewed diff leaked into trace_json:\n%s", cs.rec.TraceJSON)
 	}
 }
 

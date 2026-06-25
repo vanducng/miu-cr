@@ -89,7 +89,8 @@ ALTER TABLE reviews ADD COLUMN IF NOT EXISTS provider TEXT NOT NULL DEFAULT '';
 ALTER TABLE reviews ADD COLUMN IF NOT EXISTS model TEXT NOT NULL DEFAULT '';
 ALTER TABLE reviews ADD COLUMN IF NOT EXISTS transcript_json TEXT NOT NULL DEFAULT '';
 ALTER TABLE reviews ADD COLUMN IF NOT EXISTS raw_prompt TEXT NOT NULL DEFAULT '';
-ALTER TABLE reviews ADD COLUMN IF NOT EXISTS raw_response TEXT NOT NULL DEFAULT '';`
+ALTER TABLE reviews ADD COLUMN IF NOT EXISTS raw_response TEXT NOT NULL DEFAULT '';
+ALTER TABLE reviews ADD COLUMN IF NOT EXISTS trace_json TEXT NOT NULL DEFAULT '';`
 
 // migrationLockKey is the fixed advisory-lock key serializing schema migrations.
 // CREATE {EXTENSION,TABLE} IF NOT EXISTS is NOT concurrency-safe: two sessions
@@ -145,12 +146,12 @@ func (s *Store) SaveReview(ctx context.Context, rec store.ReviewRecord) (string,
 	}
 	_, err = s.db.ExecContext(ctx,
 		`INSERT INTO reviews (id, repo_dir, mode, head_sha, status, created_at, findings_json, stats_json,
-		   owner, repo, number, provider, model, transcript_json, raw_prompt, raw_response)
-		 VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16)`,
+		   owner, repo, number, provider, model, transcript_json, raw_prompt, raw_response, trace_json)
+		 VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17)`,
 		rec.ID, rec.RepoDir, rec.Mode, rec.HeadSHA, rec.Status,
 		rec.CreatedAt.UTC().Format(time.RFC3339Nano), findingsJSON, statsJSON,
 		rec.Owner, rec.Repo, rec.Number, rec.Provider, rec.Model,
-		string(rec.Transcript), rec.RawPrompt, rec.RawResponse,
+		string(rec.Transcript), rec.RawPrompt, rec.RawResponse, rec.TraceJSON,
 	)
 	if err != nil {
 		return "", fmt.Errorf("insert review: %w", err)
@@ -168,18 +169,18 @@ func (s *Store) UpsertReview(ctx context.Context, rec store.ReviewRecord) (strin
 	}
 	_, err = s.db.ExecContext(ctx,
 		`INSERT INTO reviews (id, repo_dir, mode, head_sha, status, created_at, findings_json, stats_json,
-		   owner, repo, number, provider, model, transcript_json, raw_prompt, raw_response)
-		 VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16)
+		   owner, repo, number, provider, model, transcript_json, raw_prompt, raw_response, trace_json)
+		 VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17)
 		 ON CONFLICT(id) DO UPDATE SET
 		   repo_dir=excluded.repo_dir, mode=excluded.mode, head_sha=excluded.head_sha,
 		   status=excluded.status, findings_json=excluded.findings_json, stats_json=excluded.stats_json,
 		   owner=excluded.owner, repo=excluded.repo, number=excluded.number,
 		   provider=excluded.provider, model=excluded.model, transcript_json=excluded.transcript_json,
-		   raw_prompt=excluded.raw_prompt, raw_response=excluded.raw_response`,
+		   raw_prompt=excluded.raw_prompt, raw_response=excluded.raw_response, trace_json=excluded.trace_json`,
 		rec.ID, rec.RepoDir, rec.Mode, rec.HeadSHA, rec.Status,
 		rec.CreatedAt.UTC().Format(time.RFC3339Nano), findingsJSON, statsJSON,
 		rec.Owner, rec.Repo, rec.Number, rec.Provider, rec.Model,
-		string(rec.Transcript), rec.RawPrompt, rec.RawResponse,
+		string(rec.Transcript), rec.RawPrompt, rec.RawResponse, rec.TraceJSON,
 	)
 	if err != nil {
 		return "", fmt.Errorf("upsert review: %w", err)
@@ -233,10 +234,10 @@ func (s *Store) GetReview(ctx context.Context, id string) (store.ReviewRecord, e
 	)
 	row := s.db.QueryRowContext(ctx,
 		`SELECT id, repo_dir, mode, head_sha, status, created_at, findings_json, stats_json,
-		   owner, repo, number, provider, model, transcript_json, raw_prompt, raw_response
+		   owner, repo, number, provider, model, transcript_json, raw_prompt, raw_response, trace_json
 		 FROM reviews WHERE id = $1`, id)
 	err := row.Scan(&rec.ID, &rec.RepoDir, &rec.Mode, &rec.HeadSHA, &rec.Status, &createdAt, &findingsJSON, &statsJSON,
-		&rec.Owner, &rec.Repo, &rec.Number, &rec.Provider, &rec.Model, &transcriptJSON, &rec.RawPrompt, &rec.RawResponse)
+		&rec.Owner, &rec.Repo, &rec.Number, &rec.Provider, &rec.Model, &transcriptJSON, &rec.RawPrompt, &rec.RawResponse, &rec.TraceJSON)
 	if errors.Is(err, sql.ErrNoRows) {
 		return store.ReviewRecord{}, fmt.Errorf("review %q not found", id)
 	}
@@ -310,6 +311,7 @@ func (e EngineStore) SaveReview(ctx context.Context, rec engine.PersistRecord) (
 		Transcript:  rec.Transcript,
 		RawPrompt:   rec.RawPrompt,
 		RawResponse: rec.RawResponse,
+		TraceJSON:   rec.TraceJSON,
 	})
 }
 
@@ -335,6 +337,7 @@ func (e EngineStore) GetReview(ctx context.Context, id string) (engine.PersistRe
 		Transcript:  r.Transcript,
 		RawPrompt:   r.RawPrompt,
 		RawResponse: r.RawResponse,
+		TraceJSON:   r.TraceJSON,
 	}, nil
 }
 

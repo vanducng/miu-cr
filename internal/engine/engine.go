@@ -15,6 +15,7 @@ import (
 	"time"
 
 	"github.com/vanducng/miu-cr/internal/cli/clierr"
+	"github.com/vanducng/miu-cr/internal/config"
 	enginectx "github.com/vanducng/miu-cr/internal/engine/context"
 	"github.com/vanducng/miu-cr/internal/engine/diff"
 	"github.com/vanducng/miu-cr/internal/engine/gitcmd"
@@ -40,6 +41,7 @@ type PersistRecord struct {
 	Transcript  []byte
 	RawPrompt   string
 	RawResponse string
+	TraceJSON   string
 }
 
 // TurnRecord is one tool dispatch in the review session (turn index, tool name,
@@ -50,19 +52,63 @@ type TurnRecord struct {
 	Args string `json:"args"`
 }
 
-// ReviewTrace accumulates the session content during a review for persistence:
-// the raw user prompt, the per-turn tool calls, and the raw final response. The
-// agent records into it via nil-safe methods (mirroring the Progress seam); the
-// engine creates it, threads it onto AgentContext, and reads it back after
-// Review. A nil *ReviewTrace makes every recorder a no-op (capture disabled).
-// UserPrompt/FinalResponse (and PersistRecord.RawPrompt/RawResponse) capture the
-// full reviewed diff + model output by design — full capture, stored LOCAL-only
-// in the gitignored state.db; the invariant is no auth tokens (never in the
-// prompt/diff), not "no code".
+// DiffMeta identifies which revisions the review compared and how that diff was
+// computed (staged index / commit / range).
+type DiffMeta struct {
+	BaseSHA string `json:"base_sha"`
+	HeadSHA string `json:"head_sha"`
+	Source  string `json:"source"`
+}
+
+// RuleRef is one injected rule's identity for the trace: its file stem and trust
+// provenance (e.g. built-in / user / repo). No rule body — selection identity only.
+type RuleRef struct {
+	Stem       string `json:"stem"`
+	Provenance string `json:"provenance"`
+}
+
+// ReviewTrace accumulates the full session content during a review for
+// persistence: the system + user prompts, diff identification, selected files,
+// injected rules, model/provider, the per-turn tool calls, and the raw final
+// response. The agent/engine record into it via nil-safe setters (mirroring the
+// Progress seam); the engine creates it, threads it onto AgentContext, and reads
+// it back after Review. A nil *ReviewTrace makes every recorder a no-op (capture
+// disabled). The content (system/user prompt + diff) is captured in full by
+// design — stored LOCAL-only in the gitignored state.db, never in the review
+// envelope or a posted comment; the invariant is no auth tokens (redacted at
+// persist), not "no code".
+//
+// Sink, when non-nil, is invoked by each setter with the step name + the recorded
+// payload — phase 2 wires it to live --trace NDJSON on stderr; nil = persist-only.
 type ReviewTrace struct {
-	UserPrompt    string
-	FinalResponse string
-	Turns         []TurnRecord
+	SystemPrompt  string                         `json:"system_prompt"`
+	UserPrompt    string                         `json:"user_prompt"`
+	DiffMeta      DiffMeta                       `json:"diff_meta"`
+	SelectedFiles []string                       `json:"selected_files"`
+	InjectedRules []RuleRef                      `json:"injected_rules"`
+	Model         string                         `json:"model"`
+	Provider      string                         `json:"provider"`
+	FinalResponse string                         `json:"final_response"`
+	Turns         []TurnRecord                   `json:"turns"`
+	Sink          func(step string, payload any) `json:"-"`
+}
+
+// emit forwards a recorded step to the live Sink when set; nil-safe.
+func (t *ReviewTrace) emit(step string, payload any) {
+	if t == nil || t.Sink == nil {
+		return
+	}
+	t.Sink(step, payload)
+}
+
+// SetSystemPrompt records the shared system prompt once (first non-empty wins);
+// nil-safe. Called in every backend so openai/codex don't persist an empty one.
+func (t *ReviewTrace) SetSystemPrompt(p string) {
+	if t == nil || t.SystemPrompt != "" {
+		return
+	}
+	t.SystemPrompt = p
+	t.emit("system_prompt", p)
 }
 
 // SetPrompt records the raw user prompt once (first non-empty wins); nil-safe.
@@ -71,6 +117,49 @@ func (t *ReviewTrace) SetPrompt(p string) {
 		return
 	}
 	t.UserPrompt = p
+	t.emit("user_prompt", p)
+}
+
+// SetDiffMeta records the diff identification (base/head + source); nil-safe.
+func (t *ReviewTrace) SetDiffMeta(m DiffMeta) {
+	if t == nil {
+		return
+	}
+	t.DiffMeta = m
+	t.emit("diff_meta", m)
+}
+
+// SetSelectedFiles records the post-filter selected file set; nil-safe.
+func (t *ReviewTrace) SetSelectedFiles(files []string) {
+	if t == nil {
+		return
+	}
+	t.SelectedFiles = files
+	t.emit("selected_files", files)
+}
+
+// SetInjectedRules records which rules survived selection (stem + provenance);
+// nil-safe.
+func (t *ReviewTrace) SetInjectedRules(refs []RuleRef) {
+	if t == nil {
+		return
+	}
+	t.InjectedRules = refs
+	t.emit("injected_rules", refs)
+}
+
+// SetModel records the resolved model + provider; nil-safe. Called per backend.
+func (t *ReviewTrace) SetModel(provider, model string) {
+	if t == nil {
+		return
+	}
+	if t.Provider == "" {
+		t.Provider = provider
+	}
+	if t.Model == "" {
+		t.Model = model
+	}
+	t.emit("model", map[string]string{"provider": provider, "model": model})
 }
 
 // SetFinalResponse records the raw final response text; nil-safe.
@@ -79,6 +168,7 @@ func (t *ReviewTrace) SetFinalResponse(r string) {
 		return
 	}
 	t.FinalResponse = r
+	t.emit("final_response", r)
 }
 
 // RecordTool appends one tool dispatch; nil-safe.
@@ -86,7 +176,9 @@ func (t *ReviewTrace) RecordTool(turn int, tool, args string) {
 	if t == nil {
 		return
 	}
-	t.Turns = append(t.Turns, TurnRecord{Turn: turn, Tool: tool, Args: args})
+	tr := TurnRecord{Turn: turn, Tool: tool, Args: args}
+	t.Turns = append(t.Turns, tr)
+	t.emit("tool", tr)
 }
 
 // Store is the optional persistence seam: when set, Review saves each result and
@@ -186,6 +278,12 @@ type Request struct {
 	// layer builds it from --verbose/--quiet + a TTY check. Only milestone strings
 	// and file paths/tool names ever reach it — never tokens.
 	Progress func(string)
+
+	// TraceSink, when non-nil, is wired onto the ReviewTrace.Sink so each capture
+	// seam emits a live step (cli's --trace renders NDJSON to stderr). Distinct from
+	// Progress; nil = persist-only (no live stream). Capture still runs regardless,
+	// so the live stream and the persisted trace stay consistent by construction.
+	TraceSink func(step string, payload any)
 
 	// Persist context copied onto the saved PersistRecord (no secrets): the resolved
 	// provider/model and, on the --pr path, the PR owner/repo/number. Local reviews
@@ -289,7 +387,15 @@ func (e *Engine) Review(ctx stdctx.Context, req Request) (ReviewResult, error) {
 		}, nil
 	}
 
-	rulesText, rulesApplied, rulesTruncated := e.buildRules(req, selected)
+	var trace *ReviewTrace
+	if e.Store != nil || req.TraceSink != nil {
+		trace = &ReviewTrace{Sink: req.TraceSink}
+		headSHA, _ := e.Runner.HeadSHA(ctx, req.RepoDir)
+		trace.SetDiffMeta(DiffMeta{BaseSHA: baseRef(req), HeadSHA: headSHA, Source: modeName(req.Mode)})
+		trace.SetSelectedFiles(changedPathsOf(selected))
+	}
+
+	rulesText, rulesApplied, rulesTruncated := e.buildRules(req, selected, trace)
 
 	assembled := enginectx.AssembleContext(selected, enginectx.AssembleOptions{
 		TokenBudget:  diffBudget(req.TokenBudget, req.RulesTokenBudget),
@@ -303,10 +409,7 @@ func (e *Engine) Review(ctx stdctx.Context, req Request) (ReviewResult, error) {
 
 	semanticContext, semanticStat := retrieveSemantic(ctx, req.Retriever, selected)
 
-	var trace *ReviewTrace
-	if e.Store != nil {
-		trace = &ReviewTrace{}
-	}
+	trace.SetModel(req.Provider, req.Model)
 
 	rev := selected[0].Ref
 	out, err := e.Agent.Review(ctx, AgentContext{
@@ -373,6 +476,11 @@ func (e *Engine) Review(ctx stdctx.Context, req Request) (ReviewResult, error) {
 					rec.Transcript = blob
 				}
 			}
+			if blob, merr := json.Marshal(redactTrace(*trace)); merr != nil {
+				stats["trace_error"] = merr.Error()
+			} else {
+				rec.TraceJSON = string(blob)
+			}
 		}
 		id, serr := e.Store.SaveReview(ctx, rec)
 		if serr != nil {
@@ -388,7 +496,7 @@ func (e *Engine) Review(ctx stdctx.Context, req Request) (ReviewResult, error) {
 // buildRules selects the loaded rules against the changed paths and renders the
 // fenced rules section. On a fork PR, Untrusted (repo) rules are dropped before
 // selection and their context_files are never inlined.
-func (e *Engine) buildRules(req Request, selected []diff.Diff) (text string, applied int, truncated bool) {
+func (e *Engine) buildRules(req Request, selected []diff.Diff, trace *ReviewTrace) (text string, applied int, truncated bool) {
 	loaded := req.Rules
 	if req.RulesFork {
 		loaded = trustedOnly(loaded)
@@ -400,6 +508,11 @@ func (e *Engine) buildRules(req Request, selected []diff.Diff) (text string, app
 	if len(picked) == 0 {
 		return "", 0, false
 	}
+	refs := make([]RuleRef, 0, len(picked))
+	for _, r := range picked {
+		refs = append(refs, RuleRef{Stem: r.Stem, Provenance: r.Provenance.String()})
+	}
+	trace.SetInjectedRules(refs)
 	return rules.BuildRulesSection(picked, !req.RulesFork, req.RulesTokenBudget)
 }
 
@@ -505,6 +618,53 @@ func diffBudget(total, rulesCap int) int {
 		return 1
 	}
 	return b
+}
+
+// baseRef is the base operand the diff compared against, by mode: the range
+// <from>, the commit's parent expression, or "" for the staged index (vs HEAD).
+func baseRef(req Request) string {
+	switch req.Mode {
+	case diff.ModeRange:
+		return req.From
+	case diff.ModeCommit:
+		if req.Commit == "" {
+			return ""
+		}
+		return req.Commit + "^"
+	default:
+		return ""
+	}
+}
+
+// redactTrace returns a copy of t with secrets removed two ways: structured
+// fields that could carry a credential are blanked (defensive — model/provider
+// are non-secret but Provider literals stay), and config.RedactString runs over
+// every free-text field (system/user prompt, injected-rule stems, final
+// response) so a token embedded in the diff or prompt prose is masked too. The
+// trace is LOCAL-only; this guards the on-disk state.db.
+func redactTrace(t ReviewTrace) ReviewTrace {
+	t.Sink = nil
+	t.SystemPrompt = config.RedactString(t.SystemPrompt)
+	t.UserPrompt = config.RedactString(t.UserPrompt)
+	t.FinalResponse = config.RedactString(t.FinalResponse)
+	t.DiffMeta.BaseSHA = config.RedactString(t.DiffMeta.BaseSHA)
+	t.DiffMeta.HeadSHA = config.RedactString(t.DiffMeta.HeadSHA)
+	rules := make([]RuleRef, len(t.InjectedRules))
+	for i, r := range t.InjectedRules {
+		rules[i] = RuleRef{Stem: config.RedactString(r.Stem), Provenance: r.Provenance}
+	}
+	t.InjectedRules = rules
+	files := make([]string, len(t.SelectedFiles))
+	for i, f := range t.SelectedFiles {
+		files[i] = config.RedactString(f)
+	}
+	t.SelectedFiles = files
+	turns := make([]TurnRecord, len(t.Turns))
+	for i, tr := range t.Turns {
+		turns[i] = TurnRecord{Turn: tr.Turn, Tool: tr.Tool, Args: config.RedactString(tr.Args)}
+	}
+	t.Turns = turns
+	return t
 }
 
 func modeName(m diff.Mode) string {

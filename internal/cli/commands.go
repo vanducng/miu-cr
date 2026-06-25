@@ -110,6 +110,7 @@ func rootCommand(opts *options) *cobra.Command {
 	root.AddCommand(serveCommand(opts))
 	root.AddCommand(rulesCommand(opts))
 	root.AddCommand(historyCommand(opts))
+	root.AddCommand(traceCommand(opts))
 	return root
 }
 

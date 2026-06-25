@@ -3,12 +3,68 @@ package agent
 import (
 	stdctx "context"
 	"encoding/json"
+	"io"
+	"net/http"
+	"net/http/httptest"
 	"strings"
 	"testing"
 
 	"github.com/vanducng/miu-cr/internal/engine"
 	"github.com/vanducng/miu-cr/internal/engine/gitcmd"
 )
+
+// Every backend's Review must capture a NON-EMPTY system prompt + its
+// model/provider into the threaded Trace — the headline bug fix. Without this an
+// openai/codex review would persist an empty SystemPrompt.
+func TestTrace_AnthropicCapturesSystemPromptAndModel(t *testing.T) {
+	a := &anthropicAgent{
+		client: &fakeAnthropic{responses: []string{textMessage(`{"findings":[]}`)}},
+		model:  "claude-test",
+	}
+	tr := &engine.ReviewTrace{}
+	if _, err := a.Review(stdctx.Background(), Context{Text: "ctx", RepoDir: t.TempDir(), Trace: tr}); err != nil {
+		t.Fatalf("Review: %v", err)
+	}
+	assertCapturedSystemPrompt(t, tr, "anthropic", "claude-test")
+}
+
+func TestTrace_OpenAICapturesSystemPromptAndModel(t *testing.T) {
+	a := &openaiAgent{
+		client: &fakeOpenAI{responses: []string{textCompletion(`{"findings":[]}`)}},
+		model:  "gpt-test",
+	}
+	tr := &engine.ReviewTrace{}
+	if _, err := a.Review(stdctx.Background(), Context{Text: "ctx", RepoDir: t.TempDir(), Trace: tr}); err != nil {
+		t.Fatalf("Review: %v", err)
+	}
+	assertCapturedSystemPrompt(t, tr, "openai", "gpt-test")
+}
+
+func TestTrace_CodexCapturesSystemPromptAndModel(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		_, _ = io.WriteString(w, codexMessageResp(`{"findings":[]}`))
+	}))
+	defer srv.Close()
+	a := newTestCodexAgent(t, srv)
+	tr := &engine.ReviewTrace{}
+	if _, err := a.Review(stdctx.Background(), Context{Text: "diff", Trace: tr}); err != nil {
+		t.Fatalf("Review: %v", err)
+	}
+	assertCapturedSystemPrompt(t, tr, "codex", "gpt-test")
+}
+
+func assertCapturedSystemPrompt(t *testing.T, tr *engine.ReviewTrace, wantProvider, wantModel string) {
+	t.Helper()
+	if tr.SystemPrompt != systemPrompt {
+		t.Errorf("system prompt not captured: got %q", tr.SystemPrompt)
+	}
+	if tr.Provider != wantProvider || tr.Model != wantModel {
+		t.Errorf("model/provider: got %q/%q, want %q/%q", tr.Provider, tr.Model, wantProvider, wantModel)
+	}
+	if tr.UserPrompt == "" {
+		t.Error("user prompt not captured")
+	}
+}
 
 // runTool records each dispatch into a non-nil Trace (turn, tool, args), with
 // args holding only the path/pattern label — never the file content or a token.

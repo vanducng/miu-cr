@@ -160,6 +160,8 @@ func (a *codexAgent) Review(ctx stdctx.Context, rc Context) (engine.ReviewOutput
 	}
 
 	userPrompt := BuildUserPrompt(PromptParts{Rules: rc.Rules, SemanticContext: rc.SemanticContext, WantDiagram: rc.WantDiagram, Diff: rc.Text})
+	rc.Trace.SetSystemPrompt(systemPrompt)
+	rc.Trace.SetModel("codex", a.model)
 	rc.Trace.SetPrompt(userPrompt)
 	input := []codexItem{{
 		Type: "message",

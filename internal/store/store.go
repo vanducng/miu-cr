@@ -34,6 +34,10 @@ type ReviewRecord struct {
 	Transcript  []byte // JSON per-turn tool calls; nil/empty when not captured
 	RawPrompt   string
 	RawResponse string
+	// TraceJSON is the full redacted review trace (system+user prompts, diff meta,
+	// selected files, injected rules, model/provider, final response) as JSON.
+	// LOCAL-only; never in the review envelope or a posted comment.
+	TraceJSON string
 }
 
 // ReviewSummary is the list row for `history` — the scalar columns only (no
