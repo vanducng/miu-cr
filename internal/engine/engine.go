@@ -150,15 +150,11 @@ func (t *ReviewTrace) SetInjectedRules(refs []RuleRef) {
 
 // SetModel records the resolved model + provider; nil-safe. Called per backend.
 func (t *ReviewTrace) SetModel(provider, model string) {
-	if t == nil {
+	if t == nil || t.Model != "" { // first-write-wins; emit the step exactly once
 		return
 	}
-	if t.Provider == "" {
-		t.Provider = provider
-	}
-	if t.Model == "" {
-		t.Model = model
-	}
+	t.Provider = provider
+	t.Model = model
 	t.emit("model", map[string]string{"provider": provider, "model": model})
 }
 

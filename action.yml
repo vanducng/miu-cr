@@ -99,8 +99,9 @@ runs:
         fi
         if [ -n "$MODEL" ]; then export ANTHROPIC_MODEL="$MODEL"; fi
         REF="${GITHUB_REPOSITORY}#${PR_NUMBER}"
-        # A real LLM PR review exceeds the 30s default; give it room.
-        ARGS=(review --pr "$REF" --post --gate "$GATE" --filter-mode "$FILTER_MODE" --timeout 300s)
+        # A real LLM PR review exceeds the 30s default; a large diff on a slower model
+        # can exceed 300s, so give it 600s (review.timeout is retryable + actionable anyway).
+        ARGS=(review --pr "$REF" --post --gate "$GATE" --filter-mode "$FILTER_MODE" --timeout 600s)
         if [ -n "$SARIF_FILE" ]; then ARGS+=(--sarif-out "$SARIF_FILE"); fi
         if [ "${SUGGEST:-}" = "true" ]; then ARGS+=(--suggest); fi
         miucr "${ARGS[@]}"

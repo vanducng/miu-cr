@@ -64,7 +64,8 @@ func traceCommand(_ *options) *cobra.Command {
 				return renderTrace(cmd.OutOrStdout(), id, tr)
 			}
 			data := traceData(id, tr)
-			summary := map[string]any{"id": id, "steps": len(traceSteps(tr))}
+			steps, _ := data["steps"].([]traceStep)
+			summary := map[string]any{"id": id, "steps": len(steps)}
 			return writeSuccess(cmd.OutOrStdout(), "trace", "trace.show", data, summary)
 		},
 	}
