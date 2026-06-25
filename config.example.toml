@@ -102,6 +102,7 @@ default_provider = "anthropic"
 # min_severity = "low"           # --pr inline floor: none|info|low|medium|high|critical
 # timeout      = "300s"          # review timeout (a Go duration: 300s, 5m, …)
 # suggest      = false           # emit GitHub one-click suggestions on --post (default off)
+# patch_repair = false           # 2nd-pass recovery of one-click suggestions; only effective with suggest=true (default off)
 #
 # # category_urls maps a finding Category (case-insensitive) to a docs URL so the
 # # category renders as a clickable link in PR comments/summary + the SARIF helpUri.
