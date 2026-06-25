@@ -150,7 +150,7 @@ func RenderSummaryFull(info *PRInfo, findings []engine.Finding, stats map[string
 	if lead != "" {
 		lead += fmt.Sprintf(" · %d finding%s", len(findings), plural(len(findings)))
 	} else {
-		lead = "✅ no findings"
+		lead = "<sub><sub>![no issues found](https://img.shields.io/badge/no_issues_found-brightgreen?style=flat)</sub></sub>"
 	}
 	fmt.Fprintf(&b, "> %s\n\n", lead)
 	renderConfidence(&b, opts.Confidence, opts.ConfidenceReason, findings)
@@ -169,9 +169,9 @@ func RenderSummaryFull(info *PRInfo, findings []engine.Finding, stats map[string
 		renderOverflow(&b, info, omitted, categoryURLs, opts.RuleCitations)
 	}
 
-	renderPresentation(&b, info, findings, opts.Diffs, opts.ReviewID, opts.FileSummaries)
+	renderPresentation(&b, info, findings, opts.Diffs, opts.FileSummaries)
 
-	renderReviewInternals(&b, stats, opts.Diffs)
+	renderHandoffAndInternals(&b, info, opts.ReviewID, stats, opts.Diffs)
 
 	fmt.Fprintf(&b, "\n<sub>Reviewed commit %s · Posted by miu-cr</sub>", commitRef(info))
 	return b.String()
@@ -185,14 +185,28 @@ func plural(n int) string {
 	return "s"
 }
 
-// renderReviewInternals writes the verbose PR metadata into a COLLAPSED
-// <details>Review internals</details> bullet list near the footer (off the
-// scannable top): Files, Churn (+adds/−dels), Effort, Context. File/churn/effort
-// come from diffs; with no diffs it falls back to the stats files_reviewed count
-// and omits the churn/effort bullets. All values are trusted (ints + fixed labels).
-func renderReviewInternals(b *strings.Builder, stats map[string]any, diffs []diff.Diff) {
+// renderHandoffAndInternals writes ONE collapsed <details> combining the agent
+// handoff (review_id, re-run command, MCP) and the verbose review metadata (Files,
+// Churn, Effort, Context), so the summary has a single secondary block instead of two
+// confusingly-similar ones. The handoff group is omitted when reviewID is empty; the
+// internals group always renders. All values are trusted (ids, ints, fixed labels);
+// only a backtick inside the review_id is neutralized.
+func renderHandoffAndInternals(b *strings.Builder, info *PRInfo, reviewID string, stats map[string]any, diffs []diff.Diff) {
+	b.WriteString("\n<details>\n<summary>Agent handoff & review internals</summary>\n\n")
+
+	if strings.TrimSpace(reviewID) != "" {
+		b.WriteString("**Hand off to an agent**\n\n")
+		fmt.Fprintf(b, "- review_id: `%s`\n", strings.ReplaceAll(reviewID, "`", "'"))
+		if url := prURL(info); url != "" {
+			fmt.Fprintf(b, "- Re-run as JSON: `miucr review --pr %s -o json`\n", strings.ReplaceAll(url, "`", "'"))
+		} else {
+			b.WriteString("- Re-run as JSON: `miucr review --pr <pr-url> -o json`\n")
+		}
+		b.WriteString("- MCP: call `review_run` (or `review_get` with the review_id) from an agent host.\n\n")
+	}
+
+	b.WriteString("**Review internals**\n\n")
 	files, adds, dels := diffStats(diffs)
-	b.WriteString("\n<details>\n<summary>Review internals</summary>\n\n")
 	if files > 0 {
 		fmt.Fprintf(b, "- Files: **%d**\n", files)
 		fmt.Fprintf(b, "- Churn: +%d/−%d\n", adds, dels)
