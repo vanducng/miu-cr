@@ -154,7 +154,7 @@ const conversationTruncated = "\n…(conversation truncated)"
 // FetchConversation paginates the PR's prior miucr review summaries, inline
 // finding threads, and developer issue replies into one labeled, byte-capped
 // advisory string for the USER turn. It is best-effort: any list error is logged
-// (redacted) and returns "" — a conversation fetch never fails the review (mirrors
+// (redacted) and returns "": a conversation fetch never fails the review (mirrors
 // skipUnchanged's degrade-to-default). The caller drops it on fork PRs; this
 // helper does no trust decision. Returns "" when there is nothing to inject.
 func FetchConversation(ctx stdctx.Context, client Client, info *PRInfo) string {
@@ -209,7 +209,7 @@ func capConversation(s string) string {
 }
 
 // fetchPriorSummaries returns miucr's own prior review summary (the marker-bearing
-// ISSUE COMMENT — the upsert target, not a review body), newest pages last. "" on
+// ISSUE COMMENT, the upsert target, not a review body), newest pages last. "" on
 // any list error. The summary moved out of the review body to a single upserted
 // issue comment, so --conversation scans issue comments here to surface it.
 func fetchPriorSummaries(ctx stdctx.Context, client Client, info *PRInfo) string {

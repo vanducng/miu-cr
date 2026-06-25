@@ -1,18 +1,18 @@
 ---
 title: System Architecture
-description: How miucr's delivery surfaces funnel into one deterministic review engine — the data flow, the store-swap seam, and the serve, dedupe, write-action, poll, and REST/App-auth security models.
+description: How miucr's delivery surfaces funnel into one deterministic review engine: the data flow, the store-swap seam, and the serve, dedupe, write-action, poll, and REST/App-auth security models.
 ---
 
 miucr is a pure-Go (`CGO_ENABLED=0`) static binary. The review engine is **owned
-and deterministic** where correctness matters — selecting files, assembling
+and deterministic** where correctness matters: selecting files, assembling
 context, anchoring findings to real line numbers, gating, and dedupe. The LLM is
 used **only for judgment**: finding bugs and proposing fixes. Every delivery
 surface is a thin shell around that one engine.
 
 ## System overview
 
-miucr exposes several surfaces — a one-shot `review` CLI, the `serve` webhook
-daemon, a GitHub Action, a poll trigger, a REST API, and an MCP server — but
+miucr exposes several surfaces (a one-shot `review` CLI, the `serve` webhook
+daemon, a GitHub Action, a poll trigger, a REST API, and an MCP server), but
 there is **no second engine and no duplicated review logic**. The
 GitHub-integrated surfaces all converge on a single PR-review path,
 `cli.PRReviewer.ReviewPR`; local review (`miucr review` over staged changes / a
@@ -33,7 +33,7 @@ graph TD
 
     PRPath["cli.PRReviewer.ReviewPR<br/>fetch + publish + dedupe/resolution"]
     ServeSeam["cli.ReviewPRForServe"]
-    Engine["internal/engine — engine.Review<br/>I/O-agnostic, deterministic"]
+    Engine["internal/engine: engine.Review<br/>I/O-agnostic, deterministic"]
     Store[("store.Store /<br/>store.PRThreadStore")]
 
     Action --> ReviewPRCLI
@@ -64,7 +64,7 @@ review.
 `ReviewPRForServe` delegates straight to `PRReviewer.ReviewPR`; it bypasses the
 CLI's `gate_failed` exit path, so the serve gate is **publish-severity only** and
 never affects daemon liveness. The GitHub Action is a composite action that
-installs the released binary and runs `miucr review --pr --post` in CI — it
+installs the released binary and runs `miucr review --pr --post` in CI; it
 validates the released binary, not `serve`.
 
 ## The PR-review data flow
@@ -79,10 +79,10 @@ flowchart TD
     D --> E["Agent.Review<br/>one LLM pass, file_read / grep tools"]
     E --> F["ResolveLineNumbers<br/>re-anchor from quoted code"]
     F --> G{"Quote still<br/>matches?"}
-    G -->|"no — Line == 0"| Drop["drop — findings_dropped"]
+    G -->|"no: Line == 0"| Drop["drop: findings_dropped"]
     G -->|"yes"| H["Dedupe<br/>file + line + category + hash"]
     H --> I{"Worst severity<br/>reaches --gate?"}
-    I -->|"yes"| Gate["gate status set — review exits 2"]
+    I -->|"yes"| Gate["gate status set: review exits 2"]
     I -->|"no"| Pass["gate clean"]
     Gate --> P["Publish (--post)<br/>upsert ONE summary issue comment + inline review comments"]
     Pass --> P
@@ -91,7 +91,7 @@ flowchart TD
 The reviewed *revision* travels with the diff, so every later stage reads the exact
 content the diff came from. **Line-anchoring with drift-reject** is the core trick:
 any line number the model emits is discarded; the engine recomputes each finding's
-line from its quoted `existing_code` against the reviewed revision — matching the
+line from its quoted `existing_code` against the reviewed revision, matching the
 hunk new side, then old side, then the full new-file content as a fallback. A
 finding whose quote no longer matches resolves to line `0` and is **dropped**. That
 single rule kills the position drift that plagues diff-only and bare-agent review.
@@ -102,7 +102,7 @@ misconfigured run never silently passes.
 
 Publishing keeps the summary and the inline findings in **separate homes**: inline
 comments post as a PR review (body left empty), and the summary is **ONE issue
-comment that is upserted** - miu-cr lists the PR's issue comments, finds the one
+comment that is upserted**: miu-cr lists the PR's issue comments, finds the one
 carrying the `<!-- miu-cr-review -->` marker, and edits it in place (else creates
 it). A re-run **updates the single summary** instead of stacking a review per
 commit. See [How it works](/how-it-works/) for the per-stage detail.
@@ -118,14 +118,14 @@ engine; it does no review logic. The seam splits cleanly across the layering:
 graph LR
     Wire["wire layer<br/>discover + load + trust-tag + IsFork"] -->|"[]rules.Rule + isFork<br/>in engine.Request"| Engine["engine<br/>selects after SelectFiles"]
     Engine -->|"render"| Prompt["USER turn<br/>fenced rules section before the diff"]
-    Defaults["built-in defaults — Trusted"] --> Wire
-    User["~/.config/miu/cr/rules — Trusted"] --> Wire
-    Repo[".miu/cr/rules — Untrusted"] --> Wire
+    Defaults["built-in defaults: Trusted"] --> Wire
+    User["~/.config/miu/cr/rules: Trusted"] --> Wire
+    Repo[".miu/cr/rules: Untrusted"] --> Wire
 ```
 
 Only the wire layer knows whether a path is a local working tree or a fork-PR temp
 clone, so it owns discovery, provenance (defaults/user = **Trusted**, repo =
-**Untrusted**), and `IsFork` — it never selects. The engine selects in-memory (no
+**Untrusted**), and `IsFork`; it never selects. The engine selects in-memory (no
 filesystem access) from the slice wire passed in, because selection needs the
 changed paths that only exist after `SelectFiles`. Repo (Untrusted) rules are
 wrapped in a context-only fence and **dropped entirely on fork PRs** before
@@ -138,7 +138,7 @@ result.
 ## The store-swap seam
 
 miucr persists reviews and PR-thread resolution state behind two small
-interfaces. Everything above them — engine, CLI, publish, MCP server — consumes
+interfaces. Everything above them (engine, CLI, publish, MCP server) consumes
 only the interfaces, so the backend swaps without any of them changing.
 
 ```mermaid
@@ -151,8 +151,8 @@ graph LR
     S1["store.Store"]
     S2["store.PRThreadStore"]
     Factory["wire storefactory<br/>backend = sqlite | postgres"]
-    SQLite[("SQLite — default<br/>modernc.org/sqlite")]
-    PG[("Postgres — opt-in<br/>pgx/v5 via database/sql")]
+    SQLite[("SQLite: default<br/>modernc.org/sqlite")]
+    PG[("Postgres: opt-in<br/>pgx/v5 via database/sql")]
 
     Eng --> S1
     CLIp --> S1
@@ -165,7 +165,7 @@ graph LR
 ```
 
 The backend factory lives in the **wire layer** (`storefactory`), not in
-`package store` — both `sqlite` and `postgres` import `store`, so a factory inside
+`package store`: both `sqlite` and `postgres` import `store`, so a factory inside
 `store` would cycle. Resolution is `MIUCR_STORE_BACKEND` (env) > `[store] backend`
 (config) > `sqlite`, with an empty config value falling through to the default. The
 Postgres DSN prefers `MIUCR_PG_DSN` (env) over `[store] dsn` so the password need
@@ -184,7 +184,7 @@ service container.
 
 Because Postgres is an explicit choice, an open/connect/auth failure with
 `backend = postgres` is **fatal** (a typed `store.unavailable` `CLIError`, exit 1,
-safe to retry) on both the CLI and the MCP-`Serve` paths — never a panic, never a
+safe to retry) on both the CLI and the MCP-`Serve` paths, never a panic, never a
 silent nil-degrade. The implicit, opt-in SQLite PR-thread path keeps its silent
 nil-degrade. See [Store backends](/store-backends/) for the operator reference.
 
@@ -198,11 +198,11 @@ budget, and only then is the review dispatched to a bounded worker.
 flowchart TD
     W["POST /webhook"] --> Cap["MaxBytesReader 5 MB<br/>before HMAC (OOM guard)"]
     Cap --> Type{"WebHookType<br/>== pull_request?"}
-    Type -->|"no"| Ignore1["ignore — avoids ParseWebHook panic"]
+    Type -->|"no"| Ignore1["ignore: avoids ParseWebHook panic"]
     Type -->|"yes"| HMAC{"HMAC valid?<br/>WEBHOOK_SECRET required"}
-    HMAC -->|"no"| Reject["reject — forged"]
+    HMAC -->|"no"| Reject["reject: forged"]
     HMAC -->|"yes"| Allow{"owner/repo in<br/>--repos allowlist?"}
-    Allow -->|"no"| Ignore2["ignore — SSRF / cost guard"]
+    Allow -->|"no"| Ignore2["ignore: SSRF / cost guard"]
     Allow -->|"yes"| Ack["respond 200<br/>before dispatch"]
     Ack --> Pool["bounded worker pool<br/>coalesce on {owner, repo, number}"]
     Pool --> Job["ReviewPRForServe → ReviewPR<br/>per-job recover()"]
@@ -215,46 +215,46 @@ webhooks) and a GitHub token is required to clone and post. The 5 MB body cap ru
 `ParseWebHook` (which panics on unregistered event types); the `200` is returned
 **before** dispatch. A mutex-guarded in-flight set keyed by `{owner, repo, number}`
 coalesces concurrent deliveries for the same PR, and a full queue is loud-logged
-and counted — never a silent drop. The owner/repo **allowlist** (`--repos`) stops
+and counted, never a silent drop. The owner/repo **allowlist** (`--repos`) stops
 a forged webhook from making the token clone an arbitrary repo. All serve-side
 errors route through `config.RedactString` (the clone URL embeds the token), so
 secrets are never logged, never in the envelope, never persisted.
 
 ## Cross-push dedupe and resolution
 
-Re-running a review must not re-post a finding the author already saw — even across
-pushes that shift line numbers — and a finding the author **fixed** should go quiet
+Re-running a review must not re-post a finding the author already saw (even across
+pushes that shift line numbers), and a finding the author **fixed** should go quiet
 without being permanently suppressed if it recurs. Two independent layers handle
 this.
 
 ```mermaid
 flowchart TD
-    F["Finding"] --> FP["fingerprint() — line-free<br/>path + category + sha256(QuotedCode)"]
+    F["Finding"] --> FP["fingerprint(): line-free<br/>path + category + sha256(QuotedCode)"]
     FP --> Marker["16-hex marker embedded in the comment"]
     Marker --> Skip{"in skip-set?<br/>ExistingFingerprints ∪ store-posted"}
-    Skip -->|"posted"| Quiet["skip — already seen"]
+    Skip -->|"posted"| Quiet["skip: already seen"]
     Skip -->|"resolved"| Reopen["set-difference reopen<br/>delete from skip-set"]
     Skip -->|"absent"| Post["post inline comment"]
     Reopen --> Post
-    Post --> Persist["UpsertPosted — PostedFindings only"]
+    Post --> Persist["UpsertPosted: PostedFindings only"]
     Gone["prior posted fp absent now<br/>AND path still in PR diff"] --> Resolved["MarkResolved"]
 ```
 
-**Layer 1 — content-stable fingerprint (portable, no DB).** The single chokepoint
+**Layer 1, content-stable fingerprint (portable, no DB).** The single chokepoint
 `github.fingerprint()` is line-free: `path | category |
 sha256(normalizeForFingerprint(QuotedCode))`. Dropping `Line` (the volatile re-post
 axis) and `Rationale` (LLM free-text) makes a re-anchored finding hash to the same
 16-hex marker, so the existing comment markers carry the dedupe state with **no
-database** — this is exactly the stateless, DB-free path the ephemeral Action
+database**: this is exactly the stateless, DB-free path the ephemeral Action
 runner needs. `normalizeForFingerprint` is a dedicated, **less-lossy** normalize
 (strip the diff marker + trailing whitespace, CRLF → LF; **preserve leading
-indentation and blank lines**) — deliberately not the anchor's full-trim normalize,
+indentation and blank lines**), deliberately not the anchor's full-trim normalize,
 which would over-dedup and collapse indentation-distinct findings. The content key
 is best-effort exact-match; semantic matching is a separate, opt-in layer (see
 [Semantic code-recall](/semantic-recall/)).
 
-**Layer 2 — opt-in PR-thread store (serve / local).** Resolution tracking lives
-behind `store.PRThreadStore` — `UpsertPosted` / `MarkResolved` / `ListFindings`
+**Layer 2, opt-in PR-thread store (serve / local).** Resolution tracking lives
+behind `store.PRThreadStore`: `UpsertPosted` / `MarkResolved` / `ListFindings`
 over a `pr_findings` table (`owner, repo, number, fingerprint, path, status` with
 `status ∈ {posted, resolved}`). It is **opt-in via `MIUCR_PR_STORE`** (an explicit
 signal, not a dir-exists heuristic) so a warm-home self-hosted runner never
@@ -264,10 +264,10 @@ envelope.
 
 The wire glue (`publishReview`) computes the skip-set as `ExistingFingerprints ∪
 store{posted}`, then **reopens via set difference**: for each current finding whose
-stored status is `resolved`, it deletes the fingerprint from the skip-set — the
+stored status is `resolved`, it deletes the fingerprint from the skip-set: the
 lingering GitHub marker keeps it in `ExistingFingerprints`, so a plain union could
 never re-raise it; it must be subtracted. After the review, the store is populated
-from the **actually-submitted** set (`PostedFindings` — post-cap, post-empty-guard,
+from the **actually-submitted** set (`PostedFindings`: post-cap, post-empty-guard,
 post-degrade), never the raw findings, so a cap-omitted finding never records
 `status=posted`. A prior `posted` fingerprint absent from the current run whose path
 is **still in the PR diff** → `MarkResolved`. The store handle is opened per review
@@ -281,13 +281,13 @@ scrape converges once the first review's comments land.
 
 `review --pr` has two **opt-in** write-actions, **both default OFF**, both gated on
 the same publish path (`github.PostReview`, driven by a `PostReviewOptions` struct).
-Without the flags, behavior is unchanged — except a latent bug is fixed:
+Without the flags, behavior is unchanged, except a latent bug is fixed:
 `commentBody` no longer emits a one-click `suggestion` fence unconditionally; a
 native suggestion is emitted only under the gate below, else a plain fenced hint.
 
 ```mermaid
 flowchart TD
-    Pub["publish path — github.PostReview"]
+    Pub["publish path: github.PostReview"]
     Pub --> Sug{"--suggest set?"}
     Sug -->|"no"| Hint["plain fenced hint"]
     Sug -->|"yes"| Clean{"isCleanReplacement?<br/>single-line + re-matched anchor<br/>+ non-no-op + severity ≥ floor"}
@@ -303,32 +303,32 @@ flowchart TD
 
 **`--suggest`** emits a GitHub native suggested change only when *all* hold
 (`isCleanReplacement`): the finding is **single-line**
-(`EndLine == 0 || EndLine == Line` — a wrong multi-line *finding* range 422s the
+(`EndLine == 0 || EndLine == Line`, a wrong multi-line *finding* range 422s the
 whole review); the raw new-file line at `Line` exists and
 `normalizeLine(rawLine) == normalizeLine(QuotedCode)` (proving `Line` is the
 anchored line, since the resolver can fall back to an old-file number); the patch
 is not a no-op; and severity is ≥ the floor (default `medium`). `SuggestedPatch`
-may be a single line **or** a multi-line block — a wrap/guard/insert fix (e.g. a
+may be a single line **or** a multi-line block, a wrap/guard/insert fix (e.g. a
 nil-check around the line, or the line wrapped in `if err != nil { … }`): once the
 anchor is QuotedCode-proven, GitHub replaces exactly that single line with the
 block, so the multi-line patch is a safe in-place expansion. A multi-line patch on
 a *mismatched* anchor is dropped (never a wrong-span replace). Multi-line *finding*
 ranges (`EndLine > Line`) still require a proven contiguous one-hunk RIGHT range.
-Anything else degrades to the safe plain hint. Suggestions are **author-applied** —
+Anything else degrades to the safe plain hint. Suggestions are **author-applied**:
 miucr never pushes or commits to the PR branch.
 
 **`--approve-clean`** submits `Event=APPROVE` instead of the default `COMMENT` only
 when **every** precondition holds: gate clean, **not a fork**, **trusted author**
 (`AuthorAssociation` ∉ `{NONE, FIRST_TIME_CONTRIBUTOR, FIRST_TIMER}`), **≥1 file
 actually reviewed**, **head unchanged** (the head SHA is re-fetched immediately
-before `CreateReview`), and **not already approved** at the current head SHA. A
+before submitting the review), and **not already approved** at the current head SHA. A
 self-approve 422 is caught reactively and degrades to `COMMENT`. A precondition miss
-**degrades to COMMENT, never errors** — a CI run is never failed by an
+**degrades to COMMENT, never errors**: a CI run is never failed by an
 approve-precondition. Outcomes surface in the `data.pr` envelope block
 (`approve_action`, `approve_reason`, `suggestions_posted`).
 
-`serve` inherits both flags **OFF** — a webhook daemon must not auto-suggest or
-auto-approve — and the **GitHub Action stays comment-only** (a default token APPROVE
+`serve` inherits both flags **OFF** (a webhook daemon must not auto-suggest or
+auto-approve) and the **GitHub Action stays comment-only** (a default token APPROVE
 is a self-approve / supply-chain risk). One caveat: a PAT-submitted APPROVE
 **satisfies branch-protection required reviews** and can enable auto-merge, so "the
 human still owns merge" is not an invariant of `--approve-clean`; use a bot identity
@@ -345,30 +345,30 @@ the review/publish engine and fork handling are inherited unchanged via
 
 ```mermaid
 flowchart TD
-    Tick["tick — interval = max(--poll-interval, X-Poll-Interval)"] --> Src{"candidate source"}
+    Tick["tick: interval = max(--poll-interval, X-Poll-Interval)"] --> Src{"candidate source"}
     Src -->|"notifications (default)"| Notif["user notifications API<br/>Since cursor → GetPR resolves head SHA"]
     Src -->|"pulls"| Pulls["list open PRs per allowlisted repo<br/>head SHA carried inline"]
     Notif --> Dedup{"new head SHA?<br/>per-head dedup"}
     Pulls --> Dedup
-    Dedup -->|"no"| Skip["skip — spend guard"]
+    Dedup -->|"no"| Skip["skip: spend guard"]
     Dedup -->|"yes"| Job["build serve.Job → Pool.Submit"]
     Job --> Same["same ReviewPRForServe path"]
     Same --> OnDone["OnDone(nil) → seen[ref] = headSHA<br/>only on success"]
 ```
 
-The per-head dedup is the spend guard — **each new head SHA is one full LLM
+The per-head dedup is the spend guard: **each new head SHA is one full LLM
 review**, and a re-pushed head is a new SHA → one fresh review; the `--repos`
 allowlist is the blast-radius guard. Poll uses a narrow serve-local `notifGetter`
 interface (`ListNotifications` / `ListOpenPRs` / `GetPR`) rather than widening the
 shared `github.Client` (which would break its fakes). A restart-safe poller-local
 cursor (`~/.config/miu/cr/poll-cursor.json`, `{since, seen, notif_seen}`) records
-the reviewed head — **not** the review store, which can't answer "reviewed at head
+the reviewed head, **not** the review store, which can't answer "reviewed at head
 SHA X". The token is never a field; the file is written atomically (`0600`); a
 corrupt file degrades to empty + warn, never fatal. The poller records
 `seen[ref]=headSHA` only via `Job.OnDone(nil)` on success, so a failed or dropped
 review stays retryable next tick. Rate limits are honored (`X-Poll-Interval` floor,
 `RateLimitError` sleeps to reset, transients exponential-backoff with jitter), and
-on any error the cursor is never advanced — no tight loop. Webhook and poll run
+on any error the cursor is never advanced, no tight loop. Webhook and poll run
 under one `errgroup`/ctx and drain exactly once on cancel.
 
 ## REST API and GitHub App auth
@@ -379,10 +379,10 @@ opt-in; the default token + webhook + poll path is unchanged.
 ```mermaid
 flowchart TD
     C["client"] -->|"Authorization: Bearer MIUCR_API_TOKEN"| Auth{"constant-time<br/>bearer check"}
-    Auth -->|"empty / invalid"| E401["401 — len==0 checked first"]
+    Auth -->|"empty / invalid"| E401["401: len==0 checked first"]
     Auth -->|"ok"| Post["POST /v1/reviews"]
     Post --> AL{"owner/repo<br/>allowlisted?"}
-    AL -->|"no"| E403["403 — explicit, not silent 200"]
+    AL -->|"no"| E403["403: explicit, not silent 200"]
     AL -->|"yes"| Persist["persist pending ReviewRecord<br/>crypto/rand server-generated id"]
     Persist --> Enqueue["enqueue on the same worker pool<br/>respond 202 + id"]
     Get["GET /v1/reviews/{id}"] --> WL["whitelist: id, status, created_at,<br/>findings, stats (RepoDir excluded)"]
@@ -393,15 +393,15 @@ The REST API is gated by **one shared bearer = one trust boundary**: whoever hol
 `MIUCR_API_TOKEN` owns every stored review. This is deliberately **not**
 multi-tenant. The bearer middleware checks `len(token)==0 → 401` **before**
 `subtle.ConstantTimeCompare` (empty compares equal to empty), and the token is
-**env-only** (no flag → no `argv`/`ps` leak) — with no token the `/v1` routes are
+**env-only** (no flag → no `argv`/`ps` leak); with no token the `/v1` routes are
 not registered. POST validates and allowlist-checks (an explicit **403** off the
 allowlist, unlike the webhook's silent ignore), generates a `crypto/rand` id (a
-client can never supply one — removing the forgeable-id IDOR class), persists a
+client can never supply one, removing the forgeable-id IDOR class), persists a
 `pending` record, enqueues onto the **same worker pool** the webhook uses, and
 returns **202 + id**. The store gains an `UpsertReview`
 (`INSERT … ON CONFLICT(id) DO UPDATE`) so the worker can persist the final record
 over the pending row. `GET` maps a **whitelist** to the envelope, excluding
-`RepoDir` (the host `/tmp` clone path — info disclosure), and a `pending` row older
+`RepoDir` (the host `/tmp` clone path, info disclosure), and a `pending` row older
 than the review timeout is lazily recovered to `failed` so a crashed worker leaves
 no eternal pending.
 
@@ -413,11 +413,11 @@ sequenceDiagram
     participant T as appTokenSource
     participant GH as GitHub Apps API
     S->>T: resolveToken (request ctx + bounded timeout)
-    T->>T: mint RS256 App JWT — iss = app_id, exp ~9 min
+    T->>T: mint RS256 App JWT, iss = app_id, exp ~9 min
     T->>GH: CreateInstallationToken(jwt, installation_id)
     GH-->>T: installation token (~1 h)
     T->>T: cache in-memory, refresh-before-expiry, singleflight per installation
-    T-->>S: bearer — flows through WithAuthToken
+    T-->>S: bearer, flows through WithAuthToken
 ```
 
 A pure-Go **RS256** App-JWT minter (`crypto/rsa` + `crypto/sha256` + `crypto/x509`
@@ -426,11 +426,11 @@ with `iss = app_id`. A `TokenSource` interface keeps the seam clean:
 `staticTokenSource` reproduces the prior PAT/anonymous behavior byte-for-byte;
 `appTokenSource` mints the JWT, exchanges it via `Apps.CreateInstallationToken`,
 and caches the installation token in-memory with **refresh-before-expiry** (~5 min
-margin) plus **single-flight** (keyed by installation id — no thundering herd). An
+margin) plus **single-flight** (keyed by installation id, no thundering herd). An
 installation token is just a bearer, so it flows through the existing
-`WithAuthToken` — `NewClient` and `resolveToken`'s signature are untouched. The
+`WithAuthToken`; `NewClient` and `resolveToken`'s signature are untouched. The
 `[github]` config gains `mode = pat [default] | app`, `app_id`, `installation_id`,
-and `private_key_path` (**path-only** — the PEM is read at startup, parsed, and its
+and `private_key_path` (**path-only**: the PEM is read at startup, parsed, and its
 raw bytes zeroed; never inlined, logged, or persisted, since `RedactString` can't
 mask a multi-line PEM).
 

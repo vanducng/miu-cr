@@ -1,15 +1,15 @@
 ---
 title: REST API & GitHub App auth
-description: Drive miucr as a deployable single-operator service — an authenticated JSON REST API for reviews, plus opt-in GitHub App installation auth. Covers the single-operator threat model and secrets handling.
+description: Drive miucr as a deployable single-operator service; an authenticated JSON REST API for reviews, plus opt-in GitHub App installation auth. Covers the single-operator threat model and secrets handling.
 ---
 
 `miucr serve` can run as a small **deployable service**: an authenticated JSON
 REST API for queuing and reading reviews, plus opt-in **GitHub App installation
-auth** as an alternative to a static PAT. Both are **opt-in** — the default serve
+auth** as an alternative to a static PAT. Both are **opt-in**; the default serve
 path (HMAC webhook + PAT, see [Serve & Action](/serve-and-action/)) is unchanged.
 
 > **Scope: single-operator.** The REST API is gated by **one shared bearer
-> token**. That bearer is **one trust boundary** — whoever holds it owns *every*
+> token**. That bearer is **one trust boundary**: whoever holds it owns *every*
 > review the service has handled. This is **not** a multi-tenant SaaS: there is no
 > per-user isolation, no per-review authorization beyond "holds the bearer", and
 > no tenant column. Run it as your own single-operator service; do not hand the
@@ -19,7 +19,7 @@ path (HMAC webhook + PAT, see [Serve & Action](/serve-and-action/)) is unchanged
 
 Enable the API by setting **`MIUCR_API_TOKEN`** in the environment and wiring a
 store (the default SQLite store is wired automatically). Without `MIUCR_API_TOKEN`
-the `/v1` routes are **not registered at all** — serve stays webhook-only.
+the `/v1` routes are **not registered at all**; serve stays webhook-only.
 
 ```sh
 MIUCR_API_TOKEN=$(openssl rand -hex 32) \
@@ -27,7 +27,7 @@ WEBHOOK_SECRET=… GITHUB_TOKEN=… ANTHROPIC_API_KEY=… \
   miucr serve --addr :8080 --repos owner/repo
 ```
 
-The bearer is **env-only** (like `WEBHOOK_SECRET`) — there is intentionally **no
+The bearer is **env-only** (like `WEBHOOK_SECRET`); there is intentionally **no
 flag**, so it never lands in `argv` / `ps` / shell history.
 
 ### Endpoints
@@ -53,7 +53,7 @@ The body is `{owner, repo, number}` (the PR number). The server:
 1. Validates the body (`owner`, `repo` non-empty, `number > 0`) → else **`400`**.
 2. Checks the `--repos` **allowlist** → off-allowlist is an explicit **`403`**
    (unlike the webhook's silent `200`-ignore).
-3. Generates the review **id** with `crypto/rand` — the id is **never
+3. Generates the review **id** with `crypto/rand`; the id is **never
    client-supplied**.
 4. Persists a **`pending`** record under that id, then enqueues the review onto
    the same bounded worker pool the webhook uses.
@@ -81,8 +81,8 @@ curl -sS https://your-host/v1/reviews/9f2c… \
   -H "Authorization: Bearer $MIUCR_API_TOKEN"
 ```
 
-Reads the record back. The `data` block is a **whitelist** —
-`id, status, created_at, findings, stats` — and deliberately **omits the clone
+Reads the record back. The `data` block is a **whitelist**
+(`id, status, created_at, findings, stats`) and deliberately **omits the clone
 path** (`RepoDir`, a host `/tmp` path) and any other host-revealing field:
 
 ```json
@@ -116,7 +116,7 @@ An unknown id is a **`404`**.
 The worker persists the **final** record under the same id when the review
 finishes (`done` with findings/stats, or `failed` on error). **Stuck-pending
 recovery:** if a worker crashes mid-review, a later `GET` that finds a `pending`
-row **older than the review timeout** lazily flips it to `failed` — so a crash
+row **older than the review timeout** lazily flips it to `failed`, so a crash
 never leaves an eternal `pending`.
 
 ### HTTP error map
@@ -148,10 +148,10 @@ private_key_path = "/etc/miucr/app-key.pem"
 
 | Key                | Required (App) | Notes                                                       |
 |--------------------|----------------|-------------------------------------------------------------|
-| `mode`             | —              | `pat` (default) or `app`. Anything but `app` keeps PAT mode.|
+| `mode`             | no             | `pat` (default) or `app`. Anything but `app` keeps PAT mode.|
 | `app_id`           | **yes**        | The numeric GitHub App ID (the JWT `iss`).                  |
 | `installation_id`  | **yes**        | The numeric installation id (the App's installation URL).   |
-| `private_key_path` | **yes**        | **Path** to the App private-key PEM — **never inline PEM**. |
+| `private_key_path` | **yes**        | **Path** to the App private-key PEM (**never inline PEM**). |
 
 ### How it works
 
@@ -164,10 +164,10 @@ private_key_path = "/etc/miucr/app-key.pem"
    `Apps.CreateInstallationToken`.
 3. **Cache it in-memory** with **refresh-before-expiry** (~5 min margin) and
    **single-flight** (one in-flight mint per installation, so a refresh can't
-   stampede GitHub). The installation token is just a bearer — it flows through
+   stampede GitHub). The installation token is just a bearer; it flows through
    the existing `WithAuthToken` unchanged; nothing else in the review path moves.
 
-Installation tokens live **in memory only** — never persisted, never logged,
+Installation tokens live **in memory only**: never persisted, never logged,
 never in the envelope. They are lost on restart and re-minted on demand.
 
 ## Threat model
@@ -183,15 +183,15 @@ and mint GitHub tokens**, so the boundaries are explicit.
   bearer like a root credential for the service.
 - **Server-generated ids only.** The review id is `crypto/rand`; a client can
   **never** choose an id, so it can't probe or collide with another id by guessing.
-  (This is not multi-tenant isolation — a holder of the bearer can still read any
+  (This is not multi-tenant isolation; a holder of the bearer can still read any
   id it learns. It removes the *forgeable-id* class, not the shared-bearer scope.)
 
 ### Authentication
 
-- **Bearer is env-only** (`MIUCR_API_TOKEN`) — mirrors `WEBHOOK_SECRET`; a flag
+- **Bearer is env-only** (`MIUCR_API_TOKEN`); mirrors `WEBHOOK_SECRET`; a flag
   would leak via `argv` / `ps` / history.
 - **Empty token can never authenticate.** The middleware checks
-  `len(configured token) == 0 → 401` **before** the constant-time compare —
+  `len(configured token) == 0 → 401` **before** the constant-time compare,
   because an empty-vs-empty `subtle.ConstantTimeCompare` returns *equal*. With no
   token configured the `/v1` routes are not even registered.
 - **Constant-time compare** (`subtle.ConstantTimeCompare`) on the bearer; a strict
@@ -204,8 +204,8 @@ and mint GitHub tokens**, so the boundaries are explicit.
   bytes are **zeroed**. It is never inline in config, never logged, never in the
   envelope. (`config.RedactString` cannot mask a multi-line PEM, so the key must
   never become a config/log value at all.)
-- **Installation tokens are in-memory only** — never persisted/logged/enveloped.
-- **The GET envelope is a whitelist** — `RepoDir` (the host `/tmp` clone path) and
+- **Installation tokens are in-memory only**: never persisted/logged/enveloped.
+- **The GET envelope is a whitelist**: `RepoDir` (the host `/tmp` clone path) and
   other host paths are never exposed. Every serve-side error string is funneled
   through `config.RedactString`.
 
@@ -215,7 +215,7 @@ and mint GitHub tokens**, so the boundaries are explicit.
   maps to **`413`** via `errors.As(*http.MaxBytesError)`.
 - **Method + path guards** on every `/v1` route (wrong method → `405`).
 - **Explicit allowlist 403** off the `--repos` allowlist.
-- A panic in any review is recovered on the worker — it never kills a worker or
+- A panic in any review is recovered on the worker; it never kills a worker or
   the daemon.
 
 ## Live smoke (manual, key-gated)

@@ -62,7 +62,7 @@ func TestSkipUnchangedPostNeverSkips(t *testing.T) {
 }
 
 // TestSkipUnchangedChecksModeNeverSkips: --mode checks --post always publishes the
-// (idempotent per-commit) CheckRun, even at an already-reviewed SHA.
+// (idempotent per-SHA) CheckRun, even at an already-reviewed SHA.
 func TestSkipUnchangedChecksModeNeverSkips(t *testing.T) {
 	ctx := stdctx.Background()
 	st := tempStore(t)

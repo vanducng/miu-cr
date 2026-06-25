@@ -155,7 +155,7 @@ func resolveAnthropic(in ResolveInput, prof config.Provider) (Credentials, error
 
 	// A Bearer auth_token only makes sense for an Anthropic-compatible gateway,
 	// which requires a base_url. Without one it would be sent to api.anthropic.com
-	// (which uses x-api-key, not Bearer) — leaking the token and failing the call.
+	// (which uses x-api-key, not Bearer), leaking the token and failing the call.
 	if authToken != "" && baseURL == "" {
 		return Credentials{}, &clierr.CLIError{
 			Code:    "agent.auth_token_requires_base_url",
@@ -188,7 +188,7 @@ func resolveOpenAI(in ResolveInput, prof config.Provider) (Credentials, error) {
 	}
 	// preDefaultBase is the explicitly-configured endpoint, BEFORE the
 	// DefaultOpenAIBaseURL fallback. An api-key (non-OAuth) profile with NONE set
-	// would ship the key to api.openai.com — a key-leak for a custom keyed
+	// would ship the key to api.openai.com: a key-leak for a custom keyed
 	// kind=openai gateway profile that forgot base_url. The built-in openai profile
 	// sets prof.BaseURL=DefaultOpenAIBaseURL (provider.go), so it passes. Mirrors
 	// the symmetric Anthropic auth_token guard above.
@@ -310,7 +310,7 @@ func resolveOAuthCodex(in ResolveInput, prof config.Provider) (Credentials, bool
 	if !ok {
 		return Credentials{}, false, nil
 	}
-	// The codex backend only accepts codex models — never the merged gpt-4o
+	// The codex backend only accepts codex models, never the merged gpt-4o
 	// default (an api.openai.com model it rejects). codexConfigModel honors an
 	// EXPLICIT non-gpt-4o config model while filtering that leaked default.
 	// Precedence: --model > MIUCR_CODEX_MODEL > explicit config model (not gpt-4o)

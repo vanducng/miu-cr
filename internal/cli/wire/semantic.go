@@ -76,7 +76,7 @@ func buildSemantic(ctx stdctx.Context, cfg config.Config) (embed.Embedder, store
 const (
 	// semanticReadTimeout bounds the pre-agent read embed so a slow/hung embedder
 	// degrades to empty + a stat rather than stalling the review. MVP (deferred):
-	// the write path reuses this single bound — 8s is ample for the bounded batch
+	// the write path reuses this single bound; 8s is ample for the bounded batch
 	// (~40 inline-capped findings); a dedicated write timeout is a future tweak.
 	semanticReadTimeout = 8 * time.Second
 	// semanticTopK is the number of prior cosine-near findings retrieved per review.
@@ -88,7 +88,7 @@ const (
 
 // retriever is the engine.Retriever implementation for M7: it scrubs+embeds the
 // current change's code anchors and returns advisory prose for the top-K prior
-// cosine-near findings. Best-effort by construction — Related never returns a
+// cosine-near findings. Best-effort by construction: Related never returns a
 // review-fatal error (engine treats any error as "no advisory"). The embedder and
 // store are injected so tests drive it with a fakeEmbedder + fake store (keyless,
 // serverless).
@@ -266,7 +266,7 @@ func writeFindingEmbeddings(ctx stdctx.Context, emb embed.Embedder, st store.Emb
 		return
 	}
 
-	// MVP (deferred): one upsert per posted finding (N+1) — bounded by the ~40
+	// MVP (deferred): one upsert per posted finding (N+1), bounded by the ~40
 	// inline-comment cap, so a batch INSERT is a future write-path opt (YAGNI).
 	written := 0
 	for i, j := range jobs {

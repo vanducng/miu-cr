@@ -119,7 +119,7 @@ func minSeverityFloor(findings []engine.Finding, min string) []engine.Finding {
 
 // filterToDiffHunks keeps only findings inline-eligible under DiffContext: an
 // anchored Line on a RIGHT-side (added or context) line inside one of the PR's
-// diff hunks. It is filterFindings(FilterDiffContext) — kept as a named helper
+// diff hunks. It is filterFindings(FilterDiffContext), kept as a named helper
 // because it is the inline default and is referenced widely.
 func filterToDiffHunks(findings []engine.Finding, diffs []diff.Diff) []engine.Finding {
 	return filterFindings(findings, diffs, FilterDiffContext)
@@ -128,7 +128,7 @@ func filterToDiffHunks(findings []engine.Finding, diffs []diff.Diff) []engine.Fi
 // filterFindings selects findings per mode. For Added/DiffContext a finding must
 // anchor on the corresponding RIGHT-side line; for File the finding's file must be
 // in the diff; for NoFilter all findings pass. Line==0 (drift) findings are kept
-// only by File/NoFilter — they can never be inlined but must still reach SARIF/local.
+// only by File/NoFilter: they can never be inlined but must still reach SARIF/local.
 func filterFindings(findings []engine.Finding, diffs []diff.Diff, mode FilterMode) []engine.Finding {
 	if mode == FilterNoFilter {
 		out := make([]engine.Finding, len(findings))
@@ -136,7 +136,7 @@ func filterFindings(findings []engine.Finding, diffs []diff.Diff, mode FilterMod
 		return out
 	}
 
-	// File mode keys only on file presence — skip the per-line hunk maps entirely.
+	// File mode keys only on file presence; skip the per-line hunk maps entirely.
 	if mode == FilterFile {
 		filesInDiff := make(map[string]bool, len(diffs))
 		for i := range diffs {
@@ -203,7 +203,7 @@ func filterFindings(findings []engine.Finding, diffs []diff.Diff, mode FilterMod
 
 // inlineEligible selects findings postable as inline comments under mode. Added
 // restricts to added lines; every other mode (including file/nofilter) is clamped
-// to diff_context — a finding off a RIGHT-side diff line can never be inlined
+// to diff_context: a finding off a RIGHT-side diff line can never be inlined
 // (GitHub 422), so file/nofilter only ever WIDEN the summary/SARIF/local set, never
 // the inline set.
 func inlineEligible(findings []engine.Finding, diffs []diff.Diff, mode FilterMode) []engine.Finding {
@@ -362,8 +362,8 @@ func ExistingFingerprints(ctx stdctx.Context, client Client, info *PRInfo) (map[
 }
 
 // PostReviewOptions carries the opt-in write-action toggles for PostReview. Both
-// actions default OFF; with the zero value PostReview behaves exactly as the M2
-// comment-only path (modulo the latent unconditional-suggestion-fence fix).
+// actions default OFF; with the zero value PostReview posts inline comments only
+// (no suggestions, no approve).
 type PostReviewOptions struct {
 	Suggest       bool       // emit native single-line suggested-changes when proven clean
 	ApproveClean  bool       // resolve Event=APPROVE when the PR is clean and all safety predicates hold
@@ -373,10 +373,10 @@ type PostReviewOptions struct {
 	FilterMode    FilterMode // inline-eligibility filter; empty = diff_context (default)
 	// MinSeverity is the inline-posting floor: none|info|low|medium|high|critical.
 	// Empty/"none" posts everything (current behavior); a real floor drops
-	// below-threshold findings from INLINE only — they still reach the summary/SARIF.
+	// below-threshold findings from INLINE only; they still reach the summary/SARIF.
 	MinSeverity string
 	// CategoryURLs maps a lowercased finding Category to a validated docs URL
-	// (TRUSTED config only — never repo rules). When a finding's category matches,
+	// (TRUSTED config only, never repo rules). When a finding's category matches,
 	// commentBody renders it as a Markdown link; an empty/nil map = plain category.
 	CategoryURLs map[string]string
 	// RuleCitations maps a wire-validated rule stem to its citation (linkable repo
@@ -386,7 +386,7 @@ type PostReviewOptions struct {
 	// ActionsOut is where the fork-PR 403 fallback writes ::error:: workflow commands.
 	// GitHub Actions parses workflow commands ONLY from the step's stdout, so this must
 	// resolve to the same stream as the miucr.cli/v1 envelope (the command's stdout
-	// writer, cmd.OutOrStdout()) — not os.Stderr, where the commands would be ignored.
+	// writer, cmd.OutOrStdout()), not os.Stderr, where the commands would be ignored.
 	// The fallback writes these commands DURING the run and the envelope is emitted
 	// LAST, so on the rare fork-fallback path stdout carries the ::error:: lines
 	// followed by the single-line JSON envelope; `tail -1 | jq` still parses it. nil
@@ -405,11 +405,11 @@ type PostReviewResult struct {
 	Event       string
 	Reason      string
 	// OmittedFindings are the capped (over-limit) findings NOT posted inline, in
-	// the same severity order they were dropped — surfaced into the summary overflow
+	// the same severity order they were dropped, surfaced into the summary overflow
 	// block so nothing is silently lost.
 	OmittedFindings []engine.Finding
 	// PostedFindings carries (fingerprint, path) for the inline comments in the
-	// ACTUALLY-submitted review only — set after a successful submit, never on the
+	// ACTUALLY-submitted review only; set after a successful submit, never on the
 	// empty-guard / pre-submit path. The store records exactly these as posted.
 	PostedFindings []PostedFinding
 	// Fallback is the count of ::error:: workflow annotations emitted to stdout when
@@ -431,13 +431,14 @@ type PostedFinding struct {
 // the head SHA with comfort-fade inline comments (Side=RIGHT/Line only, never
 // Position). The Event is COMMENT unless opts.ApproveClean and every safety
 // predicate holds (resolveEvent), in which case it is APPROVE. A failed APPROVE
-// degrades to COMMENT when the cause is a 422 precondition miss — self_approve_forbidden
+// degrades to COMMENT when the cause is a 422 precondition miss: self_approve_forbidden
 // (the bot is the author) or approve_rejected (any other 422: stale head, branch
-// protection, …) — never an error. A non-422 API failure surfaces as an error and
+// protection, ...), never an error. A non-422 API failure surfaces as an error and
 // never reports a phantom approval.
-// summaryFn renders the review body given the inline-omitted set (known only after
-// the cap is applied), so the body's overflow block lists the actually-omitted
-// findings. A nil summaryFn means no body (e.g. --mode checks / approve-only paths).
+// summaryFn is an optional review-body hook given the inline-omitted set (known only
+// after the cap is applied). In the current model the summary is a separate upserted
+// issue comment (UpsertSummaryComment), so the production caller passes nil and the
+// inline review has an empty body; a non-nil summaryFn is exercised by tests only.
 func PostReview(ctx stdctx.Context, client Client, info *PRInfo, findings []engine.Finding, diffs []diff.Diff, summaryFn func(omitted int, omittedFindings []engine.Finding) string, existingFPs map[string]bool, opts PostReviewOptions) (PostReviewResult, error) {
 	newFileContent := make(map[string]string, len(diffs))
 	for i := range diffs {
@@ -483,7 +484,7 @@ func PostReview(ctx stdctx.Context, client Client, info *PRInfo, findings []engi
 		// gates the native multi-line suggestion below: a multi-line ```suggestion may
 		// be one-clicked only on a verified contiguous-one-hunk RIGHT range, else it
 		// degrades to a plain fenced hint (a single-anchored multi-line suggestion
-		// inserts instead of replaces — a broken patch the spec forbids).
+		// inserts instead of replaces: a broken patch the spec forbids).
 		isRange := f.EndLine > f.Line && rangeInOneHunk(hunkSets, f.File, f.Line, f.EndLine)
 		rendered, native := commentBody(info, f, newFileContent[f.File], opts, isRange)
 		if native {
@@ -537,7 +538,7 @@ func PostReview(ctx stdctx.Context, client Client, info *PRInfo, findings []engi
 			result.Fallback = emitWorkflowAnnotations(out, toPost)
 			// A fork token that 403s on CreateReview also can't APPROVE (same call);
 			// the fallback only emits annotations, so the resolved event degrades to
-			// COMMENT regardless of opts.ApproveClean — intentional, not a dropped approval.
+			// COMMENT regardless of opts.ApproveClean: intentional, not a dropped approval.
 			result.Posted, result.Event, result.PostedFindings = 0, "COMMENT", nil
 			return result, nil
 		}
@@ -557,7 +558,7 @@ func PostReview(ctx stdctx.Context, client Client, info *PRInfo, findings []engi
 			return PostReviewResult{Omitted: omitted, Event: "COMMENT"}, mapWriteError("github.create_review_failed", "creating review", err)
 		}
 		// Re-apply the empty-review guard once the event is COMMENT: don't submit a
-		// review with no inline comments and no body — GitHub 422s an empty COMMENT.
+		// review with no inline comments and no body: GitHub 422s an empty COMMENT.
 		if len(comments) == 0 && strings.TrimSpace(summary) == "" {
 			result.Posted = 0
 			return result, nil
@@ -583,7 +584,7 @@ func resolveApproveEvent(ctx stdctx.Context, client Client, info *PRInfo, opts P
 	}
 
 	// Idempotency guard. If the dedupe read itself fails we can't confirm there
-	// isn't already an APPROVE — degrade rather than risk a duplicate APPROVE.
+	// isn't already an APPROVE: degrade rather than risk a duplicate APPROVE.
 	done, err := alreadyApproved(ctx, client, info)
 	if err != nil {
 		return "COMMENT", approveReasonIdempotencyUnverified
@@ -604,7 +605,7 @@ func resolveApproveEvent(ctx stdctx.Context, client Client, info *PRInfo, opts P
 
 // isSelfApprove422 reports whether err is a GitHub 422 specifically from approving
 // one's own PR (the bot PAT identity == the PR author). Matched reactively at the
-// CreateReview call — there is no proactive bot-identity lookup. It inspects the
+// CreateReview call; there is no proactive bot-identity lookup. It inspects the
 // error message (top-level and nested errors[]) so unrelated 422s (stale head,
 // branch protection, invalid line) are NOT misclassified as self-approve.
 func isSelfApprove422(err error) bool {
@@ -625,7 +626,7 @@ func is422(err error) bool {
 	return errors.As(err, &er) && er.Response != nil && er.Response.StatusCode == 422
 }
 
-// is403 reports whether err is a GitHub 403 (Forbidden) — typically a fork PR
+// is403 reports whether err is a GitHub 403 (Forbidden): typically a fork PR
 // whose Actions token lacks the write scope to post review comments.
 func is403(err error) bool {
 	var er *gh.ErrorResponse
@@ -640,10 +641,10 @@ func inGitHubActions() bool { return os.Getenv("GITHUB_ACTIONS") == "true" }
 const maxWorkflowAnnotations = 50
 
 // emitWorkflowAnnotations writes per-finding `::error file=...,line=...,endLine=...::message`
-// workflow commands to w (stdout under Actions — the runner only parses commands
+// workflow commands to w (stdout under Actions; the runner only parses commands
 // from stdout, never stderr), capped, so a fork PR that 403s on comment writes still
 // surfaces findings as Actions annotations instead of hard-failing. The file path is
-// property-escaped and the message is data-escaped (finding text only — never a
+// property-escaped and the message is data-escaped (finding text only, never a
 // token), so a path or rationale carrying ':'/','/newline can't break the command
 // boundary or inject a fake annotation. A finding with Line<=0 (file-level/drift,
 // not line-anchorable) emits a file-level annotation (no line/endLine), which the
@@ -681,7 +682,7 @@ func escapeWorkflowMessage(s string) string {
 
 // escapeWorkflowProperty escapes a workflow command property value (mirrors
 // @actions/core escapeProperty): the data escapes PLUS ':' and ',', which delimit
-// properties — so a file path containing a colon/comma/newline can't terminate the
+// properties, so a file path containing a colon/comma/newline can't terminate the
 // `file=` property early or inject another `::error::` annotation.
 func escapeWorkflowProperty(s string) string {
 	r := strings.NewReplacer("%", "%25", "\r", "%0D", "\n", "%0A", ":", "%3A", ",", "%2C")
@@ -695,7 +696,7 @@ func escapeWorkflowProperty(s string) string {
 // new-file line AND the severity meets the floor; otherwise (and whenever there's a patch
 // but the gate isn't met) the patch is shown as a plain fenced hint, never a
 // one-click suggestion. This is also the fix for the latent M2 bug where a
-// ```suggestion fence was emitted unconditionally — one-click-applying an
+// ```suggestion fence was emitted unconditionally, one-click-applying an
 // unverified, possibly multi-line patch. Returning the native flag lets PostReview
 // count suggestions from this single render pass (no second isCleanReplacement /
 // file split per finding).
@@ -703,7 +704,7 @@ func escapeWorkflowProperty(s string) string {
 // isRange MUST be the caller's rangeInOneHunk(Line,EndLine) proof: a native
 // multi-line suggestion (EndLine>Line) is emitted ONLY when isRange is true, so a
 // span that fell back to a single-line comment never carries a one-click multi-line
-// fence (which GitHub would INSERT, not replace — a broken unverified patch). A
+// fence (which GitHub would INSERT, not replace: a broken unverified patch). A
 // single-line finding (EndLine<=Line) ignores isRange.
 func commentBody(info *PRInfo, f engine.Finding, newFileContent string, opts PostReviewOptions, isRange bool) (string, bool) {
 	var b strings.Builder
@@ -769,8 +770,8 @@ const (
 // fork-PR 403 under Actions (token lacks comment-write scope) it degrades to
 // fork_fallback (no hard fail), mirroring PostReview's inline 403 path. An empty
 // body is a no-op (UpsertNone). The marker lives on the ISSUE COMMENT here, distinct
-// from review bodies (ListReviews), so there is no cross-match with historical
-// per-commit review bodies.
+// from review bodies (ListReviews), so there is no cross-match with any historical
+// review bodies.
 func UpsertSummaryComment(ctx stdctx.Context, client Client, info *PRInfo, body string) (UpsertAction, error) {
 	if strings.TrimSpace(body) == "" {
 		return UpsertNone, nil

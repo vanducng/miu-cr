@@ -27,7 +27,7 @@ var (
 // codexRetryable wraps a transient codex failure (429/502/503/504 or a
 // response.failed SSE event) the post() loop may retry. resetsIn/retryAfter
 // carry an upstream-suggested wait when known (0 ⇒ use computed backoff). It is
-// never the value returned to the caller — on give-up the loop converts it to a
+// never the value returned to the caller: on give-up the loop converts it to a
 // typed CLIError; a non-retryable status returns its CLIError directly.
 type codexRetryable struct {
 	status     int
@@ -162,7 +162,7 @@ func codexBackoff(attempt int, suggested time.Duration) time.Duration {
 		d = codexMaxBackoff
 	}
 	half := int64(d) / 2
-	return time.Duration(half + rand.Int63n(half+1)) // equal jitter [d/2, d] — never 0, so a 429 burst actually backs off
+	return time.Duration(half + rand.Int63n(half+1)) // equal jitter [d/2, d], never 0, so a 429 burst actually backs off
 }
 
 // sleepCtx waits d, aborting promptly on ctx cancel/deadline (returns the ctx error).

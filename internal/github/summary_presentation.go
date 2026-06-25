@@ -28,7 +28,7 @@ var mermaidKeywords = []string{"flowchart", "graph", "sequencediagram", "classdi
 
 // renderDiagram writes the opt-in mermaid change diagram as a fenced ```mermaid
 // block GitHub renders, but ONLY when the model text starts with a known mermaid
-// keyword (a degrade-safe sanity check); otherwise — and on empty — it renders a
+// keyword (a degrade-safe sanity check); otherwise (and on empty) it renders a
 // plain note, never a broken block. The block content is emitted verbatim (mermaid
 // is not markdown; mdInline would corrupt the diagram), so the keyword gate is the
 // guard: a non-diagram payload can never reach the fenced block.
@@ -47,8 +47,8 @@ func renderDiagram(b *strings.Builder, diagram string) {
 }
 
 // startsWithMermaidKeyword reports whether the first line of d begins with a
-// recognized mermaid diagram-type keyword. The comparison is case-insensitive —
-// mermaid keywords are (e.g. "Flowchart TD" and "graph LR" both parse) — so the
+// recognized mermaid diagram-type keyword. The comparison is case-insensitive
+// (e.g. "Flowchart TD" and "graph LR" both parse), so the
 // first line is lowercased before the prefix check (mermaidKeywords are stored
 // lowercase to match).
 func startsWithMermaidKeyword(d string) bool {
@@ -65,7 +65,7 @@ func startsWithMermaidKeyword(d string) bool {
 	return false
 }
 
-// renderWalkthrough writes the review pass's PR-level summary as LEAD PROSE — no
+// renderWalkthrough writes the review pass's PR-level summary as LEAD PROSE: no
 // "Walkthrough" heading (intentionally un-CodeRabbit-like). Rendered via mdProse so
 // the model's bullet newlines survive (mdInline would collapse them) while HTML/fence
 // breakout vectors stay neutralized. Empty (after trim) omits it.
@@ -77,7 +77,7 @@ func renderWalkthrough(b *strings.Builder, walkthrough string) {
 	b.WriteString("\n\n")
 }
 
-// renderConfidence writes "Confidence: N/5 — reason". The model's confidence (1-5)
+// renderConfidence writes "Confidence: N/5 · reason". The model's confidence (1-5)
 // wins when emitted; otherwise it derives from findings (5 when none; critical −2,
 // high −1, floored at 1) so the line is always present (greptile-style).
 func renderConfidence(b *strings.Builder, confidence int, reason string, findings []engine.Finding) {
@@ -103,7 +103,7 @@ func renderConfidence(b *strings.Builder, confidence int, reason string, finding
 	}
 }
 
-// effortSize buckets a PR into S/M/L/XL from file count + total churn — pure
+// effortSize buckets a PR into S/M/L/XL from file count + total churn: pure
 // arithmetic, stable across runs.
 func effortSize(files int, churn int64) string {
 	switch {

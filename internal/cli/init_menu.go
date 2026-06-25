@@ -13,8 +13,8 @@ type menuItem struct {
 	key, name, desc string
 }
 
-// printMenu renders a sectioned menu — blank line, indented title, one option per
-// line with aligned descriptions — for a readable plain-terminal layout.
+// printMenu renders a sectioned menu (blank line, indented title, one option per
+// line with aligned descriptions) for a readable plain-terminal layout.
 func printMenu(out io.Writer, title string, items []menuItem) {
 	fmt.Fprintf(out, "\n  %s\n", title)
 	for _, it := range items {

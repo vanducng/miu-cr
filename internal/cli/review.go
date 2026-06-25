@@ -19,7 +19,7 @@ import (
 	"github.com/vanducng/miu-cr/internal/sarif"
 )
 
-// classifyReviewErr types a ctx timeout/cancel raised during the review pass —
+// classifyReviewErr types a ctx timeout/cancel raised during the review pass;
 // the review layer is the one place that knows the --timeout value. Any other
 // error passes through unchanged (preserving an already-typed CLIError or a bare
 // %w). This is the timeout owner; backends keep the ctx chain via %w so the
@@ -107,8 +107,9 @@ type ReviewOutcome struct {
 // PostedInline is the count of inline comments posted THIS run (0 on --no-post
 // and on re-runs where everything was already posted); SummaryAction reports the
 // fate of the single upserted summary issue comment:
-// none|created|edited|fork_fallback ("none" on --no-post, checks mode, or a clean
-// no-summary run; created vs edited on --post).
+// none|created|edited|fork_fallback|failed ("none" on --no-post, checks mode, or
+// a clean no-summary run; created vs edited on --post; failed if the upsert
+// errored after the inline review already posted).
 type PRResult struct {
 	Owner         string `json:"owner"`
 	Repo          string `json:"repo"`
@@ -216,12 +217,12 @@ var prReviewer PRReviewer
 
 // SetPRReviewer wires the github-backed PR reviewer. Called exactly once from
 // wire.init, which happens-before any serve worker goroutine that calls
-// ReviewPRForServe — so the package-level read needs no lock or atomic.
+// ReviewPRForServe, so the package-level read needs no lock or atomic.
 func SetPRReviewer(r PRReviewer) { prReviewer = r }
 
 // ReviewPRForServe is the in-process seam serve calls: it delegates straight to
 // the wired prReviewer.ReviewPR (NOT runPRReview) so the gate_failed exit path is
-// bypassed — serve's gate governs publish severity only, never worker liveness.
+// bypassed: serve's gate governs publish severity only, never worker liveness.
 func ReviewPRForServe(ctx stdctx.Context, req PRReviewRequest) (ReviewOutcome, error) {
 	if prReviewer == nil {
 		return ReviewOutcome{}, &CLIError{Code: "review.not_wired", Message: "PR review engine not wired", Exit: 1}
@@ -244,7 +245,7 @@ func resolveGitHubToken(flag string) string {
 
 // nudgeIfUnconfigured returns a friendly typed nudge to run `miucr init` only
 // when nothing at all provides auth: no config file on disk AND no LLM-credential
-// env var AND no --api-key/--auth-token flag. Soft by design — when a key or flag
+// env var AND no --api-key/--auth-token flag. Soft by design: when a key or flag
 // IS present, this is a no-op and review proceeds (zero-config still works).
 func nudgeIfUnconfigured(apiKey, authToken string) error {
 	if strings.TrimSpace(apiKey) != "" || strings.TrimSpace(authToken) != "" {
@@ -592,9 +593,9 @@ func runPRReview(cmd *cobra.Command, a prRunArgs) error {
 	}
 
 	// Incremental-skip path (additive, back-compatible): an unchanged head SHA
-	// short-circuited with no LLM pass. Emit a coherent envelope — findings as an
+	// short-circuited with no LLM pass. Emit a coherent envelope: findings as an
 	// empty array (never null) + an empty stats object, so a consumer expecting an
-	// array/object shape doesn't break — and surface skipped_unchanged +
+	// array/object shape doesn't break, and surface skipped_unchanged +
 	// prior_review_id. Do NOT write SARIF: a zero-finding write would clobber a
 	// prior good report. No gate evaluation (no findings ran this pass).
 	if out.SkippedUnchanged {
@@ -777,7 +778,7 @@ func emitReview(w io.Writer, out ReviewOutcome, data, summary map[string]any) er
 // caller can upload it (e.g. github/codeql-action/upload-sarif) alongside the
 // normal --output/posting from the SAME single review run. Empty path is a no-op
 // (the default). It writes to a temp file in the target dir and renames on
-// success, so a failed/partial write never leaves a broken file — and callers
+// success, so a failed/partial write never leaves a broken file, and callers
 // invoke it only after the review succeeded, so a review error leaves no file.
 func writeSARIFOut(path string, findings []ReviewFinding) error {
 	if strings.TrimSpace(path) == "" {
@@ -806,7 +807,7 @@ func writeSARIFOut(path string, findings []ReviewFinding) error {
 }
 
 // categoryURLs loads the validated [review].category_urls map from TRUSTED config
-// (user file + built-in defaults — never repo rules) for the local SARIF emit path.
+// (user file + built-in defaults, never repo rules) for the local SARIF emit path.
 // A config-load error degrades to no links (the map is presentation-only).
 func categoryURLs() map[string]string {
 	cfg, err := config.Load()

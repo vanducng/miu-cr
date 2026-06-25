@@ -150,7 +150,7 @@ func serveCommand(opts *options) *cobra.Command {
 			}
 			cfg, cfgErr := config.Load()
 			if cfgErr != nil {
-				// Load() returns Defaults() on error, so we proceed — but log it
+				// Load() returns Defaults() on error, so we proceed, but log it
 				// (redacted) so a malformed config (e.g. [github] mode=app) isn't
 				// silently degraded to the PAT default with a confusing downstream error.
 				slog.Default().Warn("serve: config load failed; using defaults", "error", config.RedactString(cfgErr.Error()))
@@ -205,7 +205,7 @@ func serveCommand(opts *options) *cobra.Command {
 			}
 
 			// The REST API is opt-in: enabled ONLY when MIUCR_API_TOKEN (env-only,
-			// like WEBHOOK_SECRET — never a flag) is set. When enabled, open the
+			// like WEBHOOK_SECRET, never a flag) is set. When enabled, open the
 			// review store once (shared by the POST pending-persist, the GET read,
 			// and the worker's final-record upsert).
 			apiToken := strings.TrimSpace(os.Getenv("MIUCR_API_TOKEN"))
@@ -330,7 +330,7 @@ func buildTokenSource(g config.Github) (ghub.TokenSource, error) {
 // When j.ReviewID is set (REST-initiated) and st is non-nil, reviewFn persists the
 // FINAL record under that id: done (with the returned outcome's findings/stats/
 // HeadSHA) on success, failed on error. The findings/stats/HeadSHA live in the
-// RETURNED cli.ReviewOutcome — not in Job.OnDone(error) — so the upsert rides here,
+// RETURNED cli.ReviewOutcome (not in Job.OnDone(error)), so the upsert rides here,
 // inside reviewFn, not in OnDone. The webhook/poll paths leave ReviewID empty and
 // skip the upsert (byte-for-byte unchanged).
 func buildServeReviewFn(log *slog.Logger, gate string, st serve.ReviewStore) func(serve.Job) error {
