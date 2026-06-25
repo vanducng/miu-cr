@@ -14,6 +14,7 @@ type reviewRunInput struct {
 	Gate        string `json:"gate,omitempty" jsonschema:"Severity gate: none|info|low|medium|high|critical. Defaults to high."`
 	Expand      *int   `json:"expand,omitempty" jsonschema:"Context lines above/below each hunk in the new-content window. Defaults to 5; 0 disables."`
 	TokenBudget int    `json:"token_budget,omitempty" jsonschema:"Approximate token budget; over budget degrades context. 0 disables."`
+	Instruction string `json:"instruction,omitempty" jsonschema:"Optional free-text steer for THIS review; injected fenced/context-only, never redefines the finding schema."`
 }
 
 type reviewRunOutput struct {

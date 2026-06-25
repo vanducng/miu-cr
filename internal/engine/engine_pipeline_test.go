@@ -20,17 +20,19 @@ func init() { engine.SetAnchorer(anchor.ResolveLineNumbers) }
 // fakeAgent returns canned findings, ignoring the assembled context. No network,
 // no API key. It records the rev it was invoked with for revision-source asserts.
 type fakeAgent struct {
-	findings    []engine.Finding
-	gotRev      string
-	gotRules    string
-	gotSemantic string
-	gotProgress bool
+	findings       []engine.Finding
+	gotRev         string
+	gotRules       string
+	gotSemantic    string
+	gotInstruction string
+	gotProgress    bool
 }
 
 func (f *fakeAgent) Review(_ stdctx.Context, rc engine.AgentContext) (engine.ReviewOutput, error) {
 	f.gotRev = rc.Rev
 	f.gotRules = rc.Rules
 	f.gotSemantic = rc.SemanticContext
+	f.gotInstruction = rc.Instruction
 	f.gotProgress = rc.Progress != nil
 	if rc.Progress != nil {
 		rc.Progress("agent ran")
@@ -128,6 +130,47 @@ func TestReviewPipelineEndToEnd(t *testing.T) {
 	}
 	if engine.GateFailed(res.Findings, "high") != true {
 		t.Error("high finding must trip high gate")
+	}
+}
+
+func TestReviewThreadsInstructionToAgent(t *testing.T) {
+	dir := initRepo(t)
+	writeFile(t, dir, "app.go", "package app\n\nfunc Existing() int { return 1 }\n")
+	git(t, dir, "add", ".")
+	git(t, dir, "commit", "-q", "-m", "base")
+	writeFile(t, dir, "app.go", "package app\n\nfunc Existing() int { return 2 }\n")
+	git(t, dir, "add", "app.go")
+
+	fa := &fakeAgent{}
+	eng := engine.New(fa, gitcmd.New())
+	_, err := eng.Review(stdctx.Background(), engine.Request{
+		Mode: 0, RepoDir: dir, Gate: "high", Extensions: []string{"go"},
+		Instruction: "focus on the auth changes",
+	})
+	if err != nil {
+		t.Fatalf("Review: %v", err)
+	}
+	if fa.gotInstruction != "focus on the auth changes" {
+		t.Errorf("engine dropped Instruction: got %q", fa.gotInstruction)
+	}
+}
+
+func TestReviewEmptyInstructionStaysEmpty(t *testing.T) {
+	dir := initRepo(t)
+	writeFile(t, dir, "app.go", "package app\n\nfunc Existing() int { return 1 }\n")
+	git(t, dir, "add", ".")
+	git(t, dir, "commit", "-q", "-m", "base")
+	writeFile(t, dir, "app.go", "package app\n\nfunc Existing() int { return 2 }\n")
+	git(t, dir, "add", "app.go")
+
+	fa := &fakeAgent{}
+	eng := engine.New(fa, gitcmd.New())
+	_, err := eng.Review(stdctx.Background(), engine.Request{Mode: 0, RepoDir: dir, Gate: "high", Extensions: []string{"go"}})
+	if err != nil {
+		t.Fatalf("Review: %v", err)
+	}
+	if fa.gotInstruction != "" {
+		t.Errorf("unset Instruction must stay empty: got %q", fa.gotInstruction)
 	}
 }
 

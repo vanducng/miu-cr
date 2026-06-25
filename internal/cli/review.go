@@ -74,6 +74,7 @@ type ReviewRequest struct {
 	TokenBudget  int
 	FilterMode   string       // added|diff_context|file|nofilter (default diff_context)
 	WantDiagram  bool         // opt into the mermaid change diagram (default off)
+	Instruction  string       // optional per-review developer steer; injected fenced/context-only into the USER turn
 	NoSave       bool         // opt out of persisting this run to the local history store
 	Progress     func(string) // nil = silent; stderr milestones, never the stdout envelope
 	// TraceSink, when non-nil, streams each captured trace step (system prompt, diff
@@ -186,6 +187,8 @@ type PRReviewRequest struct {
 	FilterMode   string       // added|diff_context|file|nofilter (default diff_context)
 	MinSeverity  string       // inline-posting floor: none|info|low|medium|high|critical (default keeps current behavior)
 	WantDiagram  bool         // opt into the mermaid change diagram (default off)
+	Instruction  string       // optional per-review developer steer; injected fenced/context-only into the USER turn
+	Conversation bool         // opt into fetching the prior PR conversation; injected fenced/context-only, Untrusted, dropped on fork PRs
 	Mode         string       // review (default: inline+summary) | checks (GitHub Checks-API reporter)
 	NoSave       bool         // opt out of persisting this run to the local history store
 	Force        bool         // re-review even when the head SHA is unchanged since the last review (bypass the incremental skip)
@@ -297,6 +300,8 @@ func reviewCommand(opts *options) *cobra.Command {
 		filterMode   string
 		minSeverity  string
 		wantDiagram  bool
+		instruction  string
+		conversation bool
 		mode         string
 		sarifOut     string
 		pr           string
@@ -372,6 +377,8 @@ func reviewCommand(opts *options) *cobra.Command {
 					filterMode:   filterMode,
 					minSeverity:  minSeverity,
 					wantDiagram:  wantDiagram,
+					instruction:  instruction,
+					conversation: conversation,
 					mode:         mode,
 					sarifOut:     sarifOut,
 					noSave:       noSave,
@@ -406,6 +413,7 @@ func reviewCommand(opts *options) *cobra.Command {
 				TokenBudget:  tokenBudget,
 				FilterMode:   filterMode,
 				WantDiagram:  wantDiagram,
+				Instruction:  instruction,
 				NoSave:       noSave,
 				Progress:     prog,
 				TraceSink:    traceSink,
@@ -470,6 +478,8 @@ func reviewCommand(opts *options) *cobra.Command {
 	f.StringVar(&filterMode, "filter-mode", "diff_context", "Inline-eligibility filter on --pr: added|diff_context|file|nofilter (default diff_context; file/nofilter route off-diff findings to the summary/SARIF/local output, never inline)")
 	f.StringVar(&minSeverity, "min-severity", "", "Minimum severity posted INLINE on --pr: none|info|low|medium|high|critical (default keeps current behavior; below-threshold findings still appear in the summary histogram + SARIF, never inline)")
 	f.BoolVar(&wantDiagram, "walkthrough-diagram", false, "Ask the model to also emit an optional mermaid change diagram in the summary (opt-in; diagram quality varies; a malformed/omitted diagram degrades to a plain note)")
+	f.StringVar(&instruction, "instruction", "", "Extra free-text steer for THIS review (e.g. 'focus on the auth changes'); injected fenced, context-only, and length-capped, so it never redefines the finding schema")
+	f.BoolVar(&conversation, "conversation", false, "On --pr, fetch the prior PR conversation (miucr summary + finding threads + developer replies) and inject it fenced/context-only as UNTRUSTED context (dropped on fork PRs); one extra read pass, no extra LLM call (default OFF)")
 	f.StringVar(&mode, "mode", "review", "GitHub reporter on --pr --post: review (inline comments + summary, default) | checks (a GitHub CheckRun with annotations — survives force-push, works on fork PRs, can be a required check)")
 	f.StringVar(&sarifOut, "sarif-out", "", "Also write a SARIF 2.1.0 report to this path (in addition to the normal --output/posting), from the same single review run; written only on success (atomic temp+rename, so a failed run leaves no file)")
 	f.StringVar(&pr, "pr", "", "Review a GitHub PR: https://github.com/owner/repo/pull/N or owner/repo#N (no GitHub PAT needed for public repos in dry-run)")
@@ -504,20 +514,22 @@ type prRunArgs struct {
 	model        string
 	timeout      time.Duration
 
-	include     []string
-	exclude     []string
-	exts        []string
-	expand      int
-	tokenBudget int
-	filterMode  string
-	minSeverity string
-	wantDiagram bool
-	mode        string
-	sarifOut    string
-	noSave      bool
-	force       bool
-	progress    func(string)
-	traceSink   func(step string, payload any)
+	include      []string
+	exclude      []string
+	exts         []string
+	expand       int
+	tokenBudget  int
+	filterMode   string
+	minSeverity  string
+	wantDiagram  bool
+	instruction  string
+	conversation bool
+	mode         string
+	sarifOut     string
+	noSave       bool
+	force        bool
+	progress     func(string)
+	traceSink    func(step string, payload any)
 }
 
 // runPRReview drives the --pr path: resolve the GitHub token (empty-tolerant for
@@ -565,6 +577,8 @@ func runPRReview(cmd *cobra.Command, a prRunArgs) error {
 		FilterMode:   a.filterMode,
 		MinSeverity:  a.minSeverity,
 		WantDiagram:  a.wantDiagram,
+		Instruction:  a.instruction,
+		Conversation: a.conversation,
 		Mode:         a.mode,
 		NoSave:       a.noSave,
 		Force:        a.force,

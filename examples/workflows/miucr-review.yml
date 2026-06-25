@@ -1,0 +1,111 @@
+# Copy this file to .github/workflows/miucr-review.yml in your repository.
+#
+# Dual trigger:
+#   - pull_request: reviews every PR push (fork PRs are skipped — the diff is
+#     read via the API, but the released-binary path here does not run fork code).
+#   - issue_comment: a write-collaborator posts "/miucr review <prompt>" on a PR
+#     to steer a re-review with free text.
+#
+# Prerequisites:
+#   1. Add ANTHROPIC_API_KEY to your repo secrets (Settings → Secrets → Actions).
+#   2. Pin `vanducng/miu-cr@vX.Y.Z` below to a real release tag (or an exact SHA).
+#
+# SECURITY (issue_comment): this event runs the BASE-branch workflow with full
+# secrets even on fork PRs, and ANYONE can post a comment. The job therefore
+# self-gates: the `if:` pre-filters PR-only + the command + non-bot + a plausible
+# association, and the FIRST comment-path step authoritatively verifies the
+# commenter has write|admin via the API (author_association alone is insufficient
+# — read-only externals report COLLABORATOR). The comment body is passed via the
+# BODY env var and never inline-interpolated into a `run:` line (injection). The
+# comment path uses the released binary only (no build-from-source) so fork head
+# code is never compiled/run with secrets present.
+
+name: miucr review
+
+on:
+  pull_request:
+    types: [opened, synchronize, reopened, ready_for_review]
+  issue_comment:
+    types: [created]
+
+permissions:
+  pull-requests: write
+  contents: read
+
+concurrency:
+  group: miucr-review-${{ github.event.issue.number || github.event.pull_request.number }}
+  cancel-in-progress: true
+
+jobs:
+  review:
+    runs-on: ubuntu-latest
+    if: >-
+      (github.event_name == 'pull_request' &&
+       github.event.pull_request.head.repo.fork != true) ||
+      (github.event_name == 'issue_comment' &&
+       github.event.issue.pull_request &&
+       github.event.comment.user.type != 'Bot' &&
+       startsWith(github.event.comment.body, '/miucr review') &&
+       contains(fromJSON('["OWNER","MEMBER","COLLABORATOR"]'),
+                github.event.comment.author_association))
+    steps:
+      - name: Permission gate + resolve head SHA (comment path)
+        if: github.event_name == 'issue_comment'
+        id: gate
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const r = await github.rest.repos.getCollaboratorPermissionLevel({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              username: context.payload.comment.user.login,
+            });
+            if (!['write', 'admin'].includes(r.data.permission)) {
+              core.setFailed('miucr: write access required to trigger a review');
+              return;
+            }
+            const pr = await github.rest.pulls.get({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              pull_number: context.payload.issue.number,
+            });
+            core.setOutput('head_sha', pr.data.head.sha);
+
+      - name: Ack reaction (comment path)
+        if: github.event_name == 'issue_comment'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh api -X POST \
+            "repos/${{ github.repository }}/issues/comments/${{ github.event.comment.id }}/reactions" \
+            -f content=eyes
+
+      - name: Parse command (comment path)
+        if: github.event_name == 'issue_comment'
+        id: cmd
+        env:
+          BODY: ${{ github.event.comment.body }}
+        run: |
+          set -euo pipefail
+          first=$(printf '%s' "$BODY" | head -n1)
+          prompt=$(printf '%s' "$first" | sed -E 's#^/miucr review[[:space:]]*##')
+          {
+            echo "instruction<<MIUCR_EOF"
+            echo "$prompt"
+            echo MIUCR_EOF
+          } >> "$GITHUB_OUTPUT"
+
+      # Pin the checkout to the PR head SHA (comment path) instead of a mutable
+      # ref so the agent's file_read/grep tools read the EXACT reviewed revision;
+      # the released binary still reads the diff via the API, so fork head code is
+      # never compiled/run with secrets present.
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event_name == 'issue_comment' && steps.gate.outputs.head_sha || github.sha }}
+
+      - uses: vanducng/miu-cr@vX.Y.Z   # pin to a real release tag or an exact SHA
+        with:
+          api-key: ${{ secrets.ANTHROPIC_API_KEY }}
+          gate: high
+          pr-number: ${{ github.event_name == 'issue_comment' && github.event.issue.number || github.event.pull_request.number }}
+          instruction: ${{ steps.cmd.outputs.instruction }}

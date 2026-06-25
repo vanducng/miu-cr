@@ -46,19 +46,84 @@ brew install vanducng/tap/miucr
 go install github.com/vanducng/miu-cr/cmd/miucr@latest
 ```
 
-Drop the reusable composite **GitHub Action** into a workflow (no daemon to host):
+Drop the reusable composite **GitHub Action** into a workflow (no daemon to host). The
+canonical copy-paste is the **dual-trigger** workflow: every PR push gets a review, and a
+write-collaborator can steer a re-review by commenting `/miucr review <prompt>` on the PR
+(full file:
+[`examples/workflows/miucr-review.yml`](https://github.com/vanducng/miu-cr/blob/main/examples/workflows/miucr-review.yml)):
 
 ```yaml
+name: miucr review
+on:
+  pull_request:
+    types: [opened, synchronize, reopened, ready_for_review]
+  issue_comment:                            # "/miucr review <prompt>" on a PR
+    types: [created]
 permissions:
   pull-requests: write
   contents: read
-steps:
-  - uses: actions/checkout@v4
-  - uses: vanducng/miu-cr@vX.Y.Z          # pin the latest release tag
-    with:
-      api-key: ${{ secrets.ANTHROPIC_API_KEY }}
-      gate: high                            # "none" never blocks CI
+concurrency:
+  group: miucr-review-${{ github.event.issue.number || github.event.pull_request.number }}
+  cancel-in-progress: true
+jobs:
+  review:
+    runs-on: ubuntu-latest
+    # PR pushes (non-fork) OR a "/miucr review" comment by a plausible collaborator.
+    if: >-
+      (github.event_name == 'pull_request' &&
+       github.event.pull_request.head.repo.fork != true) ||
+      (github.event_name == 'issue_comment' &&
+       github.event.issue.pull_request &&
+       github.event.comment.user.type != 'Bot' &&
+       startsWith(github.event.comment.body, '/miucr review') &&
+       contains(fromJSON('["OWNER","MEMBER","COLLABORATOR"]'),
+                github.event.comment.author_association))
+    steps:
+      # Authoritative gate: require write|admin (author_association alone is insufficient).
+      - name: Permission gate (comment path)
+        if: github.event_name == 'issue_comment'
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const r = await github.rest.repos.getCollaboratorPermissionLevel({
+              owner: context.repo.owner, repo: context.repo.repo,
+              username: context.payload.comment.user.login });
+            if (!['write', 'admin'].includes(r.data.permission))
+              core.setFailed('miucr: write access required to trigger a review');
+      - name: Ack reaction (comment path)         # 👀 to acknowledge accepted commands
+        if: github.event_name == 'issue_comment'
+        env: { GH_TOKEN: "${{ github.token }}" }
+        run: |
+          gh api -X POST \
+            "repos/${{ github.repository }}/issues/comments/${{ github.event.comment.id }}/reactions" \
+            -f content=eyes
+      - name: Parse command (comment path)        # body via env only, never inline (injection)
+        if: github.event_name == 'issue_comment'
+        id: cmd
+        env: { BODY: "${{ github.event.comment.body }}" }
+        run: |
+          set -euo pipefail
+          prompt=$(printf '%s' "$BODY" | head -n1 | sed -E 's#^/miucr review[[:space:]]*##')
+          { echo "instruction<<MIUCR_EOF"; echo "$prompt"; echo MIUCR_EOF; } >> "$GITHUB_OUTPUT"
+      - uses: actions/checkout@v4
+      - uses: vanducng/miu-cr@vX.Y.Z              # pin the latest release tag
+        with:
+          api-key: ${{ secrets.ANTHROPIC_API_KEY }}
+          gate: high                              # "none" never blocks CI
+          pr-number: ${{ github.event_name == 'issue_comment' && github.event.issue.number || github.event.pull_request.number }}
+          instruction: ${{ steps.cmd.outputs.instruction }}
 ```
+
+**Comment-triggered review.** Posting `/miucr review <prompt>` on a PR re-runs miucr with
+`<prompt>` as a free-text steer (e.g. `/miucr review focus on the auth changes`). The
+`issue_comment` event runs the trusted base-branch workflow with full secrets even on fork
+PRs, so the job self-gates: only a **write or admin collaborator** can trigger it (the
+permission gate is authoritative; `author_association` alone lets read-only externals
+through), the comment path uses the released binary only (never builds fork head code), and
+the body is read via an env var so it can't inject shell. miucr reacts with a 👀 on the
+triggering comment to acknowledge an accepted command. If you only want PR-push reviews,
+drop the `issue_comment` trigger, the gate/ack/parse steps, and the `pr-number`/`instruction`
+inputs.
 
 **Windows:** download `miucr_windows_x86_64.zip` from
 [Releases](https://github.com/vanducng/miu-cr/releases), extract `miucr.exe`, and put it
@@ -183,12 +248,18 @@ miucr review --staged                        # staged changes vs the index
 miucr review --from main --to HEAD           # a commit range
 miucr review --commit HEAD~1                 # one commit vs its parent
 miucr review --pr owner/repo#123 --post      # a GitHub PR: post the review + inline comments
+miucr review --staged --instruction "focus on the auth changes"   # steer this one review
+miucr review --pr owner/repo#123 --conversation                   # also read the prior PR thread
 ```
 
 One LLM pass over a deterministically selected diff, then line-anchor, severity gate, and
 dedupe. Flags: `--gate`, `--provider anthropic|openai|<name>|auto`, `--base-url`,
-`--model`, `--include`/`--exclude`/`--ext`. GitHub PRs add head-SHA anchoring and
-one review per commit (same-SHA re-runs skip).
+`--model`, `--include`/`--exclude`/`--ext`. `--instruction "<text>"` adds a free-text steer
+for **this** review; `--conversation` (on `--pr`) folds the prior PR conversation back in.
+Both ride the same single review pass (no extra LLM call) as fenced, context-only input.
+They never change the finding schema; conversation text is treated as untrusted and dropped
+on fork PRs. GitHub PRs add head-SHA anchoring and one review per commit (same-SHA re-runs
+skip).
 [Usage](https://miucr.vanducng.dev/usage/) ·
 [How it works](https://miucr.vanducng.dev/how-it-works/) ·
 [GitHub PR review](https://miucr.vanducng.dev/github-pr/)
@@ -233,7 +304,7 @@ path. [Serve daemon and GitHub Action](https://miucr.vanducng.dev/serve-and-acti
 - **Store backends:** SQLite by default (`~/.config/miu/cr/state.db`); opt into Postgres via `[store] backend = "postgres"` + `MIUCR_PG_DSN`. The DSN is never persisted, logged, or placed in the envelope. [Store backends](https://miucr.vanducng.dev/store-backends/)
 - **Semantic code-recall:** opt-in embeddings plus pgvector recall prior findings whose code resembles your diff and inject them as advisory context (never suppressing or mutating a finding). Off by default; needs `[embedding] enabled = true` and a Postgres store. [Semantic code-recall](https://miucr.vanducng.dev/semantic-recall/)
 - **REST API and GitHub App:** set `MIUCR_API_TOKEN` to register `POST /v1/reviews` and `GET /v1/reviews/{id}` on the serve mux (one shared bearer is one trust boundary). `[github] mode = "app"` swaps PAT auth for App installation auth. [REST API and GitHub App](https://miucr.vanducng.dev/rest-api-and-github-app/)
-- **MCP server:** `miucr mcp` exposes `review_run` / `review_get` over stdio to any MCP runtime, reviewing the repo in the current working directory. [MCP integration](https://miucr.vanducng.dev/mcp/)
+- **MCP server:** `miucr mcp` exposes `review_run` / `review_get` over stdio to any MCP runtime, reviewing the repo in the current working directory. `review_run` takes an optional `instruction` to steer the review (fenced/context-only, never changes the finding schema). [MCP integration](https://miucr.vanducng.dev/mcp/)
 
 ## Output contract
 
@@ -241,7 +312,10 @@ Every command emits the stable **`miucr.cli/v1`** envelope (default `-o json`; `
 for a human table). `ok` is the branch point; `artifacts` and `warnings` are always present
 (`[]` when empty); `summary`, `data`, and `stats` appear when relevant. Errors use the same
 envelope with `ok:false`, `kind:"error"`, and a typed `error` object (`code`, `message`,
-`hint`, `retryable`). Secrets never appear in the envelope, logs, or on disk.
+`hint`, `retryable`). Secrets never appear in the envelope, logs, or on disk. The
+`--instruction`/`--conversation` flags and the `/miucr review <prompt>` trigger only add
+**input** to a review; the envelope and the finding JSON are unchanged (still
+`miucr.cli/v1`).
 
 Severities low to high: `info` < `low` < `medium` < `high` < `critical`.
 

@@ -60,6 +60,14 @@ inputs:
       PR is reviewed by ITS code, not the last release. Requires Go on the runner.
     required: false
     default: "false"
+  pr-number:
+    description: PR number to review (defaults to the pull_request event's number).
+    required: false
+    default: ${{ github.event.pull_request.number }}
+  instruction:
+    description: Extra free-text steer passed to miucr review --instruction.
+    required: false
+    default: ""
 
 runs:
   using: composite
@@ -100,7 +108,8 @@ runs:
         FILTER_MODE: ${{ inputs.filter-mode }}
         SARIF_FILE: ${{ inputs.sarif-file }}
         SUGGEST: ${{ inputs.suggest }}
-        PR_NUMBER: ${{ github.event.pull_request.number }}
+        PR_NUMBER: ${{ inputs.pr-number }}
+        INSTRUCTION: ${{ inputs.instruction }}
       run: |
         set -euo pipefail
         # A gateway base-url means Bearer auth (ANTHROPIC_AUTH_TOKEN); plain
@@ -112,12 +121,14 @@ runs:
           export ANTHROPIC_API_KEY="$API_KEY"
         fi
         if [ -n "$MODEL" ]; then export ANTHROPIC_MODEL="$MODEL"; fi
+        if [ -z "$PR_NUMBER" ]; then echo "::error::miucr: pr-number is empty"; exit 1; fi
         REF="${GITHUB_REPOSITORY}#${PR_NUMBER}"
         # A real LLM PR review exceeds the 30s default; a large diff on a slower model
         # can exceed 300s, so give it 600s (review.timeout is retryable + actionable anyway).
         ARGS=(review --pr "$REF" --post --gate "$GATE" --filter-mode "$FILTER_MODE" --timeout 600s)
         if [ -n "$SARIF_FILE" ]; then ARGS+=(--sarif-out "$SARIF_FILE"); fi
         if [ "${SUGGEST:-}" = "true" ]; then ARGS+=(--suggest); fi
+        if [ -n "$INSTRUCTION" ]; then ARGS+=(--instruction "$INSTRUCTION"); fi
         # Retry on a RETRYABLE provider error (envelope retryable:true — e.g. a 529
         # overloaded / rate-limit), then soft-pass: a transient upstream outage must
         # not fail the check (it's not the PR's fault). A non-retryable error (or a

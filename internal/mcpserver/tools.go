@@ -35,6 +35,7 @@ func registerTools(server *mcp.Server, deps Deps, opts Options, policy safetyPol
 			RepoDir:      ".",
 			ExpandWindow: expand,
 			TokenBudget:  in.TokenBudget,
+			Instruction:  in.Instruction,
 		})
 		if err != nil {
 			return nil, reviewRunOutput{}, policy.toolErr("review.run_failed", err)
