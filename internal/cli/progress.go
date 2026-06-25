@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"time"
 )
 
 // newProgress builds the stderr progress sink for review. Progress is shown when
@@ -16,7 +17,9 @@ func newProgress(w io.Writer, verbose, quiet bool) func(string) {
 	if quiet || (!verbose && !isTerminal(w)) {
 		return nil
 	}
-	return func(msg string) { fmt.Fprintln(w, "miu-cr: "+msg) }
+	return func(msg string) {
+		fmt.Fprintf(w, "miu-cr: %s %s\n", time.Now().Format("15:04:05.000"), msg)
+	}
 }
 
 // isTerminal reports whether w is a character device (an interactive terminal),

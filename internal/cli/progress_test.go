@@ -27,7 +27,7 @@ func TestNewProgress(t *testing.T) {
 			t.Fatal("verbose must return a non-nil sink")
 		}
 		p("reviewing 2 files (3 changed)…")
-		if got := buf.String(); got != "miu-cr: reviewing 2 files (3 changed)…\n" {
+		if got := buf.String(); !strings.HasPrefix(got, "miu-cr: ") || !strings.Contains(got, "reviewing 2 files (3 changed)…\n") {
 			t.Errorf("unexpected progress line: %q", got)
 		}
 	})
@@ -67,7 +67,7 @@ func TestReviewVerboseProgressToStderrOnly(t *testing.T) {
 	if !strings.Contains(out.String(), `"api_version"`) {
 		t.Errorf("stdout must still carry the envelope: %s", out.String())
 	}
-	if !strings.Contains(errBuf.String(), "miu-cr: done: 1 findings") {
+	if !strings.Contains(errBuf.String(), "done: 1 findings") {
 		t.Errorf("stderr must carry the done milestone, got: %q", errBuf.String())
 	}
 }
