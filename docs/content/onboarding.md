@@ -33,21 +33,21 @@ miucr init
 
 The wizard asks three things:
 
-1. **Provider** — `[1] anthropic  [2] openai  [3] custom`. Custom asks for a
+1. **Provider**: `[1] anthropic  [2] openai  [3] custom`. Custom asks for a
    gateway base URL (e.g. a GLM/z.ai endpoint).
-2. **Auth method** — for `anthropic`/`custom` the menu is `[1] env var` or
+2. **Auth method**: for `anthropic`/`custom` the menu is `[1] env var` or
    `[2] paste now`. The env-var path stores **only the env-var name**
-   (`ANTHROPIC_API_KEY` by default) — **no secret is written to disk**. Paste-now
+   (`ANTHROPIC_API_KEY` by default); **no secret is written to disk**. Paste-now
    is gated behind an explicit confirm and a plaintext-on-disk warning. For
    `openai` the menu adds a third, default option: **`[1] Browser login (OAuth)`**
-   (review on your ChatGPT/Codex plan, no API key — see `miucr login`), then
+   (review on your ChatGPT/Codex plan, no API key; see `miucr login`), then
    `[2] env var` and `[3] paste now`.
-3. **Project rules** — `init` detects your stack (`go.mod`, `package.json`,
+3. **Project rules**: `init` detects your stack (`go.mod`, `package.json`,
    `pyproject.toml`, …) and offers to scaffold a starter rule under
    `.miu/cr/rules/`.
 
-The saved config holds **only your choices** — the default provider plus the one
-provider block you picked — not the full built-in defaults. It ends on a payoff
+The saved config holds **only your choices** (the default provider plus the one
+provider block you picked), not the full built-in defaults. It ends on a payoff
 box pointing at your first command:
 
 ```
@@ -60,7 +60,7 @@ box pointing at your first command:
   ▶ miucr review --staged
 ```
 
-Re-running `init` is idempotent — it asks `Overwrite?` before clobbering an
+Re-running `init` is idempotent; it asks `Overwrite?` before clobbering an
 existing config.
 
 ### Non-interactive (CI bootstrap)
@@ -73,7 +73,7 @@ Zero prompts; writes the same delta-only config. Add `--base-url` for a gateway,
 `--no-rules` to skip rule scaffolding.
 
 :::note
-You can skip `init` entirely — everything works with zero config when a provider
+You can skip `init` entirely: everything works with zero config when a provider
 key is on the environment. With no config **and** no provider key, `miucr review`
 prints a one-line nudge to run `init`.
 :::
@@ -137,26 +137,26 @@ See [Usage](/usage/) for every flag and exit code.
 MCP-capable host can run a review without leaving the editor. Two tools:
 `review_run` (review local changes) and `review_get` (fetch a stored result).
 
-- **Claude Code** — drop a `.mcp.json` at the repo root.
-- **Cursor** — add `.cursor/mcp.json` (or the global `~/.cursor/mcp.json`).
-- **Codex CLI** — add an `[mcp_servers.miucr]` block to `~/.codex/config.toml`.
+- **Claude Code**: drop a `.mcp.json` at the repo root.
+- **Cursor**: add `.cursor/mcp.json` (or the global `~/.cursor/mcp.json`).
+- **Codex CLI**: add an `[mcp_servers.miucr]` block to `~/.codex/config.toml`.
 
 Copy-paste configs for all three (plus setup notes) live in
 [`examples/mcp-setup/`](https://github.com/vanducng/miu-cr/tree/main/examples/mcp-setup).
-If the `miucr` Claude Code skill is installed, invoke it as `/miucr` — it runs
+If the `miucr` Claude Code skill is installed, invoke it as `/miucr`; it runs
 the CLI `miucr review --staged` for you. See [MCP integration](/mcp/) for details.
 
 ## 5. Automate it in CI
 
 Drop the sample workflow into `.github/workflows/` and add `ANTHROPIC_API_KEY`
-to your repo secrets — every PR gets reviewed with inline comments and an
+to your repo secrets; every PR gets reviewed with inline comments and an
 idempotent summary:
 
 - [`examples/github-action/code-review.yml`](https://github.com/vanducng/miu-cr/tree/main/examples/github-action/code-review.yml)
-  — the reusable composite action (fork-safe via `pull_request_target`; it
+  (the reusable composite action; fork-safe via `pull_request_target`; it
   fetches the diff via the API and never runs fork code).
-- [`examples/docker/`](https://github.com/vanducng/miu-cr/tree/main/examples/docker)
-  — a distroless image + compose file for running
+- [`examples/docker/`](https://github.com/vanducng/miu-cr/tree/main/examples/docker):
+  a distroless image + compose file for running
   `miucr serve` as a self-hosted webhook/poll daemon.
 
 For the full automation story, see [Serve & Action](/serve-and-action/) and
@@ -164,13 +164,13 @@ For the full automation story, see [Serve & Action](/serve-and-action/) and
 
 ## Where to go next
 
-- [Project rules](/rules/) — give the reviewer deterministic, glob-selected
+- [Project rules](/rules/): give the reviewer deterministic, glob-selected
   context.
-- [Providers](/providers/) and [Credentials](/credentials/) — gateways, models,
+- [Providers](/providers/) and [Credentials](/credentials/): gateways, models,
   and how auth is resolved. To review on your **ChatGPT plan** instead of
-  a billed key, run `miucr login` — see
+  a billed key, run `miucr login`; see
   [Using your ChatGPT plan](/credentials/#using-openai--your-chatgpt-plan-miucr-login).
-- [Review history](/history/) — every review auto-saves; browse with `miucr history` (list), `miucr history show <id>`, and `miucr history prune`.
-- [How it works](/how-it-works/) — the deterministic engine behind the LLM pass.
+- [Review history](/history/): every review auto-saves; browse with `miucr history` (list), `miucr history show <id>`, and `miucr history prune`.
+- [How it works](/how-it-works/): the deterministic engine behind the LLM pass.
 - Browse all copy-paste starters in
   [`examples/`](https://github.com/vanducng/miu-cr/tree/main/examples).

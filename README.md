@@ -233,7 +233,7 @@ PR comments are polished, not raw findings (see
 
 - **Head-SHA-anchored inline comments** with multi-line ranges, dropped (not mis-posted) on position drift.
 - **One-click suggestions:** GitHub-native suggested edits for proven single-line fixes (`--suggest`, author-applied).
-- **One review per commit:** the summary is the review body with inline comments nested under it. A same-commit re-run is skipped, so re-runs and re-pushes do not double-post.
+- **One upserted summary:** the summary is ONE issue comment that is created on the first run and edited in place after (carrying the `<!-- miu-cr-review -->` marker); inline findings post as a PR review with an empty body. Re-runs and re-pushes update that single comment instead of stacking duplicates.
 - **Optional auto-approve:** `--approve-clean` submits `APPROVE` only on a clean, non-fork, trusted-author PR, else it degrades to `COMMENT`.
 - **Fork-safe:** repo rules are trust-fenced and dropped on fork PRs; the engine still reviews.
 
@@ -258,8 +258,8 @@ dedupe. Flags: `--gate`, `--provider anthropic|openai|<name>|auto`, `--base-url`
 for **this** review; `--conversation` (on `--pr`) folds the prior PR conversation back in.
 Both ride the same single review pass (no extra LLM call) as fenced, context-only input.
 They never change the finding schema; conversation text is treated as untrusted and dropped
-on fork PRs. GitHub PRs add head-SHA anchoring and one review per commit (same-SHA re-runs
-skip).
+on fork PRs. GitHub PRs add head-SHA anchoring and one upserted summary issue comment
+(re-runs edit it in place).
 [Usage](https://miucr.vanducng.dev/usage/) ·
 [How it works](https://miucr.vanducng.dev/how-it-works/) ·
 [GitHub PR review](https://miucr.vanducng.dev/github-pr/)

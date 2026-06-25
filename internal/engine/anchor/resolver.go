@@ -178,7 +178,7 @@ func resolveFromFileContent(f *engine.Finding, d *diff.Diff, target []string) bo
 // splitAndNormalize splits code into normalized non-blank lines.
 // Invariant: blank-after-normalize lines are DROPPED here (so quoted code with
 // interior blanks still matches), whereas resolveFromFileContent keeps file
-// blanks in place — both sides are compared only on the surviving target lines.
+// blanks in place; both sides are compared only on the surviving target lines.
 func splitAndNormalize(code string) []string {
 	raw := strings.Split(code, "\n")
 	result := make([]string, 0, len(raw))

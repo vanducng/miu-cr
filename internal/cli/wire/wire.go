@@ -56,7 +56,7 @@ func loadRules(repoDir string, allowRepo bool) []rules.Rule {
 // repo-ROOT-relative path via filepath.Rel(repoDir, Path) for the blob URL
 // (blobURL anchors at the repo root, so a rule at .miu/cr/rules/go.md must link
 // as .miu/cr/rules/go.md, not go.md). A user rule (absolute home path) and a
-// built-in (defaults/* virtual path) are NEVER given a path — linking either
+// built-in (defaults/* virtual path) are NEVER given a path; linking either
 // would leak the home dir or point at a non-repo file. A repo rule whose Rel
 // fails or escapes the repo (rel starts with "..") is downgraded to cite-only.
 func ruleCitations(loaded []rules.Rule, repoDir string) map[string]mgithub.RuleCitation {
@@ -213,16 +213,16 @@ func (engineReviewer) GateFailed(findings []cli.ReviewFinding, gate string) bool
 var newGitHubClient = mgithub.NewClient
 
 // newPRThreadStore is the opt-in PR-thread store seam. It returns a non-nil store
-// (and a closer) ONLY when MIUCR_PR_STORE is set — never on the action/CI path,
+// (and a closer) ONLY when MIUCR_PR_STORE is set, never on the action/CI path,
 // which must stay stateless and byte-for-byte M2/M9. A nil store disables all
 // resolution tracking; the caller MUST nil-check. Tests override it to inject a
 // temp store.
 //
 // Backend selection routes through the wire factory. The SQLite path keeps the
-// silent nil-degrade (resolution off, review proceeds) — it is implicitly
+// silent nil-degrade (resolution off, review proceeds); it is implicitly
 // opt-in. Any non-sqlite backend PROPAGATES its failure: an explicit
 // backend=postgres open failure surfaces the typed, redacted store.unavailable,
-// and an unknown backend surfaces config.invalid — a user who chose a non-default
+// and an unknown backend surfaces config.invalid: a user who chose a non-default
 // backend must know it failed rather than silently lose resolution tracking.
 var newPRThreadStore = func(ctx stdctx.Context, cfg config.Config) (store.PRThreadStore, func(), error) {
 	if os.Getenv("MIUCR_PR_STORE") == "" {
@@ -281,7 +281,7 @@ func (prReviewer) ReviewPR(ctx stdctx.Context, req cli.PRReviewRequest) (cli.Rev
 
 	// Incremental re-review: short-circuit before the clone + LLM pass when the
 	// desired end-state already holds and --force was not passed. Only --no-post
-	// skips (an unchanged saved SHA — a pure LLM-pass perf optimization); --post
+	// skips (an unchanged saved SHA, a pure LLM-pass perf optimization); --post
 	// always re-enters so the single summary issue comment gets EDITED in place. A
 	// store read failure degrades to always-review (skipUnchanged returns ok=false),
 	// never blocks. See skipUnchanged.
@@ -290,7 +290,7 @@ func (prReviewer) ReviewPR(ctx stdctx.Context, req cli.PRReviewRequest) (cli.Rev
 			req.Progress("skipped: head SHA " + info.HeadSHA + " already reviewed (use --force to re-review)")
 		}
 		return cli.ReviewOutcome{
-			// review_id resolves to the prior review this run reuses (not "" — that
+			// review_id resolves to the prior review this run reuses (not "", which
 			// would wrongly read as --no-save); PriorReviewID keeps it explicit.
 			ReviewID:         prior.ID,
 			SkippedUnchanged: true,
@@ -419,10 +419,10 @@ func (prReviewer) ReviewPR(ctx stdctx.Context, req cli.PRReviewRequest) (cli.Rev
 // skipUnchanged reports whether the --pr review can short-circuit because the
 // desired end-state already holds and --force was not passed. It is the --no-post
 // LLM-pass perf optimization ONLY: skip when a prior SAVED review of the same PR
-// key exists at the current head SHA. --post NEVER skips — a same-SHA re-run must
+// key exists at the current head SHA. --post NEVER skips: a same-SHA re-run must
 // re-enter publishReview so the single summary issue comment gets EDITED in place.
 //
-// A nil store / any read failure degrades to ok=false (always review) — never
+// A nil store / any read failure degrades to ok=false (always review), never
 // blocks. The returned LatestReview carries the prior review id for the
 // skipped_unchanged envelope.
 func skipUnchanged(ctx stdctx.Context, hist store.Store, info *mgithub.PRInfo, force, post bool) (store.LatestReview, bool) {
@@ -475,13 +475,13 @@ func publishReview(ctx stdctx.Context, client mgithub.Client, runner *gitcmd.Run
 	// M2/M9 ExistingFingerprints; with a store we layer prior 'posted' fps on top
 	// and then SUBTRACT recurring resolved fps so a fixed-then-reappearing finding
 	// reopens (the lingering marker keeps it in `existing`, so only a set-difference
-	// can re-raise it — a union never could).
+	// can re-raise it; a union never could).
 	skip := existing
 	prKey := store.PRKey{Owner: info.Owner, Repo: info.Repo, Number: info.Number}
 	var prior []store.PRFinding
 	if prStore != nil {
 		// Best-effort store: a read failure degrades to an EMPTY prior set (no
-		// skip/resolution this run) and is logged — it must never abort the review.
+		// skip/resolution this run) and is logged; it must never abort the review.
 		if p, lerr := prStore.ListFindings(ctx, prKey); lerr != nil {
 			slog.Warn("pr-thread store read failed, proceeding without prior findings: " + config.RedactString(lerr.Error()))
 		} else {
@@ -564,7 +564,7 @@ func publishReview(ctx stdctx.Context, client mgithub.Client, runner *gitcmd.Run
 	}
 
 	if prStore != nil {
-		// PostReview already succeeded — the review is live. A store write failure must
+		// PostReview already succeeded: the review is live. A store write failure must
 		// not discard that outcome: log (redacted), continue.
 		if terr := trackResolution(ctx, prStore, prKey, prior, res.Findings, diffs, pr.PostedFindings); terr != nil {
 			slog.Warn("pr-thread store tracking failed: " + config.RedactString(terr.Error()))
@@ -573,7 +573,7 @@ func publishReview(ctx stdctx.Context, client mgithub.Client, runner *gitcmd.Run
 
 	// M7 write path (gated by [embedding].enabled+postgres, independent of the
 	// PR-thread store): embed the actually-posted findings' scrubbed code anchors.
-	// Best-effort — never affects the published review.
+	// Best-effort, never affects the published review.
 	ew.write(ctx, pr.PostedFindings, res.Findings, res.Stats)
 
 	prResult.Posted = true

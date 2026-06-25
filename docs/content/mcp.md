@@ -36,7 +36,7 @@ Review local git changes (staged, a range, or a single commit) and return gated 
 | `expand` | int | Context lines above/below each hunk. Defaults to `5`; `0` disables. |
 | `token_budget` | int | Approximate token budget; over budget degrades context. `0` disables. |
 
-Select **exactly one** mode (`staged`, `from`+`to`, or `commit`) — the same validation as the CLI. Returns `{ id, findings, stats }`; `id` is the persisted review id (use it with `review_get`).
+Select **exactly one** mode (`staged`, `from`+`to`, or `commit`); the same validation as the CLI. Returns `{ id, findings, stats }`; `id` is the persisted review id (use it with `review_get`).
 
 ### `review_get`
 

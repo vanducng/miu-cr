@@ -15,7 +15,7 @@ change with the backend.
 | `sqlite`   | Default. Single host, local/serve.    | `~/.config/miu/cr/state.db` (WAL)   |
 | `postgres` | Opt-in. Shared/multi-instance serve.  | A Postgres database you provide.    |
 
-SQLite stays the default — existing setups see no change. Postgres is purely
+SQLite stays the default; existing setups see no change. Postgres is purely
 opt-in.
 
 ## Selecting the backend
@@ -43,26 +43,26 @@ export MIUCR_STORE_BACKEND=postgres
 miucr review --pr 123
 ```
 
-- **`sslmode=require`** (or stricter — `verify-full`) is recommended for any
+- **`sslmode=require`** (or stricter, `verify-full`) is recommended for any
   non-local Postgres.
 - The DSN is **never persisted to disk by miucr**, never written to the
   `miucr.cli/v1` JSON envelope, and is **always redacted** (`config.RedactString`)
   in every error and log line, so a password can't leak via a connect failure.
-- A bounded (~10s) connect/ping timeout — a Go-side `context` deadline around the
-  connection ping, **not** a `connect_timeout` DSN parameter — makes a bad host
+- A bounded (~10s) connect/ping timeout, a Go-side `context` deadline around the
+  connection ping (**not** a `connect_timeout` DSN parameter), makes a bad host
   fast-fail instead of hanging.
 
 The core schema is created idempotently on open (`CREATE TABLE IF NOT EXISTS`); no
 manual migration step is required. The core `reviews`/`pr_findings` schema issues
 **no** `CREATE EXTENSION`. Only the opt-in semantic-recall layer (when
 `[embedding].enabled = true`) runs `CREATE EXTENSION IF NOT EXISTS vector` to
-provision pgvector — see [Semantic code-recall](/semantic-recall/).
+provision pgvector; see [Semantic code-recall](/semantic-recall/).
 
 ## Failure behavior
 
 Because Postgres is an **explicit** choice, an open/connect/auth failure with
 `backend = postgres` is **fatal** for the **resolution-tracking and history-read
-paths** — a typed `store.unavailable` error (exit 1, safe to retry): the `miucr
+paths**: a typed `store.unavailable` error (exit 1, safe to retry): the `miucr
 history` command, the MCP `serve` paths, and the PR-thread store (when
 `MIUCR_PR_STORE` is set). Those never silently degrade to a no-op store the way the
 implicit, opt-in SQLite PR-thread path can; a user who selected Postgres is told it
@@ -70,7 +70,7 @@ failed (with a redacted message).
 
 The one carve-out is the **per-run history save** on `miucr review`: it is
 **best-effort on every backend**. If the store can't be opened (a bad Postgres DSN
-included), the review still runs and emits its findings — the save is skipped with
+included), the review still runs and emits its findings; the save is skipped with
 a redacted warning and an empty `review_id`, rather than failing the review.
 
 ## Schema
@@ -80,8 +80,8 @@ against drift; types differ only by dialect, e.g. SQLite `INTEGER` ↔ Postgres
 `BIGINT`). Timestamps are stored as `RFC3339Nano` TEXT in both backends for
 byte-for-byte row parity across a switch.
 
-- `reviews` — persisted review records.
-- `pr_findings` — PR-thread dedupe/resolution state
+- `reviews`: persisted review records.
+- `pr_findings`: PR-thread dedupe/resolution state
   (`owner, repo, number, fingerprint, path, status`).
 
 The opt-in semantic-recall layer adds a separate, Postgres-only
@@ -96,7 +96,7 @@ parity test are untouched by it. See
   the shared backend-conformance suite against SQLite only.
 - CI additionally runs the **same conformance suite against real Postgres** via a
   `pgvector/pgvector:pg16` service container (`MIUCR_TEST_PG_DSN` set in that job),
-  so the Postgres path — including the opt-in `pgvector` EmbeddingStore — is
+  so the Postgres path (including the opt-in `pgvector` EmbeddingStore) is
   exercised on every PR.
 - A manual, gated end-to-end smoke against your own Postgres:
 

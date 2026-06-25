@@ -1,16 +1,16 @@
 ---
 title: Review history
-description: Every review is auto-saved to a local store as a full record — findings, stats, per-turn transcript, and the raw prompt/response. Browse it with `miucr history` (list / show / prune).
+description: Every review is auto-saved to a local store as a full record (findings, stats, per-turn transcript, and the raw prompt/response). Browse it with `miucr history` (list / show / prune).
 ---
 
-Every `miucr review` — local **and** `--pr` — auto-saves a **full record** to a
+Every `miucr review` (local **and** `--pr`) auto-saves a **full record** to a
 local store: the findings + stats, the PR/repo context, the provider/model, a
 per-turn **transcript** of the reviewer's tool calls, and the **raw prompt and
 raw final response**. That makes a review auditable and replayable after the
 fact: `miucr history show <id>` reconstructs exactly what the reviewer saw and
 said.
 
-Auto-save is **on by default**. Nothing leaves your machine — the store is the
+Auto-save is **on by default**. Nothing leaves your machine: the store is the
 same local SQLite DB at `~/.config/miu/cr/state.db` (or your configured Postgres
 backend), and it is gitignored. **No credentials are ever persisted**: tokens
 never enter the prompt, the diff, or the record.
@@ -21,13 +21,13 @@ never enter the prompt, the diff, or the record.
 | --- | --- |
 | `id`, `created_at` | Record identity + timestamp |
 | `target` | `owner/repo#N` for a PR, else the local repo dir |
-| `mode` | `staged` / `range` / `commit` (a `--pr` review is stored as `range` — it is identified by `target`, not a distinct `pr` mode) |
+| `mode` | `staged` / `range` / `commit` (a `--pr` review is stored as `range`; it is identified by `target`, not a distinct `pr` mode) |
 | `provider`, `model` | The LLM profile used |
 | `status`, `max_severity` | Terminal status + worst finding severity |
 | `findings`, `stats` | The full review result |
 | `transcript` | Per-turn tool calls the reviewer made |
 | `raw_prompt`, `raw_response` | The verbatim LLM I/O (audit trail) |
-| `trace` | The full redacted trace (system prompt, diff meta, selected files, injected rules, prompts, response) — view with `miucr trace <id>` |
+| `trace` | The full redacted trace (system prompt, diff meta, selected files, injected rules, prompts, response); view with `miucr trace <id>` |
 
 ## Opting out per run
 
@@ -35,7 +35,7 @@ never enter the prompt, the diff, or the record.
 miucr review --staged --no-save     # review, but persist nothing
 ```
 
-The stdout envelope is unchanged either way — it gains an **additive** `review_id`
+The stdout envelope is unchanged either way; it gains an **additive** `review_id`
 field (the saved record id, or empty with `--no-save`).
 
 ## Browsing history
@@ -57,7 +57,7 @@ miucr history show <id> -o pretty --raw          # pretty, with the raw prompt/r
 
 ## Inspecting the trace
 
-Alongside the record, every review keeps a **redacted trace** — the ordered steps
+Alongside the record, every review keeps a **redacted trace**: the ordered steps
 of the pipeline: the **system prompt**, the **diff identification** (base/head +
 how it was computed), the **selected files**, the **injected rules** (stem +
 provenance), the **user prompt**, the **model/provider**, the **raw response**,
@@ -72,14 +72,14 @@ miucr trace <id> -o pretty       # a readable per-step view
 typed `trace.not_found`; an old review with no trace renders empty.
 
 For a **live** trace, pass `--trace` to `review`: each capture seam streams one
-NDJSON line (`{"step":...,"payload":...}`) to **stderr** as the run proceeds —
+NDJSON line (`{"step":...,"payload":...}`) to **stderr** as the run proceeds,
 distinct from `--verbose` progress. The stdout result envelope is unchanged.
 
 ```sh
 miucr review --staged --trace 2> trace.ndjson    # live steps on stderr; envelope on stdout
 ```
 
-The trace holds the prompt (your own code), so it is **local only** — read from
+The trace holds the prompt (your own code), so it is **local only**: read from
 the local store, never re-fetched from a provider, never posted, and never in the
 `review.result` envelope. Secrets (tokens, DSNs) are redacted at persist and in
 the live stream.

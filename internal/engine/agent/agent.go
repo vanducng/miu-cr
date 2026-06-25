@@ -41,7 +41,7 @@ func classifyAnthropicErr(err error) error {
 type Context struct {
 	Text  string
 	Rules string // fenced rules section emitted before the diff in the USER turn
-	// SemanticContext is the optional M7 advisory block. LOCKSTEP: mirror Rules —
+	// SemanticContext is the optional M7 advisory block. LOCKSTEP: mirror Rules,
 	// it threads engine.AgentContext -> here -> PromptParts -> BuildUserPrompt in
 	// BOTH agent.go and openai.go, or it is silently dropped.
 	SemanticContext string
@@ -49,7 +49,7 @@ type Context struct {
 	// is byte-identical and the prompt cache is preserved). LOCKSTEP: thread it from
 	// engine.AgentContext into BuildUserPrompt in agent.go/openai.go/codex.go.
 	WantDiagram bool
-	// Instruction is the optional per-review developer steer. LOCKSTEP: mirror Rules —
+	// Instruction is the optional per-review developer steer. LOCKSTEP: mirror Rules,
 	// thread it engine.AgentContext -> here -> PromptParts -> BuildUserPrompt in ALL
 	// three backends (agent.go/openai.go/codex.go), or it is silently dropped.
 	Instruction string
@@ -256,7 +256,7 @@ type grepArgs struct {
 }
 
 // fileReadLabel renders a short "path:start-end" label for the progress sink
-// (range omitted when unset). Paths/line numbers only — never secrets.
+// (range omitted when unset). Paths/line numbers only, never secrets.
 func fileReadLabel(a fileReadArgs) string {
 	if a.Start <= 0 {
 		return a.File // no usable start (incl. line 0, which doesn't exist) → just the path

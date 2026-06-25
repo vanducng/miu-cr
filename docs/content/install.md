@@ -21,8 +21,8 @@ The script detects your OS/arch, downloads the matching archive, **verifies its 
 
 Knobs:
 
-- `MIUCR_VERSION` — tag to install (same as the positional arg).
-- `MIUCR_INSTALL_DIR` — target bin directory.
+- `MIUCR_VERSION`: tag to install (same as the positional arg).
+- `MIUCR_INSTALL_DIR`: target bin directory.
 
 :::note
 The script publishes darwin amd64+arm64 and linux amd64 only. On linux/arm64 it tells you to build from source (`go install …`).
@@ -85,4 +85,4 @@ miucr version            # stable JSON envelope
 miucr version -o pretty
 ```
 
-Then set a provider key and run your first review — see [Usage](/usage/) and [Credentials](/credentials/).
+Then set a provider key and run your first review. See [Usage](/usage/) and [Credentials](/credentials/).

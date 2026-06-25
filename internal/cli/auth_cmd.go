@@ -10,7 +10,7 @@ import (
 	"github.com/vanducng/miu-cr/internal/config"
 )
 
-// whoamiCommand reports the cached OAuth identity by WHITELIST — only the
+// whoamiCommand reports the cached OAuth identity by WHITELIST: only the
 // non-secret fields {Provider, AccountID, ExpiresAt}. The record's four secret
 // fields (AccessToken/RefreshToken/IDToken/APIKey) are never read into the
 // envelope, so no token can leak via whoami.

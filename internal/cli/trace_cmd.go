@@ -37,7 +37,7 @@ func newTraceSink(w io.Writer) func(step string, payload any) {
 // `miucr trace <id>` loads the review's redacted trace_json from history and
 // shows the ordered steps (system prompt → diff identification → selected files
 // → injected rules → user prompt → raw response → tool calls). The trace is
-// LOCAL-only — it is read from the local history store, never re-fetched from a
+// LOCAL-only: it is read from the local history store, never re-fetched from a
 // provider and never posted; secrets were redacted at persist.
 func traceCommand(_ *options) *cobra.Command {
 	cmd := &cobra.Command{

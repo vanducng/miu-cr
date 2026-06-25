@@ -8,7 +8,7 @@ import (
 )
 
 // ANSI codes; emitted only when the writer is a terminal (isTerminal, from
-// progress.go — same stdlib check, no go-isatty dependency). Piped/CI stays plain.
+// progress.go; same stdlib check, no go-isatty dependency). Piped/CI stays plain.
 const (
 	ansiReset = "\033[0m"
 	ansiBold  = "\033[1m"

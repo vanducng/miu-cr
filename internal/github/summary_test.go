@@ -171,7 +171,7 @@ func TestRenderSummaryHeaderNoFindings(t *testing.T) {
 func TestRenderSummaryFooterReviewedCommit(t *testing.T) {
 	out := RenderSummaryFull(&PRInfo{HeadSHA: "deadbeef"}, nil, nil, 0, nil, nil, SummaryOptions{})
 	if !strings.Contains(out, "<sub>Reviewed commit `deadbeef` · Posted by miu-cr</sub>") {
-		t.Fatalf("want the per-commit attribution footer:\n%s", out)
+		t.Fatalf("want the per-SHA reviewed-commit attribution footer:\n%s", out)
 	}
 	// The old upsert footer line must be gone.
 	if strings.Contains(out, "Re-runs edit this summary") {

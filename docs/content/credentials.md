@@ -1,6 +1,6 @@
 ---
 title: Credentials
-description: Bring your own API key — passed in memory, never persisted to disk or the store.
+description: Bring your own API key, passed in memory, never persisted to disk or the store.
 ---
 
 miu-cr is **bring-your-own-key**. You supply an LLM API key via an environment variable or a flag; it lives in memory only for the duration of the call. It is **never** written to disk, the SQLite history, or anywhere else.
@@ -24,17 +24,17 @@ miucr review --staged --auth-token "$ZAI_API_KEY" --base-url https://api.z.ai/ap
 ```
 
 You can also name a provider profile in the optional config file and have it
-reference an env var by name (`auth_env`) instead of putting the token inline —
+reference an env var by name (`auth_env`) instead of putting the token inline;
 the token still resolves from the environment at run time and is never written
 back. See [Providers](/providers/) for the config schema, named-profile examples
 (z.ai/GLM, a generic OpenAI-compatible gateway), and the full resolution matrix.
 
 :::caution[Prefer `auth_env` over `auth_token`]
-A profile credential can be `auth_env` (the **name** of an env var) or `auth_token` (a **literal** token). Prefer `auth_env` — with `auth_token` the secret is stored **in plaintext on disk** in `config.toml`. When both are set, `auth_token` wins, and miu-cr prints a one-time stderr warning whenever a plaintext `auth_token` is used.
+A profile credential can be `auth_env` (the **name** of an env var) or `auth_token` (a **literal** token). Prefer `auth_env`: with `auth_token` the secret is stored **in plaintext on disk** in `config.toml`. When both are set, `auth_token` wins, and miu-cr prints a one-time stderr warning whenever a plaintext `auth_token` is used.
 :::
 
 :::note[Migrating from `ZAI_API_KEY`]
-Earlier builds special-cased a bare `ZAI_API_KEY`. That hardcoding is gone — use a config profile with `auth_env = "ZAI_API_KEY"`, or set `ANTHROPIC_BASE_URL` + `ANTHROPIC_AUTH_TOKEN`. See [Providers](/providers/) for the full z.ai example.
+Earlier builds special-cased a bare `ZAI_API_KEY`. That hardcoding is gone; use a config profile with `auth_env = "ZAI_API_KEY"`, or set `ANTHROPIC_BASE_URL` + `ANTHROPIC_AUTH_TOKEN`. See [Providers](/providers/) for the full z.ai example.
 :::
 
 ## Using OpenAI / your ChatGPT plan (`miucr login`)
@@ -53,7 +53,7 @@ miucr login --provider openai      # opens the browser, completes PKCE, caches t
 miucr review --staged              # now runs on your ChatGPT plan
 ```
 
-`provider` is an explicit flag backed by a small registry — `openai` is the only
+`provider` is an explicit flag backed by a small registry; `openai` is the only
 entry today (`--provider anthropic`/unknown is rejected: third-party Anthropic
 OAuth is ToS-prohibited). The flow binds a loopback callback on one of the
 OpenAI-allow-listed ports (`1455`, then `1457`). On a headless/SSH box use:
@@ -62,7 +62,7 @@ OpenAI-allow-listed ports (`1455`, then `1457`). On a headless/SSH box use:
 miucr login --no-browser           # prints the authorize URL to open elsewhere
 ```
 
-The `login.result` envelope is **secret-free** — it emits only
+The `login.result` envelope is **secret-free**: it emits only
 `{provider, oauth_path, expires_at, account_id, has_api_key}`; no tokens.
 
 ### Inspect and clear the cached login (`whoami` / `logout`)
@@ -73,18 +73,18 @@ miucr logout     # delete oauth.json; idempotent ({removed: bool})
 ```
 
 `whoami` reports only the **non-secret** fields from the cached record (provider,
-account id, expiry) — the access/refresh/id token and api key are never read into
+account id, expiry); the access/refresh/id token and api key are never read into
 the envelope, so no token can leak via `whoami` (in either `json` or `pretty`
 output). With no cached record it returns `{logged_in: false}` (a clean result,
 not an error). `logout` deletes `oauth.json`; running it again on an
 already-cleared record is a no-op (`{removed: false}`), so it is safe to repeat.
 
-**Precedence** — the cached login credential sits **below** an explicit key. An
+**Precedence**: the cached login credential sits **below** an explicit key. An
 explicit `--api-key` / `OPENAI_API_KEY` (and any Anthropic path) still wins, so a
 real key always overrides a stale token. OAuth is consulted only when no OpenAI
 key is present.
 
-### CI / GitHub Actions — use an API key, not OAuth
+### CI / GitHub Actions: use an API key, not OAuth
 
 OAuth is interactive (it needs a browser) so it is **not** used in CI. For
 GitHub Actions, generate a key at
@@ -130,7 +130,7 @@ jobs:
 - API keys and auth tokens (`--api-key`, `--auth-token`, `ANTHROPIC_API_KEY`, `OPENAI_API_KEY`, `ZAI_API_KEY`, …).
 - Base URLs supplied via `--base-url`.
 
-The SQLite history stores **review records only** — anchored findings and run stats. Credentials are not part of that record.
+The SQLite history stores **review records only**: anchored findings and run stats. Credentials are not part of that record.
 
 ## Output redaction
 
@@ -138,12 +138,12 @@ The **CLI envelope** success output is run through a credential scrubber before 
 
 - Credential-named JSON fields (anything matching `password`, `secret`, `token`, `api_key`, `auth_token`, …) are replaced with `***`.
 - Credential-bearing URLs and `key=value` assignments are redacted.
-- **Finding prose is exempt** — `rationale` and `suggested_patch` may legitimately quote token-like example text, so they survive the scrub intact.
+- **Finding prose is exempt**: `rationale` and `suggested_patch` may legitimately quote token-like example text, so they survive the scrub intact.
 
 On the **MCP path** the redaction is narrower: tool *error* messages are redacted, but the structured success output (the engine's findings + stats) is returned directly, without the `***` field scrubber. That output carries no token-bearing fields by construction, so no credentials flow through it. Errors on both paths are always redacted.
 
 ## Local state
 
-The SQLite review history is a local file at `~/.config/miu/cr/state.db` (same on macOS and Linux), alongside `config.toml`. The project `.gitignore` excludes `*.db` and `state.db` so review state — and the code it references — is never committed. Treat the history database as local-only.
+The SQLite review history is a local file at `~/.config/miu/cr/state.db` (same on macOS and Linux), alongside `config.toml`. The project `.gitignore` excludes `*.db` and `state.db` so review state (and the code it references) is never committed. Treat the history database as local-only.
 
 The state DB moved here from the older `miucr` directory. If you have an existing `state.db` under the old location, move it to `~/.config/miu/cr/state.db` to keep your history; otherwise miu-cr re-creates an empty one on first run.

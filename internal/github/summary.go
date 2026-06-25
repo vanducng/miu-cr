@@ -13,7 +13,7 @@ var severityOrder = []string{"critical", "high", "medium", "low", "info"}
 
 // severityMeta is the single source-of-truth severity→(emoji, P-level, shields color)
 // map: critical→P0/red, high→P1/orange, medium→P2/yellow, low→P3/blue, info+unknown→
-// P4/grey. DISPLAY ONLY — severity stays the gate/SARIF source (severityOrder/
+// P4/grey. DISPLAY ONLY: severity stays the gate/SARIF source (severityOrder/
 // severityRank untouched). priorityBadge + severityCountBadge derive from it.
 func severityMeta(sev string) (emoji, plevel, color string) {
 	switch strings.ToLower(strings.TrimSpace(sev)) {
@@ -135,7 +135,7 @@ func RenderSummaryFull(info *PRInfo, findings []engine.Finding, stats map[string
 	// render with an unset ReviewCount (no FetchPR), which still seeds N=1.
 	b.WriteString(runsCountToken(max(info.ReviewCount, 1)) + "\n")
 
-	// Keep the H2 small — severity chips ride the compact quote line below, not the header.
+	// Keep the H2 small; severity chips ride the compact quote line below, not the header.
 	b.WriteString("## Code Review\n\n")
 
 	if info.HeadSHA != "" {
@@ -321,7 +321,7 @@ func ruleCitation(info *PRInfo, ruleStem string, cites map[string]RuleCitation) 
 // mdInline neutralizes untrusted model text (rationale/category) for a Markdown
 // list item: collapse newlines to one line, HTML-escape <> (so a rationale can't
 // inject markup or break out of the <details> block), and backslash-escape the
-// Markdown breakout chars. '#' is escaped too — collapsed text placed at the start
+// Markdown breakout chars. '#' is escaped too: collapsed text placed at the start
 // of a line (e.g. after "## Walkthrough\n\n") would otherwise inject a heading.
 func mdInline(s string) string {
 	s = strings.Join(strings.Fields(s), " ")

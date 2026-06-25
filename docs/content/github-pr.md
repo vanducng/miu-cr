@@ -19,7 +19,7 @@ miucr review --pr owner/repo#123
 
 ## Dry-run vs. publish
 
-The default is a **dry-run** — findings only, nothing is posted:
+The default is a **dry-run**: findings only, nothing is posted:
 
 ```sh
 # Public PR, no GitHub PAT needed (the LLM key is still required):
@@ -47,7 +47,7 @@ envelope carries `data.findings`, `data.stats`, and a `data.pr` block:
 }
 ```
 
-On a dry-run, `approve_action` and `approve_reason` are empty strings — they (and
+On a dry-run, `approve_action` and `approve_reason` are empty strings; they (and
 `posted`/`posted_inline`/`mode`) are only populated on the `--post` path, where you
 would see values like `approve_action: "commented"` / `approve_reason: "not_requested"`.
 
@@ -59,7 +59,7 @@ miucr review --pr owner/repo#123 --post
 
 `--post` and `--no-post` are mutually exclusive.
 
-> A dry-run on a **public** PR needs no GitHub PAT — only `--post` (and private
+> A dry-run on a **public** PR needs no GitHub PAT: only `--post` (and private
 > repos) require a token. The LLM API key is always required: the dry-run still
 > runs the model to produce findings.
 
@@ -72,7 +72,7 @@ The GitHub token is resolved, first non-empty wins:
 3. `GH_TOKEN`
 
 It must be a personal access token with `repo` scope. The token is held in
-memory only — it is never written to config, never logged, and never appears in
+memory only; it is never written to config, never logged, and never appears in
 the JSON envelope.
 
 A PR-fetch failure is classified by cause so the next step is obvious: a `401`/
@@ -89,8 +89,8 @@ hunks** (re-derived deterministically from the same diff the engine anchored
 against), so GitHub never 422s on an out-of-hunk line. Each inline comment uses
 the modern comfort-fade API (`Side: RIGHT`, `Line`) and the review is anchored
 to the **head SHA**. Each inline comment leads with a display-only shields.io
-priority badge — `P0` (red, critical) · `P1` (orange, high) · `P2` (yellow, medium)
-· `P3` (blue, low) · `P4` (grey, info) — followed by the category and any `(per
+priority badge (`P0` red critical · `P1` orange high · `P2` yellow medium
+· `P3` blue low · `P4` grey info), followed by the category and any `(per
 <rule>)` citation; the underlying severity (used for the gate and SARIF) is unchanged. By
 default the review uses `Event: COMMENT` and never
 approves or requests changes; two opt-in write-actions (`--suggest`,
@@ -104,7 +104,7 @@ for the review (a hallucinated citation is dropped); a repo rule
 head SHA, while user and built-in rules are cited as text only.
 
 When a finding spans more than one line (the anchor resolves an `EndLine` past
-its `Line`), miu-cr posts a **multi-line range comment** — but only when the
+its `Line`), miu-cr posts a **multi-line range comment**, but only when the
 whole `Line`..`EndLine` span is **contiguous inside a single RIGHT-side diff
 hunk**. That contiguity proof is the GitHub 422 guard: a range that crosses two
 hunks or runs off the diff is rejected, so any finding that fails the proof
@@ -169,7 +169,7 @@ without a second model call. Any **new commit** (a changed head SHA) always
 re-reviews. Pass `--force` to re-review an unchanged head SHA anyway.
 
 This is keyed strictly on the head SHA, so a rare content change with no new
-commit is not detected — use `--force` for that. If the history store is off
+commit is not detected; use `--force` for that. If the history store is off
 (`--no-save` or disabled) or unreadable, the check degrades to always-review and
 never blocks.
 
@@ -180,14 +180,14 @@ sha256(normalized QuotedCode)`. Because the line number is dropped, a finding
 whose quoted code re-anchors to a **different line** after a push keeps the
 **same** fingerprint and is **not** re-posted. This dedupe lives entirely in the
 GitHub comment markers, so it works on the **ephemeral CI runner with no
-database** — the GitHub Action path needs no state of its own.
+database**: the GitHub Action path needs no state of its own.
 
 > **Best-effort, exact-match.** The key is the normalized quoted code, so a
 > re-quote of the same bug (a different span, ±1 line) produces a different
 > fingerprint and can leak a duplicate. Semantic (non-exact) matching is a
 > possible future refinement. Normalization
 > strips the diff `+`/`-` marker, trailing whitespace, and normalizes CRLF, but
-> **preserves leading indentation and blank lines** — two findings that differ
+> **preserves leading indentation and blank lines**: two findings that differ
 > only by indentation stay distinct (no over-dedup).
 
 > **One-time re-post on upgrade.** Markers written by older releases used the
@@ -210,20 +210,20 @@ for `miucr serve` or local `miucr review --pr`:
 
 The store holds finding text **locally only** under `~/.config/miu/cr/state.db`;
 it never reaches the JSON envelope and is never committed. It is **off by
-default** and stays **nil on the GitHub Action / CI path** — with no store, the
+default** and stays **nil on the GitHub Action / CI path**: with no store, the
 publish behavior is byte-for-byte the stateless comment-dedupe path.
 
 If a review would carry more inline comments than GitHub accepts in one request,
 miu-cr posts the highest-severity findings up to a fixed cap (40), notes the
 omitted count in the summary body, and lists every capped finding in a
-collapsible **`<details>` overflow block** at the end of the summary — each with
-its severity, category, optional bold **title**, optional **`(per <rule>)`** citation, `file:line`, rationale (which may flag a convention inconsistency the model can see — e.g. *"differs from `mapWriteError`"*), and a **blob permalink** pinned
-to the head SHA — so a finding dropped from the inline set is never silently
+collapsible **`<details>` overflow block** at the end of the summary, each with
+its severity, category, optional bold **title**, optional **`(per <rule>)`** citation, `file:line`, rationale (which may flag a convention inconsistency the model can see, e.g. *"differs from `mapWriteError`"*), and a **blob permalink** pinned
+to the head SHA, so a finding dropped from the inline set is never silently
 lost. The whole review can't 422 on size.
 
 ## Inline filtering (`--filter-mode`)
 
-`--filter-mode` mirrors reviewdog's diff knob — it controls which findings are
+`--filter-mode` mirrors reviewdog's diff knob; it controls which findings are
 **eligible for inline comments** on `--pr` (default `diff_context`):
 
 | Mode | Inline-eligible findings |
@@ -234,14 +234,14 @@ lost. The whole review can't 422 on size.
 | `nofilter` | every finding |
 
 `file` and `nofilter` never widen the **inline** set past the diff (GitHub 422s
-an off-diff inline comment) — they route the extra off-diff findings to the
+an off-diff inline comment); they route the extra off-diff findings to the
 **summary**, **SARIF**, and **local output** instead, never inline.
 
 ## Inline severity floor (`--min-severity`)
 
 `--min-severity none|info|low|medium|high|critical` raises the floor on which
 findings post **inline**. Findings below the threshold are excluded from inline
-comments only — they still appear in the summary header counts and SARIF, so
+comments only; they still appear in the summary header counts and SARIF, so
 nothing is dropped. Omitting the flag (the default) keeps the current behavior (no
 floor).
 
@@ -256,18 +256,18 @@ An out-of-set value is rejected before any work runs.
 `--walkthrough-diagram` (opt-in, default off) asks the model to also emit a small
 [Mermaid](https://mermaid.js.org/) change diagram, rendered as a fenced
 ` ```mermaid ` block GitHub draws inline in the summary. It rides the same single
-review pass — no extra LLM call. Diagram quality varies, so it's opt-in; a
+review pass, no extra LLM call. Diagram quality varies, so it's opt-in; a
 malformed or omitted diagram degrades to a short plain note instead of a broken
 block (a start-keyword sanity check gates the fenced render).
 
 ## Check Run reporter
 
 `--mode` selects how findings reach the PR on `--post` (it only steers the PR
-path — it's inert for a local review):
+path, it's inert for a local review):
 
-- **`--mode review`** (default) - ONE upserted summary issue comment + inline review
+- **`--mode review`** (default): ONE upserted summary issue comment + inline review
   comments described above.
-- **`--mode checks`** — a single GitHub **Check Run** named `miu-cr` carrying one
+- **`--mode checks`**: a single GitHub **Check Run** named `miu-cr` carrying one
   annotation per diff-eligible finding (same `--filter-mode` eligibility as the
   review path). The annotation level maps from severity (critical/high →
   `failure`, medium → `warning`, low/info → `notice`); the run's conclusion maps
@@ -279,13 +279,13 @@ miucr review --pr owner/repo#123 --post --mode checks
 
 The Checks reporter has properties the review reporter can't offer:
 
-- **Works on fork PRs** — a Check Run needs only `checks: write`, not the
+- **Works on fork PRs**: a Check Run needs only `checks: write`, not the
   comment-write scope a fork's token lacks.
-- **Survives force-push** — annotations attach to the head SHA, not to a diff
+- **Survives force-push**: annotations attach to the head SHA, not to a diff
   position a rebase invalidates.
-- **Can be a required check** — the stable `miu-cr` check name can be marked
+- **Can be a required check**: the stable `miu-cr` check name can be marked
   required in branch protection, so a gate-hit blocks merge.
-- **Idempotent per head SHA** — a re-run at the same head reuses the existing
+- **Idempotent per head SHA**: a re-run at the same head reuses the existing
   `miu-cr` Check Run instead of spawning a duplicate.
 
 Checks-mode outcomes surface in the `data.pr` envelope block as `mode`,
@@ -300,25 +300,25 @@ is comment-only.
 miucr review --pr owner/repo#123 --post --suggest --approve-clean
 ```
 
-### `--suggest` — native one-click suggestions
+### `--suggest`: native one-click suggestions
 
 Emits a GitHub native `suggestion` block (one-click "Commit suggestion") **only**
 for a **proven** fix of the anchored lines: the raw new-file line(s) at the
 anchored position must match the finding's quoted code (so the suggestion can't
 replace an unrelated span), and the finding must reach a severity floor (default
 `medium`). The patch may be a **single-line replacement** *or* a **wrap/guard/insert
-fix** — a multi-line patch on a single-line anchor (e.g. a nil-check around the
+fix**: a multi-line patch on a single-line anchor (e.g. a nil-check around the
 line, or the line wrapped in `if err != nil { … }`). Because the anchor is proven
 and GitHub replaces exactly that one line with the block, the multi-line patch is a
 safe in-place expansion, not a wrong-span insert. A multi-line *finding* range
 (`EndLine > Line`) is one-clickable only when its span is the same proven
-contiguous-one-hunk RIGHT-side range used for range comments. Everything else —
-patches on a mismatched anchor, finding ranges that fail the contiguity proof,
-findings below the floor — falls back to a plain fenced hint (the safe default).
+contiguous-one-hunk RIGHT-side range used for range comments. Everything else
+(patches on a mismatched anchor, finding ranges that fail the contiguity proof,
+findings below the floor) falls back to a plain fenced hint (the safe default).
 Suggestions are **author-applied**: miu-cr never pushes or commits to the branch.
 The count emitted this run is reported as `suggestions_posted`.
 
-### `--approve-clean` — APPROVE only on a clean, trusted PR
+### `--approve-clean`: APPROVE only on a clean, trusted PR
 
 Submits `Event=APPROVE` instead of `COMMENT`, but **only** when every safety
 precondition holds: the PR is clean (no finding reaches the gate), is **not a
@@ -328,23 +328,23 @@ reviewed**, the **head SHA is unchanged** (re-fetched right before submitting),
 and no `APPROVED` review already exists at that SHA. Re-runs at the same head SHA
 post **no second APPROVE**.
 
-Any missed precondition silently **degrades to `COMMENT`** with a reason — it
+Any missed precondition silently **degrades to `COMMENT`** with a reason; it
 **never fails the run**. The outcome is reported as `approve_action`
 (`approved` | `commented`) and `approve_reason` (e.g. `gate_failed`, `fork`,
 `untrusted_author`, `nothing_reviewed`, `head_moved`, `already_approved`,
 `self_approve_forbidden`).
 
 > **`--approve-clean` is not advisory.** A review submitted by a **PAT satisfies
-> branch-protection required-reviews** and can enable auto-merge — so a human does
+> branch-protection required-reviews** and can enable auto-merge, so a human does
 > **not** necessarily still own the merge. Use it only where the bot identity does
 > **not** count toward required reviews, or with auto-merge disabled, and ensure
 > the PAT is a **distinct identity** from the PR author (a bot can't approve its
-> own PR — that degrades to `self_approve_forbidden`). GitHub Apps are
+> own PR, that degrades to `self_approve_forbidden`). GitHub Apps are
 > self-approval-safe. When unsure, leave it OFF.
 
 ### Inheritance
 
-`serve` inherits both flags **OFF** — a webhook daemon must not auto-suggest or
+`serve` inherits both flags **OFF**: a webhook daemon must not auto-suggest or
 auto-approve. The GitHub Action stays **comment-only** for now (a default-token
 APPROVE is a self-approve / supply-chain risk), so it exposes no
 `suggest`/`approve-clean` inputs.
@@ -357,7 +357,7 @@ review still works without write access to the fork.
 
 On the **GitHub Action** path a fork PR's `GITHUB_TOKEN` is usually read-only, so
 the inline review `CreateReview` call 403s. miu-cr detects that 403 (only under
-Actions) and **falls back to workflow annotations** — it prints one
+Actions) and **falls back to workflow annotations**: it prints one
 `::error file=…,line=…,endLine=…::<rationale>` command per finding to stdout, so
 findings still surface as annotations on the PR's "Files changed" tab instead of
 hard-failing the run. The count is reported as `fallback_annotations` in the

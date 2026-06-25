@@ -310,7 +310,7 @@ func (a *codexAgent) postOnce(ctx stdctx.Context, body codexReq) (*codexResp, er
 				return nil, fmt.Errorf("agent: codex auth refresh failed: %w", rerr)
 			}
 			// A transient refresh failure (network/DNS/5xx from the OAuth endpoint,
-			// signaled via clierr.Retry) leaves the credential possibly valid — surface
+			// signaled via clierr.Retry) leaves the credential possibly valid: surface
 			// it as retryable, not as a re-login prompt. A real rejection (invalid /
 			// expired refresh token) stays auth_expired. Either way preserve rerr.
 			var rce *clierr.CLIError
@@ -356,7 +356,7 @@ func (a *codexAgent) postOnce(ctx stdctx.Context, body codexReq) (*codexResp, er
 }
 
 // parseCodexSSE reads the Responses SSE stream and returns the final response
-// object from the response.completed event. Deltas are ignored — only the
+// object from the response.completed event. Deltas are ignored: only the
 // terminal event carries the full output we parse. response.failed / an error
 // event surfaces as a typed error.
 func parseCodexSSE(r io.Reader) (*codexResp, error) {
@@ -411,7 +411,7 @@ func parseCodexSSE(r io.Reader) (*codexResp, error) {
 			}
 			// The Responses API emits response.failed for PERMANENT errors too
 			// (invalid_request_error, content policy). Retrying those only wastes
-			// attempts — surface them as terminal; only transient failures retry.
+			// attempts: surface them as terminal; only transient failures retry.
 			if codexFailurePermanent(errType, errCode) {
 				return nil, fmt.Errorf("agent: %s", msg)
 			}

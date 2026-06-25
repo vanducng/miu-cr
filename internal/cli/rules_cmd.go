@@ -93,7 +93,7 @@ func rulesCheckCommand(_ *options) *cobra.Command {
 			}
 			// Surface ALL load warnings (bad YAML, oversized, invalid glob, blocked
 			// stem-override, symlink-skip), matching what the live reviewer logs via
-			// slog.Warn — so a user debugging "why isn't my rule loading?" sees them.
+			// slog.Warn, so a user debugging "why isn't my rule loading?" sees them.
 			data := map[string]any{
 				"path":         changed,
 				"applicable":   applicable,

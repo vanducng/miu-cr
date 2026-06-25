@@ -45,7 +45,7 @@ type PersistRecord struct {
 }
 
 // TurnRecord is one tool dispatch in the review session (turn index, tool name,
-// raw args). Args are paths/patterns — no auth tokens.
+// raw args). Args are paths/patterns, no auth tokens.
 type TurnRecord struct {
 	Turn int    `json:"turn"`
 	Tool string `json:"tool"`
@@ -61,7 +61,7 @@ type DiffMeta struct {
 }
 
 // RuleRef is one injected rule's identity for the trace: its file stem and trust
-// provenance (e.g. built-in / user / repo). No rule body — selection identity only.
+// provenance (e.g. built-in / user / repo). No rule body, selection identity only.
 type RuleRef struct {
 	Stem       string `json:"stem"`
 	Provenance string `json:"provenance"`
@@ -74,12 +74,12 @@ type RuleRef struct {
 // Progress seam); the engine creates it, threads it onto AgentContext, and reads
 // it back after Review. A nil *ReviewTrace makes every recorder a no-op (capture
 // disabled). The content (system/user prompt + diff) is captured in full by
-// design — stored LOCAL-only in the gitignored state.db, never in the review
+// design: stored LOCAL-only in the gitignored state.db, never in the review
 // envelope or a posted comment; the invariant is no auth tokens (redacted at
 // persist), not "no code".
 //
 // Sink, when non-nil, is invoked by each setter with the step name + the recorded
-// payload — phase 2 wires it to live --trace NDJSON on stderr; nil = persist-only.
+// payload; phase 2 wires it to live --trace NDJSON on stderr; nil = persist-only.
 type ReviewTrace struct {
 	SystemPrompt  string                         `json:"system_prompt"`
 	UserPrompt    string                         `json:"user_prompt"`
@@ -162,7 +162,7 @@ func (t *ReviewTrace) SetModel(provider, model string) {
 	if t.Model == "" {
 		t.Model = model
 	}
-	// Emit the live step exactly once — when the model first becomes known.
+	// Emit the live step exactly once, when the model first becomes known.
 	if !t.modelEmitted && t.Model != "" {
 		t.modelEmitted = true
 		t.emit("model", map[string]string{"provider": t.Provider, "model": t.Model})
@@ -300,7 +300,7 @@ type Request struct {
 
 	// Progress is the optional milestone sink (stderr); nil = silent. The wire/cli
 	// layer builds it from --verbose/--quiet + a TTY check. Only milestone strings
-	// and file paths/tool names ever reach it — never tokens.
+	// and file paths/tool names ever reach it, never tokens.
 	Progress func(string)
 
 	// TraceSink, when non-nil, is wired onto the ReviewTrace.Sink so each capture
@@ -663,7 +663,7 @@ func baseRef(req Request) string {
 }
 
 // redactTrace returns a copy of t with secrets removed two ways: structured
-// fields that could carry a credential are blanked (defensive — model/provider
+// fields that could carry a credential are blanked (defensive: model/provider
 // are non-secret but Provider literals stay), and config.RedactString runs over
 // every free-text field (system/user prompt, injected-rule stems, final
 // response) so a token embedded in the diff or prompt prose is masked too. The

@@ -33,7 +33,7 @@ type authInput struct {
 
 // chooseAuth renders a provider-aware authentication menu and records the chosen
 // method. openai offers browser OAuth (default), env var, or paste; anthropic and
-// custom offer env var (default) or paste — anthropic never offers OAuth (ToS).
+// custom offer env var (default) or paste; anthropic never offers OAuth (ToS).
 func chooseAuth(ctx stdctx.Context, ask func(string, string) string, out io.Writer, in authInput, provider string, prof *config.Provider) (authMethod, error) {
 	if in.nonInteractive {
 		return nonInteractiveAuth(in, provider, prof)
@@ -104,7 +104,7 @@ func authOAuth(ctx stdctx.Context, out io.Writer, prof *config.Provider) (authMe
 	return authMethodOAuth, nil
 }
 
-// authEnv records the NAME of an env var holding the key — no secret on disk.
+// authEnv records the NAME of an env var holding the key; no secret on disk.
 func authEnv(ask func(string, string) string, provider string, prof *config.Provider) (authMethod, error) {
 	defEnv := defaultAuthEnv(provider, *prof)
 	env := strings.TrimSpace(ask("  Env var name", defEnv))
