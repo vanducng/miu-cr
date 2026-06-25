@@ -42,7 +42,8 @@ func priorityBadge(sev string) string {
 // summary chips (same style as the inline priorityBadge, with the count as message).
 func severityCountBadge(sev string, n int) string {
 	_, p, color := severityMeta(sev)
-	return fmt.Sprintf("<sub><sub>![%s %d](https://img.shields.io/badge/%s-%d-%s?style=flat)</sub></sub>", p, n, p, n, color)
+	// Px label carries the severity color (labelColor); the count is neutral grey.
+	return fmt.Sprintf("<sub><sub>![%s %d](https://img.shields.io/badge/%s-%d-lightgrey?labelColor=%s&style=flat)</sub></sub>", p, n, p, n, color)
 }
 
 // severityCounts renders the per-level shields count badges for findings, critical/
@@ -127,7 +128,8 @@ func RenderSummaryFull(info *PRInfo, findings []engine.Finding, stats map[string
 	} else {
 		lead = "✅ no findings"
 	}
-	renderMetaQuote(&b, stats, opts.Diffs, lead)
+	fmt.Fprintf(&b, "> %s\n\n", lead)
+	renderMetaLine(&b, stats, opts.Diffs)
 	renderConfidence(&b, opts.Confidence, opts.ConfidenceReason, findings)
 
 	renderWalkthrough(&b, opts.Walkthrough)
@@ -163,22 +165,23 @@ func plural(n int) string {
 // effort badge: `> <files> files · +<adds>/−<dels> · effort <L> · context <full>`.
 // File/churn/effort come from opts.Diffs; with no diffs it falls back to the
 // stats files_reviewed count and omits the churn/effort segments.
-func renderMetaQuote(b *strings.Builder, stats map[string]any, diffs []diff.Diff, lead string) {
+// renderMetaLine writes the PR-shape metadata as a normal (non-blockquote) line so it
+// stays visible — `**N files** · +adds/−dels · effort L · context full` — with the file
+// count bolded. File/churn/effort come from diffs; with no diffs it falls back to the
+// stats files_reviewed count and omits churn/effort.
+func renderMetaLine(b *strings.Builder, stats map[string]any, diffs []diff.Diff) {
 	files, adds, dels := diffStats(diffs)
 	var seg []string
-	if lead != "" {
-		seg = append(seg, lead)
-	}
 	if files > 0 {
-		seg = append(seg, fmt.Sprintf("%d file%s", files, plural(files)))
+		seg = append(seg, fmt.Sprintf("**%d file%s**", files, plural(files)))
 		seg = append(seg, fmt.Sprintf("+%d/−%d", adds, dels))
 		seg = append(seg, fmt.Sprintf("effort %s", effortSize(files, adds+dels)))
 	} else {
 		n := statIntVal(stats, "files_reviewed")
-		seg = append(seg, fmt.Sprintf("%d file%s", n, plural(n)))
+		seg = append(seg, fmt.Sprintf("**%d file%s**", n, plural(n)))
 	}
 	seg = append(seg, fmt.Sprintf("context %s", truncationLevel(stats)))
-	fmt.Fprintf(b, "> %s\n\n", strings.Join(seg, " · "))
+	fmt.Fprintf(b, "%s\n\n", strings.Join(seg, " · "))
 }
 
 // diffStats sums the changed-file count and total insertions/deletions, skipping

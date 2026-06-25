@@ -113,10 +113,10 @@ hunks or runs off the diff is rejected, so any finding that fails the proof
 are unaffected.
 
 The **summary body** leads with a clean `## Code Review` header (no severity on the
-H2 — it stays small), then a compact one-line metadata quote that carries the
-per-level **shields.io count badges** (`P1 | 2`, `P2 | 1`, …, critical/high first;
-zero findings → `✅ no findings`) plus `N findings · N files · +adds/−dels · effort S
-· context full`, a **`Confidence: N/5`** line
+H2 — it stays small), then a subtle quote line of per-level **shields.io count badges**
+(the `Px` label in its severity color, the count neutral grey, critical/high first;
+zero findings → `✅ no findings`) plus the finding total, then a visible **metadata
+line** (`**N files** · +adds/−dels · effort L · context full`), a **`Confidence: N/5`** line
 (the model's merge-safety confidence + a one-line reason; derived from findings when
 the model omits it), then the model's PR summary as lead prose — 3–6 key-point bullets,
 **no "Walkthrough" heading**. The collapsible **Important Files Changed** table
