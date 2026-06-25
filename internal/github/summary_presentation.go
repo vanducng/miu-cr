@@ -99,7 +99,7 @@ func renderConfidence(b *strings.Builder, confidence int, reason string, finding
 		}
 	}
 	if r := strings.TrimSpace(reason); r != "" {
-		fmt.Fprintf(b, "**Confidence: %d/5** — %s\n\n", score, mdInline(r))
+		fmt.Fprintf(b, "**Confidence: %d/5** · %s\n\n", score, mdInline(r))
 	} else {
 		fmt.Fprintf(b, "**Confidence: %d/5**\n\n", score)
 	}
@@ -199,19 +199,19 @@ func renderChangesTable(b *strings.Builder, info *PRInfo, diffs []diff.Diff, fin
 }
 
 // summaryCell renders a file's one-line digest for the changes table, escaped
-// via mdInline (untrusted model text); empty renders an em-dash.
+// via mdInline (untrusted model text); empty renders a hyphen.
 func summaryCell(s string) string {
 	if v := mdInline(s); v != "" {
 		return v
 	}
-	return "—"
+	return "-"
 }
 
 // findingCounts renders a file's finding histogram high→low (e.g. "2 high, 1
-// low") or "—" when the file has none.
+// low") or "-" when the file has none.
 func findingCounts(counts map[string]int) string {
 	if len(counts) == 0 {
-		return "—"
+		return "-"
 	}
 	parts := make([]string, 0, len(counts))
 	for _, sev := range severityOrder {
@@ -228,7 +228,7 @@ func findingCounts(counts map[string]int) string {
 	sort.Strings(extra)
 	parts = append(parts, extra...)
 	if len(parts) == 0 {
-		return "—"
+		return "-"
 	}
 	return strings.Join(parts, ", ")
 }

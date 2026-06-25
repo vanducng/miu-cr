@@ -67,6 +67,23 @@ func severityCounts(findings []engine.Finding) string {
 	return strings.Join(chips, " ")
 }
 
+// commitRef renders the head SHA as a short (8-char) linked reference when an HTML base
+// is known, else a short code span, so the summary never repeats the full 40-char SHA.
+func commitRef(info *PRInfo) string {
+	sha := info.HeadSHA
+	if sha == "" {
+		return ""
+	}
+	short := sha
+	if len(short) > 8 {
+		short = short[:8]
+	}
+	if info.HTMLBase != "" {
+		return fmt.Sprintf("[`%s`](<%s/commit/%s>)", short, info.HTMLBase, sha)
+	}
+	return "`" + short + "`"
+}
+
 // RenderSummary builds the PR summary that becomes the CreateReview BODY: it leads
 // with ReviewMarker (identifies the review as ours for alreadyPostedAtSHA) and a
 // Codex-style `Reviewed commit` line, then a clean `## Code Review` header, a compact
@@ -119,7 +136,7 @@ func RenderSummaryFull(info *PRInfo, findings []engine.Finding, stats map[string
 	b.WriteString("## Code Review\n\n")
 
 	if info.HeadSHA != "" {
-		fmt.Fprintf(&b, "Reviewed commit: `%s`\n\n", info.HeadSHA)
+		fmt.Fprintf(&b, "Reviewed commit: %s\n\n", commitRef(info))
 	}
 
 	lead := severityCounts(findings)
@@ -148,7 +165,7 @@ func RenderSummaryFull(info *PRInfo, findings []engine.Finding, stats map[string
 
 	renderPresentation(&b, info, findings, opts.Diffs, opts.ReviewID, opts.FileSummaries)
 
-	fmt.Fprintf(&b, "\n<sub>Reviewed commit `%s` · Posted by miu-cr</sub>", info.HeadSHA)
+	fmt.Fprintf(&b, "\n<sub>Reviewed commit %s · Posted by miu-cr</sub>", commitRef(info))
 	return b.String()
 }
 
