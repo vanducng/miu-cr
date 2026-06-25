@@ -4,11 +4,12 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"reflect"
 
 	toml "github.com/pelletier/go-toml/v2"
 )
 
-const saveHeader = `# miu-cr config — written by ` + "`miucr init`" + `.
+const saveHeader = `# miu-cr config, written by ` + "`miucr init`" + ` / ` + "`miucr config set`" + `.
 # Only user-set values live here; built-in defaults are layered at load time.
 # Prefer auth_env (an env-var NAME) over auth_token (a literal secret on disk).
 `
@@ -22,6 +23,8 @@ type savedConfig struct {
 	Store           *Store              `toml:"store,omitempty"`
 	Embedding       *Embedding          `toml:"embedding,omitempty"`
 	Github          *Github             `toml:"github,omitempty"`
+	Review          *Review             `toml:"review,omitempty"`
+	History         *History            `toml:"history,omitempty"`
 }
 
 // Save writes the user-set deltas of cfg to FilePath() atomically with safe
@@ -157,6 +160,17 @@ func delta(cfg Config) savedConfig {
 	if cfg.Github != base.Github {
 		g := cfg.Github
 		out.Github = &g
+	}
+	// Review/History carry map/pointer fields (not comparable with !=), and config set
+	// writes them, so they MUST round-trip through Save. DeepEqual against the defaults
+	// keeps an unchanged section out of the file.
+	if !reflect.DeepEqual(cfg.Review, base.Review) {
+		r := cfg.Review
+		out.Review = &r
+	}
+	if !reflect.DeepEqual(cfg.History, base.History) {
+		h := cfg.History
+		out.History = &h
 	}
 	return out
 }
