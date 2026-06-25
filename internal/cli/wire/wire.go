@@ -11,6 +11,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/vanducng/miu-cr/internal/cli"
@@ -79,6 +80,7 @@ func ruleCitations(loaded []rules.Rule, repoDir string) map[string]mgithub.RuleC
 
 func init() {
 	engine.SetAnchorer(anchor.ResolveLineNumbers)
+	engine.SetCleanReplacement(mgithub.ClassifyReplacement)
 	cli.SetReviewer(engineReviewer{})
 	cli.SetPRReviewer(prReviewer{})
 	cli.SetMCPServer(mcpServerImpl{})
@@ -369,6 +371,8 @@ func (prReviewer) ReviewPR(ctx stdctx.Context, req cli.PRReviewRequest) (cli.Rev
 		Owner:        info.Owner,
 		Repo:         info.Repo,
 		Number:       info.Number,
+		Post:         req.Post,
+		PatchRepair:  req.PatchRepair,
 
 		Rules:            loaded,
 		RulesFork:        info.IsFork,
@@ -406,6 +410,9 @@ func (prReviewer) ReviewPR(ctx stdctx.Context, req cli.PRReviewRequest) (cli.Rev
 		if err := publishReview(ctx, client, runner, dir, info, res, prResult, req, prStore, ew, cfg.Review.CategoryURLMap(), ruleCitations(loaded, dir)); err != nil {
 			return cli.ReviewOutcome{}, err
 		}
+		// Source of truth is the engine stat (repair ran in the engine, not github);
+		// omitempty drops it when --patch-repair is OFF.
+		prResult.PatchesRepaired = patchRepairedCount(res.Stats)
 	}
 
 	return cli.ReviewOutcome{
@@ -607,6 +614,19 @@ func publishChecks(ctx stdctx.Context, client mgithub.Client, info *mgithub.PRIn
 	return nil
 }
 
+// patchRepairedCount reads the engine's repair stat (set only when --patch-repair
+// ran). The repair loop records counts as float64; a missing/mistyped stat → 0.
+func patchRepairedCount(stats map[string]any) int {
+	pr, ok := stats["patch_repair"].(map[string]any)
+	if !ok {
+		return 0
+	}
+	if n, ok := pr["repaired"].(float64); ok {
+		return int(n)
+	}
+	return 0
+}
+
 // trackResolution records the actually-submitted findings as posted, then marks as
 // resolved any prior 'posted' fp absent from THIS run whose stored path is still in
 // the PR diff (a finding off the diff can't be re-posted, so absence isn't a fix).
@@ -687,6 +707,17 @@ func (a agentAdapter) Review(ctx stdctx.Context, rc engine.AgentContext) (engine
 	})
 }
 
+// RepairPatch forwards the engine's repair request to the concrete agent —
+// lockstep: a missed forward silently no-ops repair for the real agent.
+func (a agentAdapter) RepairPatch(ctx stdctx.Context, rr engine.RepairRequest) (string, error) {
+	return a.inner.RepairPatch(ctx, agent.RepairRequest{
+		Span:      rr.Span,
+		Rationale: rr.Rationale,
+		Category:  rr.Category,
+		Severity:  rr.Severity,
+	})
+}
+
 // mcpServerImpl builds the engine + SQLite store and serves them over MCP. The
 // agent resolves credentials lazily (on the first review_run), so the MCP
 // handshake and tools/list need no Anthropic key.
@@ -694,7 +725,7 @@ type mcpServerImpl struct{}
 
 func (mcpServerImpl) Serve(ctx stdctx.Context, req cli.MCPRequest) error {
 	runner := gitcmd.New()
-	eng := engine.New(lazyAgent{timeout: req.Timeout}, runner)
+	eng := engine.New(&lazyAgent{timeout: req.Timeout}, runner)
 
 	cfg, lerr := config.Load()
 	if lerr != nil {
@@ -737,19 +768,49 @@ func (mcpServerImpl) Serve(ctx stdctx.Context, req cli.MCPRequest) error {
 }
 
 // lazyAgent resolves Anthropic credentials only when a review actually runs, so
-// the MCP server can start (and answer initialize/tools-list) without a key.
-type lazyAgent struct{ timeout time.Duration }
+// the MCP server can start (and answer initialize/tools-list) without a key. The
+// resolution is memoized (sync.Once), so a review plus its per-finding repair calls
+// resolve credentials + build the client exactly once.
+type lazyAgent struct {
+	timeout time.Duration
+	once    sync.Once
+	inner   agentAdapter
+	err     error
+}
 
-func (l lazyAgent) Review(ctx stdctx.Context, rc engine.AgentContext) (engine.ReviewOutput, error) {
-	creds, err := agent.Resolve(agent.ResolveInput{Ctx: ctx, OAuthResolver: oauthResolver()})
+func (l *lazyAgent) resolve(ctx stdctx.Context) (agentAdapter, error) {
+	l.once.Do(func() {
+		creds, err := agent.Resolve(agent.ResolveInput{Ctx: ctx, OAuthResolver: oauthResolver()})
+		if err != nil {
+			l.err = err
+			return
+		}
+		llm, err := agent.New(creds, l.timeout)
+		if err != nil {
+			l.err = err
+			return
+		}
+		l.inner = agentAdapter{inner: llm}
+	})
+	return l.inner, l.err
+}
+
+func (l *lazyAgent) Review(ctx stdctx.Context, rc engine.AgentContext) (engine.ReviewOutput, error) {
+	a, err := l.resolve(ctx)
 	if err != nil {
 		return engine.ReviewOutput{}, err
 	}
-	llm, err := agent.New(creds, l.timeout)
+	return a.Review(ctx, rc)
+}
+
+// RepairPatch reuses the memoized agent (mirroring Review) — lockstep with the
+// engine.Agent interface.
+func (l *lazyAgent) RepairPatch(ctx stdctx.Context, rr engine.RepairRequest) (string, error) {
+	a, err := l.resolve(ctx)
 	if err != nil {
-		return engine.ReviewOutput{}, err
+		return "", err
 	}
-	return agentAdapter{inner: llm}.Review(ctx, rc)
+	return a.RepairPatch(ctx, rr)
 }
 
 func modeFor(req cli.ReviewRequest) diff.Mode {

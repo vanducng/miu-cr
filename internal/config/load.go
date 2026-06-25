@@ -142,6 +142,9 @@ func mergeReview(base, file Review) Review {
 	if file.Suggest != nil {
 		out.Suggest = file.Suggest
 	}
+	if file.PatchRepair != nil {
+		out.PatchRepair = file.PatchRepair
+	}
 	if len(file.CategoryURLs) > 0 {
 		out.CategoryURLs = file.CategoryURLs
 	}

@@ -77,12 +77,21 @@ func (c Context) progress(msg string) {
 // walkthrough/per-file digest the same pass may emit.
 type Agent interface {
 	Review(ctx stdctx.Context, rc Context) (engine.ReviewOutput, error)
+	// RepairPatch runs a single tools-less, code-only completion for ONE span +
+	// ONE problem and returns the minimal replacement (fence-stripped). The engine
+	// re-validates the reply; "" means no usable replacement (the engine falls
+	// back to the original finding).
+	RepairPatch(ctx stdctx.Context, rr RepairRequest) (string, error)
 }
 
 const (
 	maxToolTurns   = 24
 	maxEmptyRounds = 3
 	maxTokens      = 8192
+
+	// repairMaxTokens bounds the second-pass replacement: a single span's minimal
+	// edit, never a full review.
+	repairMaxTokens = 1024
 
 	// Injected on the final tool turn (with tools withdrawn) so a budget-exhausted
 	// large diff is forced to finalize into a real review, not a hard failure.
@@ -225,6 +234,43 @@ func (a *anthropicAgent) Review(ctx stdctx.Context, rc Context) (engine.ReviewOu
 		params.Messages = append(params.Messages, anthropic.NewUserMessage(toolResults...))
 	}
 	return engine.ReviewOutput{}, fmt.Errorf("agent: forced finalization produced no parseable findings after %d turns", maxToolTurns)
+}
+
+// RepairPatch issues one tools-less, code-only completion (system =
+// repairSystemPrompt, user = BuildRepairPrompt) and returns the fence-stripped,
+// trimmed reply. Reuses the same creds/client as Review; the ctx deadline owns
+// the wall clock.
+func (a *anthropicAgent) RepairPatch(ctx stdctx.Context, rr RepairRequest) (string, error) {
+	if a.timeout > 0 {
+		var cancel stdctx.CancelFunc
+		ctx, cancel = stdctx.WithTimeout(ctx, a.timeout)
+		defer cancel()
+	}
+	msg, err := a.client.newMessage(ctx, anthropic.MessageNewParams{
+		MaxTokens: repairMaxTokens,
+		Model:     anthropic.Model(a.model),
+		System:    []anthropic.TextBlockParam{{Text: repairSystemPrompt}},
+		Messages: []anthropic.MessageParam{
+			anthropic.NewUserMessage(anthropic.NewTextBlock(BuildRepairPrompt(rr))),
+		},
+	})
+	if err != nil {
+		return "", classifyAnthropicErr(err)
+	}
+	var text strings.Builder
+	for _, block := range msg.Content {
+		if block.Type == "text" {
+			text.WriteString(block.Text)
+		}
+	}
+	return parseRepairReply(text.String()), nil
+}
+
+// parseRepairReply fence-strips the model reply and trims it consistently with
+// isCleanReplacement's own trimming so the re-validation gate sees identical
+// bytes. Empty after strip => no usable replacement.
+func parseRepairReply(reply string) string {
+	return strings.TrimRight(stripMarkdownFences(reply), "\r")
 }
 
 // dispatch executes every tool_use block in msg, returning the tool_result

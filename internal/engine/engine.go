@@ -206,6 +206,20 @@ var anchorLineNumbers Anchorer
 // SetAnchorer wires the drift-reject anchoring implementation.
 func SetAnchorer(a Anchorer) { anchorLineNumbers = a }
 
+// CleanReplacementFn is the injected re-validation seam (mirrors Anchorer): given
+// a finding and its raw new-file content it classifies whether SuggestedPatch is a
+// clean replacement, returning the suggestion text, a stable lowercase reason, and
+// whether that reason is worth a repair pass. internal/github implements it
+// (ClassifyReplacement) and wire injects it via SetCleanReplacement, keeping engine
+// free of an internal/github import (github imports engine.Finding → cycle).
+type CleanReplacementFn func(f Finding, newFileContent string) (patch string, reason string, repairable bool)
+
+var classifyReplacement CleanReplacementFn
+
+// SetCleanReplacement wires the deterministic re-validation gate the repair loop
+// re-runs after each repair attempt.
+func SetCleanReplacement(fn CleanReplacementFn) { classifyReplacement = fn }
+
 // AgentContext is everything the review pass needs: the assembled prompt text
 // plus the reviewed revision so the agent reads the SAME content the diff came
 // from (Rev=="" is the staged index). Defined here (not imported from the agent
@@ -252,6 +266,20 @@ type Retriever interface {
 // walkthrough/per-file digest the same pass may emit.
 type Agent interface {
 	Review(ctx stdctx.Context, rc AgentContext) (ReviewOutput, error)
+	// RepairPatch runs the conditional second pass: ONE span + ONE problem in,
+	// the minimal replacement out (already fence-stripped/trimmed). "" => no
+	// usable replacement; the engine falls back to the original finding. The wire
+	// layer adapts this to agent.RepairPatch, keeping engine below agent.
+	RepairPatch(ctx stdctx.Context, rr RepairRequest) (string, error)
+}
+
+// RepairRequest is the engine-side shadow of agent.RepairRequest (defined here so
+// engine sits below agent in the import graph; the wire layer adapts it).
+type RepairRequest struct {
+	Span      string
+	Rationale string
+	Category  string
+	Severity  string
 }
 
 // Request is one review invocation: the diff mode and its operands, the severity
@@ -308,6 +336,18 @@ type Request struct {
 	// Progress; nil = persist-only (no live stream). Capture still runs regardless,
 	// so the live stream and the persisted trace stay consistent by construction.
 	TraceSink func(step string, payload any)
+
+	// Post reports whether this run will publish (the --pr post path). Repair only
+	// matters when one-click suggestions are actually rendered, so the loop gates on
+	// PatchRepair && Post: a dry-run (--no-post) makes ZERO repair LLM calls.
+	Post bool
+
+	// PatchRepair opts into the conditional second LLM pass that recovers one-click
+	// suggestions the first pass nearly produced (default OFF; PR-path + --suggest +
+	// --post only). OFF is byte-identical. MaxRepair caps the per-review repair calls
+	// (0 => defaultMaxRepair); candidates are tried highest-severity-first.
+	PatchRepair bool
+	MaxRepair   int
 
 	// Persist context copied onto the saved PersistRecord (no secrets): the resolved
 	// provider/model and, on the --pr path, the PR owner/repo/number. Local reviews
@@ -474,6 +514,8 @@ func (e *Engine) Review(ctx stdctx.Context, req Request) (ReviewResult, error) {
 	if semanticStat != "" {
 		stats["semantic_recall"] = semanticStat
 	}
+
+	kept = e.repairPatches(ctx, kept, selected, req, stats)
 
 	result := ReviewResult{Findings: kept, Walkthrough: out.Walkthrough, FileSummaries: out.FileSummaries, Diagram: out.Diagram, Confidence: out.Confidence, ConfidenceReason: out.ConfidenceReason, Stats: stats}
 

@@ -11,11 +11,19 @@ import (
 // captureAgent records the agent.Context it was called with so we can assert the
 // adapter forwards every field, Rules in particular, whose copy is easy to
 // forget and would silently drop all project rules.
-type captureAgent struct{ got agent.Context }
+type captureAgent struct {
+	got       agent.Context
+	gotRepair agent.RepairRequest
+}
 
 func (c *captureAgent) Review(_ stdctx.Context, rc agent.Context) (engine.ReviewOutput, error) {
 	c.got = rc
 	return engine.ReviewOutput{}, nil
+}
+
+func (c *captureAgent) RepairPatch(_ stdctx.Context, rr agent.RepairRequest) (string, error) {
+	c.gotRepair = rr
+	return "", nil
 }
 
 func TestAgentAdapterForwardsRules(t *testing.T) {

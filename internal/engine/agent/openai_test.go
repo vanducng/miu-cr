@@ -239,6 +239,31 @@ func TestOpenAIAgentForcedFinalizeStillErrors(t *testing.T) {
 	}
 }
 
+// RepairPatch issues one tools-less, low-token completion and returns the
+// fence-stripped reply (lockstep with the Anthropic backend).
+func TestOpenAIAgentRepairPatch(t *testing.T) {
+	fc := &fakeOpenAI{responses: []string{textCompletion("```go\nval, ok := m[key]\n```")}}
+	a := &openaiAgent{client: fc, model: "gpt-test"}
+	out, err := a.RepairPatch(stdctx.Background(), RepairRequest{Span: "val := m[key]", Rationale: "missing check", Category: "bug", Severity: "high"})
+	if err != nil {
+		t.Fatalf("RepairPatch: %v", err)
+	}
+	if out != "val, ok := m[key]" {
+		t.Fatalf("reply not fence-stripped: %q", out)
+	}
+	p := fc.seen[0]
+	raw, _ := json.Marshal(p)
+	if !strings.Contains(string(raw), "val := m[key]") {
+		t.Fatalf("span missing from repair request: %s", raw)
+	}
+	if p.MaxTokens.Value != int64(repairMaxTokens) {
+		t.Fatalf("repair must use low max tokens, got %v", p.MaxTokens)
+	}
+	if len(p.Tools) != 0 {
+		t.Fatalf("repair must offer no tools, got %d", len(p.Tools))
+	}
+}
+
 // New(creds) with the OpenAI kind must build an openaiAgent (interface
 // satisfied) without touching the network.
 func TestNewBuildsOpenAIAgent(t *testing.T) {

@@ -30,6 +30,9 @@ jobs:
           gate: none
           base-url: https://api.z.ai/api/anthropic
           model: glm-5.2
+          # Dogfood one-click suggestions + the second-pass patch repair.
+          suggest: "true"
+          patch-repair: "true"
           # Review this PR with ITS code, not the last release — so the review
           # reflects presentation/behavior changes in the PR itself.
           build-from-source: "true"

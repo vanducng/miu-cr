@@ -60,11 +60,12 @@ func newCodexAgent(creds Credentials, timeout time.Duration) *codexAgent {
 // codexReq is the Responses API request body. store:false keeps the call
 // stateless (no server-side session); tools mirror the Anthropic/OpenAI loop.
 type codexReq struct {
-	Model        string      `json:"model"`
-	Instructions string      `json:"instructions"`
-	Input        []codexItem `json:"input"`
-	Tools        []codexTool `json:"tools,omitempty"`
-	Store        bool        `json:"store"`
+	Model           string      `json:"model"`
+	Instructions    string      `json:"instructions"`
+	Input           []codexItem `json:"input"`
+	Tools           []codexTool `json:"tools,omitempty"`
+	Store           bool        `json:"store"`
+	MaxOutputTokens int         `json:"max_output_tokens,omitempty"`
 	// The codex backend requires stream:true ("Stream must be set to true"); the
 	// response is an SSE stream parsed in post().
 	Stream bool `json:"stream"`
@@ -148,6 +149,44 @@ func codexTools() []codexTool {
 			},
 		},
 	}
+}
+
+// RepairPatch issues one tools-less, code-only Responses completion over the
+// same SSE/stream path as Review (stream:true, entitled model id) and returns
+// the fence-stripped, trimmed reply (lockstep with the SDK backends).
+func (a *codexAgent) RepairPatch(ctx stdctx.Context, rr RepairRequest) (string, error) {
+	if a.timeout > 0 {
+		var cancel stdctx.CancelFunc
+		ctx, cancel = stdctx.WithTimeout(ctx, a.timeout)
+		defer cancel()
+	}
+	resp, err := a.post(ctx, codexReq{
+		Model:        a.model,
+		Instructions: repairSystemPrompt,
+		Input: []codexItem{{
+			Type:    "message",
+			Role:    "user",
+			Content: []codexContent{{Type: "input_text", Text: BuildRepairPrompt(rr)}},
+		}},
+		Store:           false,
+		Stream:          true,
+		MaxOutputTokens: repairMaxTokens,
+	})
+	if err != nil {
+		return "", err
+	}
+	var text strings.Builder
+	for _, o := range resp.Output {
+		if o.Type != "message" {
+			continue
+		}
+		for _, c := range o.Content {
+			if c.Type == "output_text" || c.Type == "text" {
+				text.WriteString(c.Text)
+			}
+		}
+	}
+	return parseRepairReply(text.String()), nil
 }
 
 func (a *codexAgent) Review(ctx stdctx.Context, rc Context) (engine.ReviewOutput, error) {

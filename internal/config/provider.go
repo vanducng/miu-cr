@@ -121,6 +121,7 @@ type Review struct {
 	MinSeverity  string            `toml:"min_severity,omitempty"`
 	Timeout      string            `toml:"timeout,omitempty"`
 	Suggest      *bool             `toml:"suggest,omitempty"`
+	PatchRepair  *bool             `toml:"patch_repair,omitempty"`
 	CategoryURLs map[string]string `toml:"category_urls,omitempty"`
 }
 

@@ -70,6 +70,10 @@ func TestMergeReviewMergesNewFields(t *testing.T) {
 	if out.Suggest == nil || *out.Suggest != false {
 		t.Fatalf("Suggest not merged: %+v", out.Suggest)
 	}
+	pr := mergeReview(Review{}, Review{PatchRepair: boolPtr(true)})
+	if pr.PatchRepair == nil || *pr.PatchRepair != true {
+		t.Fatalf("PatchRepair not merged: %+v", pr.PatchRepair)
+	}
 	// An empty file inherits base.
 	keep := mergeReview(Review{Gate: "high"}, Review{})
 	if keep.Gate != "high" {

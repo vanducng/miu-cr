@@ -251,6 +251,47 @@ func TestAnthropicAgentClassifies401(t *testing.T) {
 	}
 }
 
+// RepairPatch issues one tools-less, low-token completion and returns the
+// fence-stripped reply; the request must carry repairSystemPrompt + the span and
+// NO tools.
+func TestAnthropicAgentRepairPatch(t *testing.T) {
+	fc := &fakeAnthropic{responses: []string{textMessage("```go\nval, ok := m[key]\n```")}}
+	a := &anthropicAgent{client: fc, model: "claude-test"}
+	out, err := a.RepairPatch(stdctx.Background(), RepairRequest{Span: "val := m[key]", Rationale: "missing check", Category: "bug", Severity: "high"})
+	if err != nil {
+		t.Fatalf("RepairPatch: %v", err)
+	}
+	if out != "val, ok := m[key]" {
+		t.Fatalf("reply not fence-stripped: %q", out)
+	}
+	raw, _ := json.Marshal(fc.seen[0])
+	if !strings.Contains(string(raw), "val := m[key]") {
+		t.Fatalf("span missing from repair request: %s", raw)
+	}
+	if fc.seen[0].MaxTokens != repairMaxTokens {
+		t.Fatalf("repair must use low max tokens, got %d", fc.seen[0].MaxTokens)
+	}
+	if len(fc.seen[0].Tools) != 0 {
+		t.Fatalf("repair must offer no tools, got %d", len(fc.seen[0].Tools))
+	}
+	if got := fc.seen[0].System[0].Text; got != repairSystemPrompt {
+		t.Fatalf("repair must use repairSystemPrompt, got %q", got)
+	}
+}
+
+// A surfaced API error from RepairPatch must be wrapped through the same
+// classifier as Review (consistent error taxonomy).
+func TestAnthropicAgentRepairPatchErrorWrapped(t *testing.T) {
+	a := &anthropicAgent{
+		client: &fakeAnthropic{err: fmt.Errorf("401 x-api-key: %s invalid", secretToken)},
+		model:  "claude-test",
+	}
+	_, err := a.RepairPatch(stdctx.Background(), RepairRequest{Span: "x"})
+	if err == nil || !strings.Contains(err.Error(), "messages.new") {
+		t.Fatalf("expected wrapped error, got %v", err)
+	}
+}
+
 // A wall-clock deadline already in the past must abort before any API call.
 func TestAnthropicAgentDeadline(t *testing.T) {
 	fc := &fakeAnthropic{responses: []string{textMessage(`{"findings":[]}`)}}

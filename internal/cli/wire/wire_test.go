@@ -520,3 +520,27 @@ func TestPublishReviewSuggestCount(t *testing.T) {
 		t.Fatalf("suggest ON must post 1 native suggestion, got %d", prOn.SuggestionsPosted)
 	}
 }
+
+// patchRepairedCount maps the engine's patch_repair stat onto the data.pr envelope
+// field. The repair loop records counts as float64; OFF leaves the stat absent so
+// the count is 0 (omitempty drops the field).
+func TestPatchRepairedCount(t *testing.T) {
+	cases := []struct {
+		name  string
+		stats map[string]any
+		want  int
+	}{
+		{"off: stat absent", map[string]any{"truncation_level": "full"}, 0},
+		{"on: repaired 2", map[string]any{"patch_repair": map[string]any{"attempted": float64(3), "repaired": float64(2)}}, 2},
+		{"on: repaired 0", map[string]any{"patch_repair": map[string]any{"attempted": float64(1), "repaired": float64(0)}}, 0},
+		{"mistyped stat", map[string]any{"patch_repair": "nope"}, 0},
+		{"nil stats", nil, 0},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			if got := patchRepairedCount(tc.stats); got != tc.want {
+				t.Fatalf("patchRepairedCount=%d want %d", got, tc.want)
+			}
+		})
+	}
+}

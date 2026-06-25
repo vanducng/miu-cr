@@ -127,6 +127,11 @@ type PRResult struct {
 	ApproveReason     string `json:"approve_reason"`
 	SuggestionsPosted int    `json:"suggestions_posted"`
 
+	// PatchesRepaired counts findings whose rejected suggested patch was recovered
+	// by the --patch-repair second pass into a now-clean one-click suggestion this
+	// run (0/absent when --patch-repair is OFF). Source of truth is the engine stat.
+	PatchesRepaired int `json:"patches_repaired,omitempty"`
+
 	// Mode is the GitHub reporter used: review (inline+summary) | checks (CheckRun).
 	// Checks-only fields are populated under --mode checks; FallbackAnnotations counts
 	// ::error:: workflow annotations emitted on the fork-PR 403 fallback (0 normally).
@@ -172,6 +177,7 @@ type PRReviewRequest struct {
 	Token        string
 	Post         bool
 	Suggest      bool
+	PatchRepair  bool
 	ApproveClean bool
 	Gate         string
 	Provider     string
@@ -311,6 +317,7 @@ func reviewCommand(opts *options) *cobra.Command {
 		post         bool
 		noPost       bool
 		suggest      bool
+		patchRepair  bool
 		approveClean bool
 		noSave       bool
 		force        bool
@@ -342,9 +349,15 @@ func reviewCommand(opts *options) *cobra.Command {
 		RunE: func(cmd *cobra.Command, args []string) error {
 			// [review] config defaults fill any flag the user did NOT set; an explicit
 			// flag always wins (cmd.Flags().Changed). Validated config-side (config.invalid).
-			rcfg, err := loadReviewDefaults(cmd, &gate, &filterMode, &minSeverity, &suggest)
+			rcfg, err := loadReviewDefaults(cmd, &gate, &filterMode, &minSeverity, &suggest, &patchRepair)
 			if err != nil {
 				return err
+			}
+			// Fail loud: --patch-repair only recovers one-click suggestions, so it is
+			// meaningless without --suggest. A new intentional flag-combination guard
+			// (config.invalid), not a silent no-op.
+			if patchRepair && !suggest {
+				return &CLIError{Code: "config.invalid", Message: "--patch-repair requires --suggest", Exit: 2}
 			}
 			// A real LLM review routinely exceeds the 30s root default; bump it for
 			// review unless the user set --timeout explicitly. A [review].timeout
@@ -363,6 +376,7 @@ func reviewCommand(opts *options) *cobra.Command {
 					token:        token,
 					post:         post && !noPost,
 					suggest:      suggest,
+					patchRepair:  patchRepair,
 					approveClean: approveClean,
 					gate:         gate,
 					provider:     provider,
@@ -489,6 +503,7 @@ func reviewCommand(opts *options) *cobra.Command {
 	f.BoolVar(&post, "post", false, "Publish inline comments + a summary to the PR (requires a token)")
 	f.BoolVar(&noPost, "no-post", false, "Dry-run the PR review without posting (default for --pr)")
 	f.BoolVar(&suggest, "suggest", false, "Emit GitHub native one-click suggestions for proven single-line replacements; author-applied, never pushed. Requires --post (inert in dry-run) (default OFF; else a plain hint)")
+	f.BoolVar(&patchRepair, "patch-repair", false, "On --suggest, run a focused 2nd LLM pass per finding whose suggested patch was rejected, to recover a one-click suggestion (highest-severity-first, capped). Requires --suggest; one extra LLM call per repaired candidate (default OFF)")
 	f.BoolVar(&approveClean, "approve-clean", false, "Submit Event=APPROVE only on a clean, non-fork, trusted-author PR; skipped (→ COMMENT) otherwise, never errors. A PAT APPROVE counts toward required reviews. Requires --post (inert in dry-run) (default OFF)")
 	f.BoolVar(&noSave, "no-save", false, "Do not persist this review to the local history store (default: every review is saved to ~/.config/miu/cr/state.db)")
 	f.BoolVar(&force, "force", false, "On --pr, re-review even when the head SHA is unchanged since the last saved review (default: an unchanged head SHA short-circuits with skipped_unchanged, no LLM pass)")
@@ -507,6 +522,7 @@ type prRunArgs struct {
 	token        string
 	post         bool
 	suggest      bool
+	patchRepair  bool
 	approveClean bool
 	gate         string
 	provider     string
@@ -563,6 +579,7 @@ func runPRReview(cmd *cobra.Command, a prRunArgs) error {
 		Token:        ghToken,
 		Post:         a.post,
 		Suggest:      a.suggest,
+		PatchRepair:  a.patchRepair,
 		ApproveClean: a.approveClean,
 		Gate:         a.gate,
 		Provider:     a.provider,
@@ -647,7 +664,7 @@ func runPRReview(cmd *cobra.Command, a prRunArgs) error {
 // command line. An explicit flag always wins (cmd.Flags().Changed); a config
 // value only fills an unset flag. Returns the validated Review so the caller can
 // also derive the timeout default. A config-load error propagates (typed).
-func loadReviewDefaults(cmd *cobra.Command, gate, filterMode, minSeverity *string, suggest *bool) (config.Review, error) {
+func loadReviewDefaults(cmd *cobra.Command, gate, filterMode, minSeverity *string, suggest, patchRepair *bool) (config.Review, error) {
 	cfg, err := config.Load()
 	if err != nil {
 		return config.Review{}, err
@@ -668,6 +685,9 @@ func loadReviewDefaults(cmd *cobra.Command, gate, filterMode, minSeverity *strin
 	}
 	if r.Suggest != nil && !f.Changed("suggest") {
 		*suggest = *r.Suggest
+	}
+	if r.PatchRepair != nil && !f.Changed("patch-repair") {
+		*patchRepair = *r.PatchRepair
 	}
 	return r, nil
 }

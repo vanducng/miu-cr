@@ -99,6 +99,31 @@ func openAITools() []openai.ChatCompletionToolUnionParam {
 	}
 }
 
+// RepairPatch issues one tools-less, code-only chat completion and returns the
+// fence-stripped, trimmed reply (lockstep with anthropicAgent.RepairPatch).
+func (a *openaiAgent) RepairPatch(ctx stdctx.Context, rr RepairRequest) (string, error) {
+	if a.timeout > 0 {
+		var cancel stdctx.CancelFunc
+		ctx, cancel = stdctx.WithTimeout(ctx, a.timeout)
+		defer cancel()
+	}
+	resp, err := a.client.create(ctx, openai.ChatCompletionNewParams{
+		Model: shared.ChatModel(a.model),
+		Messages: []openai.ChatCompletionMessageParamUnion{
+			openai.SystemMessage(repairSystemPrompt),
+			openai.UserMessage(BuildRepairPrompt(rr)),
+		},
+		MaxTokens: openai.Int(int64(repairMaxTokens)),
+	})
+	if err != nil {
+		return "", classifyOpenAIErr(err)
+	}
+	if len(resp.Choices) == 0 {
+		return "", fmt.Errorf("agent: empty completion (no choices)")
+	}
+	return parseRepairReply(resp.Choices[0].Message.Content), nil
+}
+
 func (a *openaiAgent) Review(ctx stdctx.Context, rc Context) (engine.ReviewOutput, error) {
 	// The ctx deadline (below) owns the wall clock; each turn checks ctx.Err()
 	// rather than tracking a parallel manual deadline.
