@@ -3,11 +3,11 @@
 Runnable starting points for reviewing your own changes **before** they leave
 your machine. Each file is self-contained — read its header, copy it into your
 repo, and adjust. The full prose recipes are in the
-[Use cases & recipes](https://miucr.vanducng.dev/use-cases/) docs page.
+[Use cases & recipes](https://cr.miu.sh/use-cases/) docs page.
 
 All of these need `miucr` on `PATH` and a provider key in the environment
 (`ANTHROPIC_API_KEY`, or `miucr login` for a ChatGPT plan). See
-[Credentials](https://miucr.vanducng.dev/credentials/).
+[Credentials](https://cr.miu.sh/credentials/).
 
 | File | What it is |
 |------|------------|
@@ -64,7 +64,7 @@ chmod +x examples/local-review/agent-review.sh
 - Tune with `MIUCR_GATE=` and `MIUCR_MAX_ROUNDS=`.
 - A real agent replaces the `APPLY FIXES HERE` block with an edit-and-restage
   pass, then loops until the review is clean. The integrated, non-shell path is
-  the [MCP server](https://miucr.vanducng.dev/mcp/) (`review_run` / `review_get`),
+  the [MCP server](https://cr.miu.sh/mcp/) (`review_run` / `review_get`),
   which returns the same findings as a tool result.
 
 > Examples use **synthetic** names and paths only — never paste real source,

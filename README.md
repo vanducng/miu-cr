@@ -10,7 +10,7 @@
 
 AI code review for the CLI, CI, and MCP hosts. Review staged changes locally, gate PRs in CI, or drive the engine from any MCP-capable agent (Claude Code, Codex, and others). Deterministic engine + LLM, stable JSON envelope on stdout.
 
-**Docs:** [miucr.vanducng.dev](https://miucr.vanducng.dev)
+**Docs:** [cr.miu.sh](https://cr.miu.sh)
 
 ## Install
 
@@ -45,7 +45,7 @@ miucr review --from main --to HEAD --gate high   # range; exit 2 on high+ findin
 miucr review --pr owner/repo#123 --post          # GitHub PR with inline comments
 ```
 
-Full guide: [Getting started](https://miucr.vanducng.dev/onboarding/)
+Full guide: [Getting started](https://cr.miu.sh/onboarding/)
 
 ## Features
 
@@ -55,7 +55,7 @@ Full guide: [Getting started](https://miucr.vanducng.dev/onboarding/)
 - **Project rules** — `.miu/cr/rules/*.md` glob-scoped context injected per file
 - **MCP server** — `miucr mcp` exposes `review_run` / `review_get` over stdio
 
-Full reference: [miucr.vanducng.dev](https://miucr.vanducng.dev)
+Full reference: [cr.miu.sh](https://cr.miu.sh)
 
 ## Develop
 

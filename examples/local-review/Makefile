@@ -2,7 +2,7 @@
 # this file and run `make -f examples/local-review/Makefile review`).
 #
 # Requires: miucr on PATH and a provider key in the environment
-# (ANTHROPIC_API_KEY, or `miucr login`). See https://miucr.vanducng.dev/usage/
+# (ANTHROPIC_API_KEY, or `miucr login`). See https://cr.miu.sh/usage/
 #
 # Override the gate or the branch on the command line:
 #   make review GATE=medium

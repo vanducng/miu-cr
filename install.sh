@@ -171,7 +171,7 @@ main() {
 	info "Next steps:"
 	info "  $BINARY version"
 	info "  export ANTHROPIC_API_KEY=...   # then: $BINARY review --staged"
-	info "  Docs: https://miucr.vanducng.dev"
+	info "  Docs: https://cr.miu.sh"
 }
 
 main "$@"

@@ -11,7 +11,7 @@
 #
 # Requires: miucr on PATH and a provider key in the environment
 # (ANTHROPIC_API_KEY, or `miucr login` for a ChatGPT plan). See
-# https://miucr.vanducng.dev/credentials/
+# https://cr.miu.sh/credentials/
 #
 # Tune GATE to none|info|low|medium|high|critical. Default "high" fails the
 # commit only on a high or critical finding.
