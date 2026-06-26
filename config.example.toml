@@ -18,7 +18,7 @@
 # `auth_command` (argv; stdout is the token) so no secret is written to this
 # file. `auth_token` (a literal token) is supported but DISCOURAGED: it sits in
 # plaintext on disk. Precedence: auth_token > non-empty auth_env > auth_command.
-# A selected auth_command failure is fatal; it will not silently fall through to OAuth/env keys.
+# A selected auth_command failure is fatal and stderr is omitted from the error.
 
 # Profile to use when --provider is omitted and env auto-detect doesn't force a
 # choice. Built-in profiles are "anthropic" and "openai".

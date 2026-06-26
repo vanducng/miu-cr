@@ -2,7 +2,6 @@ package agent
 
 import (
 	stdctx "context"
-	"errors"
 	"fmt"
 	"net/http"
 	"os"
@@ -398,11 +397,9 @@ func runAuthCommand(ctx stdctx.Context, argv []string) (string, error) {
 	ctx, cancel := stdctx.WithTimeout(ctx, authCommandTimeout)
 	defer cancel()
 	cmd := exec.CommandContext(ctx, args[0], args[1:]...)
-	var stdout, stderr cappedBuffer
+	var stdout cappedBuffer
 	stdout.limit = authCommandOutputLimit
-	stderr.limit = authCommandOutputLimit
 	cmd.Stdout = &stdout
-	cmd.Stderr = &stderr
 	err := cmd.Run()
 	if err != nil {
 		switch ctx.Err() {
@@ -411,14 +408,7 @@ func runAuthCommand(ctx stdctx.Context, argv []string) (string, error) {
 		case stdctx.Canceled:
 			return "", &clierr.CLIError{Code: "agent.auth_command_cancelled", Message: "auth_command cancelled", Hint: "the parent context was cancelled", Exit: 1, Cause: err}
 		}
-		msg := "auth_command failed"
-		var exitErr *exec.ExitError
-		if errors.As(err, &exitErr) {
-			if text := strings.TrimSpace(config.RedactString(stderr.String())); text != "" {
-				msg += ": " + capError(text)
-			}
-		}
-		return "", &clierr.CLIError{Code: "agent.auth_command_failed", Message: msg, Hint: "run the configured auth_command directly and ensure it prints only the credential to stdout", Exit: 1, Cause: err}
+		return "", &clierr.CLIError{Code: "agent.auth_command_failed", Message: "auth_command failed", Hint: "run the configured auth_command directly; miu-cr omits stderr because it may contain secrets", Exit: 1, Cause: err}
 	}
 	secret := strings.TrimSpace(stdout.String())
 	if secret == "" {
@@ -449,13 +439,6 @@ func (b *cappedBuffer) Write(p []byte) (int, error) {
 
 func (b *cappedBuffer) String() string {
 	return b.buf.String()
-}
-
-func capError(s string) string {
-	if len(s) <= 240 {
-		return s
-	}
-	return s[:240] + "..."
 }
 
 func normalizeAuthMode(auth string) string {

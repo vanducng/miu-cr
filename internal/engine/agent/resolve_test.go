@@ -346,14 +346,14 @@ func TestRunAuthCommandRejectsMultiline(t *testing.T) {
 	}
 }
 
-func TestRunAuthCommandRedactsStderr(t *testing.T) {
+func TestRunAuthCommandOmitsStderr(t *testing.T) {
 	const leaked = "synthetic-secret-value-123456"
 	_, err := runAuthCommand(context.Background(), credentialCommand(t, "printf 'x-api-key: "+leaked+"\\n' >&2\nexit 7\n"))
 	var cerr *clierr.CLIError
 	if !errors.As(err, &cerr) || cerr.Code != "agent.auth_command_failed" {
 		t.Fatalf("expected auth_command failure, got %v", err)
 	}
-	if strings.Contains(cerr.Message, leaked) {
+	if strings.Contains(cerr.Message, leaked) || strings.Contains(cerr.Message, "x-api-key") {
 		t.Fatalf("stderr secret leaked: %q", cerr.Message)
 	}
 }

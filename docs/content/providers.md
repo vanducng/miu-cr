@@ -51,7 +51,7 @@ The two built-in profiles `anthropic` and `openai` always exist; you only declar
 | `oauth` | `openai` | Use `miucr login` / ChatGPT-plan OAuth; profile static credentials are rejected. |
 | omitted | both | Legacy auto: Anthropic profile credentials are Bearer; OpenAI uses profile key > OAuth > ambient `OPENAI_API_KEY`. |
 
-Credential source precedence is `auth_token` > non-empty `auth_env` > `auth_command`. `auth_command` is an argv array executed directly, never through a shell; it must print exactly one credential line to stdout. If a selected `auth_command` fails, resolution fails instead of silently falling through to OAuth or ambient env keys.
+Credential source precedence is `auth_token` > non-empty `auth_env` > `auth_command`. `auth_command` is an argv array executed directly, never through a shell; it must print exactly one credential line to stdout. If a selected `auth_command` fails, resolution fails instead of silently falling through to OAuth or ambient env keys; stderr is omitted from the error because secret helpers may print credentials there.
 
 :::caution[Prefer `auth_env` or `auth_command` over `auth_token`]
 `auth_env` names an env var; `auth_command` reads from a local secret helper such as `gopass` or `op`. Neither writes the token to the config file. `auth_token` stores the literal token **in plaintext on disk**; use it only when an env var or secret helper isn't practical. miu-cr prints a one-time warning whenever a plaintext `auth_token` is used.
