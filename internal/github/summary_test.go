@@ -120,8 +120,8 @@ func TestRenderSummaryFullReviewInternals(t *testing.T) {
 	for _, want := range []string{
 		"<summary>Review reference</summary>",
 		"**Priority**",
-		"must fix, blocks merge", // P0 legend meaning
-		"optional, FYI",          // P4 legend meaning
+		"immediate blocker: security, data loss, outage, or auth bypass",
+		"optional FYI: non-blocking suggestion or observation",
 		"effort-S-brightgreen",
 		"context-full-brightgreen",
 	} {

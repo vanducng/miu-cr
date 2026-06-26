@@ -256,11 +256,11 @@ func renderReviewReference(b *strings.Builder, info *PRInfo, stats map[string]an
 // shields badge + a short, direct meaning for a code-review finding.
 func renderPriorityLegend(b *strings.Builder) {
 	meaning := map[string]string{
-		"critical": "must fix, blocks merge",
-		"high":     "fix before merge",
-		"medium":   "should fix",
-		"low":      "minor, can wait",
-		"info":     "optional, FYI",
+		"critical": "immediate blocker: security, data loss, outage, or auth bypass",
+		"high":     "fix before merge: major breakage or no safe workaround",
+		"medium":   "should fix soon: real defect with limited impact or workaround",
+		"low":      "can wait: minor defect, edge case, or maintainability risk",
+		"info":     "optional FYI: non-blocking suggestion or observation",
 	}
 	for _, sev := range severityOrder { // critical, high, medium, low, info → P0..P4
 		fmt.Fprintf(b, "- %s · %s\n", priorityBadge(sev), meaning[sev])
