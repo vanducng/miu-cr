@@ -115,11 +115,13 @@ func TestRenderSummaryFullChangesTable(t *testing.T) {
 func TestRenderSummaryFullReviewInternals(t *testing.T) {
 	info, diffs, findings := presentationFixture()
 	out := RenderSummaryFull(info, findings, nil, 0, nil, nil, SummaryOptions{Diffs: diffs})
-	// Metadata now lives in a collapsed Review reference details as bullets.
+	// Metadata now lives in a collapsed Review reference details: a Priority
+	// legend + badge-only Effort/Context bullets (no Files/Churn/MCP).
 	for _, want := range []string{
 		"<summary>Review reference</summary>",
-		"**Files** `2`",
-		"**Churn** `+12 / −4`",
+		"**Priority**",
+		"must fix, blocks merge", // P0 legend meaning
+		"optional, FYI",          // P4 legend meaning
 		"effort-S-brightgreen",
 		"context-full-brightgreen",
 	} {
@@ -127,9 +129,10 @@ func TestRenderSummaryFullReviewInternals(t *testing.T) {
 			t.Fatalf("want %q in the Review reference block:\n%s", want, out)
 		}
 	}
-	// The old visible meta line must be gone.
-	if strings.Contains(out, "**2 files** · ") {
-		t.Fatalf("the old visible meta line must be gone:\n%s", out)
+	for _, absent := range []string{"**Files**", "**Churn**", "**Effort**", "**Context**", "review_run", "MCP"} {
+		if strings.Contains(out, absent) {
+			t.Fatalf("Review reference must no longer contain %q:\n%s", absent, out)
+		}
 	}
 }
 
@@ -246,14 +249,15 @@ func TestRenderSummaryReviewCountIdentity(t *testing.T) {
 
 func TestRenderSummaryInternalsOmitsChurnWithoutDiffs(t *testing.T) {
 	out := RenderSummaryFull(&PRInfo{HeadSHA: "abc"}, nil, map[string]any{"files_reviewed": float64(4)}, 0, nil, nil, SummaryOptions{})
-	if !strings.Contains(out, "**Files** `4`") {
-		t.Fatalf("no-diffs internals must keep the files-reviewed fallback:\n%s", out)
-	}
 	if !strings.Contains(out, "context-full") {
 		t.Fatalf("no-diffs internals must keep Context:\n%s", out)
 	}
-	if strings.Contains(out, "**Churn**") || strings.Contains(out, "**Effort**") {
-		t.Fatalf("no-diffs internals must omit Churn/Effort bullets:\n%s", out)
+	if !strings.Contains(out, "**Priority**") {
+		t.Fatalf("no-diffs internals must still show the Priority legend:\n%s", out)
+	}
+	// Without diff churn there is no Effort badge; Files/Churn are gone entirely.
+	if strings.Contains(out, "effort-") || strings.Contains(out, "**Files**") || strings.Contains(out, "**Churn**") {
+		t.Fatalf("no-diffs internals must omit Files/Churn/Effort:\n%s", out)
 	}
 }
 
@@ -312,11 +316,11 @@ func TestRenderSummaryFullHandoff(t *testing.T) {
 	if !strings.Contains(out, "**Run again**") {
 		t.Fatalf("want a re-run block:\n%s", out)
 	}
-	if !strings.Contains(out, "Run locally: `miucr review --pr https://github.com/o/r/pull/7`") {
-		t.Fatalf("want a copy-paste local run pointer:\n%s", out)
+	if !strings.Contains(out, "Run locally: `miucr review --pr https://github.com/o/r/pull/7 -o pretty`") {
+		t.Fatalf("want a copy-paste local run pointer with -o pretty:\n%s", out)
 	}
-	if !strings.Contains(out, "review_run") {
-		t.Fatalf("want an MCP pointer:\n%s", out)
+	if strings.Contains(out, "review_run") || strings.Contains(out, "MCP") {
+		t.Fatalf("the MCP pointer line must be removed:\n%s", out)
 	}
 	// No secret leakage: a token-shaped string must never appear.
 	if strings.Contains(out, "ghp_") || strings.Contains(out, "sk-") {
