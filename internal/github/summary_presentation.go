@@ -65,10 +65,10 @@ func startsWithMermaidKeyword(d string) bool {
 	return false
 }
 
-// renderWalkthrough writes the review pass's PR-level summary as LEAD PROSE: no
-// "Walkthrough" heading (intentionally un-CodeRabbit-like). Rendered via mdProse so
-// the model's bullet newlines survive (mdInline would collapse them) while HTML/fence
-// breakout vectors stay neutralized. Empty (after trim) omits it.
+// renderWalkthrough writes the review pass's PR-level summary under a bold
+// "**What changed:**" lead-in (not an H3, to keep the comment compact). Rendered via
+// mdProse so the model's bullet newlines survive (mdInline would collapse them) while
+// HTML/fence breakout vectors stay neutralized. Empty (after trim) omits it.
 func renderWalkthrough(b *strings.Builder, walkthrough string) {
 	if strings.TrimSpace(walkthrough) == "" {
 		return
