@@ -111,6 +111,9 @@ type SummaryOptions struct {
 	Walkthrough   string
 	FileSummaries map[string]string
 	Diagram       string
+	// Version is the miucr release tag appended to the footer "Posted by" line
+	// when non-empty (sourced from the cli version var via the wire layer).
+	Version string
 	// RuleCitations grounds an omitted finding's cited rule stem in the overflow
 	// list (validated/linked in the wire layer; an unmatched stem is dropped).
 	RuleCitations map[string]RuleCitation
@@ -170,7 +173,11 @@ func RenderSummaryFull(info *PRInfo, findings []engine.Finding, stats map[string
 	if info.ReviewCount > 0 {
 		handoff = fmt.Sprintf(" · Review attempts: %d", info.ReviewCount)
 	}
-	fmt.Fprintf(&b, "\n<sub>Reviewed commit %s%s · Posted by [miu-cr](https://github.com/vanducng/miu-cr)</sub>", commitRef(info), handoff)
+	ver := ""
+	if v := strings.TrimSpace(opts.Version); v != "" {
+		ver = " " + v
+	}
+	fmt.Fprintf(&b, "\n<sub>Reviewed commit %s%s · Posted by [miu-cr](https://github.com/vanducng/miu-cr)%s</sub>", commitRef(info), handoff, ver)
 	return b.String()
 }
 

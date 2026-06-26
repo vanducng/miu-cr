@@ -544,6 +544,7 @@ func publishReview(ctx stdctx.Context, client mgithub.Client, runner *gitcmd.Run
 			Walkthrough:   res.Walkthrough,
 			FileSummaries: res.FileSummaries,
 			Diagram:       res.Diagram,
+			Version:       cli.Version(),
 			RuleCitations: ruleCites,
 		})
 	}
