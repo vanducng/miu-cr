@@ -7,7 +7,7 @@ import starlightLlmsTxt from 'starlight-llms-txt';
 import remarkGfm from 'remark-gfm';
 
 export default defineConfig({
-  site: 'https://miucr.vanducng.dev',
+  site: 'https://cr.miu.sh',
   // GFM (tables, strikethrough) for MDX — .mdx does not get it by default.
   // NOTE: markdown.remarkPlugins is deprecated in Astro 6; migrate when bumping major.
   markdown: { remarkPlugins: [remarkGfm] },

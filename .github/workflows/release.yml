@@ -163,7 +163,7 @@ jobs:
 
           ### Full documentation
 
-          https://miucr.vanducng.dev
+          https://cr.miu.sh
           TEMPLATE
 
           sed -i "s/__TAG__/${TAG_NAME}/g" "$NOTES_FILE"

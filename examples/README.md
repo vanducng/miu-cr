@@ -22,7 +22,7 @@ self-contained — read its header comment, copy it into your repo, and adjust.
 my machine" workflows: a `pre-commit` git hook that gates the commit, a
 `Makefile` with `review` / `review-range` targets, and an `agent-review.sh`
 showing the AI agent fix-loop shape. See the
-[Use cases & recipes](https://miucr.vanducng.dev/use-cases/) docs page for the
+[Use cases & recipes](https://cr.miu.sh/use-cases/) docs page for the
 full prose.
 
 ## Rules
@@ -30,7 +30,7 @@ full prose.
 Drop a `rules/*.md` file into `.miu/cr/rules/` in your repo (or
 `~/.config/miu/cr/rules/` for personal rules). The frontmatter `globs` select
 which changed files the rule applies to; the prose is injected as review
-context. See the [rules docs](https://miucr.vanducng.dev/rules/) for the trust
+context. See the [rules docs](https://cr.miu.sh/rules/) for the trust
 model.
 
 ## GitHub Action

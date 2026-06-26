@@ -12,7 +12,7 @@
 #
 # The integrated path is the MCP server (`miucr mcp` -> review_run / review_get),
 # which hands the agent the same findings as a tool result instead of parsed
-# stdout. See https://miucr.vanducng.dev/mcp/
+# stdout. See https://cr.miu.sh/mcp/
 #
 # Requires: miucr and jq on PATH, plus a provider key in the environment
 # (ANTHROPIC_API_KEY, or `miucr login`).
