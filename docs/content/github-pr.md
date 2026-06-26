@@ -112,37 +112,38 @@ hunks or runs off the diff is rejected, so any finding that fails the proof
 are unaffected.
 
 The **summary issue comment** leads, top to bottom, with a hidden `<!-- miu-cr-review -->`
-marker line, a clean `## Code Review` header (no severity on the H2 - it stays small),
-an **identity line** (`**Reviews (N)** · Last reviewed commit: <subject>`, where N is the
-review count read back from the prior summary comment and `<subject>` is the head commit's
-message subject linked to the commit, falling back to the short SHA; when there is no prior
-count it drops the `Reviews (` prefix and shows a bare `Last reviewed commit:`), then a subtle
-quote line of per-level **shields.io count badges** (the `Px` label in its severity color, the
-count neutral grey, critical/high first; zero findings → a green "no issues found" badge) plus the finding
-total, a **`Confidence: N/5`** line (the model's merge-safety confidence + a one-line
-reason; derived from findings when the model omits it), then the model's PR summary as lead
-prose (3 to 6 key-point bullets, **no "Walkthrough" heading**). The collapsible **Important
-Files Changed** table (File · Δ · Findings · Overview, the Overview from the per-file
-digests), sorted most-important-first (files with findings, then biggest churn), the
-omitted-inline note, and the `<details>` overflow block follow. The agent handoff (a copy-paste
-local re-run command + the `review_run` MCP pointer) and the review metrics (Files, Churn,
-Effort and Context badges, each with a one-line meaning) are combined into one **collapsed
-`<details>` "Agent handoff & review internals"** block near the bottom, closing with a footer
-(`Reviewed commit \`<sha>\` · Posted by miu-cr`). The `review_id` is NOT shown in the comment
-(it only resolves on the machine + store that ran the review; it stays in the JSON envelope).
-All model-supplied text is escaped at the
-render boundary.
+marker line, a second hidden `<!-- miu-cr-runs:N -->` marker (N = the review run count,
+written back for the next upsert), a clean `## Code Review Summary` header (no severity on
+the H2 - it stays small), then an INLINE `**Result:**` line (per-level **shields.io count
+badges** — the `Px` label in its severity color, the count neutral grey, critical/high first
+— followed by `· N findings`; zero findings renders a green "No findings" badge instead).
+There is no identity line and no confidence line: the prior `**Reviews (N)**` identity line
+and the `Confidence: N/5` line were removed (N was a finding count misread as a review count;
+the run count now lives only in the footer). Then comes the model's walkthrough prose as lead
+text (**no "Walkthrough" heading**). The collapsible **Important Files Changed** table
+(File · Δ · Findings · Overview, the Overview from the per-file digests), sorted
+most-important-first (files with findings, then biggest churn), the omitted-inline note, and
+the `<details>` overflow block follow. The agent handoff (a copy-paste local re-run command +
+the `review_run` MCP pointer) and the review metrics (Files, Churn, Effort and Context badges,
+each with a one-line meaning) are combined into one **collapsed `<details>` "Agent handoff &
+review internals"** block near the bottom, closing with a footer: `<sub>Reviewed commit
+[\`<7-char-sha>\`](<repo>/commit/<full-sha>) · Review attempts: N · Posted by
+[miu-cr](https://github.com/vanducng/miu-cr)</sub>` (the short SHA is GitHub-standard 7 hex
+digits, and the run count relocated here as "Review attempts: N"). The `review_id` is NOT
+shown in the comment (it only resolves on the machine + store that ran the review; it stays in
+the JSON envelope). All model-supplied text is escaped at the render boundary.
 
 The summary lives **solely in ONE issue comment** (not the review body). Its first line is
 a hidden marker that identifies the comment as miucr-authored:
 
 ```
 <!-- miu-cr-review -->
-## Code Review
+<!-- miu-cr-runs:3 -->
+## Code Review Summary
 
-**Reviews (2)** · Last reviewed commit: `<sha>`
+**Result:** 🟠 1 · 🟡 2 · 🔵 1 · 4 findings
 
-> 🟡 2 · 🔵 1 · 3 findings
+Walkthrough prose …
 ```
 
 ## One upserted summary & re-runs
