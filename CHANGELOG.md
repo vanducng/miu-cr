@@ -55,6 +55,13 @@ comment with a new marker); subsequent re-runs dedupe normally. On a
 first M5 review **manually** (or off-hours) to absorb the one-time re-post before
 the next scheduled run.
 
+## [0.41.0](https://github.com/vanducng/miu-cr/compare/v0.40.0...v0.41.0) (2026-06-26)
+
+
+### Features
+
+* **review:** summary UX — What-changed section, inline-findings CTA, graceful walkthrough cap ([#116](https://github.com/vanducng/miu-cr/issues/116)) ([66084d8](https://github.com/vanducng/miu-cr/commit/66084d8b9b1745227486763a1f30337ca8a222ed))
+
 ## [0.40.0](https://github.com/vanducng/miu-cr/compare/v0.39.0...v0.40.0) (2026-06-25)
 
 
