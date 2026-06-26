@@ -185,16 +185,16 @@ func TestPRDeepContextThreaded(t *testing.T) {
 	if !pr.gotReq.DeepContext {
 		t.Fatal("--deep-context must thread DeepContext into the PR request")
 	}
-	if pr.gotReq.ContextHops != defaultDeepContextHops {
-		t.Fatalf("--deep-context hops = %d, want %d", pr.gotReq.ContextHops, defaultDeepContextHops)
+	if !pr.gotReq.ContextHopsAuto || pr.gotReq.ContextHops != 0 {
+		t.Fatalf("--deep-context auto=%v hops=%d, want auto true hops 0", pr.gotReq.ContextHopsAuto, pr.gotReq.ContextHops)
 	}
 
 	pr = &fakePRReviewer{outcome: ReviewOutcome{PR: &PRResult{Owner: "o", Repo: "r", Number: 1}}}
 	if _, err := runPR(t, pr, &fakeReviewer{}, "--pr", "o/r#1", "--no-post", "--deep-context", "--context-hops", "4"); err != nil {
 		t.Fatalf("run explicit: %v", err)
 	}
-	if pr.gotReq.ContextHops != 4 {
-		t.Fatalf("explicit --context-hops not threaded: %d", pr.gotReq.ContextHops)
+	if pr.gotReq.ContextHopsAuto || pr.gotReq.ContextHops != 4 {
+		t.Fatalf("explicit --context-hops auto=%v hops=%d, want auto false hops 4", pr.gotReq.ContextHopsAuto, pr.gotReq.ContextHops)
 	}
 }
 

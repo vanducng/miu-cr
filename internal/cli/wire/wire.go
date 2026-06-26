@@ -177,22 +177,23 @@ func (engineReviewer) Review(ctx stdctx.Context, req cli.ReviewRequest) (cli.Rev
 	}
 
 	res, err := eng.Review(ctx, engine.Request{
-		Mode:           modeFor(req),
-		Staged:         req.Staged,
-		From:           req.From,
-		To:             req.To,
-		Commit:         req.Commit,
-		Gate:           req.Gate,
-		RepoDir:        req.RepoDir,
-		IncludeGlobs:   req.IncludeGlobs,
-		ExcludeGlobs:   req.ExcludeGlobs,
-		Extensions:     req.Extensions,
-		ExpandWindow:   req.ExpandWindow,
-		TokenBudget:    req.TokenBudget,
-		ProjectContext: req.DeepContext,
-		ContextHops:    req.ContextHops,
-		Provider:       string(creds.Kind),
-		Model:          creds.Model,
+		Mode:            modeFor(req),
+		Staged:          req.Staged,
+		From:            req.From,
+		To:              req.To,
+		Commit:          req.Commit,
+		Gate:            req.Gate,
+		RepoDir:         req.RepoDir,
+		IncludeGlobs:    req.IncludeGlobs,
+		ExcludeGlobs:    req.ExcludeGlobs,
+		Extensions:      req.Extensions,
+		ExpandWindow:    req.ExpandWindow,
+		TokenBudget:     req.TokenBudget,
+		ProjectContext:  req.DeepContext,
+		ContextHops:     req.ContextHops,
+		ContextHopsAuto: req.ContextHopsAuto,
+		Provider:        string(creds.Kind),
+		Model:           creds.Model,
 
 		Rules:            loadRules(req.RepoDir, true),
 		RulesFork:        false,
@@ -269,6 +270,8 @@ func contextHopsForPR(hops int, isFork bool) int {
 	}
 	return hops
 }
+
+func contextHopsAutoForPR(auto, isFork bool) bool { return auto && !isFork }
 
 func (prReviewer) ReviewPR(ctx stdctx.Context, req cli.PRReviewRequest) (cli.ReviewOutcome, error) {
 	ref, err := mgithub.ParseRef(req.Ref)
@@ -374,25 +377,26 @@ func (prReviewer) ReviewPR(ctx stdctx.Context, req cli.PRReviewRequest) (cli.Rev
 		conversation = mgithub.FetchConversation(ctx, client, info)
 	}
 	res, err := eng.Review(ctx, engine.Request{
-		Mode:           diff.ModeRange,
-		From:           info.BaseSHA,
-		To:             info.HeadSHA,
-		Gate:           req.Gate,
-		RepoDir:        dir,
-		IncludeGlobs:   req.IncludeGlobs,
-		ExcludeGlobs:   req.ExcludeGlobs,
-		Extensions:     req.Extensions,
-		ExpandWindow:   req.ExpandWindow,
-		TokenBudget:    req.TokenBudget,
-		ProjectContext: wantProjectContext(req.DeepContext, info.IsFork),
-		ContextHops:    contextHopsForPR(req.ContextHops, info.IsFork),
-		Provider:       string(creds.Kind),
-		Model:          creds.Model,
-		Owner:          info.Owner,
-		Repo:           info.Repo,
-		Number:         info.Number,
-		Post:           req.Post,
-		PatchRepair:    req.PatchRepair,
+		Mode:            diff.ModeRange,
+		From:            info.BaseSHA,
+		To:              info.HeadSHA,
+		Gate:            req.Gate,
+		RepoDir:         dir,
+		IncludeGlobs:    req.IncludeGlobs,
+		ExcludeGlobs:    req.ExcludeGlobs,
+		Extensions:      req.Extensions,
+		ExpandWindow:    req.ExpandWindow,
+		TokenBudget:     req.TokenBudget,
+		ProjectContext:  wantProjectContext(req.DeepContext, info.IsFork),
+		ContextHops:     contextHopsForPR(req.ContextHops, info.IsFork),
+		ContextHopsAuto: contextHopsAutoForPR(req.ContextHopsAuto, info.IsFork),
+		Provider:        string(creds.Kind),
+		Model:           creds.Model,
+		Owner:           info.Owner,
+		Repo:            info.Repo,
+		Number:          info.Number,
+		Post:            req.Post,
+		PatchRepair:     req.PatchRepair,
 
 		Rules:            loaded,
 		RulesFork:        info.IsFork,
