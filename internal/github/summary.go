@@ -143,6 +143,11 @@ func RenderSummaryFull(info *PRInfo, findings []engine.Finding, stats map[string
 	}
 	fmt.Fprintf(&b, "**Result:** %s\n\n", lead)
 
+	if posted := len(findings) - omittedInline; posted > 0 {
+		b.WriteString(fmt.Sprintf("→ Review the %d inline comment%s below.", posted, plural(posted)))
+		b.WriteString("\n\n")
+	}
+
 	renderWalkthrough(&b, opts.Walkthrough)
 	renderDiagram(&b, opts.Diagram)
 

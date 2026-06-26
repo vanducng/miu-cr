@@ -73,6 +73,7 @@ func renderWalkthrough(b *strings.Builder, walkthrough string) {
 	if strings.TrimSpace(walkthrough) == "" {
 		return
 	}
+	b.WriteString("**What changed:**\n")
 	b.WriteString(mdProse(walkthrough))
 	b.WriteString("\n\n")
 }

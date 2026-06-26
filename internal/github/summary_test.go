@@ -556,3 +556,24 @@ func TestRenderChangesTableSortsByImportance(t *testing.T) {
 		t.Fatalf("a file with a finding must sort before a bigger no-finding file:\n%s", out)
 	}
 }
+func TestRenderSummaryCTAAndWhatChanged(t *testing.T) {
+	info, diffs, findings := presentationFixture()
+	out := RenderSummaryFull(info, findings, nil, 0, nil, nil, SummaryOptions{Diffs: diffs, Walkthrough: "- did a thing"})
+	if !strings.Contains(out, "→ Review the ") || !strings.Contains(out, "inline comment") {
+		t.Fatalf("want a CTA pointing to inline comments when findings exist: %s", out)
+	}
+	if !strings.Contains(out, "**What changed:**") {
+		t.Fatalf("want a What changed label before the walkthrough: %s", out)
+	}
+	clean := RenderSummaryFull(&PRInfo{HeadSHA: "h"}, nil, nil, 0, nil, nil, SummaryOptions{})
+	if strings.Contains(clean, "→ Review the ") {
+		t.Fatalf("clean review must not show the inline CTA: %s", clean)
+	}
+	if strings.Contains(clean, "**What changed:**") {
+		t.Fatalf("clean review with no walkthrough must not show the label: %s", clean)
+	}
+	allOmitted := RenderSummaryFull(info, findings, nil, len(findings), nil, nil, SummaryOptions{Diffs: diffs})
+	if strings.Contains(allOmitted, "→ Review the ") {
+		t.Fatalf("must not show the CTA when all findings were omitted inline: %s", allOmitted)
+	}
+}

@@ -391,7 +391,7 @@ func parseFindings(text string) (engine.ReviewOutput, bool) {
 	}
 	out := engine.ReviewOutput{
 		Findings:         findings,
-		Walkthrough:      capRunes(raw.Walkthrough, maxWalkthroughLen),
+		Walkthrough:      capProse(raw.Walkthrough, maxWalkthroughLen),
 		Diagram:          capRunes(raw.Diagram, maxDiagramLen),
 		Confidence:       clampConfidence(raw.Confidence),
 		ConfidenceReason: capRunes(raw.ConfidenceReason, maxConfidenceLen),
