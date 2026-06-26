@@ -10,6 +10,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/vanducng/miu-cr/internal/config"
 	"github.com/vanducng/miu-cr/internal/engine"
 )
 
@@ -57,8 +58,9 @@ const ledgerPrefix = "miu-cr-ledger:"
 
 // ledgerMarkerRe extracts the base64 ledger payload from the summary body. The
 // payload is base64(JSON) so untrusted title/category text can never break out
-// of the HTML comment (no '<', '>', or '-->' in the base64 alphabet).
-var ledgerMarkerRe = regexp.MustCompile(`<!-- miu-cr-ledger:([A-Za-z0-9+/=]*) -->`)
+// of the HTML comment (no '<', '>', or '-->' in the base64 alphabet). Built from
+// ledgerPrefix so the parser can't silently desync from renderLedgerMarker.
+var ledgerMarkerRe = regexp.MustCompile("<!-- " + regexp.QuoteMeta(ledgerPrefix) + `([A-Za-z0-9+/=]*) -->`)
 
 // renderLedgerMarker encodes the ledger as the hidden comment line embedded in
 // the summary body; "" (no marker) on a marshal error so a render never fails.
@@ -199,7 +201,7 @@ func capLedger(entries []LedgerEntry) []LedgerEntry {
 			out = append(out, e)
 		}
 	}
-	os.Stderr.WriteString(fmt.Sprintf("miucr: finding ledger at cap (%d), dropped %d oldest resolved finding(s) from tracking\n", maxLedgerEntries, dropped))
+	os.Stderr.WriteString(config.RedactString(fmt.Sprintf("miucr: finding ledger at cap (%d), dropped %d oldest resolved finding(s) from tracking", maxLedgerEntries, dropped)) + "\n")
 	return out
 }
 
