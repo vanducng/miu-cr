@@ -35,14 +35,26 @@ kind       = "anthropic"         # or "openai"; the first-class family
 base_url   = "https://…"         # optional; gateway/endpoint override
 model      = "…"                 # optional; default model for this profile
 auth_env   = "MY_TOKEN"          # RECOMMENDED; NAME of an env var holding the credential
+auth_command = ["gopass", "show", "-o", "ai/provider"]  # argv; stdout is credential
 auth_token = "…"                 # discouraged literal credential; plaintext on disk
-auth       = "oauth"             # OpenAI only: pin the credential method ("oauth" | "api_key" | omit for auto)
+auth       = "bearer"            # "bearer" | "api_key" | "oauth" | omit for legacy auto
 ```
 
-The two built-in profiles `anthropic` and `openai` always exist; you only declare a `[providers.<name>]` block to add a vendor or override a built-in's `model`/`base_url`. A profile's credential (`auth_token` or `auth_env`) is sent as a **Bearer token** on the Anthropic path and as the **API key** on the OpenAI path. Standard env vars and CLI flags still override it. `auth` is OpenAI-only and pins the credential method: `"oauth"` (use `miucr login`/the ChatGPT plan, never an API key), `"api_key"` (always a key, never OAuth), or omitted for intent-ordered auto; an unknown value is a `config.invalid` error.
+The two built-in profiles `anthropic` and `openai` always exist; you only declare a `[providers.<name>]` block to add a vendor or override a built-in's `model`/`base_url`. Standard env vars and CLI flags still override profile credentials.
 
-:::caution[Prefer `auth_env` over `auth_token`]
-`auth_env` names an env var; the token is read at run time and never written to the config file. `auth_token` stores the literal token **in plaintext on disk**; use it only when an env var isn't practical. When both are set, `auth_token` wins, and miu-cr prints a one-time warning whenever a plaintext `auth_token` is used.
+`kind` selects the protocol family. `auth` selects the credential mechanism:
+
+| `auth` | Valid kind | Meaning |
+| ------ | ---------- | ------- |
+| `bearer` | `anthropic` | Profile credential is sent as `Authorization: Bearer ...`; use for Anthropic-compatible gateways. |
+| `api_key` | `anthropic`, `openai` | Profile credential is sent as the provider API key (`x-api-key` for Anthropic, OpenAI API-key slot for OpenAI-compatible). |
+| `oauth` | `openai` | Use `miucr login` / ChatGPT-plan OAuth; profile static credentials are rejected. |
+| omitted | both | Legacy auto: Anthropic profile credentials are Bearer; OpenAI uses profile key > OAuth > ambient `OPENAI_API_KEY`. |
+
+Credential source precedence is `auth_token` > non-empty `auth_env` > `auth_command`. `auth_command` is an argv array executed directly, never through a shell; it must print exactly one credential line to stdout. If a selected `auth_command` fails, resolution fails instead of silently falling through to OAuth or ambient env keys; stderr is omitted from the error because secret helpers may print credentials there.
+
+:::caution[Prefer `auth_env` or `auth_command` over `auth_token`]
+`auth_env` names an env var; `auth_command` reads from a local secret helper such as `gopass` or `op`. Neither writes the token to the config file. `auth_token` stores the literal token **in plaintext on disk**; use it only when an env var or secret helper isn't practical. miu-cr prints a one-time warning whenever a plaintext `auth_token` is used.
 :::
 
 ### Review defaults: `[review]`
@@ -73,7 +85,7 @@ miucr config show --all    # full effective config incl. built-in defaults
 miucr config show -o pretty  # TOML view for humans
 ```
 
-`config set <key> <value>` merges one dotted, **non-secret** key (e.g. `default_provider`, `review.gate`, `providers.zai.model`) into the existing config without re-running `init`; secret keys (`auth_token`, `store.dsn`) are rejected to avoid a plaintext-secret footgun. `config edit` opens `~/.config/miu/cr/config.toml` in `$VISUAL`/`$EDITOR` (it needs an interactive terminal; in CI use `config set`). You can also edit the file directly.
+`config set <key> <value>` merges one dotted, **non-secret** scalar key (e.g. `default_provider`, `review.gate`, `providers.zai.model`, `providers.zai.auth`) into the existing config without re-running `init`; secret keys (`auth_token`, `store.dsn`) are rejected to avoid a plaintext-secret footgun. Use `config edit` or edit the file directly for array fields like `auth_command`. `config edit` opens `~/.config/miu/cr/config.toml` in `$VISUAL`/`$EDITOR` (it needs an interactive terminal; in CI use `config set`).
 
 ## Anthropic
 
@@ -87,7 +99,7 @@ Resolution order (first non-empty wins):
 | Setting | Flag | Env | Profile | Default |
 | ------- | ---- | --- | ------- | ------- |
 | API key (x-api-key) | `--api-key` | `ANTHROPIC_API_KEY` | - | required unless an auth token is set |
-| Auth token (Bearer) | `--auth-token` | `ANTHROPIC_AUTH_TOKEN` | `auth_token` / `auth_env` | - |
+| Auth token (Bearer) | `--auth-token` | `ANTHROPIC_AUTH_TOKEN` | `auth_token` / `auth_env` / `auth_command` with `auth = "bearer"` | - |
 | Base URL | `--base-url` | `ANTHROPIC_BASE_URL` | `base_url` | SDK default |
 | Model | `--model` | `ANTHROPIC_MODEL` | `model` | `claude-sonnet-4-5-20250929` |
 
@@ -103,7 +115,9 @@ z.ai exposes an **Anthropic-compatible** gateway, so it's an `anthropic`-kind pr
 kind     = "anthropic"
 base_url = "https://api.z.ai/api/anthropic"
 model    = "glm-5.2"
-auth_env = "ZAI_API_KEY"          # or: auth_token = "<token>"
+auth     = "bearer"
+auth_env = "ZAI_API_KEY"
+# auth_command = ["gopass", "show", "-o", "ai/zai"]
 ```
 
 ```sh
@@ -133,7 +147,7 @@ Set `model` (or `--model` / `ANTHROPIC_MODEL`) to a GLM model; the pinned defaul
 :::
 
 :::note[Migrating from `ZAI_API_KEY`]
-Earlier builds special-cased a bare `ZAI_API_KEY`. That hardcoding is gone. Use a config profile (above) with `auth_env = "ZAI_API_KEY"`, or set `ANTHROPIC_BASE_URL` + `ANTHROPIC_AUTH_TOKEN`.
+Earlier builds special-cased a bare `ZAI_API_KEY`. That hardcoding is gone. Use a config profile (above) with `auth_env = "ZAI_API_KEY"` or `auth_command = [...]`, or set `ANTHROPIC_BASE_URL` + `ANTHROPIC_AUTH_TOKEN`.
 :::
 
 ## OpenAI (and OpenAI-compatible)
@@ -147,7 +161,7 @@ Resolution order:
 
 | Setting | Flag | Env | Profile | Default |
 | ------- | ---- | --- | ------- | ------- |
-| API key | `--api-key` | `OPENAI_API_KEY` | `auth_token` / `auth_env` | required |
+| API key | `--api-key` | `OPENAI_API_KEY` | `auth_token` / `auth_env` / `auth_command` with `auth = "api_key"` | required |
 | Base URL | `--base-url` | `OPENAI_BASE_URL` | `base_url` | `https://api.openai.com/v1` |
 | Model | `--model` | `OPENAI_MODEL` | `model` | `gpt-4o` |
 
@@ -159,11 +173,11 @@ The OpenAI provider can also authenticate **without an API key** by reviewing on
 
 When `auth` is unset, the OpenAI credential resolves **intent-ordered** so an ambient `OPENAI_API_KEY` (often set for other tools) never silently overrides a deliberate choice:
 
-1. a profile-configured key (`auth_env` / `auth_token`) or `--api-key`;
+1. a profile-configured key (`auth_env` / `auth_command` / `auth_token`) or `--api-key`;
 2. a cached `miucr login` (OAuth → codex / ChatGPT-plan backend);
 3. an ambient `OPENAI_API_KEY` env var.
 
-Pin the method with `auth = "oauth"` or `auth = "api_key"` to skip the auto order. See [Credentials → Using your ChatGPT plan](/credentials/#using-openai--your-chatgpt-plan-miucr-login).
+Pin the method with `auth = "oauth"` or `auth = "api_key"` to skip the auto order. With `auth = "oauth"`, remove `auth_env`, `auth_command`, and `auth_token` from the profile. See [Credentials → Using your ChatGPT plan](/credentials/#using-openai--your-chatgpt-plan-miucr-login).
 
 ### Generic OpenAI-compatible gateway: example profile
 
@@ -172,7 +186,9 @@ Pin the method with `auth = "oauth"` or `auth = "api_key"` to skip the auto orde
 kind     = "openai"
 base_url = "https://gateway.example.com/v1"
 model    = "your-model-id"
-auth_env = "MY_GATEWAY_TOKEN"     # or: auth_token = "<token>"
+auth     = "api_key"
+auth_env = "MY_GATEWAY_TOKEN"
+# auth_command = ["op", "read", "op://vault/item/token"]
 ```
 
 ```sh

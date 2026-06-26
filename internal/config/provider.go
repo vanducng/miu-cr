@@ -24,24 +24,18 @@ const (
 
 // Provider is one named provider profile. A vendor (z.ai/GLM, DeepSeek, a
 // self-hosted gateway, …) is just a profile of kind "anthropic" or "openai"
-// with its own base_url/model and a credential reference. The credential is
-// either a literal AuthToken or AuthEnv, the NAME of an env var holding it;
-// AuthToken/AuthEnv is sent as a Bearer token on the Anthropic path and as the
-// API key on the OpenAI path. Standard env vars (ANTHROPIC_API_KEY, …) and CLI
-// flags still override a profile credential.
-//
-// Precedence when both are set: AuthToken (the literal) wins over AuthEnv (see
-// resolve's profileSecret). Prefer AuthEnv, it keeps the secret out of the
-// plaintext config file.
+// with its own base_url/model and a credential reference. The credential source
+// can be AuthEnv, AuthCommand, or legacy AuthToken. Standard env vars
+// (ANTHROPIC_API_KEY, …) and CLI flags still override a profile credential.
 type Provider struct {
-	Kind      Kind   `toml:"kind"`
-	BaseURL   string `toml:"base_url,omitempty"`
-	Model     string `toml:"model,omitempty"`
-	AuthToken string `toml:"auth_token,omitempty"` // literal credential; wins over AuthEnv when both set
-	AuthEnv   string `toml:"auth_env,omitempty"`   // NAME of an env var holding the credential (preferred)
-	// Auth explicitly pins the method (OpenAI): "oauth" (use `miucr login`/the
-	// ChatGPT plan, never an API key) | "api_key" (use a key, never OAuth) | ""
-	// (intent-ordered auto: --api-key/profile key > OAuth login > OPENAI_API_KEY).
+	Kind        Kind     `toml:"kind"`
+	BaseURL     string   `toml:"base_url,omitempty"`
+	Model       string   `toml:"model,omitempty"`
+	AuthToken   string   `toml:"auth_token,omitempty"`   // literal credential; wins over AuthEnv/AuthCommand
+	AuthEnv     string   `toml:"auth_env,omitempty"`     // NAME of an env var holding the credential
+	AuthCommand []string `toml:"auth_command,omitempty"` // argv command; stdout is the credential
+	// Auth pins the credential method: "oauth", "api_key", "bearer", or "" for
+	// legacy auto behavior.
 	Auth string `toml:"auth,omitempty"`
 }
 

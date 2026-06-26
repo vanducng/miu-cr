@@ -32,6 +32,7 @@ func TestSetKeyHappyPaths(t *testing.T) {
 		{"providers.zai.kind", "anthropic"},
 		{"providers.zai.model", "glm-5.2"},
 		{"providers.zai.auth_env", "ZAI_API_KEY"},
+		{"providers.zai.auth", "bearer"},
 	} {
 		if err := SetKey(&cfg, tc.key, tc.val); err != nil {
 			t.Fatalf("SetKey(%q,%q): %v", tc.key, tc.val, err)
@@ -40,7 +41,7 @@ func TestSetKeyHappyPaths(t *testing.T) {
 	if cfg.DefaultProvider != "zai" || cfg.Review.Gate != "high" || cfg.Store.Backend != "postgres" {
 		t.Fatalf("scalars not set: %+v", cfg)
 	}
-	if cfg.Providers["zai"].Model != "glm-5.2" || cfg.Providers["zai"].AuthEnv != "ZAI_API_KEY" {
+	if cfg.Providers["zai"].Model != "glm-5.2" || cfg.Providers["zai"].AuthEnv != "ZAI_API_KEY" || cfg.Providers["zai"].Auth != "bearer" {
 		t.Fatalf("provider not set: %+v", cfg.Providers["zai"])
 	}
 }
@@ -75,6 +76,7 @@ func TestSetKeyValidatesEnums(t *testing.T) {
 		{"store.backend", "mysql"},
 		{"github.mode", "oauth"},
 		{"providers.x.kind", "claude"},
+		{"providers.x.auth", "token"},
 		{"embedding.dim", "abc"},
 		{"unknown.key", "x"},
 	} {

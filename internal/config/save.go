@@ -11,7 +11,7 @@ import (
 
 const saveHeader = `# miu-cr config, written by ` + "`miucr init`" + ` / ` + "`miucr config set`" + `.
 # Only user-set values live here; built-in defaults are layered at load time.
-# Prefer auth_env (an env-var NAME) over auth_token (a literal secret on disk).
+# Prefer auth_env or auth_command over auth_token (a literal secret on disk).
 `
 
 // savedConfig is the on-disk projection of a Config: every field is omitempty
@@ -144,7 +144,7 @@ func delta(cfg Config) savedConfig {
 		out.DefaultProvider = cfg.DefaultProvider
 	}
 	for name, p := range cfg.Providers {
-		if bp, ok := base.Providers[name]; ok && p == bp {
+		if bp, ok := base.Providers[name]; ok && reflect.DeepEqual(p, bp) {
 			continue
 		}
 		out.Providers[name] = p

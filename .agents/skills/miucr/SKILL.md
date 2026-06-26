@@ -20,7 +20,7 @@ proposing fixes). It runs four ways:
 - **The summary is a per-finding lifecycle ledger, not just the latest run.** It renders a grouped **🔴 Open** table + a collapsed **✅ Resolved** table, each finding tracked by its line-independent fingerprint across commits: status (`open` / `resolved` / `reopened`), the **origin commit** it was first raised on and the **resolved commit** it disappeared on (both linked), **severity before→after** (escalation shown `🟡→🔴`, a fix shown `🟠→✅`), and first-seen / resolved timestamps. A clean review shows **Review passed** (not "No findings"). The footer is always the latest reviewed commit + **Last reviewed `<UTC>`** + the miu-cr release. Lifecycle state is **storeless**: it lives in a hidden `<!-- miu-cr-ledger:<base64> -->` marker inside the comment (like the runs counter), so it survives ephemeral CI with no DB. A finding resolves only when it is absent AND its file is still in the diff (absence off-diff ≠ fix).
 - **One-click suggestions are conservative + model-controlled.** `--suggest` emits a native GitHub ` ```suggestion ` block ONLY when the patch *deterministically* replaces the exact anchored line(s) AND the model is certain of a grounded mechanical fix (a cited rule or an obvious best practice). It NEVER guesses an unverifiable value (a URL, path, route, ID, version, config key, API signature); such concerns become a verification-question in the rationale instead. `--patch-repair` (requires `--suggest`) runs one focused 2nd LLM pass to recover a near-miss single-line patch. `--approve-clean` submits APPROVE only on a clean, non-fork, trusted-author PR.
 - **`-o pretty`** is the human-readable local format; **`-o json`** is for agents; `-o sarif` for editors/CI.
-- **Multi-provider profiles.** Add a named provider (e.g. z.ai/glm) with `config set providers.<name>.{kind,base_url,model,auth_env}`; select with `--provider <name>`. Built-in kinds: `anthropic`, `openai` (ChatGPT-plan OAuth via `miucr login`). Transient GitHub/network errors auto-retry with backoff.
+- **Multi-provider profiles.** Add a named provider (e.g. z.ai/glm) with `kind`, `base_url`, `model`, `auth`, and either `auth_env` or `auth_command`; select with `--provider <name>`. Built-in kinds: `anthropic`, `openai` (ChatGPT-plan OAuth via `miucr login`). Transient GitHub/network errors auto-retry with backoff.
 
 ## Output contract: `miucr.cli/v1` envelope (parse this)
 
@@ -479,10 +479,11 @@ miucr config show -o pretty    # TOML view for humans
 miucr config set review.gate high          # set ONE non-secret key, merged in (kind: config.set)
 miucr config set default_provider zai
 miucr config set providers.zai.model glm-5.2
+miucr config set providers.zai.auth bearer
 miucr config edit              # open config.toml in $VISUAL/$EDITOR, then validate (kind: config.edit)
 ```
 
-`show` is read-only; every credential (`auth_token`, store `dsn`) is masked by **structural** redaction, so a token/DSN can never reach stdout (json or pretty). `set` writes ONE dotted key and merges it into the existing config (it does not overwrite like `init`); it validates enums (`config.invalid` on a bad value) and **refuses secret keys** (`*.auth_token`, `store.dsn`) since secrets are read from env at runtime. `edit` opens `config.toml` in `$VISUAL`/`$EDITOR` (interactive; needs a TTY) and reloads it afterward, reporting `valid`.
+`show` is read-only; every credential (`auth_token`, store `dsn`) is masked by **structural** redaction, so a token/DSN can never reach stdout (json or pretty). `set` writes ONE dotted scalar key and merges it into the existing config (it does not overwrite like `init`); it validates enums (`config.invalid` on a bad value) and **refuses secret keys** (`*.auth_token`, `store.dsn`) since secrets are read from env at runtime. Use `edit` for array fields like `auth_command`. `edit` opens `config.toml` in `$VISUAL`/`$EDITOR` (interactive; needs a TTY) and reloads it afterward, reporting `valid`.
 
 ## Config (`~/.config/miu/cr/config.toml`): all optional, zero-config works
 
@@ -495,7 +496,9 @@ default_provider = "anthropic"          # profile used when --provider is omitte
 kind     = "anthropic"                  # first-class kinds: anthropic, openai
 base_url = "https://api.z.ai/api/anthropic"
 model    = "glm-5.2"
-auth_env = "ZAI_API_KEY"                # RECOMMENDED: name of env var holding the token
+auth     = "bearer"                     # bearer | api_key | oauth
+auth_env = "ZAI_API_KEY"                # name of env var holding the token
+# auth_command = ["gopass", "show", "-o", "ai/zai"]  # argv only; no shell
 # auth_token = "<token>"                # discouraged: plaintext on disk
 
 [store]
@@ -532,8 +535,11 @@ category_urls = { security = "https://docs.example.com/security" }   # case-inse
 See the effective config any time with `miucr config show` (below).
 
 **Provider resolution**: `auto` picks OpenAI when `OPENAI_API_KEY` is set and no Anthropic credential is
-present, else `default_provider` (Anthropic). OpenAI order: explicit `--api-key` > `OPENAI_API_KEY` > profile key >
-a cached `miucr login` OAuth token (routes to the codex/ChatGPT-plan backend): an explicit key always wins.
+present, else `default_provider` (Anthropic). `auth` is the credential mechanism: `bearer` (Anthropic-compatible
+gateway Authorization header), `api_key` (provider key slot), `oauth` (OpenAI `miucr login`; reject static profile
+credentials). Profile source precedence: `auth_token` > non-empty `auth_env` > `auth_command`; a selected
+`auth_command` failure is fatal, not an OAuth/env fallback, and stderr is omitted because it may contain secrets. Prefer `auth_env`/`auth_command` so secrets stay out of config. OpenAI order when `auth` is omitted: explicit `--api-key` >
+profile key > cached OAuth (`miucr login`, codex/ChatGPT-plan backend) > ambient `OPENAI_API_KEY`.
 Env: Anthropic = `ANTHROPIC_API_KEY` / `ANTHROPIC_AUTH_TOKEN`
 (Bearer, for compatible gateways) / `ANTHROPIC_BASE_URL` / `ANTHROPIC_MODEL` (default `claude-sonnet-4-5-20250929`);
 OpenAI = `OPENAI_API_KEY` / `OPENAI_BASE_URL` / `OPENAI_MODEL` (default `gpt-4o`). `--auth-token` is Anthropic-only.

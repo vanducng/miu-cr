@@ -243,5 +243,11 @@ func mergeProvider(base, file Provider) Provider {
 	if file.AuthEnv != "" {
 		out.AuthEnv = file.AuthEnv
 	}
+	if len(file.AuthCommand) > 0 {
+		out.AuthCommand = append([]string(nil), file.AuthCommand...)
+	}
+	if file.Auth != "" {
+		out.Auth = file.Auth
+	}
 	return out
 }
