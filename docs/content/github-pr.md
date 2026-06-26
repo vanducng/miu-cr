@@ -117,22 +117,23 @@ written back for the next upsert), a clean `## Code Review Summary` header (no s
 the H2 - it stays small), then an INLINE `**Result:**` line driven by the finding **lifecycle
 ledger** (per-level **shields.io count badges** for currently-OPEN findings — each badge reads
 `Px | severity | count`, with the `Px` label in its severity color and the rest neutral grey,
-critical/high first — followed by `· N open` and, when any were fixed, `· ✅ M resolved`; a
-review with nothing open renders a green "Review passed" badge instead).
-There is no identity line and no confidence line: the prior `**Reviews (N)**` identity line
-and the `Confidence: N/5` line were removed (N was a finding count misread as a review count;
-the run count now lives only in the footer). When at least one finding was posted inline,
-a one-line pointer follows Result: `→ Review the N inline comment(s) below.` — omitted on a
-clean review, or when every finding went to the overflow block. Below the Result line miu-cr
-renders the **finding lifecycle ledger**: a visible **🔴 Open** table and a collapsed
-**✅ Resolved** `<details>`, each row keyed by the finding's line-independent fingerprint and
-carrying its **severity before→after** (e.g. `🟡→🔴` on escalation, `🟠→✅` when fixed), its
-location, and the linked **origin commit** (plus, for resolved rows, the linked **resolved
-commit**). This is what lets a re-run show how each issue *progressed* instead of only the
-latest snapshot. A finding flips to resolved only when it is absent from a run AND its file is
-still in the diff (absence off-diff is not treated as a fix). Then the model's walkthrough
-prose renders under a `**What changed:**` label (bold lead-in, no H3, to keep the comment
-compact; gracefully capped at a word boundary with an ellipsis if long). The collapsible **Important Files Changed** table
+critical/high first — followed by `· N open`; a review with nothing open renders a green
+"Review passed" badge plus a friendly `· all clear 🎉`. The resolved count is NOT repeated on
+the Result line; it lives in the Resolved table heading).
+There is no identity line, no confidence line, and no inline-comment pointer: the prior
+`**Reviews (N)**` identity line, the `Confidence: N/5` line, and the `→ Review the N inline
+comment(s) below` pointer were removed (the run count now lives only in the footer; GitHub
+already surfaces the inline review thread below). Directly under the Result line the model's
+**concise PR summary** renders under a `**What changed:**` label — up to **5 high-level
+bullets** (one short line each), kept above the tracking tables as a quick skim. Then comes the
+**finding lifecycle ledger**, two ALWAYS-VISIBLE tables labelled in bold (not oversized H3):
+**⚠️ Open (N)** and **✅ Resolved (N)**. Each row is keyed by the finding's line-independent
+fingerprint with a **Priority** column (P0–P4 + emoji), its **severity before→after** (e.g.
+`🟡→🔴` on escalation, `🟠→✅` when fixed), its location, and the linked **origin commit** (plus,
+for resolved rows, the linked **resolved commit**). This is what lets a re-run show how each
+issue *progressed* instead of only the latest snapshot. A finding flips to resolved only when
+it is absent from a run AND its file is still in the diff (absence off-diff is not treated as a
+fix). The collapsible **Important Files Changed** table
 (File · Δ · Findings · Overview, the Overview from the per-file digests), sorted
 most-important-first (files with findings, then biggest churn), the omitted-inline note, and
 the `<details>` overflow block follow. The agent handoff (a copy-paste local re-run command +
@@ -158,26 +159,25 @@ a hidden marker that identifies the comment as miucr-authored:
 <!-- miu-cr-runs:3 -->
 ## Code Review Summary
 
-**Result:** <shields P0 chip> · 1 open · ✅ 3 resolved
-→ Review the 1 inline comment below.
-
-### 🔴 Open (1)
-| Sev | Issue | Location | Opened |
-|-----|-------|----------|--------|
-| 🔴 P0 | SQL injection | api/db.go:42 | `a1b2c3d` |
-
-<details>
-<summary>✅ Resolved (3)</summary>
-
-| Sev | Issue | Location | Opened → Resolved |
-|-----|-------|----------|-------------------|
-| 🟠→✅ P1 | Path traversal | fs/read.go:12 | `a1b2c3d` → `e4f5a6b` |
-</details>
+**Result:** <shields P0 chip> · 1 open
 
 **What changed:**
-Walkthrough prose …
+- High-level bullet 1 (up to 5)
+- High-level bullet 2
 
-<sub>Reviewed commit `e4f5a6b` · Review attempts: 3 · Last reviewed 2026-06-27 00:04 UTC · Posted by miu-cr v0.44.0</sub>
+**⚠️ Open (1)**
+
+| Priority | Issue | Location | Opened |
+|----------|-------|----------|--------|
+| 🔴 P0 | SQL injection | api/db.go:42 | `a1b2c3d` |
+
+**✅ Resolved (3)**
+
+| Priority | Issue | Location | Opened → Resolved |
+|----------|-------|----------|-------------------|
+| 🟠→✅ P1 | Path traversal | fs/read.go:12 | `a1b2c3d` → `e4f5a6b` |
+
+<sub>Reviewed commit `e4f5a6b` · Review attempts: 3 · Last reviewed 2026-06-27 00:04 UTC · Posted by miu-cr v0.45.0</sub>
 <!-- miu-cr-ledger:<base64 lifecycle state> -->
 ```
 

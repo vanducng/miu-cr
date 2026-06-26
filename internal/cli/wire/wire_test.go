@@ -213,7 +213,7 @@ func TestPublishReviewWireFlow(t *testing.T) {
 	}
 	// Lifecycle mode: the Open table, the footer timestamp, and a parseable embedded
 	// ledger marker carrying this run's finding as open.
-	if !strings.Contains(summary, "🔴 Open") || !strings.Contains(summary, "Last reviewed") {
+	if !strings.Contains(summary, "⚠️ Open") || !strings.Contains(summary, "Last reviewed") {
 		t.Fatalf("first-run summary must render the ledger Open table + Last reviewed footer:\n%s", summary)
 	}
 	if led := mgithub.ParseLedger(summary); len(led) != 1 || led[0].Status != "open" {

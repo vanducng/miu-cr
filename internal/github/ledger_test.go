@@ -196,12 +196,13 @@ func TestRenderSummaryLedgerGroupedTables(t *testing.T) {
 		{FP: "aaaaaaaaaaaaaaaa", Path: "api/db.go", Line: 42, Title: "SQL injection", Category: "security", Status: statusOpen, Sev: "critical", FirstSev: "critical", OpenSHA: "a1b2c3d4", FirstAt: now.Format(time.RFC3339)},
 		{FP: "bbbbbbbbbbbbbbbb", Path: "fs/read.go", Line: 12, Title: "Path traversal", Category: "security", Status: statusResolved, Sev: "high", FirstSev: "high", OpenSHA: "a1b2c3d4", ResSHA: "e4f5a6b7", FirstAt: now.Format(time.RFC3339), ResAt: now.Format(time.RFC3339)},
 	}
-	out := RenderSummaryFull(info, nil, nil, 0, nil, nil, SummaryOptions{Ledger: ledger, Now: now, Version: "v0.44.0"})
+	out := RenderSummaryFull(info, nil, nil, 0, nil, nil, SummaryOptions{Ledger: ledger, Now: now, Version: "v0.44.0", Walkthrough: "- adds a thing\n- removes another"})
 
 	for _, want := range []string{
-		"### 🔴 Open (1)",
+		"**⚠️ Open (1)**",    // bold (not H3), calm warning marker
+		"**✅ Resolved (1)**", // resolved table expanded (no <details>)
+		"| Priority |",       // column renamed from Sev
 		"SQL injection",
-		"<summary>✅ Resolved (1)</summary>",
 		"Path traversal",
 		"→✅",                                 // severity before→after for the resolved row
 		"Last reviewed 2026-06-26 22:51 UTC", // footer timestamp
@@ -213,6 +214,20 @@ func TestRenderSummaryLedgerGroupedTables(t *testing.T) {
 			t.Fatalf("rendered ledger summary missing %q:\n%s", want, out)
 		}
 	}
+	for _, absent := range []string{
+		"### 🔴 Open",          // no oversized H3 / alarming red marker
+		"<summary>✅ Resolved", // resolved table is no longer collapsed
+		"| Sev |",             // old column header
+		"Review the",          // inline-comment pointer removed in ledger mode
+	} {
+		if strings.Contains(out, absent) {
+			t.Fatalf("rendered ledger summary should NOT contain %q:\n%s", absent, out)
+		}
+	}
+	// The concise "What changed" summary must sit ABOVE the Open tracking table.
+	if wc, op := strings.Index(out, "What changed"), strings.Index(out, "⚠️ Open"); wc < 0 || op < 0 || wc > op {
+		t.Fatalf("walkthrough must render above the Open table (wc=%d, open=%d):\n%s", wc, op, out)
+	}
 	// The embedded marker must round-trip back to the same ledger.
 	if got := ParseLedger(out); len(got) != 2 {
 		t.Fatalf("embedded marker should parse back to 2 entries, got %d", len(got))
@@ -223,11 +238,26 @@ func TestRenderSummaryLedgerReviewPassed(t *testing.T) {
 	now := time.Date(2026, 6, 26, 22, 51, 0, 0, time.UTC)
 	// Non-nil but empty ledger (clean review) → "Review passed", not "No findings".
 	out := RenderSummaryFull(&PRInfo{HeadSHA: "h"}, nil, nil, 0, nil, nil, SummaryOptions{Ledger: []LedgerEntry{}, Now: now})
-	if !strings.Contains(out, "Review_passed") {
-		t.Fatalf("clean ledger review should show Review passed badge:\n%s", out)
+	if !strings.Contains(out, "Review_passed") || !strings.Contains(out, "all clear 🎉") {
+		t.Fatalf("clean ledger review should show the Review passed badge + a friendly all-clear note:\n%s", out)
 	}
 	if strings.Contains(out, "No_findings") {
 		t.Fatalf("ledger mode must not use the legacy No findings badge:\n%s", out)
+	}
+}
+
+func TestLedgerResultLineNoDuplicateResolvedCount(t *testing.T) {
+	// All findings resolved (0 open): the Result line must NOT repeat the resolved
+	// count (it lives in the "✅ Resolved (N)" heading); just the all-clear message.
+	ledger := []LedgerEntry{
+		{FP: "aaaaaaaaaaaaaaaa", Path: "a.go", Status: statusResolved, Sev: "high", FirstSev: "high", OpenSHA: "aaaaaa1", ResSHA: "bbbbbb2"},
+	}
+	line := ledgerResultLine(ledger)
+	if strings.Contains(line, "resolved") {
+		t.Fatalf("Result line must not duplicate the resolved count, got %q", line)
+	}
+	if !strings.Contains(line, "Review_passed") {
+		t.Fatalf("0-open Result line should be the Review passed message, got %q", line)
 	}
 }
 

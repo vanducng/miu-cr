@@ -153,7 +153,12 @@ func RenderSummaryFull(info *PRInfo, findings []engine.Finding, stats map[string
 	b.WriteString("## Code Review Summary\n\n")
 
 	if opts.Ledger != nil {
+		// Lifecycle mode: Result → a concise PR summary → the always-visible
+		// Open/Resolved tracking tables. No inline-comment pointer (GitHub already
+		// surfaces the inline review thread below).
 		fmt.Fprintf(&b, "**Result:** %s\n\n", ledgerResultLine(opts.Ledger))
+		renderWalkthrough(&b, opts.Walkthrough)
+		renderLedger(&b, info, opts.Ledger)
 	} else {
 		lead := severityCounts(findings)
 		if lead != "" {
@@ -162,18 +167,12 @@ func RenderSummaryFull(info *PRInfo, findings []engine.Finding, stats map[string
 			lead = "<sub><sub>![No findings](https://img.shields.io/badge/No_findings-brightgreen?style=flat)</sub></sub>"
 		}
 		fmt.Fprintf(&b, "**Result:** %s\n\n", lead)
+		if posted := len(findings) - omittedInline; posted > 0 {
+			b.WriteString(fmt.Sprintf("→ Review the %d inline comment%s below.", posted, plural(posted)))
+			b.WriteString("\n\n")
+		}
+		renderWalkthrough(&b, opts.Walkthrough)
 	}
-
-	if posted := len(findings) - omittedInline; posted > 0 {
-		b.WriteString(fmt.Sprintf("→ Review the %d inline comment%s below.", posted, plural(posted)))
-		b.WriteString("\n\n")
-	}
-
-	if opts.Ledger != nil {
-		renderLedger(&b, info, opts.Ledger)
-	}
-
-	renderWalkthrough(&b, opts.Walkthrough)
 	renderDiagram(&b, opts.Diagram)
 
 	if info.IsFork {
