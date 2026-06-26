@@ -54,6 +54,11 @@ func SetHistoryStoreFactory(f func(ctx stdctx.Context) (store.Store, func(), err
 
 var version = "v0.41.0" // x-release-please-version
 
+// Version returns the current miucr version. The literal is bumped by
+// release-please; goreleaser ldflags-overrides it with the release tag in
+// published binaries.
+func Version() string { return version }
+
 // Execute runs the miucr root command with args, returning a CLIError whose Exit
 // code the caller (cmd/miucr) maps to the process status.
 func Execute(args []string) error {

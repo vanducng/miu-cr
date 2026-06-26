@@ -577,3 +577,13 @@ func TestRenderSummaryCTAAndWhatChanged(t *testing.T) {
 		t.Fatalf("must not show the CTA when all findings were omitted inline: %s", allOmitted)
 	}
 }
+func TestRenderSummaryFooterVersion(t *testing.T) {
+	withVer := RenderSummaryFull(&PRInfo{HeadSHA: "deadbeef"}, nil, nil, 0, nil, nil, SummaryOptions{Version: "v0.40.0"})
+	if !strings.Contains(withVer, "Posted by [miu-cr](https://github.com/vanducng/miu-cr) [v0.40.0](https://github.com/vanducng/miu-cr/releases/tag/v0.40.0)</sub>") {
+		t.Fatalf("footer must link the version to its release tag: %s", withVer)
+	}
+	empty := RenderSummaryFull(&PRInfo{HeadSHA: "deadbeef"}, nil, nil, 0, nil, nil, SummaryOptions{})
+	if strings.Contains(empty, "releases/tag") {
+		t.Fatalf("empty Version must not emit a release link: %s", empty)
+	}
+}
