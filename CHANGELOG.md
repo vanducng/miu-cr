@@ -55,6 +55,13 @@ comment with a new marker); subsequent re-runs dedupe normally. On a
 first M5 review **manually** (or off-hours) to absorb the one-time re-post before
 the next scheduled run.
 
+## [0.45.0](https://github.com/vanducng/miu-cr/compare/v0.44.0...v0.45.0) (2026-06-26)
+
+
+### Features
+
+* track finding lifecycle in the PR summary ledger ([#127](https://github.com/vanducng/miu-cr/issues/127)) ([46edf82](https://github.com/vanducng/miu-cr/commit/46edf82c78501b4da18a81409297af8dd370b371))
+
 ## [0.44.0](https://github.com/vanducng/miu-cr/compare/v0.43.0...v0.44.0) (2026-06-26)
 
 
