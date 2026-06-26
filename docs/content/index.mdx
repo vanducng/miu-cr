@@ -33,16 +33,46 @@ Local review, GitHub PR review, project rules, the serve/poll daemon + GitHub Ac
 
 ## What you get
 
-- **Local review** — `miucr review --staged` / `--from`+`--to` / `--commit`: deterministic select → context → single LLM pass → line-anchor → gate → dedupe. Non-zero exit at/above `--gate` severity (CI-friendly). → [Usage](/usage/) · copy-paste recipes in [Use cases](/use-cases/)
-- **GitHub PR review** — `review --pr <url|owner/repo#N>`: head-SHA-anchored inline comments (multi-line range aware) + one idempotent summary, or a required GitHub **Check Run** (`--mode checks`); `--filter-mode` diff control; SARIF export; content-stable cross-push dedupe + resolution; opt-in `--suggest` and `--approve-clean`. → [GitHub PR review](/github-pr/)
-- **Project rules** — `.miu/cr/rules/*.md` markdown with frontmatter selects context by glob; built-in defaults + user + repo layers, trust-fenced on fork PRs. → [Project rules](/rules/)
-- **serve · poll · Action** — an HMAC webhook daemon, an opt-in poll trigger, and a reusable GitHub Action — all funnel into one review path. → [Serve & Action](/serve-and-action/)
-- **Review history** — every review auto-saves a full record (findings + stats + transcript + raw I/O) to the local store; browse with `miucr history` (list), `miucr history show <id>`, and `miucr history prune`. → [Review history](/history/)
-- **Store backends** — SQLite by default; opt into Postgres via `[store] backend` + `MIUCR_PG_DSN`. → [Store backends](/store-backends/)
-- **Semantic code-recall** — opt-in embeddings + pgvector recall prior findings as advisory context; off by default. → [Semantic code-recall](/semantic-recall/)
-- **REST API + GitHub App** — `MIUCR_API_TOKEN` registers `/v1/reviews`; `[github] mode = app` swaps PAT auth for App installation auth. → [REST API & GitHub App](/rest-api-and-github-app/)
-- **MCP server** — `miucr mcp` exposes `review_run` / `review_get` over stdio to any MCP runtime. → [MCP integration](/mcp/)
-- **Single static binary** — credentials are passed at runtime and **never persisted**.
+### Review where you work
+
+- **Local review** — [Usage](/usage/) · [Use cases](/use-cases/)
+  - Run staged, range, or commit reviews: `--staged`, `--from` + `--to`, `--commit`.
+  - Deterministic select → context → single LLM pass → line-anchor → gate → dedupe.
+  - CI-friendly exit codes at or above `--gate` severity.
+- **GitHub PR review** — [GitHub PR review](/github-pr/)
+  - Head-SHA-anchored inline comments, including multi-line ranges.
+  - One idempotent summary, or a required GitHub **Check Run** with `--mode checks`.
+  - `--filter-mode`, SARIF export, cross-push dedupe, `--suggest`, and `--approve-clean`.
+
+### Project context
+
+- **Project rules** — [Project rules](/rules/)
+  - `.miu/cr/rules/*.md` frontmatter selects context by changed-file glob.
+  - Built-in, user, and repo layers; repo rules are trust-fenced on fork PRs.
+- **Semantic code-recall** — [Semantic code-recall](/semantic-recall/)
+  - Optional embeddings + pgvector recall prior findings as advisory context.
+  - Off by default.
+
+### Automation and integrations
+
+- **serve · poll · Action** — [Serve & Action](/serve-and-action/)
+  - HMAC webhook daemon, opt-in poll trigger, and reusable GitHub Action.
+  - All three funnel into the same review path.
+- **MCP server** — [MCP integration](/mcp/)
+  - `miucr mcp` exposes `review_run` / `review_get` over stdio.
+- **REST API + GitHub App** — [REST API & GitHub App](/rest-api-and-github-app/)
+  - `MIUCR_API_TOKEN` registers `/v1/reviews`.
+  - `[github] mode = app` swaps PAT auth for App installation auth.
+
+### Storage and packaging
+
+- **Review history** — [Review history](/history/)
+  - Every review auto-saves findings, stats, transcript, and raw I/O.
+  - Browse with `miucr history`, `miucr history show <id>`, and `miucr history prune`.
+- **Store backends** — [Store backends](/store-backends/)
+  - SQLite by default; opt into Postgres via `[store] backend` + `MIUCR_PG_DSN`.
+- **Single static binary**
+  - Credentials are passed at runtime and **never persisted**.
 
 ## A 30-second tour
 
