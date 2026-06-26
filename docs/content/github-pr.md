@@ -91,7 +91,11 @@ the modern comfort-fade API (`Side: RIGHT`, `Line`) and the review is anchored
 to the **head SHA**. Each inline comment leads with a display-only shields.io
 priority badge (`P0` red critical · `P1` orange high · `P2` yellow medium
 · `P3` blue low · `P4` grey info), followed by the category and any `(per
-<rule>)` citation; the underlying severity (used for the gate and SARIF) is unchanged. By
+<rule>)` citation. The priority scale uses impact plus urgency: P0 is an
+immediate blocker such as exploitable security, data loss, outage, auth bypass,
+or irreversible customer impact; P1 must be fixed before merge; P2 should be
+fixed soon; P3 can wait; P4 is optional FYI. The underlying severity (used for
+the gate and SARIF) is unchanged. By
 default the review uses `Event: COMMENT` and never
 approves or requests changes; two opt-in write-actions (`--suggest`,
 `--approve-clean`, both default OFF) are described under **Opt-in write-actions**

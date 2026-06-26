@@ -281,6 +281,23 @@ func TestSystemPromptConventionGuidance(t *testing.T) {
 	}
 }
 
+func TestSystemPromptPriorityRubric(t *testing.T) {
+	for _, want := range []string{
+		"critical=P0, high=P1, medium=P2, low=P3, info=P4",
+		"Use impact + urgency",
+		"reserve P0/P1 for issues that must block merge",
+		"critical/P0: immediate blocker",
+		"high/P1: fix before merge",
+		"medium/P2: should fix soon",
+		"low/P3: can wait",
+		"info/P4: optional FYI",
+	} {
+		if !contains(systemPrompt, want) {
+			t.Fatalf("systemPrompt missing priority rubric %q", want)
+		}
+	}
+}
+
 func TestConventionCitationRidesRationale(t *testing.T) {
 	// A rationale citing a sibling rides the existing rationale field verbatim -
 	// no new finding field, contract unchanged.
