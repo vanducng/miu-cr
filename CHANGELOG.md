@@ -55,6 +55,13 @@ comment with a new marker); subsequent re-runs dedupe normally. On a
 first M5 review **manually** (or off-hours) to absorb the one-time re-post before
 the next scheduled run.
 
+## [0.48.0](https://github.com/vanducng/miu-cr/compare/v0.47.1...v0.48.0) (2026-06-26)
+
+
+### Features
+
+* **review:** sharpen cross-call concurrency review ([0ca8991](https://github.com/vanducng/miu-cr/commit/0ca8991ff898524b9b90b7566b07989d0a13f72b))
+
 ## [0.47.1](https://github.com/vanducng/miu-cr/compare/v0.47.0...v0.47.1) (2026-06-26)
 
 
