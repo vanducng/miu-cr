@@ -119,8 +119,11 @@ badges** — the `Px` label in its severity color, the count neutral grey, criti
 — followed by `· N findings`; zero findings renders a green "No findings" badge instead).
 There is no identity line and no confidence line: the prior `**Reviews (N)**` identity line
 and the `Confidence: N/5` line were removed (N was a finding count misread as a review count;
-the run count now lives only in the footer). Then comes the model's walkthrough prose as lead
-text (**no "Walkthrough" heading**). The collapsible **Important Files Changed** table
+the run count now lives only in the footer). When at least one finding was posted inline,
+a one-line pointer follows Result: `→ Review the N inline comment(s) below.` — omitted on a
+clean review, or when every finding went to the overflow block. Then the model's walkthrough
+prose renders under a `**What changed:**` label (bold lead-in, no H3, to keep the comment
+compact; gracefully capped at a word boundary with an ellipsis if long). The collapsible **Important Files Changed** table
 (File · Δ · Findings · Overview, the Overview from the per-file digests), sorted
 most-important-first (files with findings, then biggest churn), the omitted-inline note, and
 the `<details>` overflow block follow. The agent handoff (a copy-paste local re-run command +
@@ -142,7 +145,9 @@ a hidden marker that identifies the comment as miucr-authored:
 ## Code Review Summary
 
 **Result:** 🟠 1 · 🟡 2 · 🔵 1 · 4 findings
+→ Review the 4 inline comments below.
 
+**What changed:**
 Walkthrough prose …
 ```
 

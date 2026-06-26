@@ -384,3 +384,24 @@ func TestBuildUserPromptInstructionCapped(t *testing.T) {
 		t.Fatalf("instruction must be capped to %d runes, got %d", maxInstructionLen, n)
 	}
 }
+func TestCapProse(t *testing.T) {
+	tests := []struct {
+		name string
+		in   string
+		n    int
+		want string
+	}{
+		{"under cap unchanged", "hello world", 50, "hello world"},
+		{"exact cap unchanged", "hello", 5, "hello"},
+		{"cuts at word boundary + ellipsis", "aa bb cc dd", 6, "aa bb…"},
+		{"no boundary hard cut + ellipsis", "abcdef", 3, "abc…"},
+		{"rune-safe no mid-rune split", "ééé ééé", 4, "ééé…"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := capProse(tt.in, tt.n); got != tt.want {
+				t.Fatalf("capProse(%q, %d) = %q, want %q", tt.in, tt.n, got, tt.want)
+			}
+		})
+	}
+}

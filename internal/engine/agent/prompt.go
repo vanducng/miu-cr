@@ -1,6 +1,9 @@
 package agent
 
-import "strings"
+import (
+	"strings"
+	"unicode"
+)
 
 const systemPrompt = `You are a meticulous senior code reviewer. You review a unified git diff plus surrounding context and report concrete, actionable problems in the CHANGED code.
 
@@ -187,7 +190,7 @@ type rawFindings struct {
 // to every review; over-long model text is truncated, not rejected.
 const (
 	maxInstructionLen  = 2000
-	maxWalkthroughLen  = 600
+	maxWalkthroughLen  = 1000
 	maxFileSummaryLen  = 200
 	maxFileSummaryKeys = 200
 	maxConfidenceLen   = 200
@@ -207,6 +210,30 @@ func capRunes(s string, n int) string {
 		return s
 	}
 	return string(r[:n])
+}
+
+// capProse truncates prose to at most n runes, cutting at the last word boundary
+// at or before n and appending an ellipsis when it truncates, so a capped
+// walkthrough never ends mid-word. Returns s unchanged when it fits.
+func capProse(s string, n int) string {
+	if len(s) <= n {
+		return s
+	}
+	r := []rune(s)
+	if len(r) <= n {
+		return s
+	}
+	cut := n
+	for cut > 0 && !unicode.IsSpace(r[cut-1]) {
+		cut--
+	}
+	for cut > 0 && unicode.IsSpace(r[cut-1]) {
+		cut--
+	}
+	if cut == 0 {
+		cut = n
+	}
+	return string(r[:cut]) + "…"
 }
 
 // fenceSafe neutralizes triple-backtick runs in text embedded inside a ``` fence so

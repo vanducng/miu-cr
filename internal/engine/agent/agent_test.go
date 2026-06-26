@@ -246,8 +246,8 @@ func TestParseFindingsWalkthroughLengthCaps(t *testing.T) {
 	if !ok {
 		t.Fatal("parse failed")
 	}
-	if n := len([]rune(out.Walkthrough)); n != maxWalkthroughLen {
-		t.Fatalf("walkthrough not capped: got %d runes, want %d", n, maxWalkthroughLen)
+	if n := len([]rune(out.Walkthrough)); n > maxWalkthroughLen+1 || !strings.HasSuffix(out.Walkthrough, "…") {
+		t.Fatalf("walkthrough not gracefully capped: got %d runes, want <= %d + ellipsis", n, maxWalkthroughLen)
 	}
 	if n := len([]rune(out.FileSummaries["a.go"])); n != maxFileSummaryLen {
 		t.Fatalf("file summary not capped: got %d runes, want %d", n, maxFileSummaryLen)
