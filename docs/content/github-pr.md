@@ -131,9 +131,9 @@ the `review_run` MCP pointer) and the review metrics (Files, Churn, Effort and C
 each with a one-line meaning) are combined into one **collapsed `<details>` "Agent handoff &
 review internals"** block near the bottom, closing with a footer: `<sub>Reviewed commit
 [\`<7-char-sha>\`](<repo>/commit/<full-sha>) · Review attempts: N · Posted by
-[miu-cr](https://github.com/vanducng/miu-cr) v<version></sub>` (the short SHA is GitHub-standard 7 hex
+[miu-cr](https://github.com/vanducng/miu-cr) [v<version>](https://github.com/vanducng/miu-cr/releases/tag/v<version>)</sub>` (the short SHA is GitHub-standard 7 hex
 digits, the run count relocated here as "Review attempts: N", and the running miucr version
-appended after "miu-cr", e.g. `v0.40.0`). The `review_id` is NOT
+linked to its release tag, e.g. `v0.40.0`). The `review_id` is NOT
 shown in the comment (it only resolves on the machine + store that ran the review; it stays in
 the JSON envelope). All model-supplied text is escaped at the render boundary.
 
