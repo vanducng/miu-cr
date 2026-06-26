@@ -55,6 +55,13 @@ comment with a new marker); subsequent re-runs dedupe normally. On a
 first M5 review **manually** (or off-hours) to absorb the one-time re-post before
 the next scheduled run.
 
+## [0.46.0](https://github.com/vanducng/miu-cr/compare/v0.45.0...v0.46.0) (2026-06-26)
+
+
+### Features
+
+* **config:** added provider auth commands ([#129](https://github.com/vanducng/miu-cr/issues/129)) ([11865d1](https://github.com/vanducng/miu-cr/commit/11865d1c8fc095e85c6e20df672854fe5ed4cf35))
+
 ## [0.45.0](https://github.com/vanducng/miu-cr/compare/v0.44.0...v0.45.0) (2026-06-26)
 
 
