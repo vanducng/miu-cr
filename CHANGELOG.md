@@ -55,6 +55,13 @@ comment with a new marker); subsequent re-runs dedupe normally. On a
 first M5 review **manually** (or off-hours) to absorb the one-time re-post before
 the next scheduled run.
 
+## [0.44.0](https://github.com/vanducng/miu-cr/compare/v0.43.0...v0.44.0) (2026-06-26)
+
+
+### Features
+
+* auto-select deep context hops ([#125](https://github.com/vanducng/miu-cr/issues/125)) ([e2695e0](https://github.com/vanducng/miu-cr/commit/e2695e092d591947972561dfeb4d38f1bf08fc3e))
+
 ## [0.43.0](https://github.com/vanducng/miu-cr/compare/v0.42.0...v0.43.0) (2026-06-26)
 
 
