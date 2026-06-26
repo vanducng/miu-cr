@@ -98,8 +98,8 @@ func setProviderKey(cfg *Config, key, value string) error {
 	case "auth_env":
 		p.AuthEnv = value
 	case "auth":
-		if value != "" && value != "oauth" && value != "api_key" {
-			return invalidKey(key, value, "oauth|api_key")
+		if value != "" && value != "oauth" && value != "api_key" && value != "bearer" {
+			return invalidKey(key, value, "oauth|api_key|bearer")
 		}
 		p.Auth = value
 	default:

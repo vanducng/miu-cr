@@ -2,12 +2,15 @@ package agent
 
 import (
 	stdctx "context"
+	"errors"
 	"fmt"
 	"net/http"
 	"os"
+	"os/exec"
 	"strconv"
 	"strings"
 	"sync"
+	"time"
 
 	"github.com/vanducng/miu-cr/internal/cli/clierr"
 	"github.com/vanducng/miu-cr/internal/config"
@@ -138,17 +141,36 @@ func autoDetectName(cfg config.Config, in ResolveInput) string {
 }
 
 func resolveAnthropic(in ResolveInput, prof config.Provider) (Credentials, error) {
-	// Profile credential (auth_token/auth_env) is always a Bearer auth token on
-	// the Anthropic path; the x-api-key comes from --api-key / ANTHROPIC_API_KEY.
-	authToken := firstNonEmpty(in.AuthToken, os.Getenv("ANTHROPIC_AUTH_TOKEN"), profileSecret(prof))
+	authMode := normalizeAuthMode(prof.Auth)
+	switch authMode {
+	case "", "api_key", "bearer":
+	case "oauth":
+		return Credentials{}, invalidAuthMode(authMode, "oauth is only valid for kind = \"openai\"")
+	default:
+		return Credentials{}, invalidAuthMode(authMode, "use \"api_key\", \"bearer\", or omit for legacy auto")
+	}
+	authToken := firstNonEmpty(in.AuthToken, os.Getenv("ANTHROPIC_AUTH_TOKEN"))
 	apiKey := firstNonEmpty(in.APIKey, os.Getenv("ANTHROPIC_API_KEY"))
+	if apiKey == "" && authToken == "" {
+		profileCred, err := profileCredential(resolveContext(in), prof)
+		if err != nil {
+			return Credentials{}, err
+		}
+		if profileCred != "" {
+			if authMode == "api_key" {
+				apiKey = profileCred
+			} else {
+				authToken = profileCred
+			}
+		}
+	}
 	baseURL := firstNonEmpty(in.BaseURL, os.Getenv("ANTHROPIC_BASE_URL"), prof.BaseURL)
 
 	if apiKey == "" && authToken == "" {
 		return Credentials{}, &clierr.CLIError{
 			Code:    "agent.no_credentials",
 			Message: "no Anthropic credentials: set ANTHROPIC_API_KEY or ANTHROPIC_AUTH_TOKEN, configure a provider in " + config.FilePathOrEmpty() + ", or pass --api-key / --auth-token",
-			Hint:    "export ANTHROPIC_API_KEY=... or run with --api-key; see config.example.toml for provider profiles (e.g. a gateway via auth_env)",
+			Hint:    "export ANTHROPIC_API_KEY=... or run with --api-key; see config.example.toml for provider profiles (auth_env/auth_command)",
 			Exit:    1,
 		}
 	}
@@ -159,7 +181,7 @@ func resolveAnthropic(in ResolveInput, prof config.Provider) (Credentials, error
 	if authToken != "" && baseURL == "" {
 		return Credentials{}, &clierr.CLIError{
 			Code:    "agent.auth_token_requires_base_url",
-			Message: "auth_token/auth_env is a Bearer token for an Anthropic-compatible gateway, but no base_url is configured",
+			Message: "profile Bearer credential is for an Anthropic-compatible gateway, but no base_url is configured",
 			Hint:    "set base_url on the provider profile (or ANTHROPIC_BASE_URL), or use an API key (ANTHROPIC_API_KEY / --api-key)",
 			Exit:    1,
 		}
@@ -230,8 +252,11 @@ func resolveOpenAI(in ResolveInput, prof config.Provider) (Credentials, error) {
 	}
 
 	// `auth` pins the method explicitly when set.
-	switch authMode := strings.ToLower(strings.TrimSpace(prof.Auth)); authMode {
+	switch authMode := normalizeAuthMode(prof.Auth); authMode {
 	case "oauth":
+		if hasProfileCredentialSource(prof) {
+			return Credentials{}, invalidAuthMode(authMode, "remove auth_env/auth_command/auth_token when auth = \"oauth\"")
+		}
 		creds, ok, err := tryOAuth()
 		if err != nil {
 			return Credentials{}, err
@@ -241,27 +266,32 @@ func resolveOpenAI(in ResolveInput, prof config.Provider) (Credentials, error) {
 		}
 		return noCred("provider auth = \"oauth\" but no `miucr login` session — run `miucr login --provider openai`")
 	case "api_key", "apikey", "key":
-		if k := firstNonEmpty(profileSecret(prof), os.Getenv("OPENAI_API_KEY")); k != "" {
+		profileCred, err := profileCredential(resolveContext(in), prof)
+		if err != nil {
+			return Credentials{}, err
+		}
+		if k := firstNonEmpty(profileCred, os.Getenv("OPENAI_API_KEY")); k != "" {
 			return apiKeyCreds(k)
 		}
 		return noCred("provider auth = \"api_key\" but no key — set OPENAI_API_KEY, a profile auth_env, or pass --api-key")
+	case "bearer":
+		return Credentials{}, invalidAuthMode(authMode, "bearer is only valid for kind = \"anthropic\"")
 	case "":
 		// fall through to the intent-ordered auto-precedence below
 	default:
-		return Credentials{}, &clierr.CLIError{
-			Code:    "config.invalid",
-			Message: "unknown provider auth " + strconv.Quote(authMode) + " — use \"oauth\" or \"api_key\" (or omit for auto)",
-			Hint:    "set auth = \"oauth\" or auth = \"api_key\" in " + config.FilePathOrEmpty(),
-			Exit:    2,
-		}
+		return Credentials{}, invalidAuthMode(authMode, "use \"oauth\", \"api_key\", or omit for auto")
 	}
 
 	// auth unset: intent-ordered so an ambient OPENAI_API_KEY (often set for other
 	// tools) never overrides a deliberate choice:
-	//   1. a profile-configured key (auth_env/auth_token)
+	//   1. a profile-configured key (auth_env/auth_command/auth_token)
 	//   2. a cached `miucr login` (OAuth) -> the codex/ChatGPT-plan backend
 	//   3. zero-config fallback: an ambient OPENAI_API_KEY env var
-	if k := profileSecret(prof); k != "" {
+	profileCred, err := profileCredential(resolveContext(in), prof)
+	if err != nil {
+		return Credentials{}, err
+	}
+	if k := profileCred; k != "" {
 		return apiKeyCreds(k)
 	}
 	creds, ok, oauthErr := tryOAuth()
@@ -329,20 +359,117 @@ func resolveOAuthCodex(in ResolveInput, prof config.Provider) (Credentials, bool
 
 var plaintextAuthTokenWarn sync.Once
 
-// profileSecret returns a profile's literal AuthToken (which wins over AuthEnv),
-// else the value of the env var named by AuthEnv. A literal auth_token lives in
-// plaintext on disk, so its first use emits a one-time stderr warning.
-func profileSecret(prof config.Provider) string {
+const (
+	authCommandTimeout     = 10 * time.Second
+	authCommandOutputLimit = 16 * 1024
+)
+
+func resolveContext(in ResolveInput) stdctx.Context {
+	if in.Ctx != nil {
+		return in.Ctx
+	}
+	return stdctx.Background()
+}
+
+func profileCredential(ctx stdctx.Context, prof config.Provider) (string, error) {
 	if s := strings.TrimSpace(prof.AuthToken); s != "" {
 		plaintextAuthTokenWarn.Do(func() {
-			fmt.Fprintln(os.Stderr, "miu-cr: warning: provider auth_token is stored in plaintext on disk; prefer auth_env (the NAME of an env var holding the token)")
+			fmt.Fprintln(os.Stderr, "miu-cr: warning: provider auth_token is stored in plaintext on disk; prefer auth_env or auth_command")
 		})
-		return s
+		return s, nil
 	}
 	if prof.AuthEnv != "" {
-		return strings.TrimSpace(os.Getenv(prof.AuthEnv))
+		if s := strings.TrimSpace(os.Getenv(prof.AuthEnv)); s != "" {
+			return s, nil
+		}
 	}
-	return ""
+	if len(prof.AuthCommand) > 0 {
+		return runAuthCommand(ctx, prof.AuthCommand)
+	}
+	return "", nil
+}
+
+func runAuthCommand(ctx stdctx.Context, argv []string) (string, error) {
+	if len(argv) == 0 || strings.TrimSpace(argv[0]) == "" {
+		return "", &clierr.CLIError{Code: "config.invalid", Message: "auth_command must be a non-empty argv array", Hint: "set auth_command = [\"gopass\", \"show\", \"-o\", \"path/to/secret\"]", Exit: 2}
+	}
+	args := append([]string(nil), argv...)
+	args[0] = strings.TrimSpace(args[0])
+	ctx, cancel := stdctx.WithTimeout(ctx, authCommandTimeout)
+	defer cancel()
+	cmd := exec.CommandContext(ctx, args[0], args[1:]...)
+	var stdout, stderr cappedBuffer
+	stdout.limit = authCommandOutputLimit
+	stderr.limit = authCommandOutputLimit
+	cmd.Stdout = &stdout
+	cmd.Stderr = &stderr
+	err := cmd.Run()
+	if err != nil {
+		if ctx.Err() != nil {
+			return "", &clierr.CLIError{Code: "agent.auth_command_failed", Message: "auth_command timed out", Hint: "make the credential command non-interactive or increase shell/keychain availability", Exit: 1, Cause: err}
+		}
+		msg := "auth_command failed"
+		var exitErr *exec.ExitError
+		if errors.As(err, &exitErr) {
+			if text := strings.TrimSpace(config.RedactString(stderr.String())); text != "" {
+				msg += ": " + capError(text)
+			}
+		}
+		return "", &clierr.CLIError{Code: "agent.auth_command_failed", Message: msg, Hint: "run the configured auth_command directly and ensure it prints only the credential to stdout", Exit: 1, Cause: err}
+	}
+	secret := strings.TrimSpace(stdout.String())
+	if secret == "" {
+		return "", &clierr.CLIError{Code: "agent.auth_command_failed", Message: "auth_command printed no credential", Hint: "ensure the command prints the token to stdout", Exit: 1}
+	}
+	if strings.ContainsAny(secret, "\r\n") {
+		return "", &clierr.CLIError{Code: "agent.auth_command_failed", Message: "auth_command printed multiple lines", Hint: "ensure the command prints exactly one credential line", Exit: 1}
+	}
+	return secret, nil
+}
+
+type cappedBuffer struct {
+	buf   strings.Builder
+	limit int
+}
+
+func (b *cappedBuffer) Write(p []byte) (int, error) {
+	n := len(p)
+	if b.limit <= 0 || b.buf.Len() >= b.limit {
+		return n, nil
+	}
+	if remaining := b.limit - b.buf.Len(); len(p) > remaining {
+		p = p[:remaining]
+	}
+	_, _ = b.buf.Write(p)
+	return n, nil
+}
+
+func (b *cappedBuffer) String() string {
+	return b.buf.String()
+}
+
+func capError(s string) string {
+	if len(s) <= 240 {
+		return s
+	}
+	return s[:240] + "..."
+}
+
+func normalizeAuthMode(auth string) string {
+	return strings.ToLower(strings.TrimSpace(auth))
+}
+
+func hasProfileCredentialSource(prof config.Provider) bool {
+	return strings.TrimSpace(prof.AuthToken) != "" || strings.TrimSpace(prof.AuthEnv) != "" || len(prof.AuthCommand) > 0
+}
+
+func invalidAuthMode(authMode, hint string) error {
+	return &clierr.CLIError{
+		Code:    "config.invalid",
+		Message: "invalid provider auth " + strconv.Quote(authMode),
+		Hint:    hint + "; configure auth in " + config.FilePathOrEmpty(),
+		Exit:    2,
+	}
 }
 
 // codexConfigModel returns an explicitly-configured codex model, dropping the

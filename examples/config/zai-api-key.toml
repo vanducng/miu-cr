@@ -8,4 +8,6 @@ default_provider = "zai"
 kind     = "anthropic"                       # the gateway speaks the Anthropic API
 base_url = "https://api.z.ai/api/anthropic"
 model    = "glm-4.6"                          # set to a model your z.ai plan offers
-auth_env = "ZAI_API_KEY"                      # sent as a Bearer token to the gateway
+auth     = "bearer"                           # send the profile credential as Bearer
+auth_env = "ZAI_API_KEY"
+# auth_command = ["gopass", "show", "-o", "ai/zai"]

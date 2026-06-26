@@ -8,15 +8,16 @@
 # Exception — the OpenAI *credential*: --api-key / a configured profile key  >
 # `miucr login` (OAuth, your ChatGPT plan)  >  an ambient OPENAI_API_KEY. So a
 # stray OPENAI_API_KEY set for another tool never overrides a deliberate login.
-# Pin the method explicitly with `auth = "oauth"` or `auth = "api_key"` (see below).
-# With the recommended `auth_env`, miu-cr never writes credentials to disk and the
-# resolved token lives in memory for one call only. A literal `auth_token` (below) is
-# the exception: it sits in plaintext in this file you author.
+# Pin the method explicitly with `auth = "oauth"`, `auth = "api_key"`, or
+# `auth = "bearer"` (see below).
+# With `auth_env` or `auth_command`, miu-cr never writes credentials to disk and
+# the resolved token lives in memory for one call only. A literal `auth_token`
+# (below) is the exception: it sits in plaintext in this file you author.
 #
-# Credentials — prefer `auth_env` (the NAME of an env var holding the token) so no
-# secret is written to this file. `auth_token` (a literal token) is supported but
-# DISCOURAGED: it sits in plaintext on disk. When both are set, auth_token wins;
-# miu-cr prints a one-time warning whenever a plaintext auth_token is used.
+# Credentials — prefer `auth_env` (the NAME of an env var holding the token) or
+# `auth_command` (argv; stdout is the token) so no secret is written to this
+# file. `auth_token` (a literal token) is supported but DISCOURAGED: it sits in
+# plaintext on disk. Precedence: auth_token > non-empty auth_env > auth_command.
 
 # Profile to use when --provider is omitted and env auto-detect doesn't force a
 # choice. Built-in profiles are "anthropic" and "openai".
@@ -50,8 +51,10 @@ default_provider = "anthropic"
 # kind     = "anthropic"
 # base_url = "https://api.z.ai/api/anthropic"
 # model    = "glm-5.2"
-# auth_env = "ZAI_API_KEY"               # RECOMMENDED: name of the env var holding the token
-# # auth_token = "<token>"               # discouraged: plaintext on disk — prefer auth_env
+# auth     = "bearer"                    # profile credential goes in Authorization: Bearer
+# auth_env = "ZAI_API_KEY"               # name of the env var holding the token
+# # auth_command = ["gopass", "show", "-o", "ai/zai"]  # argv only; no shell
+# # auth_token = "<token>"               # discouraged: plaintext on disk
 
 # ── Example: a generic OpenAI-compatible gateway (DeepSeek, Moonshot, self-hosted, …) ──
 # Any endpoint speaking the OpenAI chat-completions API. The credential is sent
@@ -60,8 +63,10 @@ default_provider = "anthropic"
 # kind     = "openai"
 # base_url = "https://gateway.example.com/v1"
 # model    = "your-model-id"
-# auth_env = "MY_GATEWAY_TOKEN"          # RECOMMENDED: name of the env var holding the token
-# # auth_token = "<token>"               # discouraged: plaintext on disk — prefer auth_env
+# auth     = "api_key"                   # profile credential goes in the OpenAI API-key slot
+# auth_env = "MY_GATEWAY_TOKEN"          # name of the env var holding the token
+# # auth_command = ["op", "read", "op://vault/item/token"]  # argv only; no shell
+# # auth_token = "<token>"               # discouraged: plaintext on disk
 
 # ── Store backend (optional; default = sqlite) ──
 # SQLite is the default and needs no config. Postgres is opt-in for shared/serve.

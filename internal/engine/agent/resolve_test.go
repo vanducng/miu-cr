@@ -3,6 +3,8 @@ package agent
 import (
 	"context"
 	"errors"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 
@@ -20,6 +22,15 @@ func clearProviderEnv(t *testing.T) {
 	} {
 		t.Setenv(k, "")
 	}
+}
+
+func credentialCommand(t *testing.T, script string) []string {
+	t.Helper()
+	path := filepath.Join(t.TempDir(), "token.sh")
+	if err := os.WriteFile(path, []byte("#!/bin/sh\n"+script), 0o700); err != nil {
+		t.Fatalf("write auth command: %v", err)
+	}
+	return []string{path}
 }
 
 func TestResolveFlagWinsOverEnv(t *testing.T) {
@@ -100,6 +111,70 @@ func TestResolveZAIViaConfigProfile(t *testing.T) {
 	}
 	if creds.Model != "glm-4.6" {
 		t.Fatalf("profile model not honored, got %q", creds.Model)
+	}
+}
+
+func TestResolveAnthropicAuthCommandBearer(t *testing.T) {
+	clearProviderEnv(t)
+	cfg := config.Merge(config.Defaults(), config.Config{
+		Providers: map[string]config.Provider{
+			"zai": {
+				Kind:        config.KindAnthropic,
+				BaseURL:     "https://api.z.ai/api/anthropic",
+				Model:       "glm-5.2",
+				Auth:        "bearer",
+				AuthCommand: credentialCommand(t, "printf 'cmd-secret\\n'\n"),
+			},
+		},
+	})
+	creds, err := resolveWith(cfg, ResolveInput{Provider: "zai"})
+	if err != nil {
+		t.Fatalf("resolve: %v", err)
+	}
+	if creds.AuthToken != "cmd-secret" || creds.APIKey != "" {
+		t.Fatalf("auth_command bearer must become AuthToken only: %+v", creds)
+	}
+}
+
+func TestResolveAnthropicAuthCommandAPIKey(t *testing.T) {
+	clearProviderEnv(t)
+	cfg := config.Merge(config.Defaults(), config.Config{
+		Providers: map[string]config.Provider{
+			"anthropic-key": {
+				Kind:        config.KindAnthropic,
+				Model:       "claude-test",
+				Auth:        "api_key",
+				AuthCommand: credentialCommand(t, "printf 'cmd-secret\\n'\n"),
+			},
+		},
+	})
+	creds, err := resolveWith(cfg, ResolveInput{Provider: "anthropic-key"})
+	if err != nil {
+		t.Fatalf("resolve: %v", err)
+	}
+	if creds.APIKey != "cmd-secret" || creds.AuthToken != "" {
+		t.Fatalf("auth_command api_key must become APIKey only: %+v", creds)
+	}
+}
+
+func TestResolveAnthropicAuthCommandSkippedWhenFlagWins(t *testing.T) {
+	clearProviderEnv(t)
+	cfg := config.Merge(config.Defaults(), config.Config{
+		Providers: map[string]config.Provider{
+			"gw": {
+				Kind:        config.KindAnthropic,
+				BaseURL:     "https://gw.example/anthropic",
+				Auth:        "bearer",
+				AuthCommand: credentialCommand(t, "echo should-not-run >&2\nexit 42\n"),
+			},
+		},
+	})
+	creds, err := resolveWith(cfg, ResolveInput{Provider: "gw", APIKey: "flag-key"})
+	if err != nil {
+		t.Fatalf("resolve: %v", err)
+	}
+	if creds.APIKey != "flag-key" || creds.AuthToken != "" {
+		t.Fatalf("flag key must win without running auth_command: %+v", creds)
 	}
 }
 
@@ -211,6 +286,41 @@ func TestResolveOpenAICompatProfile(t *testing.T) {
 	}
 	if creds.BaseURL != "https://api.deepseek.com/v1" || creds.Model != "deepseek-chat" {
 		t.Fatalf("openai-compat base/model not honored: %+v", creds)
+	}
+}
+
+func TestResolveOpenAIAuthCommandAPIKey(t *testing.T) {
+	clearProviderEnv(t)
+	cfg := config.Merge(config.Defaults(), config.Config{
+		Providers: map[string]config.Provider{
+			"gw": {
+				Kind:        config.KindOpenAI,
+				BaseURL:     "https://gw.example/v1",
+				Model:       "m",
+				Auth:        "api_key",
+				AuthCommand: credentialCommand(t, "printf 'cmd-secret\\n'\n"),
+			},
+		},
+	})
+	creds, err := resolveWith(cfg, ResolveInput{Provider: "gw", OAuthResolver: codexResolver()})
+	if err != nil {
+		t.Fatalf("resolve: %v", err)
+	}
+	if creds.Backend == "codex" || creds.APIKey != "cmd-secret" {
+		t.Fatalf("auth_command must use API-key path, not OAuth: %+v", creds)
+	}
+}
+
+func TestResolveOpenAIBearerRejected(t *testing.T) {
+	clearProviderEnv(t)
+	cfg := config.Defaults()
+	p := cfg.Providers["openai"]
+	p.Auth = "bearer"
+	cfg.Providers["openai"] = p
+	_, err := resolveWith(cfg, ResolveInput{Provider: "openai"})
+	var cerr *clierr.CLIError
+	if !errors.As(err, &cerr) || cerr.Code != "config.invalid" || cerr.Exit != 2 {
+		t.Fatalf("expected config.invalid exit 2, got %v", err)
 	}
 }
 

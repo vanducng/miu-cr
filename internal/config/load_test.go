@@ -36,9 +36,9 @@ func TestMergeFieldOverlayAndNewProfile(t *testing.T) {
 		DefaultProvider: "zai",
 		Providers: map[string]Provider{
 			// override only the model of a built-in; kind/base must survive.
-			"openai": {Model: "gpt-4o-mini"},
+			"openai": {Model: "gpt-4o-mini", Auth: "oauth"},
 			// brand-new vendor profile.
-			"zai": {Kind: KindAnthropic, BaseURL: "https://api.z.ai/api/anthropic", Model: "glm-4.6", AuthEnv: "ZAI_API_KEY"},
+			"zai": {Kind: KindAnthropic, BaseURL: "https://api.z.ai/api/anthropic", Model: "glm-4.6", Auth: "bearer", AuthEnv: "ZAI_API_KEY", AuthCommand: []string{"gopass", "show", "-o", "ai/zai"}},
 		},
 	}
 	got := Merge(base, file)
@@ -56,8 +56,11 @@ func TestMergeFieldOverlayAndNewProfile(t *testing.T) {
 	if o.BaseURL != DefaultOpenAIBaseURL {
 		t.Fatalf("merge must preserve built-in base_url when file omits it: %+v", o)
 	}
+	if o.Auth != "oauth" {
+		t.Fatalf("merge must apply file auth: %+v", o)
+	}
 	z := got.Providers["zai"]
-	if z.Kind != KindAnthropic || z.AuthEnv != "ZAI_API_KEY" || z.BaseURL != "https://api.z.ai/api/anthropic" {
+	if z.Kind != KindAnthropic || z.Auth != "bearer" || z.AuthEnv != "ZAI_API_KEY" || z.BaseURL != "https://api.z.ai/api/anthropic" || len(z.AuthCommand) != 4 {
 		t.Fatalf("new profile not merged: %+v", z)
 	}
 	// Merge must not mutate base.
@@ -91,10 +94,13 @@ func TestLoadFromFileLayersOverDefaults(t *testing.T) {
 kind = "anthropic"
 base_url = "https://api.z.ai/api/anthropic"
 model = "glm-4.6"
+auth = "bearer"
 auth_env = "ZAI_API_KEY"
+auth_command = ["gopass", "show", "-o", "ai/zai"]
 
 [providers.openai]
 model = "gpt-4o-mini"
+auth = "oauth"
 `
 	cfgDir := filepath.Join(dir, ".config", "miu", "cr")
 	if err := os.MkdirAll(cfgDir, 0o755); err != nil {
@@ -112,14 +118,14 @@ model = "gpt-4o-mini"
 		t.Fatalf("file default_provider not applied: %q", cfg.DefaultProvider)
 	}
 	z, ok := cfg.Providers["zai"]
-	if !ok || z.Kind != KindAnthropic || z.BaseURL != "https://api.z.ai/api/anthropic" || z.AuthEnv != "ZAI_API_KEY" {
+	if !ok || z.Kind != KindAnthropic || z.BaseURL != "https://api.z.ai/api/anthropic" || z.Auth != "bearer" || z.AuthEnv != "ZAI_API_KEY" || len(z.AuthCommand) != 4 {
 		t.Fatalf("zai profile not loaded: %+v ok=%v", z, ok)
 	}
 	// built-in anthropic survives, openai model overridden but kind preserved.
 	if cfg.Providers["anthropic"].Kind != KindAnthropic {
 		t.Fatal("built-in anthropic dropped after load")
 	}
-	if cfg.Providers["openai"].Model != "gpt-4o-mini" || cfg.Providers["openai"].Kind != KindOpenAI {
+	if cfg.Providers["openai"].Model != "gpt-4o-mini" || cfg.Providers["openai"].Auth != "oauth" || cfg.Providers["openai"].Kind != KindOpenAI {
 		t.Fatalf("openai overlay wrong: %+v", cfg.Providers["openai"])
 	}
 }

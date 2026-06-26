@@ -199,6 +199,20 @@ func TestResolveAuthOAuthNoSessionErrors(t *testing.T) {
 	}
 }
 
+func TestResolveAuthOAuthRejectsProfileCredential(t *testing.T) {
+	clearProviderEnv(t)
+	cfg := config.Defaults()
+	p := cfg.Providers["openai"]
+	p.Auth = "oauth"
+	p.AuthCommand = credentialCommand(t, "echo should-not-run >&2\nexit 42\n")
+	cfg.Providers["openai"] = p
+	_, err := resolveWith(cfg, ResolveInput{Provider: "openai", OAuthResolver: codexResolver()})
+	var cerr *clierr.CLIError
+	if !errors.As(err, &cerr) || cerr.Code != "config.invalid" || cerr.Exit != 2 {
+		t.Fatalf("expected config.invalid exit 2, got %v", err)
+	}
+}
+
 func TestResolveAuthAPIKeyIgnoresOAuth(t *testing.T) {
 	clearProviderEnv(t)
 	t.Setenv("OPENAI_API_KEY", "sk-env")

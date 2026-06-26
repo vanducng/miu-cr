@@ -72,6 +72,36 @@ func TestSaveRoundTripEnvNameOnly(t *testing.T) {
 	}
 }
 
+func TestSaveRoundTripAuthCommand(t *testing.T) {
+	fakeHome(t)
+
+	cfg := Defaults()
+	cfg.DefaultProvider = "zai"
+	cfg.Providers["zai"] = Provider{
+		Kind:        KindAnthropic,
+		BaseURL:     "https://api.z.ai/api/anthropic",
+		Model:       "glm-5.2",
+		Auth:        "bearer",
+		AuthCommand: []string{"gopass", "show", "-o", "ai/zai"},
+	}
+
+	if err := Save(cfg); err != nil {
+		t.Fatalf("Save: %v", err)
+	}
+	got, err := Load()
+	if err != nil {
+		t.Fatalf("Load: %v", err)
+	}
+	z := got.Providers["zai"]
+	if z.Auth != "bearer" || len(z.AuthCommand) != 4 || z.AuthCommand[0] != "gopass" {
+		t.Fatalf("auth_command round-trip: %+v", z)
+	}
+	body, _ := readSaved(t)
+	if !strings.Contains(body, "auth_command") || strings.Contains(body, "auth_token =") {
+		t.Fatalf("auth_command config saved wrong:\n%s", body)
+	}
+}
+
 // The written file contains the chosen provider block but NOT the built-in
 // anthropic/openai default profiles.
 func TestSaveOmitsBuiltinProfiles(t *testing.T) {
