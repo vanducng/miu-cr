@@ -12,6 +12,8 @@ Apply only to the conventions actually visible in the diff; do not invent issues
 
 - A goroutine that writes to a channel nobody reads, or reads from one nobody closes, leaks for the process lifetime — flag the unbounded `go func()` with no exit path or `context` plumbed through.
 - Shared maps/slices mutated from more than one goroutine without a mutex or channel is a data race; the failure is a non-deterministic crash or corrupted read under load.
+- A worker pool must have one clear submit phase and one clear drain phase. Flag `Wait`/`Await` that can run while another goroutine still calls `Add`, `Go`, or `Submit` on the same group/pool.
+- If a worker pool stores results in a shared slice/map, every read and write must use the same lock or happen after all producers have stopped. A write-only lock still races with an unlocked reader.
 - A `defer f.Close()` inside a loop accumulates open handles until the function returns; close per-iteration or refactor when the loop count is unbounded.
 
 ## Error handling
