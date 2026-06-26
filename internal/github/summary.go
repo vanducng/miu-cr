@@ -2,6 +2,7 @@ package github
 
 import (
 	"fmt"
+	"net/url"
 	"strings"
 
 	"github.com/vanducng/miu-cr/internal/engine"
@@ -175,7 +176,7 @@ func RenderSummaryFull(info *PRInfo, findings []engine.Finding, stats map[string
 	}
 	ver := ""
 	if v := strings.TrimSpace(opts.Version); v != "" {
-		ver = fmt.Sprintf(" [%s](https://github.com/vanducng/miu-cr/releases/tag/%s)", v, v)
+		ver = fmt.Sprintf(" [%s](https://github.com/vanducng/miu-cr/releases/tag/%s)", mdInline(v), url.PathEscape(v))
 	}
 	fmt.Fprintf(&b, "\n<sub>Reviewed commit %s%s · Posted by [miu-cr](https://github.com/vanducng/miu-cr)%s</sub>", commitRef(info), handoff, ver)
 	return b.String()
