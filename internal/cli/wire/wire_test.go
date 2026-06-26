@@ -211,6 +211,14 @@ func TestPublishReviewWireFlow(t *testing.T) {
 	if !strings.Contains(summary, "Review attempts: 1") {
 		t.Fatalf("first-run summary must show Review attempts: 1:\n%s", summary)
 	}
+	// Lifecycle mode: the Open table, the footer timestamp, and a parseable embedded
+	// ledger marker carrying this run's finding as open.
+	if !strings.Contains(summary, "🔴 Open") || !strings.Contains(summary, "Last reviewed") {
+		t.Fatalf("first-run summary must render the ledger Open table + Last reviewed footer:\n%s", summary)
+	}
+	if led := mgithub.ParseLedger(summary); len(led) != 1 || led[0].Status != "open" {
+		t.Fatalf("embedded ledger must carry the finding as open, got %+v", led)
+	}
 	if le, ri := indexOf(fake.order, "list_review"), indexOf(fake.order, "create_review"); le < 0 || ri < 0 || le > ri {
 		t.Fatalf("ExistingFingerprints (list_review) must run before the review; order=%v", fake.order)
 	}
@@ -244,6 +252,58 @@ func TestPublishReviewWireFlow(t *testing.T) {
 	}
 	if got := fake.issueComments[0].GetBody(); !strings.Contains(got, "Review attempts: 2") {
 		t.Fatalf("re-run summary must advance to Review attempts: 2:\n%s", got)
+	}
+}
+
+// TestPublishReviewLedgerResolvesAcrossRuns proves the wire layer threads the
+// comment-embedded ledger end-to-end: run1 opens a finding; feeding run1's posted
+// body back as PriorLedger (as FetchPR does), a run2 where the finding is GONE
+// flips it to resolved in the upserted summary, preserving the origin commit.
+func TestPublishReviewLedgerResolvesAcrossRuns(t *testing.T) {
+	runner := gitcmd.New()
+	dir, base, head := setupRepo(t, runner)
+
+	fake := &fakeGitHub{}
+	restore := newGitHubClient
+	newGitHubClient = func(string) mgithub.Client { return fake }
+	t.Cleanup(func() { newGitHubClient = restore })
+	client := newGitHubClient("")
+
+	info := &mgithub.PRInfo{Owner: "o", Repo: "r", Number: 7, HeadSHA: head, BaseSHA: base, BaseBranch: "main", ReviewCount: 1}
+	res := engine.ReviewResult{
+		Findings: []engine.Finding{
+			{File: "foo.go", Line: 4, Severity: "high", Category: "bug", Rationale: "boom", QuotedCode: "func B() {}"},
+		},
+		Stats: map[string]any{"truncation_level": "full", "files_reviewed": float64(1)},
+	}
+	pr := &cli.PRResult{SummaryAction: "none"}
+	if err := publishReview(stdctx.Background(), client, runner, dir, info, res, pr, cli.PRReviewRequest{Gate: "high"}, nil, embedWriter{}, nil, nil); err != nil {
+		t.Fatalf("run1: %v", err)
+	}
+	led1 := mgithub.ParseLedger(fake.issueComments[0].GetBody())
+	if len(led1) != 1 || led1[0].Status != "open" {
+		t.Fatalf("run1 ledger must hold one open finding, got %+v", led1)
+	}
+	originSHA := led1[0].OpenSHA
+
+	// run2: feed prior ledger back; the finding is gone (foo.go still in the diff) → resolved.
+	info.PriorLedger = led1
+	info.ReviewCount = 2
+	res2 := engine.ReviewResult{Findings: nil, Stats: map[string]any{"truncation_level": "full", "files_reviewed": float64(1)}}
+	pr2 := &cli.PRResult{SummaryAction: "none"}
+	if err := publishReview(stdctx.Background(), client, runner, dir, info, res2, pr2, cli.PRReviewRequest{Gate: "high"}, nil, embedWriter{}, nil, nil); err != nil {
+		t.Fatalf("run2: %v", err)
+	}
+	body2 := fake.issueComments[0].GetBody()
+	led2 := mgithub.ParseLedger(body2)
+	if len(led2) != 1 || led2[0].Status != "resolved" {
+		t.Fatalf("run2 must resolve the now-absent finding, got %+v", led2)
+	}
+	if led2[0].OpenSHA != originSHA {
+		t.Fatalf("origin commit must be preserved across runs: %q vs %q", led2[0].OpenSHA, originSHA)
+	}
+	if !strings.Contains(body2, "Resolved (1)") {
+		t.Fatalf("run2 summary must render a Resolved section:\n%s", body2)
 	}
 }
 

@@ -40,6 +40,10 @@ type PRInfo struct {
 	// IS this run's number (>=1). The identity line renders it as-is; the upsert writes
 	// it straight back as the next runs token. First review = 1.
 	ReviewCount int
+	// PriorLedger is the finding lifecycle ledger parsed from the prior summary
+	// comment (the storeless source of truth). nil on the first review. The wire
+	// layer merges this run's findings into it (MergeLedger) before rendering.
+	PriorLedger []LedgerEntry
 }
 
 // blobURL builds a repo-relative blob permalink at info.HeadSHA for path/line.
@@ -108,31 +112,36 @@ func FetchPR(ctx stdctx.Context, client Client, ref PRRef) (*PRInfo, error) {
 		}
 		opts.Page = resp.NextPage
 	}
-	info.ReviewCount = priorRunsCount(ctx, client, info) + 1 // include this in-flight run; first review = 1
+	// One read of the prior summary comment seeds BOTH the storeless runs counter
+	// and the finding ledger (both live in the same lowest-id marked comment).
+	priorBody := lowestMarkedCommentBody(ctx, client, info)
+	info.ReviewCount = parseRunsCount(priorBody) + 1 // include this in-flight run; first review = 1
+	info.PriorLedger = ParseLedger(priorBody)
 	return info, nil
 }
 
-// priorRunsCount reads the runs token from the lowest-id miucr summary issue
-// comment (the upsert's edit target), returning N (0 when no marked comment or
-// the token is absent/garbled). Best-effort: any list error → 0 so the count
-// never blocks the review. Storeless: the count lives in the comment body.
-func priorRunsCount(ctx stdctx.Context, client Client, info *PRInfo) int {
+// lowestMarkedCommentBody returns the body of the lowest-id miucr summary issue
+// comment (the upsert's edit target — the authoritative copy when accidental
+// duplicates exist), or "" when none / on any list error. Best-effort: a fetch
+// failure never blocks the review. Storeless: both the runs counter and the
+// finding ledger live in this body.
+func lowestMarkedCommentBody(ctx stdctx.Context, client Client, info *PRInfo) string {
 	opts := &gh.IssueListCommentsOptions{ListOptions: gh.ListOptions{PerPage: 100}}
 	lowestID := int64(0)
-	count := 0
+	body := ""
 	for page := 0; page < maxConvPages; page++ {
 		comments, resp, err := client.ListIssueComments(ctx, info.Owner, info.Repo, info.Number, opts)
 		if err != nil {
-			return 0
+			return ""
 		}
 		for _, c := range comments {
-			body := c.GetBody()
-			if !strings.Contains(body, ReviewMarker) {
+			b := c.GetBody()
+			if !strings.Contains(b, ReviewMarker) {
 				continue
 			}
 			if id := c.GetID(); lowestID == 0 || id < lowestID {
 				lowestID = id
-				count = parseRunsCount(body)
+				body = b
 			}
 		}
 		if resp == nil || resp.NextPage == 0 {
@@ -140,7 +149,14 @@ func priorRunsCount(ctx stdctx.Context, client Client, info *PRInfo) int {
 		}
 		opts.Page = resp.NextPage
 	}
-	return count
+	return body
+}
+
+// priorRunsCount reads the runs token from the lowest-id miucr summary issue
+// comment, returning N (0 when absent/garbled). Retained for the unit test; the
+// FetchPR path reads the body once via lowestMarkedCommentBody.
+func priorRunsCount(ctx stdctx.Context, client Client, info *PRInfo) int {
+	return parseRunsCount(lowestMarkedCommentBody(ctx, client, info))
 }
 
 // maxConversationBytes caps the rendered conversation block. Mirrors the rules
@@ -224,6 +240,10 @@ func fetchPriorSummaries(ctx stdctx.Context, client Client, info *PRInfo) string
 		for _, c := range comments {
 			body := strings.TrimSpace(c.GetBody())
 			if body != "" && strings.Contains(body, ReviewMarker) {
+				// Strip the hidden ledger marker: its base64 payload is meaningless to
+				// the model and (near the entry cap) is multi-KB, which would displace
+				// real conversation prose within the shared maxConversationBytes budget.
+				body = strings.TrimSpace(ledgerMarkerRe.ReplaceAllString(body, ""))
 				b.WriteString("- ")
 				b.WriteString(body)
 				b.WriteString("\n")
