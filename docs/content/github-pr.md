@@ -115,7 +115,7 @@ The **summary issue comment** leads, top to bottom, with a hidden `<!-- miu-cr-r
 marker line, a second hidden `<!-- miu-cr-runs:N -->` marker (N = the review run count,
 written back for the next upsert), a clean `## Code Review Summary` header (no severity on
 the H2 - it stays small), then an INLINE `**Result:**` line (per-level **shields.io count
-badges** — the `Px` label in its severity color, the count neutral grey, critical/high first
+badges** — each badge reads `Px | severity | count`, with the `Px` label in its severity color and the rest neutral grey, critical/high first
 — followed by `· N findings`; zero findings renders a green "No findings" badge instead).
 There is no identity line and no confidence line: the prior `**Reviews (N)**` identity line
 and the `Confidence: N/5` line were removed (N was a finding count misread as a review count;
@@ -128,8 +128,8 @@ compact; gracefully capped at a word boundary with an ellipsis if long). The col
 most-important-first (files with findings, then biggest churn), the omitted-inline note, and
 the `<details>` overflow block follow. The agent handoff (a copy-paste local re-run command +
 the `review_run` MCP pointer) and the review metrics (Files, Churn, Effort and Context badges,
-each with a one-line meaning) are combined into one **collapsed `<details>` "Agent handoff &
-review internals"** block near the bottom, closing with a footer: `<sub>Reviewed commit
+each with a one-line meaning) are combined into one **collapsed `<details>` "Review
+reference"** block near the bottom, closing with a footer: `<sub>Reviewed commit
 [\`<7-char-sha>\`](<repo>/commit/<full-sha>) · Review attempts: N · Posted by
 [miu-cr](https://github.com/vanducng/miu-cr) [v<version>](https://github.com/vanducng/miu-cr/releases/tag/v<version>)</sub>` (the short SHA is GitHub-standard 7 hex
 digits, the run count relocated here as "Review attempts: N", and the running miucr version
@@ -145,7 +145,7 @@ a hidden marker that identifies the comment as miucr-authored:
 <!-- miu-cr-runs:3 -->
 ## Code Review Summary
 
-**Result:** 🟠 1 · 🟡 2 · 🔵 1 · 4 findings
+**Result:** <sub><sub>![P1 | high | 1](https://img.shields.io/badge/P1%20%7C%20high-1-lightgrey?labelColor=orange&style=flat)</sub></sub> <sub><sub>![P2 | medium | 2](https://img.shields.io/badge/P2%20%7C%20medium-2-lightgrey?labelColor=yellow&style=flat)</sub></sub> <sub><sub>![P3 | low | 1](https://img.shields.io/badge/P3%20%7C%20low-1-lightgrey?labelColor=blue&style=flat)</sub></sub> · 4 findings
 → Review the 4 inline comments below.
 
 **What changed:**

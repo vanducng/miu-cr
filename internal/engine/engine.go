@@ -13,6 +13,7 @@ import (
 	"sort"
 	"strings"
 	"time"
+	"unicode/utf8"
 
 	"github.com/vanducng/miu-cr/internal/cli/clierr"
 	"github.com/vanducng/miu-cr/internal/config"
@@ -232,6 +233,8 @@ type AgentContext struct {
 	// is cosine-near the current change). Empty => byte-for-byte M6 prompt. LOCKSTEP:
 	// mirror this field everywhere Rules is threaded or it is silently dropped.
 	SemanticContext string
+	ProjectContext  string
+	RelatedContext  string
 	// WantDiagram opts into the mermaid change diagram. LOCKSTEP: mirror this field
 	// everywhere Rules/SemanticContext are threaded or it is silently dropped.
 	WantDiagram bool
@@ -314,6 +317,9 @@ type Request struct {
 	// WantDiagram opts into the mermaid change diagram (default OFF). Threaded onto
 	// AgentContext so the diagram instruction rides the USER turn; OFF is byte-identical.
 	WantDiagram bool
+
+	ProjectContext bool
+	ContextHops    int
 
 	// Instruction is the optional per-review developer steer (--instruction). Threaded
 	// onto AgentContext so it rides the USER turn; empty is byte-identical. LOCKSTEP:
@@ -471,15 +477,25 @@ func (e *Engine) Review(ctx stdctx.Context, req Request) (ReviewResult, error) {
 		req.progress("diff compressed: " + lvl)
 	}
 
+	rev := selected[0].Ref
 	semanticContext, semanticStat := retrieveSemantic(ctx, req.Retriever, selected)
+	projectContext, projectContextFileCount, projectContextTruncated := "", 0, false
+	if req.ProjectContext {
+		projectContext, projectContextFileCount, projectContextTruncated = e.loadProjectContext(ctx, req.RepoDir, rev)
+	}
+	related := enginectx.RelatedResult{}
+	if req.ContextHops > 0 {
+		related = enginectx.BuildRelatedContext(ctx, req.RepoDir, rev, selected, e.Runner, enginectx.RelatedOptions{HopDepth: req.ContextHops})
+	}
 
 	trace.SetModel(req.Provider, req.Model)
 
-	rev := selected[0].Ref
 	out, err := e.Agent.Review(ctx, AgentContext{
 		Text:            assembled.Text,
 		Rules:           rulesText,
 		SemanticContext: semanticContext,
+		ProjectContext:  projectContext,
+		RelatedContext:  related.Text,
 		WantDiagram:     req.WantDiagram,
 		Instruction:     req.Instruction,
 		Conversation:    req.Conversation,
@@ -513,6 +529,15 @@ func (e *Engine) Review(ctx stdctx.Context, req Request) (ReviewResult, error) {
 	}
 	if semanticStat != "" {
 		stats["semantic_recall"] = semanticStat
+	}
+	if req.ProjectContext {
+		stats["project_context_files"] = float64(projectContextFileCount)
+		stats["project_context_truncated"] = projectContextTruncated
+	}
+	if req.ContextHops > 0 {
+		stats["related_context_files"] = float64(len(related.Files))
+		stats["related_context_hops"] = float64(related.Hops)
+		stats["related_context_truncated"] = related.Truncated
 	}
 
 	kept = e.repairPatches(ctx, kept, selected, req, stats)
@@ -617,6 +642,67 @@ func retrieveSemantic(ctx stdctx.Context, r Retriever, selected []diff.Diff) (ad
 		return "", "no_matches"
 	}
 	return advisory, "injected"
+}
+
+const (
+	projectContextMaxFileBytes  = 8 * 1024
+	projectContextMaxTotalBytes = 32 * 1024
+)
+
+var projectContextFiles = []string{"AGENTS.md", "CLAUDE.md"}
+
+func (e *Engine) loadProjectContext(ctx stdctx.Context, repoDir, rev string) (string, int, bool) {
+	runner := e.Runner
+	if runner == nil {
+		runner = gitcmd.New()
+	}
+	var sb strings.Builder
+	total := 0
+	files := 0
+	truncated := false
+	for _, name := range projectContextFiles {
+		blob, err := runner.ShowBlob(ctx, repoDir, rev, name)
+		if err != nil {
+			continue
+		}
+		if len(blob) > projectContextMaxFileBytes {
+			blob = truncateUTF8Bytes(blob, projectContextMaxFileBytes)
+			truncated = true
+		}
+		if total+len(blob) > projectContextMaxTotalBytes {
+			remaining := projectContextMaxTotalBytes - total
+			if remaining <= 0 {
+				truncated = true
+				break
+			}
+			blob = truncateUTF8Bytes(blob, remaining)
+			truncated = true
+		}
+		if sb.Len() > 0 {
+			sb.WriteString("\n\n")
+		}
+		sb.WriteString("--- project_file: ")
+		sb.WriteString(name)
+		sb.WriteString(" ---\n")
+		sb.Write(blob)
+		total += len(blob)
+		files++
+		if total >= projectContextMaxTotalBytes {
+			break
+		}
+	}
+	return sb.String(), files, truncated
+}
+
+func truncateUTF8Bytes(blob []byte, n int) []byte {
+	if len(blob) <= n {
+		return blob
+	}
+	cut := n
+	for cut > 0 && cut < len(blob) && !utf8.RuneStart(blob[cut]) {
+		cut--
+	}
+	return blob[:cut]
 }
 
 // changedHunksOf groups the added+deleted code lines per diff hunk: the read-path

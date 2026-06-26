@@ -13,7 +13,11 @@ func shieldsBadge(p, color string) string {
 }
 
 func shieldsCount(p string, n int, color string) string {
-	return fmt.Sprintf("<sub><sub>![%s %d](https://img.shields.io/badge/%s-%d-lightgrey?labelColor=%s&style=flat)</sub></sub>", p, n, p, n, color)
+	sev := map[string]string{"P0": "critical", "P1": "high", "P2": "medium", "P3": "low"}[p]
+	if sev == "" {
+		sev = "info"
+	}
+	return fmt.Sprintf("<sub><sub>![%s | %s | %d](https://img.shields.io/badge/%s%%20%%7C%%20%s-%d-lightgrey?labelColor=%s&style=flat)</sub></sub>", p, sev, n, p, sev, n, color)
 }
 
 func TestPriorityBadgeMapping(t *testing.T) {

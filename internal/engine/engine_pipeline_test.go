@@ -28,6 +28,8 @@ type fakeAgent struct {
 	gotRev         string
 	gotRules       string
 	gotSemantic    string
+	gotProject     string
+	gotRelated     string
 	gotInstruction string
 	gotProgress    bool
 
@@ -41,6 +43,8 @@ func (f *fakeAgent) Review(_ stdctx.Context, rc engine.AgentContext) (engine.Rev
 	f.gotRev = rc.Rev
 	f.gotRules = rc.Rules
 	f.gotSemantic = rc.SemanticContext
+	f.gotProject = rc.ProjectContext
+	f.gotRelated = rc.RelatedContext
 	f.gotInstruction = rc.Instruction
 	f.gotProgress = rc.Progress != nil
 	if rc.Progress != nil {
@@ -188,6 +192,55 @@ func TestReviewEmptyInstructionStaysEmpty(t *testing.T) {
 	}
 	if fa.gotInstruction != "" {
 		t.Errorf("unset Instruction must stay empty: got %q", fa.gotInstruction)
+	}
+}
+
+func TestReviewProjectContextReadsReviewedRevision(t *testing.T) {
+	dir := initRepo(t)
+	writeFile(t, dir, "AGENTS.md", "tracked context\n")
+	writeFile(t, dir, "app.go", "package app\n\nfunc Existing() int { return 1 }\n")
+	git(t, dir, "add", ".")
+	git(t, dir, "commit", "-q", "-m", "base")
+	writeFile(t, dir, "AGENTS.md", "live worktree context\n")
+	writeFile(t, dir, "app.go", "package app\n\nfunc Existing() int { return 2 }\n")
+	git(t, dir, "add", "app.go")
+
+	fa := &fakeAgent{}
+	eng := engine.New(fa, gitcmd.New())
+	res, err := eng.Review(stdctx.Background(), engine.Request{Mode: 0, RepoDir: dir, Gate: "high", Extensions: []string{"go"}, ProjectContext: true})
+	if err != nil {
+		t.Fatalf("Review: %v", err)
+	}
+	if !strings.Contains(fa.gotProject, "tracked context") {
+		t.Fatalf("project context did not include reviewed AGENTS.md: %q", fa.gotProject)
+	}
+	if strings.Contains(fa.gotProject, "live worktree context") {
+		t.Fatalf("project context read live worktree instead of reviewed revision: %q", fa.gotProject)
+	}
+	if got, _ := res.Stats["project_context_files"].(float64); got != 1 {
+		t.Fatalf("project_context_files: got %v", res.Stats["project_context_files"])
+	}
+}
+
+func TestReviewProjectContextMissingFilesIsNoop(t *testing.T) {
+	dir := initRepo(t)
+	writeFile(t, dir, "app.go", "package app\n\nfunc Existing() int { return 1 }\n")
+	git(t, dir, "add", ".")
+	git(t, dir, "commit", "-q", "-m", "base")
+	writeFile(t, dir, "app.go", "package app\n\nfunc Existing() int { return 2 }\n")
+	git(t, dir, "add", "app.go")
+
+	fa := &fakeAgent{}
+	eng := engine.New(fa, gitcmd.New())
+	res, err := eng.Review(stdctx.Background(), engine.Request{Mode: 0, RepoDir: dir, Gate: "high", Extensions: []string{"go"}, ProjectContext: true})
+	if err != nil {
+		t.Fatalf("Review: %v", err)
+	}
+	if fa.gotProject != "" {
+		t.Fatalf("missing project files must leave ProjectContext empty, got %q", fa.gotProject)
+	}
+	if got, _ := res.Stats["project_context_files"].(float64); got != 0 {
+		t.Fatalf("project_context_files: got %v", res.Stats["project_context_files"])
 	}
 }
 

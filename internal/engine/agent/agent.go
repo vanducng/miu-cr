@@ -45,6 +45,12 @@ type Context struct {
 	// it threads engine.AgentContext -> here -> PromptParts -> BuildUserPrompt in
 	// BOTH agent.go and openai.go, or it is silently dropped.
 	SemanticContext string
+	// ProjectContext is optional deep project context. LOCKSTEP: mirror
+	// SemanticContext through every backend or it is silently dropped.
+	ProjectContext string
+	// RelatedContext is optional hop-expanded related-file context. LOCKSTEP: mirror
+	// ProjectContext through every backend or it is silently dropped.
+	RelatedContext string
 	// WantDiagram opts into the mermaid change diagram (rides the USER turn so OFF
 	// is byte-identical and the prompt cache is preserved). LOCKSTEP: thread it from
 	// engine.AgentContext into BuildUserPrompt in agent.go/openai.go/codex.go.
@@ -179,7 +185,7 @@ func (a *anthropicAgent) Review(ctx stdctx.Context, rc Context) (engine.ReviewOu
 		rc.Runner = gitcmd.New()
 	}
 
-	userPrompt := BuildUserPrompt(PromptParts{Rules: rc.Rules, SemanticContext: rc.SemanticContext, WantDiagram: rc.WantDiagram, Instruction: rc.Instruction, Conversation: rc.Conversation, Diff: rc.Text})
+	userPrompt := BuildUserPrompt(PromptParts{Rules: rc.Rules, SemanticContext: rc.SemanticContext, ProjectContext: rc.ProjectContext, RelatedContext: rc.RelatedContext, WantDiagram: rc.WantDiagram, Instruction: rc.Instruction, Conversation: rc.Conversation, Diff: rc.Text})
 	rc.Trace.SetSystemPrompt(systemPrompt)
 	rc.Trace.SetModel("anthropic", a.model)
 	rc.Trace.SetPrompt(userPrompt)

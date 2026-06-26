@@ -177,6 +177,27 @@ func TestPRMinSeverityAndDiagramThreaded(t *testing.T) {
 	}
 }
 
+func TestPRDeepContextThreaded(t *testing.T) {
+	pr := &fakePRReviewer{outcome: ReviewOutcome{PR: &PRResult{Owner: "o", Repo: "r", Number: 1}}}
+	if _, err := runPR(t, pr, &fakeReviewer{}, "--pr", "o/r#1", "--no-post", "--deep-context"); err != nil {
+		t.Fatalf("run: %v", err)
+	}
+	if !pr.gotReq.DeepContext {
+		t.Fatal("--deep-context must thread DeepContext into the PR request")
+	}
+	if pr.gotReq.ContextHops != defaultDeepContextHops {
+		t.Fatalf("--deep-context hops = %d, want %d", pr.gotReq.ContextHops, defaultDeepContextHops)
+	}
+
+	pr = &fakePRReviewer{outcome: ReviewOutcome{PR: &PRResult{Owner: "o", Repo: "r", Number: 1}}}
+	if _, err := runPR(t, pr, &fakeReviewer{}, "--pr", "o/r#1", "--no-post", "--deep-context", "--context-hops", "4"); err != nil {
+		t.Fatalf("run explicit: %v", err)
+	}
+	if pr.gotReq.ContextHops != 4 {
+		t.Fatalf("explicit --context-hops not threaded: %d", pr.gotReq.ContextHops)
+	}
+}
+
 func TestPRGateUsesPRReviewerNotLocalReviewer(t *testing.T) {
 	pr := &fakePRReviewer{outcome: ReviewOutcome{
 		Findings: []ReviewFinding{{File: "a.go", Line: 1, Severity: "critical"}},

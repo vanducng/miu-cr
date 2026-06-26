@@ -30,18 +30,26 @@ func TestAgentAdapterForwardsRules(t *testing.T) {
 	ca := &captureAgent{}
 	a := agentAdapter{inner: ca}
 	_, err := a.Review(stdctx.Background(), engine.AgentContext{
-		Text:         "diff text",
-		Rules:        "RULES_SECTION_MARKER",
-		Instruction:  "INSTRUCTION_MARKER",
-		Conversation: "CONVERSATION_MARKER",
-		RepoDir:      "/repo",
-		Rev:          "abc",
+		Text:           "diff text",
+		Rules:          "RULES_SECTION_MARKER",
+		ProjectContext: "PROJECT_CONTEXT_MARKER",
+		RelatedContext: "RELATED_CONTEXT_MARKER",
+		Instruction:    "INSTRUCTION_MARKER",
+		Conversation:   "CONVERSATION_MARKER",
+		RepoDir:        "/repo",
+		Rev:            "abc",
 	})
 	if err != nil {
 		t.Fatalf("Review: %v", err)
 	}
 	if ca.got.Rules != "RULES_SECTION_MARKER" {
 		t.Errorf("adapter dropped Rules: got %q", ca.got.Rules)
+	}
+	if ca.got.ProjectContext != "PROJECT_CONTEXT_MARKER" {
+		t.Errorf("adapter dropped ProjectContext: got %q", ca.got.ProjectContext)
+	}
+	if ca.got.RelatedContext != "RELATED_CONTEXT_MARKER" {
+		t.Errorf("adapter dropped RelatedContext: got %q", ca.got.RelatedContext)
 	}
 	if ca.got.Instruction != "INSTRUCTION_MARKER" {
 		t.Errorf("adapter dropped Instruction: got %q", ca.got.Instruction)
@@ -66,5 +74,29 @@ func TestWantConversationDropsOnFork(t *testing.T) {
 		if got := wantConversation(tc.requested, tc.isFork); got != tc.want {
 			t.Errorf("wantConversation(requested=%v, fork=%v)=%v, want %v", tc.requested, tc.isFork, got, tc.want)
 		}
+	}
+}
+
+func TestWantProjectContextDropsOnFork(t *testing.T) {
+	for _, tc := range []struct {
+		requested, isFork, want bool
+	}{
+		{true, false, true},
+		{true, true, false},
+		{false, false, false},
+		{false, true, false},
+	} {
+		if got := wantProjectContext(tc.requested, tc.isFork); got != tc.want {
+			t.Errorf("wantProjectContext(requested=%v, fork=%v)=%v, want %v", tc.requested, tc.isFork, got, tc.want)
+		}
+	}
+}
+
+func TestContextHopsForPRDropsOnFork(t *testing.T) {
+	if got := contextHopsForPR(2, false); got != 2 {
+		t.Fatalf("non-fork ContextHops = %d, want 2", got)
+	}
+	if got := contextHopsForPR(2, true); got != 0 {
+		t.Fatalf("fork ContextHops = %d, want 0", got)
 	}
 }

@@ -265,6 +265,40 @@ func TestReviewAppliesTimeoutToContext(t *testing.T) {
 	}
 }
 
+func TestReviewDeepContextDefaults(t *testing.T) {
+	r := &fakeReviewer{outcome: ReviewOutcome{Findings: []ReviewFinding{}}}
+	if _, err := runReview(t, r, "--staged", "--deep-context"); err != nil {
+		t.Fatalf("review: %v", err)
+	}
+	if r.gotReq.ExpandWindow != 20 || r.gotReq.TokenBudget != 0 || r.gotReq.Timeout != deepContextTimeout || !r.gotReq.DeepContext || r.gotReq.ContextHops != defaultDeepContextHops {
+		t.Fatalf("deep defaults = expand %d budget %d timeout %s deep %v hops %d", r.gotReq.ExpandWindow, r.gotReq.TokenBudget, r.gotReq.Timeout, r.gotReq.DeepContext, r.gotReq.ContextHops)
+	}
+
+	r = &fakeReviewer{outcome: ReviewOutcome{Findings: []ReviewFinding{}}}
+	t.Setenv("HOME", t.TempDir())
+	t.Setenv("ANTHROPIC_API_KEY", "synthetic-test-key")
+	prev := reviewer
+	SetReviewer(r)
+	t.Cleanup(func() { SetReviewer(prev) })
+	prettyOutput = false
+	outputFormat = "json"
+
+	opts := &options{output: "json", timeout: 30 * time.Second}
+	cmd := rootCommand(opts)
+	var buf bytes.Buffer
+	cmd.SetOut(&buf)
+	cmd.SetErr(&buf)
+	cmd.SetArgs([]string{"--timeout", "42s", "review", "--staged", "--deep-context", "--expand", "7", "--token-budget", "123", "--context-hops", "4"})
+	cmd.SilenceUsage = true
+	cmd.SilenceErrors = true
+	if err := cmd.Execute(); err != nil {
+		t.Fatalf("review: %v", err)
+	}
+	if r.gotReq.ExpandWindow != 7 || r.gotReq.TokenBudget != 123 || r.gotReq.Timeout != 42*time.Second || r.gotReq.ContextHops != 4 {
+		t.Fatalf("explicit flags = expand %d budget %d timeout %s hops %d", r.gotReq.ExpandWindow, r.gotReq.TokenBudget, r.gotReq.Timeout, r.gotReq.ContextHops)
+	}
+}
+
 func asCLIError(err error, target **CLIError) bool {
 	for err != nil {
 		if ce, ok := err.(*CLIError); ok {
