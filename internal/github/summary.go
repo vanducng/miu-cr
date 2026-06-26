@@ -153,7 +153,12 @@ func RenderSummaryFull(info *PRInfo, findings []engine.Finding, stats map[string
 	b.WriteString("## Code Review Summary\n\n")
 
 	if opts.Ledger != nil {
+		// Lifecycle mode: Result → a concise PR summary → the always-visible
+		// Open/Resolved tracking tables. No inline-comment pointer (GitHub already
+		// surfaces the inline review thread below).
 		fmt.Fprintf(&b, "**Result:** %s\n\n", ledgerResultLine(opts.Ledger))
+		renderWalkthrough(&b, opts.Walkthrough)
+		renderLedger(&b, info, opts.Ledger)
 	} else {
 		lead := severityCounts(findings)
 		if lead != "" {
@@ -162,18 +167,12 @@ func RenderSummaryFull(info *PRInfo, findings []engine.Finding, stats map[string
 			lead = "<sub><sub>![No findings](https://img.shields.io/badge/No_findings-brightgreen?style=flat)</sub></sub>"
 		}
 		fmt.Fprintf(&b, "**Result:** %s\n\n", lead)
+		if posted := len(findings) - omittedInline; posted > 0 {
+			b.WriteString(fmt.Sprintf("→ Review the %d inline comment%s below.", posted, plural(posted)))
+			b.WriteString("\n\n")
+		}
+		renderWalkthrough(&b, opts.Walkthrough)
 	}
-
-	if posted := len(findings) - omittedInline; posted > 0 {
-		b.WriteString(fmt.Sprintf("→ Review the %d inline comment%s below.", posted, plural(posted)))
-		b.WriteString("\n\n")
-	}
-
-	if opts.Ledger != nil {
-		renderLedger(&b, info, opts.Ledger)
-	}
-
-	renderWalkthrough(&b, opts.Walkthrough)
 	renderDiagram(&b, opts.Diagram)
 
 	if info.IsFork {
@@ -231,24 +230,41 @@ func renderReviewReference(b *strings.Builder, info *PRInfo, stats map[string]an
 	// body) skip it and keep just the internals. A bare `<pr-url>` placeholder is not
 	// actionable, so it is never emitted.
 	if url := prURL(info); url != "" {
-		b.WriteString("**Run again** · pick up or re-run this review\n\n")
-		fmt.Fprintf(b, "- Run locally: `miucr review --pr %s`\n", strings.ReplaceAll(url, "`", "'"))
-		b.WriteString("- MCP: call `review_run` from an agent host (add `-o json` for a machine-readable envelope).\n\n")
+		b.WriteString("**Run again**\n\n")
+		fmt.Fprintf(b, "- Run locally: `miucr review --pr %s -o pretty`\n\n", strings.ReplaceAll(url, "`", "'"))
 	}
 
-	b.WriteString("**Review context** · how miucr sized this review\n\n")
+	// Priority legend: explains the P0–P4 column with a badge + short meaning.
+	b.WriteString("**Priority**\n\n")
+	renderPriorityLegend(b)
+
+	// Review context: badge + short note only (no leading bold label, no Files/Churn).
+	b.WriteString("\n**Review context**\n\n")
 	files, adds, dels := diffStats(diffs)
 	if files == 0 {
 		files = statIntVal(stats, "files_reviewed")
 	}
-	fmt.Fprintf(b, "- **Files** `%d` · files changed in this diff\n", files)
 	if adds > 0 || dels > 0 {
-		fmt.Fprintf(b, "- **Churn** `+%d / −%d` · lines added / removed\n", adds, dels)
-		fmt.Fprintf(b, "- **Effort** %s · estimated review size from files + churn\n", effortBadge(effortSize(files, adds+dels)))
+		fmt.Fprintf(b, "- %s · estimated review size\n", effortBadge(effortSize(files, adds+dels)))
 	}
 	lvl := truncationLevel(stats)
-	fmt.Fprintf(b, "- **Context** %s · %s\n", contextBadge(lvl), contextNote(lvl))
+	fmt.Fprintf(b, "- %s · %s\n", contextBadge(lvl), contextNote(lvl))
 	b.WriteString("\n</details>\n")
+}
+
+// renderPriorityLegend lists the P0–P4 priority levels (critical→info), each a
+// shields badge + a short, direct meaning for a code-review finding.
+func renderPriorityLegend(b *strings.Builder) {
+	meaning := map[string]string{
+		"critical": "must fix, blocks merge",
+		"high":     "fix before merge",
+		"medium":   "should fix",
+		"low":      "minor, can wait",
+		"info":     "optional, FYI",
+	}
+	for _, sev := range severityOrder { // critical, high, medium, low, info → P0..P4
+		fmt.Fprintf(b, "- %s · %s\n", priorityBadge(sev), meaning[sev])
+	}
 }
 
 // effortBadge renders the S/M/L/XL effort bucket as a color-graded shields badge

@@ -206,41 +206,39 @@ func capLedger(entries []LedgerEntry) []LedgerEntry {
 }
 
 // ledgerResultLine builds the **Result:** lead for ledger mode: open-severity
-// count chips + "N open", "Review passed" when nothing is open, and a trailing
-// "✅ M resolved" when any were resolved.
+// count chips + "N open" when findings are open, else a friendly "Review passed
+// · all clear 🎉". The resolved count is NOT repeated here — it lives in the
+// "✅ Resolved (N)" table heading.
 func ledgerResultLine(entries []LedgerEntry) string {
 	counts := map[string]int{}
-	open, resolved := 0, 0
+	open := 0
 	for _, e := range entries {
 		if e.Status == statusResolved {
-			resolved++
 			continue
 		}
 		open++
 		counts[severityLabel(e.Sev)]++
 	}
 
-	var lead string
+	// All clear: one friendly line. The resolved count is NOT repeated here — it
+	// already lives in the "✅ Resolved (N)" table heading below.
 	if open == 0 {
-		lead = "<sub><sub>![Review passed](https://img.shields.io/badge/Review_passed-brightgreen?style=flat)</sub></sub>"
-	} else {
-		var chips []string
-		for _, sev := range severityOrder {
-			if n := counts[sev]; n > 0 {
-				chips = append(chips, severityCountBadge(sev, n))
-			}
+		return "<sub><sub>![Review passed](https://img.shields.io/badge/Review_passed-brightgreen?style=flat)</sub></sub> · all clear 🎉"
+	}
+	var chips []string
+	for _, sev := range severityOrder {
+		if n := counts[sev]; n > 0 {
+			chips = append(chips, severityCountBadge(sev, n))
 		}
-		lead = strings.Join(chips, " ") + fmt.Sprintf(" · %d open", open)
 	}
-	if resolved > 0 {
-		lead += fmt.Sprintf(" · ✅ %d resolved", resolved)
-	}
-	return lead
+	return strings.Join(chips, " ") + fmt.Sprintf(" · %d open", open)
 }
 
-// renderLedger writes the grouped lifecycle tables: a visible Open table
-// (severity-sorted) and a collapsed Resolved <details>. Untrusted title/path
-// text is escaped via mdInline; commit SHAs link to their commit page.
+// renderLedger writes the grouped lifecycle tables. Both are ALWAYS VISIBLE
+// (not collapsed) — the tracking history is the point of the section. Section
+// labels are bold (not H3) so the marker emoji stays normal-sized; ⚠️ flags Open
+// (attention, not alarm) and ✅ flags Resolved. Untrusted title/path text is
+// escaped; commit SHAs link to their commit page.
 func renderLedger(b *strings.Builder, info *PRInfo, entries []LedgerEntry) {
 	var open, resolved []LedgerEntry
 	for _, e := range entries {
@@ -253,8 +251,8 @@ func renderLedger(b *strings.Builder, info *PRInfo, entries []LedgerEntry) {
 
 	if len(open) > 0 {
 		sortLedgerBySeverity(open)
-		fmt.Fprintf(b, "### 🔴 Open (%d)\n\n", len(open))
-		b.WriteString("| Sev | Issue | Location | Opened |\n|-----|-------|----------|--------|\n")
+		fmt.Fprintf(b, "**⚠️ Open (%d)**\n\n", len(open))
+		b.WriteString("| Priority | Issue | Location | Opened |\n|----------|-------|----------|--------|\n")
 		for _, e := range open {
 			fmt.Fprintf(b, "| %s | %s | %s | %s |\n", ledgerSevCell(e, false), ledgerIssue(e), ledgerLocation(info, e), shaLink(info, e.OpenSHA))
 		}
@@ -263,8 +261,8 @@ func renderLedger(b *strings.Builder, info *PRInfo, entries []LedgerEntry) {
 
 	if len(resolved) > 0 {
 		sort.SliceStable(resolved, func(i, j int) bool { return resolved[i].ResAt > resolved[j].ResAt })
-		fmt.Fprintf(b, "<details>\n<summary>✅ Resolved (%d)</summary>\n\n", len(resolved))
-		b.WriteString("| Sev | Issue | Location | Opened → Resolved |\n|-----|-------|----------|-------------------|\n")
+		fmt.Fprintf(b, "**✅ Resolved (%d)**\n\n", len(resolved))
+		b.WriteString("| Priority | Issue | Location | Opened → Resolved |\n|----------|-------|----------|-------------------|\n")
 		shown, extra := resolved, 0
 		if len(shown) > maxResolvedRows {
 			extra = len(shown) - maxResolvedRows
@@ -276,7 +274,7 @@ func renderLedger(b *strings.Builder, info *PRInfo, entries []LedgerEntry) {
 		if extra > 0 {
 			fmt.Fprintf(b, "\n_+%d older resolved finding(s) tracked but not shown._\n", extra)
 		}
-		b.WriteString("\n</details>\n\n")
+		b.WriteString("\n")
 	}
 }
 

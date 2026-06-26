@@ -69,13 +69,41 @@ func startsWithMermaidKeyword(d string) bool {
 // "**What changed:**" lead-in (not an H3, to keep the comment compact). Rendered via
 // mdProse so the model's bullet newlines survive (mdInline would collapse them) while
 // HTML/fence breakout vectors stay neutralized. Empty (after trim) omits it.
+// maxWalkthroughBullets caps the "What changed" summary so it stays a quick,
+// skimmable lead-in above the tracking tables, never a wall of detail.
+const maxWalkthroughBullets = 5
+
 func renderWalkthrough(b *strings.Builder, walkthrough string) {
-	if strings.TrimSpace(walkthrough) == "" {
+	walkthrough = capBullets(strings.TrimSpace(walkthrough), maxWalkthroughBullets)
+	if walkthrough == "" {
 		return
 	}
 	b.WriteString("**What changed:**\n")
 	b.WriteString(mdProse(walkthrough))
 	b.WriteString("\n\n")
+}
+
+// capBullets keeps at most n bullet lines (lines whose trimmed form starts with
+// "-") plus any preceding non-bullet prose, trimming an over-long model
+// walkthrough to a concise lead-in. It STOPS at the (n+1)th bullet and drops it
+// along with everything after — including that bullet's indented continuation
+// lines — so no orphaned fragment of a dropped bullet survives.
+func capBullets(s string, n int) string {
+	if s == "" {
+		return ""
+	}
+	var out []string
+	bullets := 0
+	for _, ln := range strings.Split(s, "\n") {
+		if strings.HasPrefix(strings.TrimSpace(ln), "-") {
+			bullets++
+			if bullets > n {
+				break
+			}
+		}
+		out = append(out, ln)
+	}
+	return strings.TrimSpace(strings.Join(out, "\n"))
 }
 
 // effortSize buckets a PR into S/M/L/XL from file count + total churn: pure

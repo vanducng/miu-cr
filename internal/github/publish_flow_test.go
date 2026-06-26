@@ -163,7 +163,7 @@ func TestRenderSummaryShape(t *testing.T) {
 	// Header chips high-first (empty severity folds to ⚪), finding count, the
 	// runs token seeded to 1, the collapsed internals bullets (Context + files-reviewed
 	// fallback, no diffs), fork note, footer SHA.
-	for _, want := range []string{shieldsCount("P1", 2, "orange"), shieldsCount("P3", 1, "blue"), "4 findings", runsCountToken(1), "<summary>Review reference</summary>", "context-hunks", "**Files** `3`", "fork"} {
+	for _, want := range []string{shieldsCount("P1", 2, "orange"), shieldsCount("P3", 1, "blue"), "4 findings", runsCountToken(1), "<summary>Review reference</summary>", "context-hunks", "**Priority**", "fork"} {
 		if !strings.Contains(out, want) {
 			t.Errorf("summary missing %q:\n%s", want, out)
 		}
