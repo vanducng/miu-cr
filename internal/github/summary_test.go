@@ -115,16 +115,16 @@ func TestRenderSummaryFullChangesTable(t *testing.T) {
 func TestRenderSummaryFullReviewInternals(t *testing.T) {
 	info, diffs, findings := presentationFixture()
 	out := RenderSummaryFull(info, findings, nil, 0, nil, nil, SummaryOptions{Diffs: diffs})
-	// Metadata now lives in a collapsed Review internals details as bullets.
+	// Metadata now lives in a collapsed Review reference details as bullets.
 	for _, want := range []string{
-		"<summary>Agent handoff & review internals</summary>",
+		"<summary>Review reference</summary>",
 		"**Files** `2`",
 		"**Churn** `+12 / −4`",
 		"effort-S-brightgreen",
 		"context-full-brightgreen",
 	} {
 		if !strings.Contains(out, want) {
-			t.Fatalf("want %q in the Review internals block:\n%s", want, out)
+			t.Fatalf("want %q in the Review reference block:\n%s", want, out)
 		}
 	}
 	// The old visible meta line must be gone.
@@ -149,6 +149,9 @@ func TestRenderSummaryHeaderCountsHighFirst(t *testing.T) {
 	want := "**Result:** " + shieldsCount("P1", 2, "orange") + " " + shieldsCount("P2", 1, "yellow") + " " + shieldsCount("P3", 1, "blue") + " · 4 findings"
 	if !strings.Contains(out, want) {
 		t.Fatalf("want count badges (high-first) + total in the quote:\n%s", out)
+	}
+	if !strings.Contains(out, "![P2 | medium | 1]") {
+		t.Fatalf("want the summary badge to include priority, severity, and count:\n%s", out)
 	}
 	if strings.Contains(out, "- high: 2") {
 		t.Fatalf("the old per-severity list must be gone:\n%s", out)
@@ -209,7 +212,7 @@ func TestRenderSummaryFullOrder(t *testing.T) {
 		"## Code Review Summary",
 		"**Result:**", // result line lead
 		"this is the walkthrough lead prose",
-		"<summary>Agent handoff & review internals</summary>",
+		"<summary>Review reference</summary>",
 		"<sub>Reviewed commit",
 	})
 }
@@ -288,11 +291,26 @@ func TestEffortSizeBuckets(t *testing.T) {
 	}
 }
 
+func TestContextBadgeColors(t *testing.T) {
+	for _, tt := range []struct {
+		level string
+		want  string
+	}{
+		{"full", "context-full-brightgreen"},
+		{"hunks_only", "context-hunks_only-yellow"},
+		{"filenames_only", "context-filenames_only-orange"},
+	} {
+		if got := contextBadge(tt.level); !strings.Contains(got, tt.want) {
+			t.Fatalf("contextBadge(%q) = %q, want %q", tt.level, got, tt.want)
+		}
+	}
+}
+
 func TestRenderSummaryFullHandoff(t *testing.T) {
 	info, diffs, _ := presentationFixture()
 	out := RenderSummaryFull(info, nil, nil, 0, nil, nil, SummaryOptions{Diffs: diffs, ReviewID: "rev_abc"})
-	if !strings.Contains(out, "**Hand off to an agent**") {
-		t.Fatalf("want an agent-handoff block:\n%s", out)
+	if !strings.Contains(out, "**Run again**") {
+		t.Fatalf("want a re-run block:\n%s", out)
 	}
 	if !strings.Contains(out, "Run locally: `miucr review --pr https://github.com/o/r/pull/7`") {
 		t.Fatalf("want a copy-paste local run pointer:\n%s", out)
@@ -314,7 +332,7 @@ func TestRenderSummaryHandoffNeverShowsReviewID(t *testing.T) {
 	if strings.Contains(out, "review_id") || strings.Contains(out, "rev_abc") {
 		t.Fatalf("review_id must never appear in the posted summary:\n%s", out)
 	}
-	if !strings.Contains(out, "**Hand off to an agent**") {
+	if !strings.Contains(out, "**Run again**") {
 		t.Fatalf("handoff block must still render:\n%s", out)
 	}
 }
@@ -325,7 +343,7 @@ func TestRenderSummaryFullEmptyFindingsStillClean(t *testing.T) {
 	if !strings.Contains(out, "No_findings-brightgreen") {
 		t.Fatalf("empty-findings review must still render a clean summary:\n%s", out)
 	}
-	if !strings.Contains(out, "Important Files Changed (2)") || !strings.Contains(out, "Hand off to an agent") {
+	if !strings.Contains(out, "Important Files Changed (2)") || !strings.Contains(out, "Run again") {
 		t.Fatalf("blocks must still render with zero findings:\n%s", out)
 	}
 }

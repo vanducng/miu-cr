@@ -72,6 +72,8 @@ type ReviewRequest struct {
 	Timeout      time.Duration
 	ExpandWindow int
 	TokenBudget  int
+	DeepContext  bool
+	ContextHops  int
 	FilterMode   string       // added|diff_context|file|nofilter (default diff_context)
 	WantDiagram  bool         // opt into the mermaid change diagram (default off)
 	Instruction  string       // optional per-review developer steer; injected fenced/context-only into the USER turn
@@ -192,6 +194,8 @@ type PRReviewRequest struct {
 	Extensions   []string
 	ExpandWindow int
 	TokenBudget  int
+	DeepContext  bool
+	ContextHops  int
 	FilterMode   string       // added|diff_context|file|nofilter (default diff_context)
 	MinSeverity  string       // inline-posting floor: none|info|low|medium|high|critical (default keeps current behavior)
 	WantDiagram  bool         // opt into the mermaid change diagram (default off)
@@ -286,6 +290,9 @@ func nudgeIfUnconfigured(apiKey, authToken string) error {
 // unaffected. Pass --token-budget 0 to disable, or a larger value for a
 // big-context model.
 const defaultTokenBudget = 100000
+const deepContextTimeout = 15 * time.Minute
+const defaultDeepContextHops = 2
+const maxContextHops = 5
 
 func reviewCommand(opts *options) *cobra.Command {
 	var (
@@ -305,6 +312,8 @@ func reviewCommand(opts *options) *cobra.Command {
 		model        string
 		expand       int
 		tokenBudget  int
+		deepContext  bool
+		contextHops  int
 		filterMode   string
 		minSeverity  string
 		wantDiagram  bool
@@ -336,6 +345,9 @@ func reviewCommand(opts *options) *cobra.Command {
 			if err := validateMinSeverity(minSeverity); err != nil {
 				return err
 			}
+			if contextHops < 0 || contextHops > maxContextHops {
+				return &CLIError{Code: "config.invalid", Message: fmt.Sprintf("--context-hops must be between 0 and %d", maxContextHops), Exit: 2}
+			}
 			// --mode (review|checks) only steers the PR reporter; it's inert for a
 			// local review, so only validate it when the PR path is in play.
 			if pr != "" {
@@ -365,6 +377,20 @@ func reviewCommand(opts *options) *cobra.Command {
 			if !cmd.Flags().Changed("timeout") {
 				opts.timeout = reviewTimeoutDefault(rcfg)
 			}
+			if deepContext {
+				if !cmd.Flags().Changed("expand") {
+					expand = 20
+				}
+				if !cmd.Flags().Changed("token-budget") {
+					tokenBudget = 0
+				}
+				if !cmd.Flags().Changed("timeout") && rcfg.Timeout == "" {
+					opts.timeout = deepContextTimeout
+				}
+				if !cmd.Flags().Changed("context-hops") {
+					contextHops = defaultDeepContextHops
+				}
+			}
 			prog := newProgress(cmd.ErrOrStderr(), verbose, quiet)
 			var traceSink func(step string, payload any)
 			if traceLive {
@@ -390,6 +416,8 @@ func reviewCommand(opts *options) *cobra.Command {
 					exts:         exts,
 					expand:       expand,
 					tokenBudget:  tokenBudget,
+					deepContext:  deepContext,
+					contextHops:  contextHops,
 					filterMode:   filterMode,
 					minSeverity:  minSeverity,
 					wantDiagram:  wantDiagram,
@@ -427,6 +455,8 @@ func reviewCommand(opts *options) *cobra.Command {
 				Timeout:      opts.timeout,
 				ExpandWindow: expand,
 				TokenBudget:  tokenBudget,
+				DeepContext:  deepContext,
+				ContextHops:  contextHops,
 				FilterMode:   filterMode,
 				WantDiagram:  wantDiagram,
 				Instruction:  instruction,
@@ -491,6 +521,8 @@ func reviewCommand(opts *options) *cobra.Command {
 	f.StringVar(&model, "model", "", "Override the review model (else ANTHROPIC_MODEL/OPENAI_MODEL or pinned default)")
 	f.IntVar(&expand, "expand", 5, "Context lines added above/below each hunk in the new-content window (0 disables)")
 	f.IntVar(&tokenBudget, "token-budget", defaultTokenBudget, "Approximate token budget; over budget degrades context (0 disables)")
+	f.BoolVar(&deepContext, "deep-context", false, "Use heavier context defaults for large reviews: --expand 20, --token-budget 0, --timeout 900s, --context-hops 2 unless those flags are set")
+	f.IntVar(&contextHops, "context-hops", 0, "Related-file context hop depth from changed files (0 disables, max 5)")
 	f.StringVar(&filterMode, "filter-mode", "diff_context", "Inline-eligibility filter on --pr: added|diff_context|file|nofilter (default diff_context; file/nofilter route off-diff findings to the summary/SARIF/local output, never inline)")
 	f.StringVar(&minSeverity, "min-severity", "", "Minimum severity posted INLINE on --pr: none|info|low|medium|high|critical (default keeps current behavior; below-threshold findings still appear in the summary histogram + SARIF, never inline)")
 	f.BoolVar(&wantDiagram, "walkthrough-diagram", false, "Ask the model to also emit an optional mermaid change diagram in the summary (opt-in; diagram quality varies; a malformed/omitted diagram degrades to a plain note)")
@@ -537,6 +569,8 @@ type prRunArgs struct {
 	exts         []string
 	expand       int
 	tokenBudget  int
+	deepContext  bool
+	contextHops  int
 	filterMode   string
 	minSeverity  string
 	wantDiagram  bool
@@ -593,6 +627,8 @@ func runPRReview(cmd *cobra.Command, a prRunArgs) error {
 		Extensions:   a.exts,
 		ExpandWindow: a.expand,
 		TokenBudget:  a.tokenBudget,
+		DeepContext:  a.deepContext,
+		ContextHops:  a.contextHops,
 		FilterMode:   a.filterMode,
 		MinSeverity:  a.minSeverity,
 		WantDiagram:  a.wantDiagram,

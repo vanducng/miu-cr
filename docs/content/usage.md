@@ -158,7 +158,17 @@ miucr review --staged --exclude '**/*_test.go'          # doublestar globs to dr
 
 - `--expand <n>`: context lines added above/below each changed hunk in the new-content window (default `5`; `0` disables).
 - `--token-budget <n>`: approximate token budget; over budget, context degrades through the truncation ladder (default `100000`; pass `0` to disable).
-- `--timeout <dur>`: global operation timeout (default `30s`).
+- `--timeout <dur>`: operation timeout. The root default is `30s`, but `review`
+  uses `300s` by default unless you set `--timeout` or `[review].timeout`.
+- `--deep-context`: heavier defaults for large reviews (`--expand 20`,
+  `--token-budget 0`, `--timeout 900s`, `--context-hops 2`) unless you set
+  those flags explicitly. It also injects root `AGENTS.md` / `CLAUDE.md`
+  context from the reviewed revision when present.
+- `--context-hops <n>`: include related-file context up to `n` hops from the
+  changed files (`0` disables, max `5`). The hop walker reads the reviewed
+  revision, follows Go package imports/reverse imports and basic relative
+  JS/TS/Python imports, and caps files/bytes before the prompt. On fork PRs,
+  root project context and related-file hop context are skipped.
 - `--instruction <text>`: extra free-text steer for THIS review (e.g. "focus on the auth changes"); injected fenced, context-only, and length-capped, so it never redefines the finding schema.
 
 ## Provider flags

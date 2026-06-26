@@ -43,13 +43,15 @@ func priorityBadge(sev string) string {
 // summary chips (same style as the inline priorityBadge, with the count as message).
 func severityCountBadge(sev string, n int) string {
 	_, p, color := severityMeta(sev)
+	label := severityLabel(sev)
 	// Px label carries the severity color (labelColor); the count is neutral grey.
-	return fmt.Sprintf("<sub><sub>![%s %d](https://img.shields.io/badge/%s-%d-lightgrey?labelColor=%s&style=flat)</sub></sub>", p, n, p, n, color)
+	return fmt.Sprintf("<sub><sub>![%s | %s | %d](https://img.shields.io/badge/%s-%s-lightgrey?labelColor=%s&style=flat)</sub></sub>",
+		p, label, n, url.PathEscape(fmt.Sprintf("%s | %s", p, label)), fmt.Sprintf("%d", n), color)
 }
 
 // severityCounts renders the per-level shields count badges for findings, critical/
-// high first (severityOrder), e.g. "![P1 2] ![P3 1]". Unknown severities fold into
-// the info (P4) chip. Returns "" when there are no findings so callers omit the line.
+// high first (severityOrder). Unknown severities fold into the info (P4) chip.
+// Returns "" when there are no findings so callers omit the line.
 func severityCounts(findings []engine.Finding) string {
 	counts := map[string]int{}
 	for _, f := range findings {
@@ -88,7 +90,7 @@ func commitRef(info *PRInfo) string {
 // RenderSummary builds the PR summary upserted as the single miucr issue comment:
 // it leads with ReviewMarker (the owning sentinel) + the hidden runs token, then a
 // `## Code Review Summary` header, the inline `**Result:**` severity-chips line,
-// walkthrough prose, Important Files Changed, the collapsed Review internals
+// walkthrough prose, Important Files Changed, the collapsed Review reference
 // details, and a footer whose `Review attempts: N` carries the relocated count.
 func RenderSummary(info *PRInfo, findings []engine.Finding, stats map[string]any, omittedInline int) string {
 	return RenderSummaryWithOverflow(info, findings, stats, omittedInline, nil, nil)
@@ -168,7 +170,7 @@ func RenderSummaryFull(info *PRInfo, findings []engine.Finding, stats map[string
 
 	renderPresentation(&b, info, findings, opts.Diffs, opts.FileSummaries)
 
-	renderHandoffAndInternals(&b, info, stats, opts.Diffs)
+	renderReviewReference(&b, info, stats, opts.Diffs)
 
 	handoff := ""
 	if info.ReviewCount > 0 {
@@ -190,25 +192,25 @@ func plural(n int) string {
 	return "s"
 }
 
-// renderHandoffAndInternals writes ONE collapsed <details> combining the agent
+// renderReviewReference writes ONE collapsed <details> combining the agent
 // handoff (how to re-run / pick up the review) and the review metadata (Files, Churn,
 // Effort, Context) with a one-line meaning each, so the block is a single secondary
 // section. review_id is NOT shown: it only resolves on the machine + store that ran
 // the review, so it is meaningless in a posted comment (it stays in the JSON envelope).
 // All values are trusted (ints, the PR URL, fixed effort/context enums).
-func renderHandoffAndInternals(b *strings.Builder, info *PRInfo, stats map[string]any, diffs []diff.Diff) {
-	b.WriteString("\n<details>\n<summary>Agent handoff & review internals</summary>\n\n")
+func renderReviewReference(b *strings.Builder, info *PRInfo, stats map[string]any, diffs []diff.Diff) {
+	b.WriteString("\n<details>\n<summary>Review reference</summary>\n\n")
 
 	// Handoff only makes sense with a real re-run URL; without one (the legacy non-PR
 	// body) skip it and keep just the internals. A bare `<pr-url>` placeholder is not
 	// actionable, so it is never emitted.
 	if url := prURL(info); url != "" {
-		b.WriteString("**Hand off to an agent** · pick up or re-run this review\n\n")
+		b.WriteString("**Run again** · pick up or re-run this review\n\n")
 		fmt.Fprintf(b, "- Run locally: `miucr review --pr %s`\n", strings.ReplaceAll(url, "`", "'"))
 		b.WriteString("- MCP: call `review_run` from an agent host (add `-o json` for a machine-readable envelope).\n\n")
 	}
 
-	b.WriteString("**Review internals** · how miucr sized this review\n\n")
+	b.WriteString("**Review context** · how miucr sized this review\n\n")
 	files, adds, dels := diffStats(diffs)
 	if files == 0 {
 		files = statIntVal(stats, "files_reviewed")
@@ -233,22 +235,37 @@ func effortBadge(size string) string {
 	return fmt.Sprintf("<sub><sub>![%s](https://img.shields.io/badge/effort-%s-%s?style=flat)</sub></sub>", size, size, color)
 }
 
-// contextBadge renders the diff-context level (full vs truncated) as a shields badge:
-// green when the model saw the whole diff, yellow when it was truncated.
 func contextBadge(level string) string {
 	color := "yellow"
-	if level == "full" {
+	switch level {
+	case "full":
 		color = "brightgreen"
+	case "filenames_only":
+		color = "orange"
 	}
 	return fmt.Sprintf("<sub><sub>![%s](https://img.shields.io/badge/context-%s-%s?style=flat)</sub></sub>", level, level, color)
 }
 
 // contextNote explains the context level in one line.
 func contextNote(level string) string {
-	if level == "full" {
+	switch level {
+	case "full":
 		return "the model saw the complete diff"
+	case "hunks_only", "hunks":
+		return "the model saw changed diff hunks; expanded surrounding code was dropped to fit context"
+	case "filenames_only":
+		return "the model saw changed filenames only; diff content did not fit context"
+	default:
+		return "context level reported by the review run"
 	}
-	return "the diff was truncated to fit the model context"
+}
+
+func severityLabel(sev string) string {
+	s := strings.ToLower(strings.TrimSpace(sev))
+	if known(s) {
+		return s
+	}
+	return "info"
 }
 
 // diffStats sums the changed-file count and total insertions/deletions, skipping

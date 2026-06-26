@@ -6,6 +6,7 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/vanducng/miu-cr/internal/config"
 )
@@ -151,6 +152,20 @@ gate = "low"
 	}
 	if r2.gotReq.Gate != "critical" {
 		t.Fatalf("explicit --gate should win, gotReq.Gate=%q", r2.gotReq.Gate)
+	}
+}
+
+func TestReviewTimeoutConfigWinsOverDeepContext(t *testing.T) {
+	writeUserConfig(t, `[review]
+timeout = "600s"
+`)
+	r := &fakeReviewer{outcome: ReviewOutcome{Findings: []ReviewFinding{}}}
+	_, err := runReviewKeepHome(t, r, "--staged", "--deep-context")
+	if err != nil {
+		t.Fatalf("review: %v", err)
+	}
+	if r.gotReq.Timeout != 600*time.Second {
+		t.Fatalf("[review].timeout should win over --deep-context default, got %s", r.gotReq.Timeout)
 	}
 }
 
