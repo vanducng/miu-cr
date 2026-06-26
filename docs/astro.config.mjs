@@ -49,7 +49,7 @@ export default defineConfig({
         {
           label: 'Related docs',
           items: [
-            { label: 'miudb', link: 'https://miudb.vanducng.dev', attrs: { target: '_blank' } },
+            { label: 'miu-db', link: 'https://db.miu.sh', attrs: { target: '_blank' } },
             { label: 'dotfiles', link: 'https://dotfiles.vanducng.dev', attrs: { target: '_blank' } },
             { label: 'skills', link: 'https://skills.vanducng.dev', attrs: { target: '_blank' } },
             { label: 'vd-cli', link: 'https://vd-cli.vanducng.dev', attrs: { target: '_blank' } },
