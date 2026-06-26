@@ -55,6 +55,13 @@ comment with a new marker); subsequent re-runs dedupe normally. On a
 first M5 review **manually** (or off-hours) to absorb the one-time re-post before
 the next scheduled run.
 
+## [0.47.1](https://github.com/vanducng/miu-cr/compare/v0.47.0...v0.47.1) (2026-06-26)
+
+
+### Bug Fixes
+
+* **review:** define priority severity rubric ([#133](https://github.com/vanducng/miu-cr/issues/133)) ([63e168e](https://github.com/vanducng/miu-cr/commit/63e168e10a58878e8db3a0bea0e5ef4a869c7377))
+
 ## [0.47.0](https://github.com/vanducng/miu-cr/compare/v0.46.0...v0.47.0) (2026-06-26)
 
 
