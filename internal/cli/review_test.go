@@ -270,8 +270,8 @@ func TestReviewDeepContextDefaults(t *testing.T) {
 	if _, err := runReview(t, r, "--staged", "--deep-context"); err != nil {
 		t.Fatalf("review: %v", err)
 	}
-	if r.gotReq.ExpandWindow != 20 || r.gotReq.TokenBudget != 0 || r.gotReq.Timeout != deepContextTimeout || !r.gotReq.DeepContext || r.gotReq.ContextHops != defaultDeepContextHops {
-		t.Fatalf("deep defaults = expand %d budget %d timeout %s deep %v hops %d", r.gotReq.ExpandWindow, r.gotReq.TokenBudget, r.gotReq.Timeout, r.gotReq.DeepContext, r.gotReq.ContextHops)
+	if r.gotReq.ExpandWindow != 20 || r.gotReq.TokenBudget != 0 || r.gotReq.Timeout != deepContextTimeout || !r.gotReq.DeepContext || !r.gotReq.ContextHopsAuto || r.gotReq.ContextHops != 0 {
+		t.Fatalf("deep defaults = expand %d budget %d timeout %s deep %v auto %v hops %d", r.gotReq.ExpandWindow, r.gotReq.TokenBudget, r.gotReq.Timeout, r.gotReq.DeepContext, r.gotReq.ContextHopsAuto, r.gotReq.ContextHops)
 	}
 
 	r = &fakeReviewer{outcome: ReviewOutcome{Findings: []ReviewFinding{}}}
@@ -294,8 +294,8 @@ func TestReviewDeepContextDefaults(t *testing.T) {
 	if err := cmd.Execute(); err != nil {
 		t.Fatalf("review: %v", err)
 	}
-	if r.gotReq.ExpandWindow != 7 || r.gotReq.TokenBudget != 123 || r.gotReq.Timeout != 42*time.Second || r.gotReq.ContextHops != 4 {
-		t.Fatalf("explicit flags = expand %d budget %d timeout %s hops %d", r.gotReq.ExpandWindow, r.gotReq.TokenBudget, r.gotReq.Timeout, r.gotReq.ContextHops)
+	if r.gotReq.ExpandWindow != 7 || r.gotReq.TokenBudget != 123 || r.gotReq.Timeout != 42*time.Second || r.gotReq.ContextHopsAuto || r.gotReq.ContextHops != 4 {
+		t.Fatalf("explicit flags = expand %d budget %d timeout %s auto %v hops %d", r.gotReq.ExpandWindow, r.gotReq.TokenBudget, r.gotReq.Timeout, r.gotReq.ContextHopsAuto, r.gotReq.ContextHops)
 	}
 }
 

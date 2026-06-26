@@ -318,8 +318,9 @@ type Request struct {
 	// AgentContext so the diagram instruction rides the USER turn; OFF is byte-identical.
 	WantDiagram bool
 
-	ProjectContext bool
-	ContextHops    int
+	ProjectContext  bool
+	ContextHops     int
+	ContextHopsAuto bool
 
 	// Instruction is the optional per-review developer steer (--instruction). Threaded
 	// onto AgentContext so it rides the USER turn; empty is byte-identical. LOCKSTEP:
@@ -483,9 +484,13 @@ func (e *Engine) Review(ctx stdctx.Context, req Request) (ReviewResult, error) {
 	if req.ProjectContext {
 		projectContext, projectContextFileCount, projectContextTruncated = e.loadProjectContext(ctx, req.RepoDir, rev)
 	}
+	relatedHops := req.ContextHops
+	if req.ContextHopsAuto {
+		relatedHops = autoContextHops(selected)
+	}
 	related := enginectx.RelatedResult{}
-	if req.ContextHops > 0 {
-		related = enginectx.BuildRelatedContext(ctx, req.RepoDir, rev, selected, e.Runner, enginectx.RelatedOptions{HopDepth: req.ContextHops})
+	if relatedHops > 0 {
+		related = enginectx.BuildRelatedContext(ctx, req.RepoDir, rev, selected, e.Runner, enginectx.RelatedOptions{HopDepth: relatedHops})
 	}
 
 	trace.SetModel(req.Provider, req.Model)
@@ -534,7 +539,7 @@ func (e *Engine) Review(ctx stdctx.Context, req Request) (ReviewResult, error) {
 		stats["project_context_files"] = float64(projectContextFileCount)
 		stats["project_context_truncated"] = projectContextTruncated
 	}
-	if req.ContextHops > 0 {
+	if relatedHops > 0 {
 		stats["related_context_files"] = float64(len(related.Files))
 		stats["related_context_hops"] = float64(related.Hops)
 		stats["related_context_truncated"] = related.Truncated
@@ -584,6 +589,21 @@ func (e *Engine) Review(ctx stdctx.Context, req Request) (ReviewResult, error) {
 	}
 
 	return result, nil
+}
+
+func autoContextHops(selected []diff.Diff) int {
+	var churn int64
+	for _, d := range selected {
+		churn += d.Insertions + d.Deletions
+	}
+	switch {
+	case len(selected) >= 25 || churn >= 800:
+		return 5
+	case len(selected) >= 10 || churn >= 300:
+		return 3
+	default:
+		return 2
+	}
 }
 
 // buildRules selects the loaded rules against the changed paths and renders the

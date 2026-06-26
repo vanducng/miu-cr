@@ -99,4 +99,10 @@ func TestContextHopsForPRDropsOnFork(t *testing.T) {
 	if got := contextHopsForPR(2, true); got != 0 {
 		t.Fatalf("fork ContextHops = %d, want 0", got)
 	}
+	if !contextHopsAutoForPR(true, false) {
+		t.Fatal("non-fork auto ContextHops should stay enabled")
+	}
+	if contextHopsAutoForPR(true, true) {
+		t.Fatal("fork auto ContextHops should be disabled")
+	}
 }

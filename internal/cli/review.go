@@ -55,30 +55,31 @@ func classifyReviewErr(err error, timeout time.Duration) error {
 // Reviewer. It mirrors engine.Request but lives in cli so the engine (which
 // transitively imports cli for CLIError) is not imported here, avoiding a cycle.
 type ReviewRequest struct {
-	Staged       bool
-	From         string
-	To           string
-	Commit       string
-	Gate         string
-	RepoDir      string
-	IncludeGlobs []string
-	ExcludeGlobs []string
-	Extensions   []string
-	Provider     string
-	APIKey       string
-	BaseURL      string
-	AuthToken    string
-	Model        string
-	Timeout      time.Duration
-	ExpandWindow int
-	TokenBudget  int
-	DeepContext  bool
-	ContextHops  int
-	FilterMode   string       // added|diff_context|file|nofilter (default diff_context)
-	WantDiagram  bool         // opt into the mermaid change diagram (default off)
-	Instruction  string       // optional per-review developer steer; injected fenced/context-only into the USER turn
-	NoSave       bool         // opt out of persisting this run to the local history store
-	Progress     func(string) // nil = silent; stderr milestones, never the stdout envelope
+	Staged          bool
+	From            string
+	To              string
+	Commit          string
+	Gate            string
+	RepoDir         string
+	IncludeGlobs    []string
+	ExcludeGlobs    []string
+	Extensions      []string
+	Provider        string
+	APIKey          string
+	BaseURL         string
+	AuthToken       string
+	Model           string
+	Timeout         time.Duration
+	ExpandWindow    int
+	TokenBudget     int
+	DeepContext     bool
+	ContextHops     int
+	ContextHopsAuto bool
+	FilterMode      string       // added|diff_context|file|nofilter (default diff_context)
+	WantDiagram     bool         // opt into the mermaid change diagram (default off)
+	Instruction     string       // optional per-review developer steer; injected fenced/context-only into the USER turn
+	NoSave          bool         // opt out of persisting this run to the local history store
+	Progress        func(string) // nil = silent; stderr milestones, never the stdout envelope
 	// TraceSink, when non-nil, streams each captured trace step (system prompt, diff
 	// meta, selected files, injected rules, prompts, response, tool calls) live to
 	// stderr as NDJSON (--trace). Local-only; distinct from Progress; the stdout
@@ -189,22 +190,23 @@ type PRReviewRequest struct {
 	Model        string
 	Timeout      time.Duration
 
-	IncludeGlobs []string
-	ExcludeGlobs []string
-	Extensions   []string
-	ExpandWindow int
-	TokenBudget  int
-	DeepContext  bool
-	ContextHops  int
-	FilterMode   string       // added|diff_context|file|nofilter (default diff_context)
-	MinSeverity  string       // inline-posting floor: none|info|low|medium|high|critical (default keeps current behavior)
-	WantDiagram  bool         // opt into the mermaid change diagram (default off)
-	Instruction  string       // optional per-review developer steer; injected fenced/context-only into the USER turn
-	Conversation bool         // opt into fetching the prior PR conversation; injected fenced/context-only, Untrusted, dropped on fork PRs
-	Mode         string       // review (default: inline+summary) | checks (GitHub Checks-API reporter)
-	NoSave       bool         // opt out of persisting this run to the local history store
-	Force        bool         // re-review even when the head SHA is unchanged since the last review (bypass the incremental skip)
-	Progress     func(string) // nil = silent; stderr milestones, never the stdout envelope
+	IncludeGlobs    []string
+	ExcludeGlobs    []string
+	Extensions      []string
+	ExpandWindow    int
+	TokenBudget     int
+	DeepContext     bool
+	ContextHops     int
+	ContextHopsAuto bool
+	FilterMode      string       // added|diff_context|file|nofilter (default diff_context)
+	MinSeverity     string       // inline-posting floor: none|info|low|medium|high|critical (default keeps current behavior)
+	WantDiagram     bool         // opt into the mermaid change diagram (default off)
+	Instruction     string       // optional per-review developer steer; injected fenced/context-only into the USER turn
+	Conversation    bool         // opt into fetching the prior PR conversation; injected fenced/context-only, Untrusted, dropped on fork PRs
+	Mode            string       // review (default: inline+summary) | checks (GitHub Checks-API reporter)
+	NoSave          bool         // opt out of persisting this run to the local history store
+	Force           bool         // re-review even when the head SHA is unchanged since the last review (bypass the incremental skip)
+	Progress        func(string) // nil = silent; stderr milestones, never the stdout envelope
 	// TraceSink streams live trace steps to stderr as NDJSON (--trace); nil = off.
 	TraceSink func(step string, payload any)
 	// ActionsOut is the command's stdout writer (cmd.OutOrStdout()), used ONLY by the
@@ -291,7 +293,6 @@ func nudgeIfUnconfigured(apiKey, authToken string) error {
 // big-context model.
 const defaultTokenBudget = 100000
 const deepContextTimeout = 15 * time.Minute
-const defaultDeepContextHops = 2
 const maxContextHops = 5
 
 func reviewCommand(opts *options) *cobra.Command {
@@ -388,9 +389,10 @@ func reviewCommand(opts *options) *cobra.Command {
 					opts.timeout = deepContextTimeout
 				}
 				if !cmd.Flags().Changed("context-hops") {
-					contextHops = defaultDeepContextHops
+					contextHops = 0
 				}
 			}
+			contextHopsAuto := deepContext && !cmd.Flags().Changed("context-hops")
 			prog := newProgress(cmd.ErrOrStderr(), verbose, quiet)
 			var traceSink func(step string, payload any)
 			if traceLive {
@@ -398,37 +400,38 @@ func reviewCommand(opts *options) *cobra.Command {
 			}
 			if pr != "" {
 				return runPRReview(cmd, prRunArgs{
-					ref:          pr,
-					token:        token,
-					post:         post && !noPost,
-					suggest:      suggest,
-					patchRepair:  patchRepair,
-					approveClean: approveClean,
-					gate:         gate,
-					provider:     provider,
-					apiKey:       apiKey,
-					baseURL:      baseURL,
-					authToken:    authToken,
-					model:        model,
-					timeout:      opts.timeout,
-					include:      include,
-					exclude:      exclude,
-					exts:         exts,
-					expand:       expand,
-					tokenBudget:  tokenBudget,
-					deepContext:  deepContext,
-					contextHops:  contextHops,
-					filterMode:   filterMode,
-					minSeverity:  minSeverity,
-					wantDiagram:  wantDiagram,
-					instruction:  instruction,
-					conversation: conversation,
-					mode:         mode,
-					sarifOut:     sarifOut,
-					noSave:       noSave,
-					force:        force,
-					progress:     prog,
-					traceSink:    traceSink,
+					ref:             pr,
+					token:           token,
+					post:            post && !noPost,
+					suggest:         suggest,
+					patchRepair:     patchRepair,
+					approveClean:    approveClean,
+					gate:            gate,
+					provider:        provider,
+					apiKey:          apiKey,
+					baseURL:         baseURL,
+					authToken:       authToken,
+					model:           model,
+					timeout:         opts.timeout,
+					include:         include,
+					exclude:         exclude,
+					exts:            exts,
+					expand:          expand,
+					tokenBudget:     tokenBudget,
+					deepContext:     deepContext,
+					contextHops:     contextHops,
+					contextHopsAuto: contextHopsAuto,
+					filterMode:      filterMode,
+					minSeverity:     minSeverity,
+					wantDiagram:     wantDiagram,
+					instruction:     instruction,
+					conversation:    conversation,
+					mode:            mode,
+					sarifOut:        sarifOut,
+					noSave:          noSave,
+					force:           force,
+					progress:        prog,
+					traceSink:       traceSink,
 				})
 			}
 			if err := nudgeIfUnconfigured(apiKey, authToken); err != nil {
@@ -438,31 +441,32 @@ func reviewCommand(opts *options) *cobra.Command {
 				return &CLIError{Code: "review.not_wired", Message: "review engine not wired", Exit: 1}
 			}
 			req := ReviewRequest{
-				Staged:       staged,
-				From:         from,
-				To:           to,
-				Commit:       commit,
-				Gate:         gate,
-				RepoDir:      repoDir,
-				IncludeGlobs: include,
-				ExcludeGlobs: exclude,
-				Extensions:   exts,
-				Provider:     provider,
-				APIKey:       apiKey,
-				BaseURL:      baseURL,
-				AuthToken:    authToken,
-				Model:        model,
-				Timeout:      opts.timeout,
-				ExpandWindow: expand,
-				TokenBudget:  tokenBudget,
-				DeepContext:  deepContext,
-				ContextHops:  contextHops,
-				FilterMode:   filterMode,
-				WantDiagram:  wantDiagram,
-				Instruction:  instruction,
-				NoSave:       noSave,
-				Progress:     prog,
-				TraceSink:    traceSink,
+				Staged:          staged,
+				From:            from,
+				To:              to,
+				Commit:          commit,
+				Gate:            gate,
+				RepoDir:         repoDir,
+				IncludeGlobs:    include,
+				ExcludeGlobs:    exclude,
+				Extensions:      exts,
+				Provider:        provider,
+				APIKey:          apiKey,
+				BaseURL:         baseURL,
+				AuthToken:       authToken,
+				Model:           model,
+				Timeout:         opts.timeout,
+				ExpandWindow:    expand,
+				TokenBudget:     tokenBudget,
+				DeepContext:     deepContext,
+				ContextHops:     contextHops,
+				ContextHopsAuto: contextHopsAuto,
+				FilterMode:      filterMode,
+				WantDiagram:     wantDiagram,
+				Instruction:     instruction,
+				NoSave:          noSave,
+				Progress:        prog,
+				TraceSink:       traceSink,
 			}
 			ctx := cmd.Context()
 			if opts.timeout > 0 {
@@ -521,7 +525,7 @@ func reviewCommand(opts *options) *cobra.Command {
 	f.StringVar(&model, "model", "", "Override the review model (else ANTHROPIC_MODEL/OPENAI_MODEL or pinned default)")
 	f.IntVar(&expand, "expand", 5, "Context lines added above/below each hunk in the new-content window (0 disables)")
 	f.IntVar(&tokenBudget, "token-budget", defaultTokenBudget, "Approximate token budget; over budget degrades context (0 disables)")
-	f.BoolVar(&deepContext, "deep-context", false, "Use heavier context defaults for large reviews: --expand 20, --token-budget 0, --timeout 900s, --context-hops 2 unless those flags are set")
+	f.BoolVar(&deepContext, "deep-context", false, "Use heavier context defaults for large reviews: --expand 20, --token-budget 0, --timeout 900s, auto --context-hops unless those flags are set")
 	f.IntVar(&contextHops, "context-hops", 0, "Related-file context hop depth from changed files (0 disables, max 5)")
 	f.StringVar(&filterMode, "filter-mode", "diff_context", "Inline-eligibility filter on --pr: added|diff_context|file|nofilter (default diff_context; file/nofilter route off-diff findings to the summary/SARIF/local output, never inline)")
 	f.StringVar(&minSeverity, "min-severity", "", "Minimum severity posted INLINE on --pr: none|info|low|medium|high|critical (default keeps current behavior; below-threshold findings still appear in the summary histogram + SARIF, never inline)")
@@ -564,24 +568,25 @@ type prRunArgs struct {
 	model        string
 	timeout      time.Duration
 
-	include      []string
-	exclude      []string
-	exts         []string
-	expand       int
-	tokenBudget  int
-	deepContext  bool
-	contextHops  int
-	filterMode   string
-	minSeverity  string
-	wantDiagram  bool
-	instruction  string
-	conversation bool
-	mode         string
-	sarifOut     string
-	noSave       bool
-	force        bool
-	progress     func(string)
-	traceSink    func(step string, payload any)
+	include         []string
+	exclude         []string
+	exts            []string
+	expand          int
+	tokenBudget     int
+	deepContext     bool
+	contextHops     int
+	contextHopsAuto bool
+	filterMode      string
+	minSeverity     string
+	wantDiagram     bool
+	instruction     string
+	conversation    bool
+	mode            string
+	sarifOut        string
+	noSave          bool
+	force           bool
+	progress        func(string)
+	traceSink       func(step string, payload any)
 }
 
 // runPRReview drives the --pr path: resolve the GitHub token (empty-tolerant for
@@ -609,37 +614,38 @@ func runPRReview(cmd *cobra.Command, a prRunArgs) error {
 	}
 
 	out, err := prReviewer.ReviewPR(ctx, PRReviewRequest{
-		Ref:          a.ref,
-		Token:        ghToken,
-		Post:         a.post,
-		Suggest:      a.suggest,
-		PatchRepair:  a.patchRepair,
-		ApproveClean: a.approveClean,
-		Gate:         a.gate,
-		Provider:     a.provider,
-		APIKey:       a.apiKey,
-		BaseURL:      a.baseURL,
-		AuthToken:    a.authToken,
-		Model:        a.model,
-		Timeout:      a.timeout,
-		IncludeGlobs: a.include,
-		ExcludeGlobs: a.exclude,
-		Extensions:   a.exts,
-		ExpandWindow: a.expand,
-		TokenBudget:  a.tokenBudget,
-		DeepContext:  a.deepContext,
-		ContextHops:  a.contextHops,
-		FilterMode:   a.filterMode,
-		MinSeverity:  a.minSeverity,
-		WantDiagram:  a.wantDiagram,
-		Instruction:  a.instruction,
-		Conversation: a.conversation,
-		Mode:         a.mode,
-		NoSave:       a.noSave,
-		Force:        a.force,
-		Progress:     a.progress,
-		TraceSink:    a.traceSink,
-		ActionsOut:   cmd.OutOrStdout(),
+		Ref:             a.ref,
+		Token:           ghToken,
+		Post:            a.post,
+		Suggest:         a.suggest,
+		PatchRepair:     a.patchRepair,
+		ApproveClean:    a.approveClean,
+		Gate:            a.gate,
+		Provider:        a.provider,
+		APIKey:          a.apiKey,
+		BaseURL:         a.baseURL,
+		AuthToken:       a.authToken,
+		Model:           a.model,
+		Timeout:         a.timeout,
+		IncludeGlobs:    a.include,
+		ExcludeGlobs:    a.exclude,
+		Extensions:      a.exts,
+		ExpandWindow:    a.expand,
+		TokenBudget:     a.tokenBudget,
+		DeepContext:     a.deepContext,
+		ContextHops:     a.contextHops,
+		ContextHopsAuto: a.contextHopsAuto,
+		FilterMode:      a.filterMode,
+		MinSeverity:     a.minSeverity,
+		WantDiagram:     a.wantDiagram,
+		Instruction:     a.instruction,
+		Conversation:    a.conversation,
+		Mode:            a.mode,
+		NoSave:          a.noSave,
+		Force:           a.force,
+		Progress:        a.progress,
+		TraceSink:       a.traceSink,
+		ActionsOut:      cmd.OutOrStdout(),
 	})
 	if err != nil {
 		return classifyReviewErr(err, a.timeout)

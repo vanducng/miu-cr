@@ -34,12 +34,12 @@ The reviewed *revision* travels with the diff so later stages read the exact sam
 `AssembleContext` builds the exact text the model sees, deterministic for a fixed diff set. Per file it emits the diff hunks plus a **line-numbered new-content window** around each change (`--expand` lines on each side).
 
 With `--deep-context`, the review also injects root `AGENTS.md` / `CLAUDE.md`
-from the reviewed revision (not the live worktree) when present. With
-`--context-hops <n>`, it adds capped related-file context up to `n` hops from the
-changed files, following Go package imports/reverse imports and basic relative
-JS/TS/Python imports. Related files are context only; findings must still target
-changed files in the diff. Fork PRs skip root project files and hop-expanded
-related files.
+from the reviewed revision (not the live worktree) when present and chooses a
+small related-file hop depth from the selected file count and churn. With
+`--context-hops <n>`, that auto depth is overridden. Hop context follows Go
+package imports/reverse imports and basic relative JS/TS/Python imports.
+Related files are context only; findings must still target changed files in the
+diff. Fork PRs skip root project files and hop-expanded related files.
 
 When `--token-budget` is set and the full context exceeds it, assembly degrades down a **truncation ladder**, recording the level it landed on in `stats.truncation_level`:
 
