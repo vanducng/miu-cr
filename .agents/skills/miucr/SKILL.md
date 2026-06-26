@@ -537,8 +537,8 @@ See the effective config any time with `miucr config show` (below).
 **Provider resolution**: `auto` picks OpenAI when `OPENAI_API_KEY` is set and no Anthropic credential is
 present, else `default_provider` (Anthropic). `auth` is the credential mechanism: `bearer` (Anthropic-compatible
 gateway Authorization header), `api_key` (provider key slot), `oauth` (OpenAI `miucr login`; reject static profile
-credentials). Profile source precedence: `auth_token` > non-empty `auth_env` > `auth_command`; prefer
-`auth_env`/`auth_command` so secrets stay out of config. OpenAI order when `auth` is omitted: explicit `--api-key` >
+credentials). Profile source precedence: `auth_token` > non-empty `auth_env` > `auth_command`; a selected
+`auth_command` failure is fatal, not an OAuth/env fallback. Prefer `auth_env`/`auth_command` so secrets stay out of config. OpenAI order when `auth` is omitted: explicit `--api-key` >
 profile key > cached OAuth (`miucr login`, codex/ChatGPT-plan backend) > ambient `OPENAI_API_KEY`.
 Env: Anthropic = `ANTHROPIC_API_KEY` / `ANTHROPIC_AUTH_TOKEN`
 (Bearer, for compatible gateways) / `ANTHROPIC_BASE_URL` / `ANTHROPIC_MODEL` (default `claude-sonnet-4-5-20250929`);

@@ -405,8 +405,11 @@ func runAuthCommand(ctx stdctx.Context, argv []string) (string, error) {
 	cmd.Stderr = &stderr
 	err := cmd.Run()
 	if err != nil {
-		if ctx.Err() != nil {
+		switch ctx.Err() {
+		case stdctx.DeadlineExceeded:
 			return "", &clierr.CLIError{Code: "agent.auth_command_failed", Message: "auth_command timed out", Hint: "make the credential command non-interactive or increase shell/keychain availability", Exit: 1, Cause: err}
+		case stdctx.Canceled:
+			return "", &clierr.CLIError{Code: "agent.auth_command_cancelled", Message: "auth_command cancelled", Hint: "the parent context was cancelled", Exit: 1, Cause: err}
 		}
 		msg := "auth_command failed"
 		var exitErr *exec.ExitError

@@ -31,7 +31,7 @@ schema, named-profile examples (z.ai/GLM, a generic OpenAI-compatible gateway),
 and the full resolution matrix.
 
 :::caution[Prefer `auth_env` or `auth_command` over `auth_token`]
-A profile credential can be `auth_env` (the **name** of an env var), `auth_command` (an argv command that prints one token line), or `auth_token` (a **literal** token). Prefer `auth_env` or `auth_command`: with `auth_token` the secret is stored **in plaintext on disk** in `config.toml`. Precedence is `auth_token` > non-empty `auth_env` > `auth_command`, and miu-cr prints a one-time stderr warning whenever a plaintext `auth_token` is used.
+A profile credential can be `auth_env` (the **name** of an env var), `auth_command` (an argv command that prints one token line), or `auth_token` (a **literal** token). Prefer `auth_env` or `auth_command`: with `auth_token` the secret is stored **in plaintext on disk** in `config.toml`. Precedence is `auth_token` > non-empty `auth_env` > `auth_command`; a selected command failure is fatal so miu-cr does not silently switch to another auth path. miu-cr prints a one-time stderr warning whenever a plaintext `auth_token` is used.
 :::
 
 :::note[Migrating from `ZAI_API_KEY`]

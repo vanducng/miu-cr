@@ -311,6 +311,63 @@ func TestResolveOpenAIAuthCommandAPIKey(t *testing.T) {
 	}
 }
 
+func TestResolveOpenAIAuthCommandFailureDoesNotUseOAuth(t *testing.T) {
+	clearProviderEnv(t)
+	called := false
+	resolver := func(context.Context) (OAuthCredential, bool, error) {
+		called = true
+		return OAuthCredential{AccessToken: "oauth-tok"}, true, nil
+	}
+	cfg := config.Merge(config.Defaults(), config.Config{
+		Providers: map[string]config.Provider{
+			"gw": {
+				Kind:        config.KindOpenAI,
+				BaseURL:     "https://gw.example/v1",
+				Model:       "m",
+				AuthCommand: credentialCommand(t, "printf 'locked secret store\\n' >&2\nexit 7\n"),
+			},
+		},
+	})
+	_, err := resolveWith(cfg, ResolveInput{Provider: "gw", OAuthResolver: resolver})
+	var cerr *clierr.CLIError
+	if !errors.As(err, &cerr) || cerr.Code != "agent.auth_command_failed" {
+		t.Fatalf("expected auth_command failure, got %v", err)
+	}
+	if called {
+		t.Fatal("failing auth_command must not silently fall back to OAuth")
+	}
+}
+
+func TestRunAuthCommandRejectsMultiline(t *testing.T) {
+	_, err := runAuthCommand(context.Background(), credentialCommand(t, "printf 'one\\ntwo\\n'\n"))
+	var cerr *clierr.CLIError
+	if !errors.As(err, &cerr) || cerr.Code != "agent.auth_command_failed" || !strings.Contains(cerr.Message, "multiple lines") {
+		t.Fatalf("expected multiline auth_command failure, got %v", err)
+	}
+}
+
+func TestRunAuthCommandRedactsStderr(t *testing.T) {
+	const leaked = "synthetic-secret-value-123456"
+	_, err := runAuthCommand(context.Background(), credentialCommand(t, "printf 'x-api-key: "+leaked+"\\n' >&2\nexit 7\n"))
+	var cerr *clierr.CLIError
+	if !errors.As(err, &cerr) || cerr.Code != "agent.auth_command_failed" {
+		t.Fatalf("expected auth_command failure, got %v", err)
+	}
+	if strings.Contains(cerr.Message, leaked) {
+		t.Fatalf("stderr secret leaked: %q", cerr.Message)
+	}
+}
+
+func TestRunAuthCommandParentCancel(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+	_, err := runAuthCommand(ctx, credentialCommand(t, "sleep 5\n"))
+	var cerr *clierr.CLIError
+	if !errors.As(err, &cerr) || cerr.Code != "agent.auth_command_cancelled" {
+		t.Fatalf("expected auth_command_cancelled, got %v", err)
+	}
+}
+
 func TestResolveOpenAIBearerRejected(t *testing.T) {
 	clearProviderEnv(t)
 	cfg := config.Defaults()
