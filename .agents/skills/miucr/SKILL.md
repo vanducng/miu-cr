@@ -17,6 +17,7 @@ proposing fixes). It runs four ways:
 
 **Review behavior worth knowing (design choices that prevent noise):**
 - **One upserted summary, posted first.** `--post` writes ONE summary *issue comment*, edited in place on re-runs (never stacked), and posts it BEFORE the inline review so it anchors on top (overview → details). Inline findings are a separate PR review. `review_id` is NOT shown in the comment (it only resolves on the local store; it stays in the JSON envelope).
+- **The summary is a per-finding lifecycle ledger, not just the latest run.** It renders a grouped **🔴 Open** table + a collapsed **✅ Resolved** table, each finding tracked by its line-independent fingerprint across commits: status (`open` / `resolved` / `reopened`), the **origin commit** it was first raised on and the **resolved commit** it disappeared on (both linked), **severity before→after** (escalation shown `🟡→🔴`, a fix shown `🟠→✅`), and first-seen / resolved timestamps. A clean review shows **Review passed** (not "No findings"). The footer is always the latest reviewed commit + **Last reviewed `<UTC>`** + the miu-cr release. Lifecycle state is **storeless**: it lives in a hidden `<!-- miu-cr-ledger:<base64> -->` marker inside the comment (like the runs counter), so it survives ephemeral CI with no DB. A finding resolves only when it is absent AND its file is still in the diff (absence off-diff ≠ fix).
 - **One-click suggestions are conservative + model-controlled.** `--suggest` emits a native GitHub ` ```suggestion ` block ONLY when the patch *deterministically* replaces the exact anchored line(s) AND the model is certain of a grounded mechanical fix (a cited rule or an obvious best practice). It NEVER guesses an unverifiable value (a URL, path, route, ID, version, config key, API signature); such concerns become a verification-question in the rationale instead. `--patch-repair` (requires `--suggest`) runs one focused 2nd LLM pass to recover a near-miss single-line patch. `--approve-clean` submits APPROVE only on a clean, non-fork, trusted-author PR.
 - **`-o pretty`** is the human-readable local format; **`-o json`** is for agents; `-o sarif` for editors/CI.
 - **Multi-provider profiles.** Add a named provider (e.g. z.ai/glm) with `config set providers.<name>.{kind,base_url,model,auth_env}`; select with `--provider <name>`. Built-in kinds: `anthropic`, `openai` (ChatGPT-plan OAuth via `miucr login`). Transient GitHub/network errors auto-retry with backoff.
@@ -259,7 +260,12 @@ So a re-run **updates the single summary** instead of stacking a review per comm
 `created` (first summary issue comment), `edited` (upserted in place on a re-run), `fork_fallback` (a fork
 PR lacked comment-write scope, degraded, no hard fail), or `none` (`--no-post`, `--mode checks`, or a
 clean no-summary run). A same-commit `--post` re-run now **edits** the summary (no longer skipped);
-per-comment `<!-- miucr:fp=... -->` line-free fingerprints prevent inline dupes across commits.
+per-comment `<!-- miucr:fp=... -->` line-free fingerprints prevent inline dupes across commits. The
+summary body itself carries a **finding lifecycle ledger** — Open + Resolved tables with per-finding
+status/origin+resolved commit/severity-before→after/timestamps — persisted storelessly in a hidden
+`<!-- miu-cr-ledger:<base64> -->` marker so the open/resolved history survives across pushes (and
+ephemeral CI) without a DB. The `miucr.cli/v1` JSON envelope is unchanged: the ledger is a
+rendering/comment concern, not an envelope field.
 A public-PR dry-run needs **no GitHub PAT** (LLM key still required); `--post` and private repos need a PAT with `repo` scope.
 
 ### `serve`: webhook daemon (default) + opt-in poll

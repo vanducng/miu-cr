@@ -114,14 +114,23 @@ are unaffected.
 The **summary issue comment** leads, top to bottom, with a hidden `<!-- miu-cr-review -->`
 marker line, a second hidden `<!-- miu-cr-runs:N -->` marker (N = the review run count,
 written back for the next upsert), a clean `## Code Review Summary` header (no severity on
-the H2 - it stays small), then an INLINE `**Result:**` line (per-level **shields.io count
-badges** — each badge reads `Px | severity | count`, with the `Px` label in its severity color and the rest neutral grey, critical/high first
-— followed by `· N findings`; zero findings renders a green "No findings" badge instead).
+the H2 - it stays small), then an INLINE `**Result:**` line driven by the finding **lifecycle
+ledger** (per-level **shields.io count badges** for currently-OPEN findings — each badge reads
+`Px | severity | count`, with the `Px` label in its severity color and the rest neutral grey,
+critical/high first — followed by `· N open` and, when any were fixed, `· ✅ M resolved`; a
+review with nothing open renders a green "Review passed" badge instead).
 There is no identity line and no confidence line: the prior `**Reviews (N)**` identity line
 and the `Confidence: N/5` line were removed (N was a finding count misread as a review count;
 the run count now lives only in the footer). When at least one finding was posted inline,
 a one-line pointer follows Result: `→ Review the N inline comment(s) below.` — omitted on a
-clean review, or when every finding went to the overflow block. Then the model's walkthrough
+clean review, or when every finding went to the overflow block. Below the Result line miu-cr
+renders the **finding lifecycle ledger**: a visible **🔴 Open** table and a collapsed
+**✅ Resolved** `<details>`, each row keyed by the finding's line-independent fingerprint and
+carrying its **severity before→after** (e.g. `🟡→🔴` on escalation, `🟠→✅` when fixed), its
+location, and the linked **origin commit** (plus, for resolved rows, the linked **resolved
+commit**). This is what lets a re-run show how each issue *progressed* instead of only the
+latest snapshot. A finding flips to resolved only when it is absent from a run AND its file is
+still in the diff (absence off-diff is not treated as a fix). Then the model's walkthrough
 prose renders under a `**What changed:**` label (bold lead-in, no H3, to keep the comment
 compact; gracefully capped at a word boundary with an ellipsis if long). The collapsible **Important Files Changed** table
 (File · Δ · Findings · Overview, the Overview from the per-file digests), sorted
@@ -130,12 +139,16 @@ the `<details>` overflow block follow. The agent handoff (a copy-paste local re-
 the `review_run` MCP pointer) and the review metrics (Files, Churn, Effort and Context badges,
 each with a one-line meaning) are combined into one **collapsed `<details>` "Review
 reference"** block near the bottom, closing with a footer: `<sub>Reviewed commit
-[\`<7-char-sha>\`](<repo>/commit/<full-sha>) · Review attempts: N · Posted by
+[\`<7-char-sha>\`](<repo>/commit/<full-sha>) · Review attempts: N · Last reviewed <YYYY-MM-DD HH:MM UTC> · Posted by
 [miu-cr](https://github.com/vanducng/miu-cr) [v<version>](https://github.com/vanducng/miu-cr/releases/tag/v<version>)</sub>` (the short SHA is GitHub-standard 7 hex
-digits, the run count relocated here as "Review attempts: N", and the running miucr version
-linked to its release tag, e.g. `v0.40.0`). The `review_id` is NOT
+digits, the run count relocated here as "Review attempts: N", a UTC "Last reviewed" timestamp,
+and the running miucr version linked to its release tag, e.g. `v0.40.0`) — the footer is always
+the LATEST reviewed commit, time, and runtime version. The `review_id` is NOT
 shown in the comment (it only resolves on the machine + store that ran the review; it stays in
-the JSON envelope). All model-supplied text is escaped at the render boundary.
+the JSON envelope). All model-supplied text is escaped at the render boundary. The lifecycle
+ledger state is persisted **storelessly** in a third hidden marker — `<!-- miu-cr-ledger:<base64> -->`,
+written at the end of the comment like the runs counter — so the open/resolved history survives
+across pushes and **ephemeral CI runners with no database**.
 
 The summary lives **solely in ONE issue comment** (not the review body). Its first line is
 a hidden marker that identifies the comment as miucr-authored:
@@ -145,11 +158,27 @@ a hidden marker that identifies the comment as miucr-authored:
 <!-- miu-cr-runs:3 -->
 ## Code Review Summary
 
-**Result:** <sub><sub>![P1 | high | 1](https://img.shields.io/badge/P1%20%7C%20high-1-lightgrey?labelColor=orange&style=flat)</sub></sub> <sub><sub>![P2 | medium | 2](https://img.shields.io/badge/P2%20%7C%20medium-2-lightgrey?labelColor=yellow&style=flat)</sub></sub> <sub><sub>![P3 | low | 1](https://img.shields.io/badge/P3%20%7C%20low-1-lightgrey?labelColor=blue&style=flat)</sub></sub> · 4 findings
-→ Review the 4 inline comments below.
+**Result:** <shields P0 chip> · 1 open · ✅ 3 resolved
+→ Review the 1 inline comment below.
+
+### 🔴 Open (1)
+| Sev | Issue | Location | Opened |
+|-----|-------|----------|--------|
+| 🔴 P0 | SQL injection | api/db.go:42 | `a1b2c3d` |
+
+<details>
+<summary>✅ Resolved (3)</summary>
+
+| Sev | Issue | Location | Opened → Resolved |
+|-----|-------|----------|-------------------|
+| 🟠→✅ P1 | Path traversal | fs/read.go:12 | `a1b2c3d` → `e4f5a6b` |
+</details>
 
 **What changed:**
 Walkthrough prose …
+
+<sub>Reviewed commit `e4f5a6b` · Review attempts: 3 · Last reviewed 2026-06-27 00:04 UTC · Posted by miu-cr v0.44.0</sub>
+<!-- miu-cr-ledger:<base64 lifecycle state> -->
 ```
 
 ## One upserted summary & re-runs

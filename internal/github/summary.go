@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"net/url"
 	"strings"
+	"time"
 
 	"github.com/vanducng/miu-cr/internal/engine"
 	"github.com/vanducng/miu-cr/internal/engine/diff"
@@ -120,6 +121,16 @@ type SummaryOptions struct {
 	// RuleCitations grounds an omitted finding's cited rule stem in the overflow
 	// list (validated/linked in the wire layer; an unmatched stem is dropped).
 	RuleCitations map[string]RuleCitation
+	// Ledger, when non-nil, switches the summary to lifecycle mode: the Result
+	// line and grouped Open/Resolved tables render from the merged finding
+	// ledger (per-finding open/resolved/reopened, origin+resolved commit,
+	// severity before→after) and a hidden base64 ledger marker is embedded for
+	// the next run to read. Nil (the zero value) preserves the legacy
+	// current-run-only rendering byte-for-byte.
+	Ledger []LedgerEntry
+	// Now stamps the footer "Last reviewed" time (UTC); the zero time omits the
+	// stamp (legacy byte-for-byte). Injected so renders stay deterministic in tests.
+	Now time.Time
 }
 
 // RenderSummaryFull is RenderSummaryWithOverflow plus the LLM-free reviewer-trust
@@ -141,17 +152,25 @@ func RenderSummaryFull(info *PRInfo, findings []engine.Finding, stats map[string
 	// Keep the H2 small; severity chips ride the compact Result line below, not the header.
 	b.WriteString("## Code Review Summary\n\n")
 
-	lead := severityCounts(findings)
-	if lead != "" {
-		lead += fmt.Sprintf(" · %d finding%s", len(findings), plural(len(findings)))
+	if opts.Ledger != nil {
+		fmt.Fprintf(&b, "**Result:** %s\n\n", ledgerResultLine(opts.Ledger))
 	} else {
-		lead = "<sub><sub>![No findings](https://img.shields.io/badge/No_findings-brightgreen?style=flat)</sub></sub>"
+		lead := severityCounts(findings)
+		if lead != "" {
+			lead += fmt.Sprintf(" · %d finding%s", len(findings), plural(len(findings)))
+		} else {
+			lead = "<sub><sub>![No findings](https://img.shields.io/badge/No_findings-brightgreen?style=flat)</sub></sub>"
+		}
+		fmt.Fprintf(&b, "**Result:** %s\n\n", lead)
 	}
-	fmt.Fprintf(&b, "**Result:** %s\n\n", lead)
 
 	if posted := len(findings) - omittedInline; posted > 0 {
 		b.WriteString(fmt.Sprintf("→ Review the %d inline comment%s below.", posted, plural(posted)))
 		b.WriteString("\n\n")
+	}
+
+	if opts.Ledger != nil {
+		renderLedger(&b, info, opts.Ledger)
 	}
 
 	renderWalkthrough(&b, opts.Walkthrough)
@@ -180,7 +199,14 @@ func RenderSummaryFull(info *PRInfo, findings []engine.Finding, stats map[string
 	if v := strings.TrimSpace(opts.Version); v != "" {
 		ver = fmt.Sprintf(" [%s](https://github.com/vanducng/miu-cr/releases/tag/%s)", mdInline(v), url.PathEscape(v))
 	}
-	fmt.Fprintf(&b, "\n<sub>Reviewed commit %s%s · Posted by [miu-cr](https://github.com/vanducng/miu-cr)%s</sub>", commitRef(info), handoff, ver)
+	reviewedAt := ""
+	if !opts.Now.IsZero() {
+		reviewedAt = " · Last reviewed " + opts.Now.UTC().Format("2006-01-02 15:04 UTC")
+	}
+	fmt.Fprintf(&b, "\n<sub>Reviewed commit %s%s%s · Posted by [miu-cr](https://github.com/vanducng/miu-cr)%s</sub>", commitRef(info), handoff, reviewedAt, ver)
+	if opts.Ledger != nil {
+		b.WriteString("\n" + renderLedgerMarker(opts.Ledger))
+	}
 	return b.String()
 }
 
@@ -290,9 +316,9 @@ func renderOverflow(b *strings.Builder, info *PRInfo, omitted []engine.Finding, 
 		if sev == "" {
 			sev = "NOTE"
 		}
-		// Neutralize the chars that could break the `code-span` or the [link text](url):
-		// a backtick closes the span, brackets break the link text.
-		file := strings.NewReplacer("`", "'", "[", "(", "]", ")").Replace(f.File)
+		// Neutralize the chars that could break the `code-span` or the [link text](url)
+		// AND collapse whitespace so a newline can't terminate the row (mdPathLabel).
+		file := mdPathLabel(f.File)
 		loc := fmt.Sprintf("`%s:%d`", file, f.Line)
 		if url := blobURL(info, f.File, f.Line, f.EndLine); url != "" {
 			loc = fmt.Sprintf("[`%s:%d`](%s)", file, f.Line, url)

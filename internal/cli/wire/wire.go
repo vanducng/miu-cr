@@ -552,6 +552,14 @@ func publishReview(ctx stdctx.Context, client mgithub.Client, runner *gitcmd.Run
 		ActionsOut: req.ActionsOut,
 	}
 
+	// Merge this run's findings into the comment-embedded finding ledger ONCE (the
+	// summary may be upserted twice for overflow; merging twice would double-count
+	// reopens). MergeLedger returns non-nil even when empty, so the summary always
+	// renders in lifecycle mode on the PR path. now stamps both the ledger
+	// timestamps and the footer "Last reviewed".
+	now := time.Now()
+	ledger := mgithub.MergeLedger(info.PriorLedger, res.Findings, info.HeadSHA, diffPathSet(diffs), now)
+
 	// renderSummary builds the summary body for a given omitted set. info.ReviewCount
 	// is already this run's number (FetchPR did the +1); the body's runs token seeds
 	// the next read.
@@ -564,6 +572,8 @@ func publishReview(ctx stdctx.Context, client mgithub.Client, runner *gitcmd.Run
 			Diagram:       res.Diagram,
 			Version:       cli.Version(),
 			RuleCitations: ruleCites,
+			Ledger:        ledger,
+			Now:           now,
 		})
 	}
 
@@ -685,12 +695,7 @@ func trackResolution(ctx stdctx.Context, prStore store.PRThreadStore, key store.
 	for _, f := range current {
 		currentFPs[mgithub.Fingerprint(f)] = true
 	}
-	pathsInDiff := make(map[string]bool, len(diffs))
-	for i := range diffs {
-		if diffs[i].NewPath != "" && diffs[i].NewPath != "/dev/null" {
-			pathsInDiff[diffs[i].NewPath] = true
-		}
-	}
+	pathsInDiff := diffPathSet(diffs)
 
 	var resolved []string
 	for _, pf := range prior {
@@ -699,6 +704,19 @@ func trackResolution(ctx stdctx.Context, prStore store.PRThreadStore, key store.
 		}
 	}
 	return prStore.MarkResolved(ctx, key, resolved)
+}
+
+// diffPathSet is the set of new-side paths present in the diff (skipping
+// deletions). A finding off this set can't be re-posted, so its absence from a
+// run is not treated as a fix by either the ledger merge or trackResolution.
+func diffPathSet(diffs []diff.Diff) map[string]bool {
+	m := make(map[string]bool, len(diffs))
+	for i := range diffs {
+		if diffs[i].NewPath != "" && diffs[i].NewPath != "/dev/null" {
+			m[diffs[i].NewPath] = true
+		}
+	}
+	return m
 }
 
 // filterModeOf maps the request's filter-mode string to the github enum; an empty

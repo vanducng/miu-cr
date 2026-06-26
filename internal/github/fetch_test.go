@@ -456,6 +456,50 @@ func TestPriorRunsCount(t *testing.T) {
 	}
 }
 
+// TestFetchPRSeedsPriorLedger proves FetchPR reads the lowest-id marked comment
+// ONCE and populates BOTH the runs counter and the finding ledger from that same
+// body (a higher-id duplicate is ignored).
+func TestFetchPRSeedsPriorLedger(t *testing.T) {
+	entries := []LedgerEntry{{FP: "aaaaaaaaaaaaaaaa", Path: "a.go", Title: "X", Status: statusOpen, Sev: "high", FirstSev: "high", OpenSHA: "aaaaaa1", FirstAt: "2026-06-26T22:00:00Z"}}
+	lowest := ReviewMarker + "\n" + runsCountToken(2) + "\n## Code Review Summary\n" + renderLedgerMarker(entries)
+	higher := ReviewMarker + "\n" + runsCountToken(9) + "\n" + renderLedgerMarker(nil) // higher id, must be ignored
+
+	c := &convClient{
+		fakeClient: fakeClient{pr: prFixture("vanducng", "miu-cr", "headsha", "basesha", "main")},
+		issueComments: []*gh.IssueComment{
+			{ID: gh.Ptr(int64(9)), Body: gh.Ptr(higher)},
+			{ID: gh.Ptr(int64(3)), Body: gh.Ptr(lowest)},
+		},
+	}
+	info, err := FetchPR(stdctx.Background(), c, PRRef{Owner: "vanducng", Repo: "miu-cr", Number: 1})
+	if err != nil {
+		t.Fatalf("FetchPR: %v", err)
+	}
+	if info.ReviewCount != 3 {
+		t.Fatalf("ReviewCount must be lowest-id runs token (2)+1, got %d", info.ReviewCount)
+	}
+	if len(info.PriorLedger) != 1 || info.PriorLedger[0].FP != "aaaaaaaaaaaaaaaa" || info.PriorLedger[0].Status != statusOpen {
+		t.Fatalf("PriorLedger must parse from the SAME lowest-id comment, got %+v", info.PriorLedger)
+	}
+}
+
+// TestFetchPriorSummariesStripsLedgerMarker: the multi-KB base64 ledger payload
+// must NOT be injected into the --conversation USER turn (it would displace the
+// shared byte budget); the prose survives.
+func TestFetchPriorSummariesStripsLedgerMarker(t *testing.T) {
+	marker := renderLedgerMarker([]LedgerEntry{{FP: "aaaaaaaaaaaaaaaa", Path: "a.go", Status: statusOpen, Sev: "high", FirstSev: "high", OpenSHA: "aaaaaa1"}})
+	body := ReviewMarker + "\n## Code Review Summary\n\nwalkthrough prose\n" + marker
+	c := &convClient{issueComments: []*gh.IssueComment{{ID: gh.Ptr(int64(1)), Body: gh.Ptr(body)}}}
+
+	out := fetchPriorSummaries(stdctx.Background(), c, convInfo())
+	if strings.Contains(out, ledgerPrefix) {
+		t.Fatalf("ledger marker must be stripped from the conversation injection:\n%s", out)
+	}
+	if !strings.Contains(out, "walkthrough prose") {
+		t.Fatalf("summary prose must survive the strip:\n%s", out)
+	}
+}
+
 // TestReviewCountIncrementChain exercises the TRUE render-path increment that the
 // storeless round-trip test misses: feed a prior runs token through FetchPR (read
 // + the +1) and RenderSummaryFull (display + re-write the token), then re-parse the
