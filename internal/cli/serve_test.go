@@ -248,6 +248,26 @@ func TestServeHostRuleDirectory(t *testing.T) {
 	}
 }
 
+func TestRunHostCommandOutputReportsMissingBinary(t *testing.T) {
+	_, err := runHostCommandOutput(stdctx.Background(), []string{"/definitely/missing/miucr-auth-command"})
+	var ce *CLIError
+	if !asCLIError(err, &ce) || ce.Code != "agent.auth_command_failed" || !strings.Contains(ce.Message, "binary not found") {
+		t.Fatalf("want binary not found auth_command error, got %+v", err)
+	}
+}
+
+func TestSecretBufferRejectsOverflow(t *testing.T) {
+	var b secretBuffer
+	b.limit = 3
+	n, err := b.Write([]byte("abcd"))
+	if err == nil || n != 0 {
+		t.Fatalf("want overflow error with n=0, got n=%d err=%v", n, err)
+	}
+	if b.String() != "" {
+		t.Fatalf("overflow should not retain partial secret output, got %q", b.String())
+	}
+}
+
 func TestBuildServeHostReposAppliesHostPollDefault(t *testing.T) {
 	hostPoll := false
 	cfg := config.HostConfig{

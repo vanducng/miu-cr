@@ -8,6 +8,7 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
+	"math"
 	"time"
 
 	"github.com/google/go-github/v84/github"
@@ -15,6 +16,8 @@ import (
 	"github.com/vanducng/miu-cr/internal/config"
 	"github.com/vanducng/miu-cr/internal/store"
 )
+
+const maxHostClaimsPerTick = 32
 
 type HostTokenSource interface {
 	Token(stdctx.Context) (string, error)
@@ -108,12 +111,14 @@ func NewHostRunner(cfg HostRunnerConfig) (*HostRunner, error) {
 	}
 	enabledRepos := 0
 	for _, r := range cfg.Repos {
-		if !r.Enabled || !r.Poll {
+		if !r.Enabled {
 			continue
 		}
-		enabledRepos++
 		if cfg.TokenSources[r.GithubAccount] == nil {
 			return nil, fmt.Errorf("host: repo %s references unknown GitHub account %q", r.Slug, r.GithubAccount)
+		}
+		if r.Poll {
+			enabledRepos++
 		}
 	}
 	if enabledRepos == 0 {
@@ -278,7 +283,8 @@ func (h *HostRunner) pollRepo(ctx stdctx.Context, repo HostRepoConfig, repoID in
 			Title:   pr.GetTitle(),
 		})
 		if err != nil {
-			return err
+			h.log.Warn("host: failed to upsert PR session", "repo", repo.Slug, "pr", number, "error", config.RedactString(err.Error()))
+			continue
 		}
 		_, _, err = h.store.EnqueueHostJob(ctx, store.HostJobInput{
 			RepoID:     repoID,
@@ -291,7 +297,8 @@ func (h *HostRunner) pollRepo(ctx stdctx.Context, repo HostRepoConfig, repoID in
 			RulesHash:  repo.RulesHash,
 		})
 		if err != nil {
-			return err
+			h.log.Warn("host: failed to enqueue PR review", "repo", repo.Slug, "pr", number, "error", config.RedactString(err.Error()))
+			continue
 		}
 	}
 	return nil
@@ -314,7 +321,7 @@ func (h *HostRunner) listOpenPRs(ctx stdctx.Context, getter notifGetter, repo Ho
 }
 
 func (h *HostRunner) claimReady(ctx stdctx.Context, repos map[int64]HostRepoConfig) error {
-	for {
+	for claims := 0; claims < maxHostClaimsPerTick; claims++ {
 		claim, ok, err := h.store.ClaimHostJob(ctx, store.HostJobClaimInput{WorkerID: h.workerID, Now: h.now().UTC(), LeaseDuration: h.reviewTO + time.Minute})
 		if err != nil || !ok {
 			return err
@@ -333,6 +340,10 @@ func (h *HostRunner) claimReady(ctx stdctx.Context, repos map[int64]HostRepoConf
 		timeout := repo.ReviewTimeout
 		if timeout <= 0 {
 			timeout = h.reviewTO
+		}
+		if claim.Job.Number <= 0 || claim.Job.Number > int64(math.MaxInt) {
+			_ = h.store.CompleteHostJob(ctx, store.HostJobCompleteInput{JobID: claim.Job.ID, AttemptID: claim.AttemptID, Status: "failed", Error: "invalid PR number", Now: h.now().UTC()})
+			continue
 		}
 		jobID, attemptID := claim.Job.ID, claim.AttemptID
 		job := Job{
@@ -354,9 +365,12 @@ func (h *HostRunner) claimReady(ctx stdctx.Context, repos map[int64]HostRepoConf
 			},
 		}
 		if !h.disp.Submit(job) {
-			_ = h.store.CompleteHostJob(ctx, store.HostJobCompleteInput{JobID: jobID, AttemptID: attemptID, Status: "failed", Error: "dispatcher rejected job", Now: h.now().UTC()})
+			now := h.now().UTC()
+			_ = h.store.ReleaseHostJob(ctx, store.HostJobReleaseInput{JobID: jobID, AttemptID: attemptID, Error: "dispatcher rejected job", Now: now, AvailableAt: now})
+			return nil
 		}
 	}
+	return nil
 }
 
 func RunHost(ctx stdctx.Context, pool *Pool, runner *HostRunner) error {
@@ -366,10 +380,7 @@ func RunHost(ctx stdctx.Context, pool *Pool, runner *HostRunner) error {
 		close(done)
 	}()
 	<-ctx.Done()
-	select {
-	case <-done:
-	case <-time.After(drainGrace):
-	}
+	<-done
 	if pool != nil {
 		pool.Drain()
 	}
@@ -377,7 +388,10 @@ func RunHost(ctx stdctx.Context, pool *Pool, runner *HostRunner) error {
 }
 
 func HashJSON(v any) string {
-	b, _ := json.Marshal(v)
+	b, err := json.Marshal(v)
+	if err != nil {
+		panic(err)
+	}
 	sum := sha256.Sum256(b)
 	return hex.EncodeToString(sum[:])
 }

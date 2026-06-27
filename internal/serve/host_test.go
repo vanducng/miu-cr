@@ -132,6 +132,75 @@ func TestHostRunnerFailedReviewRetriesSameHead(t *testing.T) {
 	}
 }
 
+func TestHostRunnerDispatcherRejectReleasesJob(t *testing.T) {
+	cfg := hostRunnerConfig(t)
+	disp := cfg.Dispatcher.(*pollDispatcher)
+	disp.accept = false
+	st := cfg.Store.(*fakeHostStore)
+	r, err := NewHostRunner(cfg)
+	if err != nil {
+		t.Fatalf("NewHostRunner: %v", err)
+	}
+	if err := r.Tick(stdctx.Background()); err != nil {
+		t.Fatalf("Tick: %v", err)
+	}
+	if disp.count() != 0 {
+		t.Fatalf("submitted jobs = %d, want none", disp.count())
+	}
+	if st.releaseCount != 1 {
+		t.Fatalf("release count = %d, want 1", st.releaseCount)
+	}
+	for _, job := range st.jobs {
+		if job.Status != "queued" {
+			t.Fatalf("job status = %s, want queued", job.Status)
+		}
+	}
+}
+
+func TestHostRunnerClaimsAreBoundedPerTick(t *testing.T) {
+	cfg := hostRunnerConfig(t)
+	prs := make([]*github.PullRequest, 0, maxHostClaimsPerTick+3)
+	for i := 1; i <= maxHostClaimsPerTick+3; i++ {
+		prs = append(prs, prWithHead(i, "sha-"+itoa(i)))
+	}
+	cfg.NewNotifGetter = func(string) notifGetter {
+		return &fakeNotifGetter{prs: map[string][]*github.PullRequest{"octo/hello": prs}}
+	}
+	disp := cfg.Dispatcher.(*pollDispatcher)
+	r, err := NewHostRunner(cfg)
+	if err != nil {
+		t.Fatalf("NewHostRunner: %v", err)
+	}
+	if err := r.Tick(stdctx.Background()); err != nil {
+		t.Fatalf("Tick: %v", err)
+	}
+	if disp.count() != maxHostClaimsPerTick {
+		t.Fatalf("submitted jobs = %d, want %d", disp.count(), maxHostClaimsPerTick)
+	}
+}
+
+func TestHostRunnerSinglePRStoreErrorDoesNotAbortRepo(t *testing.T) {
+	cfg := hostRunnerConfig(t)
+	cfg.NewNotifGetter = func(string) notifGetter {
+		return &fakeNotifGetter{prs: map[string][]*github.PullRequest{
+			"octo/hello": {prWithHead(1, "bad"), prWithHead(2, "good")},
+		}}
+	}
+	st := cfg.Store.(*fakeHostStore)
+	st.sessionErrFor = map[int64]error{1: errors.New("session write failed")}
+	disp := cfg.Dispatcher.(*pollDispatcher)
+	r, err := NewHostRunner(cfg)
+	if err != nil {
+		t.Fatalf("NewHostRunner: %v", err)
+	}
+	if err := r.Tick(stdctx.Background()); err != nil {
+		t.Fatalf("Tick: %v", err)
+	}
+	if disp.count() != 1 {
+		t.Fatalf("submitted jobs = %d, want remaining PR submitted", disp.count())
+	}
+}
+
 func TestHostRunnerTokenSourceCalledAcrossTicks(t *testing.T) {
 	cfg := hostRunnerConfig(t)
 	src := cfg.TokenSources["main"].(*countTokenSource)
@@ -214,16 +283,18 @@ func (s *countTokenSource) calls() int {
 }
 
 type fakeHostStore struct {
-	mu           sync.Mutex
-	nextRepo     int64
-	nextSession  int64
-	nextJob      int64
-	nextAttempt  int64
-	repos        map[string]store.HostRepo
-	jobs         map[string]store.HostJob
-	queued       []string
-	cursorWrites int
-	lastPrune    store.HostPrunePolicy
+	mu            sync.Mutex
+	nextRepo      int64
+	nextSession   int64
+	nextJob       int64
+	nextAttempt   int64
+	repos         map[string]store.HostRepo
+	jobs          map[string]store.HostJob
+	queued        []string
+	cursorWrites  int
+	releaseCount  int
+	lastPrune     store.HostPrunePolicy
+	sessionErrFor map[int64]error
 }
 
 func newFakeHostStore() *fakeHostStore {
@@ -247,6 +318,9 @@ func (s *fakeHostStore) ReconcileHostRepo(_ stdctx.Context, in store.HostRepoInp
 func (s *fakeHostStore) UpsertHostPRSession(_ stdctx.Context, in store.HostPRSessionInput) (store.HostPRSession, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
+	if err := s.sessionErrFor[in.Number]; err != nil {
+		return store.HostPRSession{}, err
+	}
 	session := store.HostPRSession{ID: s.nextSession, HostPRSessionInput: in}
 	s.nextSession++
 	return session, nil
@@ -284,6 +358,7 @@ func (s *fakeHostStore) ClaimHostJob(_ stdctx.Context, in store.HostJobClaimInpu
 	job := s.jobs[key]
 	job.Status = "running"
 	job.LeaseOwner = in.WorkerID
+	job.Attempts++
 	s.jobs[key] = job
 	claim := store.HostJobClaim{Job: job, AttemptID: s.nextAttempt}
 	s.nextAttempt++
@@ -297,6 +372,26 @@ func (s *fakeHostStore) CompleteHostJob(_ stdctx.Context, in store.HostJobComple
 		if job.ID == in.JobID {
 			job.Status = in.Status
 			s.jobs[key] = job
+			return nil
+		}
+	}
+	return errors.New("job not found")
+}
+
+func (s *fakeHostStore) ReleaseHostJob(_ stdctx.Context, in store.HostJobReleaseInput) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	for key, job := range s.jobs {
+		if job.ID == in.JobID {
+			job.Status = "queued"
+			job.Error = in.Error
+			job.LeaseOwner = ""
+			if job.Attempts > 0 {
+				job.Attempts--
+			}
+			s.jobs[key] = job
+			s.queued = append(s.queued, key)
+			s.releaseCount++
 			return nil
 		}
 	}

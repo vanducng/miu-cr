@@ -21,7 +21,6 @@ import (
 // testable without touching the real home dir.
 var configDir = config.Dir
 
-// pollSource selects how a tick enumerates review candidates.
 // PollSource is the internal trigger source selected by serve wiring.
 type PollSource string
 

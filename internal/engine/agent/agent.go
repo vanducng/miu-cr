@@ -61,7 +61,8 @@ type Context struct {
 	Instruction string
 	// Conversation is the optional fetched PR conversation (UNTRUSTED). LOCKSTEP:
 	// mirror Instruction in ALL three backends or it is silently dropped.
-	Conversation   string
+	Conversation string
+	// OperatorPrompt is trusted host policy. LOCKSTEP: mirror Conversation in ALL backends.
 	OperatorPrompt string
 	RepoDir        string
 	Rev            string

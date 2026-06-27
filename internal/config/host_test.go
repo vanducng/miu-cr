@@ -160,6 +160,45 @@ repos:
 	}
 }
 
+func TestLoadHostRejectsModeSpecificAccountFields(t *testing.T) {
+	path := writeHostConfig(t, `version: 1
+store:
+  backend: postgres
+github:
+  default_account: app
+  accounts:
+    app:
+      mode: app
+      app_id_env: APP_ID
+      installation_id_env: INSTALLATION_ID
+      private_key_path_env: APP_KEY_PATH
+      auth_env: GITHUB_TOKEN
+host:
+  poll_source: pulls
+repos:
+  - name: service-api
+    slug: example-org/service-api
+    git_url: https://github.com/example-org/service-api.git
+`)
+	err := loadHostErr(path)
+	if !isConfigInvalid(err) || !strings.Contains(err.Error(), "must not set PAT auth fields") {
+		t.Fatalf("want app auth field config.invalid, got %v", err)
+	}
+}
+
+func TestLoadHostRejectsNonMatchingGitURL(t *testing.T) {
+	path := writeHostConfig(t, minimalHostYAML()+`
+repos:
+  - name: service-api
+    slug: example-org/service-api
+    git_url: /tmp/service-api
+`)
+	err := loadHostErr(path)
+	if !isConfigInvalid(err) || !strings.Contains(err.Error(), "git_url") {
+		t.Fatalf("want git_url config.invalid, got %v", err)
+	}
+}
+
 func TestLoadHostPatchRepairRequiresSuggest(t *testing.T) {
 	path := writeHostConfig(t, minimalHostYAML()+`
 repos:
@@ -273,6 +312,17 @@ func TestRedactHostConfigMasksSecrets(t *testing.T) {
 		Providers: map[string]HostProvider{
 			"anthropic": {Kind: KindAnthropic, AuthToken: "synthetic-provider-secret"},
 		},
+		Agent: HostAgent{SystemPrompt: "global prompt", SystemPromptFile: "/tmp/global.md"},
+		Github: HostGithub{Accounts: map[string]HostGithubAccount{
+			"pat": {Mode: "pat", AuthFile: "/run/secret/token", AuthCommand: []string{"secret-tool", "lookup", "github"}},
+			"app": {Mode: "app", AppID: "123", InstallationID: "456", PrivateKeyPath: "/run/key.pem", PrivateKeyCommand: []string{"secret-tool", "lookup", "key"}},
+		}},
+		Repos: []HostRepo{{
+			Name:  "service-api",
+			Slug:  "example-org/service-api",
+			Rules: []string{"/tmp/rules.md"},
+			Agent: HostAgent{SystemPrompt: "repo prompt", SystemPromptFile: "/tmp/repo.md"},
+		}},
 	}
 	safe := RedactHostConfig(cfg)
 	if safe.Store.DSN == secret || safe.Store.DSN == "" {
@@ -283,6 +333,21 @@ func TestRedactHostConfigMasksSecrets(t *testing.T) {
 	}
 	if cfg.Store.DSN != secret {
 		t.Fatal("RedactHostConfig mutated input")
+	}
+	if safe.Agent.SystemPrompt != redactedMask || safe.Agent.SystemPromptFile != redactedMask {
+		t.Fatalf("global prompt not masked: %+v", safe.Agent)
+	}
+	if safe.Github.Accounts["pat"].AuthFile != redactedMask || safe.Github.Accounts["pat"].AuthCommand[0] != redactedMask {
+		t.Fatalf("pat account not masked: %+v", safe.Github.Accounts["pat"])
+	}
+	if safe.Github.Accounts["app"].AppID != redactedMask || safe.Github.Accounts["app"].PrivateKeyPath != redactedMask || safe.Github.Accounts["app"].PrivateKeyCommand[0] != redactedMask {
+		t.Fatalf("app account not masked: %+v", safe.Github.Accounts["app"])
+	}
+	if safe.Repos[0].Rules[0] != redactedMask || safe.Repos[0].Agent.SystemPrompt != redactedMask {
+		t.Fatalf("repo prompt/rules not masked: %+v", safe.Repos[0])
+	}
+	if cfg.Github.Accounts["app"].AppID != "123" || cfg.Repos[0].Rules[0] != "/tmp/rules.md" {
+		t.Fatal("RedactHostConfig mutated nested input")
 	}
 }
 

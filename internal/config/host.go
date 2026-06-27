@@ -241,10 +241,16 @@ func validateGithubAccounts(path string, gh HostGithub) error {
 		mode := strings.TrimSpace(acct.Mode)
 		switch mode {
 		case "pat":
+			if countSet(acct.ClientID, acct.ClientIDEnv, acct.AppID, acct.AppIDEnv, acct.InstallationID, acct.InstallationIDEnv, acct.PrivateKeyPath, acct.PrivateKeyPathEnv)+countSlice(acct.PrivateKeyCommand) != 0 {
+				return invalidHost(path, "github.accounts."+name, mode, "PAT accounts must not set app/client/private_key fields")
+			}
 			if countSet(acct.AuthEnv, acct.AuthFile)+countSlice(acct.AuthCommand) != 1 {
 				return invalidHost(path, "github.accounts."+name, mode, "exactly one PAT source: auth_env, auth_file, or auth_command")
 			}
 		case "app":
+			if countSet(acct.AuthEnv, acct.AuthFile)+countSlice(acct.AuthCommand) != 0 {
+				return invalidHost(path, "github.accounts."+name, mode, "app accounts must not set PAT auth fields")
+			}
 			if countSet(acct.AppID, acct.AppIDEnv) != 1 {
 				return invalidHost(path, "github.accounts."+name+".app_id", "", "exactly one of app_id or app_id_env")
 			}
@@ -339,13 +345,17 @@ func validateGitURL(path, field, raw, owner, repo string) error {
 	}
 	u, err := url.Parse(raw)
 	if err != nil || u.Scheme == "" {
-		return nil
+		return invalidHost(path, field, raw, "https://github.com/"+owner+"/"+repo+".git or git@github.com:"+owner+"/"+repo+".git")
 	}
-	if strings.EqualFold(u.Host, "github.com") {
-		got := strings.TrimSuffix(strings.TrimPrefix(u.Path, "/"), ".git")
-		if got != owner+"/"+repo {
-			return invalidHost(path, field, raw, "a GitHub URL matching "+owner+"/"+repo)
-		}
+	if u.Scheme != "https" && u.Scheme != "ssh" {
+		return invalidHost(path, field, raw, "https or ssh GitHub URL")
+	}
+	if !strings.EqualFold(u.Host, "github.com") {
+		return invalidHost(path, field, raw, "github.com")
+	}
+	got := strings.TrimSuffix(strings.TrimPrefix(u.Path, "/"), ".git")
+	if got != owner+"/"+repo {
+		return invalidHost(path, field, raw, "a GitHub URL matching "+owner+"/"+repo)
 	}
 	return nil
 }

@@ -228,6 +228,39 @@ func TestHostStaleAttemptCompletionDoesNotOverwriteCurrentClaim(t *testing.T) {
 	}
 }
 
+func TestHostReleaseJobRequeuesWithoutFailedAttempt(t *testing.T) {
+	s := openHost(t)
+	ctx := context.Background()
+	repo := mustHostRepo(t, s)
+	session := mustHostSession(t, s, repo.ID, 14, "open")
+	job, _, err := s.EnqueueHostJob(ctx, hostJobInput(repo.ID, session.ID, 14, uniqueName(t, "head")))
+	if err != nil {
+		t.Fatalf("enqueue: %v", err)
+	}
+	now := time.Now().UTC()
+	claim, ok, err := s.ClaimHostJob(ctx, store.HostJobClaimInput{WorkerID: "worker-1", Now: now, LeaseDuration: time.Hour})
+	if err != nil || !ok {
+		t.Fatalf("claim ok=%v err=%v", ok, err)
+	}
+	if err := s.ReleaseHostJob(ctx, store.HostJobReleaseInput{JobID: job.ID, AttemptID: claim.AttemptID, Error: "dispatcher rejected job", Now: now.Add(time.Second)}); err != nil {
+		t.Fatalf("release: %v", err)
+	}
+	var status, attemptStatus string
+	var attempts int
+	if err := s.db.QueryRowContext(ctx, `SELECT status, attempts FROM host_jobs WHERE id=$1`, job.ID).Scan(&status, &attempts); err != nil {
+		t.Fatalf("query job: %v", err)
+	}
+	if status != "queued" || attempts != 0 {
+		t.Fatalf("released job status=%s attempts=%d, want queued/0", status, attempts)
+	}
+	if err := s.db.QueryRowContext(ctx, `SELECT status FROM host_job_attempts WHERE id=$1`, claim.AttemptID).Scan(&attemptStatus); err != nil {
+		t.Fatalf("query attempt: %v", err)
+	}
+	if attemptStatus != "canceled" {
+		t.Fatalf("attempt status = %s, want canceled", attemptStatus)
+	}
+}
+
 func TestHostPollCursorRoundTrip(t *testing.T) {
 	s := openHost(t)
 	ctx := context.Background()

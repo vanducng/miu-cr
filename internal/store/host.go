@@ -14,6 +14,7 @@ type HostStore interface {
 	EnqueueHostJob(context.Context, HostJobInput) (HostJob, bool, error)
 	ClaimHostJob(context.Context, HostJobClaimInput) (HostJobClaim, bool, error)
 	CompleteHostJob(context.Context, HostJobCompleteInput) error
+	ReleaseHostJob(context.Context, HostJobReleaseInput) error
 	UpsertHostWorkspace(context.Context, HostWorkspaceInput) (HostWorkspace, error)
 	UpsertHostPollCursor(context.Context, HostPollCursorInput) error
 	GetHostPollCursor(context.Context, int64, string) (HostPollCursor, bool, error)
@@ -106,6 +107,14 @@ type HostJobCompleteInput struct {
 	Now       time.Time
 }
 
+type HostJobReleaseInput struct {
+	JobID       int64
+	AttemptID   int64
+	Error       string
+	Now         time.Time
+	AvailableAt time.Time
+}
+
 type HostWorkspaceInput struct {
 	RepoID     int64
 	SessionID  int64
@@ -156,7 +165,7 @@ func HostJobDedupeKey(in HostJobInput) string {
 	if in.DedupeKey != "" {
 		return in.DedupeKey
 	}
-	payload, _ := json.Marshal(struct {
+	payload, err := json.Marshal(struct {
 		RepoID     int64  `json:"repo_id"`
 		Number     int64  `json:"number"`
 		HeadSHA    string `json:"head_sha"`
@@ -164,6 +173,9 @@ func HostJobDedupeKey(in HostJobInput) string {
 		PromptHash string `json:"prompt_hash"`
 		RulesHash  string `json:"rules_hash"`
 	}{in.RepoID, in.Number, in.HeadSHA, in.PolicyHash, in.PromptHash, in.RulesHash})
+	if err != nil {
+		panic(err)
+	}
 	sum := sha256.Sum256(payload)
 	return hex.EncodeToString(sum[:])
 }

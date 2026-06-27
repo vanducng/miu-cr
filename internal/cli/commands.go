@@ -192,11 +192,15 @@ func serveCommand(opts *options) *cobra.Command {
 				if err != nil {
 					return err
 				}
+				reviewStore, ok := hostStore.(serve.ReviewStore)
+				if !ok {
+					return &CLIError{Code: "serve.host_store_invalid", Message: "host store does not implement review persistence", Exit: 1}
+				}
 				workers := hostCfg.Host.Workers
 				if workers <= 0 {
 					workers = 1
 				}
-				pool := serve.NewPoolWithWorkers(buildServeReviewFn(log, "", nil), log, workers)
+				pool := serve.NewPoolWithWorkers(buildServeReviewFn(log, "", reviewStore), log, workers)
 				interval := durationOrDefault(hostCfg.Host.PollInterval, time.Minute)
 				if cmd.Flags().Changed("poll-interval") {
 					interval = pollInterval
@@ -396,6 +400,13 @@ func buildServeHostRepos(ctx stdctx.Context, cfg config.HostConfig, path string)
 	baseReview := mergeHostReview(config.HostReview{Gate: "high", FilterMode: "diff_context", Timeout: "900s"}, cfg.Review)
 	hostReview := mergeHostReview(baseReview, cfg.Host.Review)
 	reviewTO := durationOrDefault(hostReview.Timeout, 15*time.Minute)
+	if provider.Kind != config.KindOpenAI && provider.Kind != config.KindAnthropic && provider.Kind != "" {
+		return nil, 0, &CLIError{Code: "config.invalid", Message: fmt.Sprintf("unknown host provider kind %q", provider.Kind), Hint: "kind must be anthropic or openai", Exit: 2}
+	}
+	providerSecret, err := hostProviderSecret(ctx, provider)
+	if err != nil {
+		return nil, 0, err
+	}
 	out := make([]serve.HostRepoConfig, 0, len(cfg.Repos))
 	hostEnabled := cfg.Host.Enabled == nil || *cfg.Host.Enabled
 	hostPoll := cfg.Host.Poll == nil || *cfg.Host.Poll
@@ -403,7 +414,7 @@ func buildServeHostRepos(ctx stdctx.Context, cfg config.HostConfig, path string)
 		enabled := hostEnabled && (repo.Enabled == nil || *repo.Enabled)
 		poll := hostPoll && (repo.Poll == nil || *repo.Poll)
 		review := mergeHostReview(hostReview, repo.Review)
-		opts, err := hostReviewOptions(ctx, provider, review)
+		opts, err := hostReviewOptions(provider, providerSecret, review)
 		if err != nil {
 			return nil, 0, err
 		}
@@ -433,7 +444,7 @@ func buildServeHostRepos(ctx stdctx.Context, cfg config.HostConfig, path string)
 	return out, reviewTO, nil
 }
 
-func hostReviewOptions(ctx stdctx.Context, provider config.HostProvider, review config.HostReview) (serve.JobReviewOptions, error) {
+func hostReviewOptions(provider config.HostProvider, secret string, review config.HostReview) (serve.JobReviewOptions, error) {
 	opts := serve.JobReviewOptions{
 		Post:         boolPtr(review.Post),
 		Suggest:      boolPtr(review.Suggest),
@@ -457,17 +468,9 @@ func hostReviewOptions(ctx stdctx.Context, provider config.HostProvider, review 
 	switch provider.Kind {
 	case config.KindOpenAI:
 		opts.Provider = string(config.KindOpenAI)
-		secret, err := hostProviderSecret(ctx, provider)
-		if err != nil {
-			return opts, err
-		}
 		opts.APIKey = secret
 	case config.KindAnthropic, "":
 		opts.Provider = string(config.KindAnthropic)
-		secret, err := hostProviderSecret(ctx, provider)
-		if err != nil {
-			return opts, err
-		}
 		if strings.EqualFold(provider.Auth, "api_key") {
 			opts.APIKey = secret
 		} else {
@@ -558,22 +561,20 @@ func readHostRuleRef(baseDir, ref string) ([]string, error) {
 	if !filepath.IsAbs(path) {
 		path = filepath.Join(baseDir, path)
 	}
-	info, err := os.Lstat(path)
+	f, info, err := openHostPath(path, ref)
 	if err != nil {
-		return nil, &CLIError{Code: "config.invalid", Message: config.RedactString(err.Error()), Hint: "fix host prompt/rule path " + ref, Exit: 2}
+		return nil, err
 	}
-	if info.Mode()&os.ModeSymlink != 0 {
-		return nil, &CLIError{Code: "config.invalid", Message: "host prompt/rule path is a symlink: " + ref, Hint: "use a regular mounted file", Exit: 2}
-	}
+	defer f.Close()
 	if !info.IsDir() {
-		text, err := readHostTextFile(path, ref)
+		text, err := readHostTextFile(f, info, ref)
 		if err != nil {
 			return nil, err
 		}
 		return []string{text}, nil
 	}
 
-	entries, err := os.ReadDir(path)
+	entries, err := f.ReadDir(-1)
 	if err != nil {
 		return nil, &CLIError{Code: "config.invalid", Message: config.RedactString(err.Error()), Hint: "fix host rule directory " + ref, Exit: 2}
 	}
@@ -584,7 +585,12 @@ func readHostRuleRef(baseDir, ref string) ([]string, error) {
 			continue
 		}
 		childRef := filepath.Join(ref, ent.Name())
-		text, err := readHostTextFile(filepath.Join(path, ent.Name()), childRef)
+		child, childInfo, err := openHostPath(filepath.Join(path, ent.Name()), childRef)
+		if err != nil {
+			return nil, err
+		}
+		text, err := readHostTextFile(child, childInfo, childRef)
+		_ = child.Close()
 		if err != nil {
 			return nil, err
 		}
@@ -598,24 +604,34 @@ func readHostTextRef(baseDir, ref string) (string, error) {
 	if !filepath.IsAbs(path) {
 		path = filepath.Join(baseDir, path)
 	}
-	info, err := os.Lstat(path)
+	f, info, err := openHostPath(path, ref)
 	if err != nil {
-		return "", &CLIError{Code: "config.invalid", Message: config.RedactString(err.Error()), Hint: "fix host prompt/rule path " + ref, Exit: 2}
+		return "", err
 	}
-	if info.Mode()&os.ModeSymlink != 0 {
-		return "", &CLIError{Code: "config.invalid", Message: "host prompt/rule path is a symlink: " + ref, Hint: "use a regular mounted file", Exit: 2}
-	}
+	defer f.Close()
 	if info.IsDir() {
 		return "", &CLIError{Code: "config.invalid", Message: "host prompt path must be a file: " + ref, Hint: "set system_prompt_file to a regular markdown file", Exit: 2}
 	}
-	return readHostTextFile(path, ref)
+	return readHostTextFile(f, info, ref)
 }
 
-func readHostTextFile(path, ref string) (string, error) {
-	info, err := os.Lstat(path)
+func openHostPath(path, ref string) (*os.File, os.FileInfo, error) {
+	f, err := os.OpenFile(path, os.O_RDONLY|syscall.O_NOFOLLOW, 0)
 	if err != nil {
-		return "", &CLIError{Code: "config.invalid", Message: config.RedactString(err.Error()), Hint: "fix host prompt/rule path " + ref, Exit: 2}
+		if errors.Is(err, syscall.ELOOP) {
+			return nil, nil, &CLIError{Code: "config.invalid", Message: "host prompt/rule path is a symlink: " + ref, Hint: "use a regular mounted file", Exit: 2}
+		}
+		return nil, nil, &CLIError{Code: "config.invalid", Message: config.RedactString(err.Error()), Hint: "fix host prompt/rule path " + ref, Exit: 2}
 	}
+	info, err := f.Stat()
+	if err != nil {
+		_ = f.Close()
+		return nil, nil, &CLIError{Code: "config.invalid", Message: config.RedactString(err.Error()), Hint: "fix host prompt/rule path " + ref, Exit: 2}
+	}
+	return f, info, nil
+}
+
+func readHostTextFile(f *os.File, info os.FileInfo, ref string) (string, error) {
 	if info.Mode()&os.ModeSymlink != 0 {
 		return "", &CLIError{Code: "config.invalid", Message: "host prompt/rule path is a symlink: " + ref, Hint: "use a regular mounted file", Exit: 2}
 	}
@@ -625,9 +641,12 @@ func readHostTextFile(path, ref string) (string, error) {
 	if info.Size() > 64*1024 {
 		return "", &CLIError{Code: "config.invalid", Message: "host prompt/rule file is too large: " + ref, Hint: "keep each host prompt/rule file under 64KiB", Exit: 2}
 	}
-	data, err := os.ReadFile(path)
+	data, err := io.ReadAll(io.LimitReader(f, 64*1024+1))
 	if err != nil {
 		return "", &CLIError{Code: "config.invalid", Message: config.RedactString(err.Error()), Hint: "fix host prompt/rule path " + ref, Exit: 2}
+	}
+	if len(data) > 64*1024 {
+		return "", &CLIError{Code: "config.invalid", Message: "host prompt/rule file is too large: " + ref, Hint: "keep each host prompt/rule file under 64KiB", Exit: 2}
 	}
 	return string(data), nil
 }
@@ -672,7 +691,6 @@ func buildHostAppTokenSource(ctx stdctx.Context, acct config.HostGithubAccount) 
 		return nil, &CLIError{Code: "config.invalid", Message: "github app installation_id must be a positive integer", Hint: "fix github.accounts.*.installation_id", Exit: 2}
 	}
 	keyPath := firstHostValue(acct.PrivateKeyPath, os.Getenv(acct.PrivateKeyPathEnv))
-	var keyPEM []byte
 	if keyPath != "" {
 		key, err := ghub.ReadPrivateKeyFile(keyPath)
 		if err != nil {
@@ -684,7 +702,7 @@ func buildHostAppTokenSource(ctx stdctx.Context, acct config.HostGithubAccount) 
 	if err != nil {
 		return nil, err
 	}
-	keyPEM = []byte(secret)
+	keyPEM := []byte(secret)
 	key, err := ghub.ParsePrivateKeyPEM(keyPEM)
 	for i := range keyPEM {
 		keyPEM[i] = 0
@@ -748,6 +766,9 @@ func runHostCommandOutput(ctx stdctx.Context, argv []string) (string, error) {
 	cmd.Stdout = &stdout
 	err := cmd.Run()
 	if err != nil {
+		if errors.Is(err, exec.ErrNotFound) || errors.Is(err, os.ErrNotExist) {
+			return "", &CLIError{Code: "agent.auth_command_failed", Message: "auth_command binary not found: " + args[0], Hint: "verify the command path in auth_command", Exit: 1, Cause: err}
+		}
 		return "", &CLIError{Code: "agent.auth_command_failed", Message: "auth_command failed", Hint: "run the configured command directly; stderr is omitted because it may contain secrets", Exit: 1, Cause: err}
 	}
 	secret := strings.TrimSpace(stdout.String())
@@ -765,7 +786,7 @@ type secretBuffer struct {
 func (b *secretBuffer) Write(p []byte) (int, error) {
 	n := len(p)
 	if b.limit > 0 && b.buf.Len()+len(p) > b.limit {
-		p = p[:b.limit-b.buf.Len()]
+		return 0, fmt.Errorf("command output exceeded %d byte limit", b.limit)
 	}
 	if len(p) > 0 {
 		_, _ = b.buf.Write(p)

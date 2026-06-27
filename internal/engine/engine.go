@@ -332,7 +332,8 @@ type Request struct {
 	// fenced, byte-capped, context-only; the wire layer fetches/renders/caps it and
 	// drops it on fork PRs. Threaded onto AgentContext so it rides the USER turn; empty
 	// is byte-identical. LOCKSTEP: mirror Instruction at every hop.
-	Conversation   string
+	Conversation string
+	// OperatorPrompt is trusted host policy. LOCKSTEP: mirror Conversation at every hop.
 	OperatorPrompt string
 
 	// Progress is the optional milestone sink (stderr); nil = silent. The wire/cli

@@ -117,6 +117,14 @@ func openReviewStore(ctx stdctx.Context) (serve.ReviewStore, func(), error) {
 }
 
 func openHostStore(ctx stdctx.Context, cfg config.HostConfig) (store.HostStore, func(), error) {
+	if cfg.Store.Backend != "" && cfg.Store.Backend != "postgres" {
+		return nil, nil, &cli.CLIError{
+			Code:    "config.invalid",
+			Message: "host store backend must be postgres",
+			Hint:    "set store.backend: postgres",
+			Exit:    2,
+		}
+	}
 	dsn := firstNonEmpty(os.Getenv("MIUCR_PG_DSN"), cfg.Store.DSN)
 	if dsn == "" {
 		return nil, nil, &cli.CLIError{

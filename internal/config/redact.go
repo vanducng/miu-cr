@@ -68,21 +68,63 @@ func RedactHostConfig(cfg HostConfig) HostConfig {
 		if p.AuthToken != "" {
 			p.AuthToken = redactedMask
 		}
+		if len(p.AuthCommand) > 0 {
+			p.AuthCommand = []string{redactedMask}
+		}
 		out.Providers[name] = p
 	}
 	if out.Store.DSN != "" {
 		out.Store.DSN = redactedMask
 	}
+	out.Agent = redactHostAgent(cfg.Agent)
 	if cfg.Github.Accounts != nil {
 		out.Github.Accounts = make(map[string]HostGithubAccount, len(cfg.Github.Accounts))
 		for name, acct := range cfg.Github.Accounts {
+			if acct.AuthFile != "" {
+				acct.AuthFile = redactedMask
+			}
+			if len(acct.AuthCommand) > 0 {
+				acct.AuthCommand = []string{redactedMask}
+			}
+			if acct.AppID != "" {
+				acct.AppID = redactedMask
+			}
+			if acct.ClientID != "" {
+				acct.ClientID = redactedMask
+			}
+			if acct.InstallationID != "" {
+				acct.InstallationID = redactedMask
+			}
+			if acct.PrivateKeyPath != "" {
+				acct.PrivateKeyPath = redactedMask
+			}
+			if len(acct.PrivateKeyCommand) > 0 {
+				acct.PrivateKeyCommand = []string{redactedMask}
+			}
 			out.Github.Accounts[name] = acct
 		}
 	}
 	if cfg.Repos != nil {
-		out.Repos = append([]HostRepo(nil), cfg.Repos...)
+		out.Repos = make([]HostRepo, len(cfg.Repos))
+		for i, repo := range cfg.Repos {
+			repo.Agent = redactHostAgent(repo.Agent)
+			if len(repo.Rules) > 0 {
+				repo.Rules = []string{redactedMask}
+			}
+			out.Repos[i] = repo
+		}
 	}
 	return out
+}
+
+func redactHostAgent(agent HostAgent) HostAgent {
+	if agent.SystemPrompt != "" {
+		agent.SystemPrompt = redactedMask
+	}
+	if agent.SystemPromptFile != "" {
+		agent.SystemPromptFile = redactedMask
+	}
+	return agent
 }
 
 // RedactString masks credentials in an arbitrary string: URL userinfo passwords,

@@ -93,8 +93,7 @@ CREATE TABLE IF NOT EXISTS host_jobs (
 	available_at TIMESTAMPTZ NOT NULL DEFAULT now(),
 	created_at   TIMESTAMPTZ NOT NULL DEFAULT now(),
 	updated_at   TIMESTAMPTZ NOT NULL DEFAULT now(),
-	completed_at TIMESTAMPTZ,
-	UNIQUE(repo_id, number, head_sha, policy_hash, prompt_hash, rules_hash)
+	completed_at TIMESTAMPTZ
 );
 
 CREATE TABLE IF NOT EXISTS host_job_attempts (

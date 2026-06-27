@@ -194,6 +194,62 @@ WHERE id=$1`, in.AttemptID, in.Status, in.Error, now); err != nil {
 	return tx.Commit()
 }
 
+func (s *Store) ReleaseHostJob(ctx context.Context, in store.HostJobReleaseInput) error {
+	now := in.Now
+	if now.IsZero() {
+		now = time.Now().UTC()
+	}
+	availableAt := in.AvailableAt
+	if availableAt.IsZero() {
+		availableAt = now
+	}
+	tx, err := s.db.BeginTx(ctx, nil)
+	if err != nil {
+		return err
+	}
+	defer func() { _ = tx.Rollback() }()
+	res, err := tx.ExecContext(ctx, `
+UPDATE host_jobs
+SET status='queued',
+    lease_owner='',
+    lease_until=NULL,
+    error=$3,
+    available_at=$4,
+    attempts=CASE WHEN $2::bigint = 0 THEN attempts ELSE GREATEST(attempts - 1, 0) END,
+    updated_at=$5,
+    completed_at=NULL
+WHERE id=$1
+  AND ($2::bigint = 0 OR attempts = (SELECT attempt FROM host_job_attempts WHERE id=$2 AND job_id=$1))`,
+		in.JobID, in.AttemptID, in.Error, availableAt, now)
+	if err != nil {
+		return err
+	}
+	if affected, err := res.RowsAffected(); err == nil && affected == 0 {
+		if in.AttemptID != 0 {
+			if _, err := tx.ExecContext(ctx, `
+UPDATE host_job_attempts
+SET status='canceled',
+    error='stale release ignored',
+    finished_at=$2
+WHERE id=$1`, in.AttemptID, now); err != nil {
+				return err
+			}
+		}
+		return tx.Commit()
+	}
+	if in.AttemptID != 0 {
+		if _, err := tx.ExecContext(ctx, `
+UPDATE host_job_attempts
+SET status='canceled',
+    error=$2,
+    finished_at=$3
+WHERE id=$1`, in.AttemptID, in.Error, now); err != nil {
+			return err
+		}
+	}
+	return tx.Commit()
+}
+
 func (s *Store) UpsertHostWorkspace(ctx context.Context, in store.HostWorkspaceInput) (store.HostWorkspace, error) {
 	if in.State == "" {
 		in.State = "active"
@@ -251,42 +307,47 @@ WHERE repo_id=$1 AND source=$2`, repoID, source)
 
 func (s *Store) PruneHost(ctx context.Context, p store.HostPrunePolicy) (store.HostPruneResult, error) {
 	var out store.HostPruneResult
+	tx, err := s.db.BeginTx(ctx, nil)
+	if err != nil {
+		return out, err
+	}
+	defer func() { _ = tx.Rollback() }()
 	if !p.FinishedAttemptsBefore.IsZero() {
-		n, err := execRows(ctx, s.db, `DELETE FROM host_job_attempts WHERE finished_at IS NOT NULL AND finished_at < $1`, p.FinishedAttemptsBefore)
+		n, err := execRows(ctx, tx, `DELETE FROM host_job_attempts WHERE finished_at IS NOT NULL AND finished_at < $1`, p.FinishedAttemptsBefore)
 		if err != nil {
 			return out, err
 		}
 		out.Attempts = n
 	}
 	if !p.CompletedJobsBefore.IsZero() {
-		n, err := execRows(ctx, s.db, `DELETE FROM host_jobs WHERE status IN ('done','failed','canceled') AND completed_at IS NOT NULL AND completed_at < $1`, p.CompletedJobsBefore)
+		n, err := execRows(ctx, tx, `DELETE FROM host_jobs WHERE status IN ('done','failed','canceled') AND completed_at IS NOT NULL AND completed_at < $1`, p.CompletedJobsBefore)
 		if err != nil {
 			return out, err
 		}
 		out.Jobs = n
 	}
 	if !p.ClosedSessionsBefore.IsZero() {
-		n, err := execRows(ctx, s.db, `DELETE FROM host_pr_sessions WHERE state IN ('closed','merged') AND updated_at < $1`, p.ClosedSessionsBefore)
+		n, err := execRows(ctx, tx, `DELETE FROM host_pr_sessions WHERE state IN ('closed','merged') AND updated_at < $1`, p.ClosedSessionsBefore)
 		if err != nil {
 			return out, err
 		}
 		out.Sessions = n
 	}
 	if !p.InactiveWorkspacesBefore.IsZero() {
-		n, err := execRows(ctx, s.db, `DELETE FROM host_workspaces WHERE state <> 'active' AND last_used_at < $1`, p.InactiveWorkspacesBefore)
+		n, err := execRows(ctx, tx, `DELETE FROM host_workspaces WHERE state <> 'active' AND last_used_at < $1`, p.InactiveWorkspacesBefore)
 		if err != nil {
 			return out, err
 		}
 		out.Workspaces = n
 	}
 	if !p.PollCursorsBefore.IsZero() {
-		n, err := execRows(ctx, s.db, `DELETE FROM host_poll_cursors WHERE updated_at < $1`, p.PollCursorsBefore)
+		n, err := execRows(ctx, tx, `DELETE FROM host_poll_cursors WHERE updated_at < $1`, p.PollCursorsBefore)
 		if err != nil {
 			return out, err
 		}
 		out.PollCursors = n
 	}
-	return out, nil
+	return out, tx.Commit()
 }
 
 func (s *Store) hostJobByDedupeKey(ctx context.Context, key string) (store.HostJob, error) {
@@ -376,7 +437,11 @@ func nullInt64(v int64) any {
 	return v
 }
 
-func execRows(ctx context.Context, db *sql.DB, query string, args ...any) (int, error) {
+type execContexter interface {
+	ExecContext(context.Context, string, ...any) (sql.Result, error)
+}
+
+func execRows(ctx context.Context, db execContexter, query string, args ...any) (int, error) {
 	res, err := db.ExecContext(ctx, query, args...)
 	if err != nil {
 		return 0, err
