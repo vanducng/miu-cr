@@ -55,6 +55,13 @@ comment with a new marker); subsequent re-runs dedupe normally. On a
 first M5 review **manually** (or off-hours) to absorb the one-time re-post before
 the next scheduled run.
 
+## [0.55.0](https://github.com/vanducng/miu-cr/compare/v0.54.0...v0.55.0) (2026-06-27)
+
+
+### Features
+
+* **review:** expose trace telemetry in stats ([#158](https://github.com/vanducng/miu-cr/issues/158)) ([04ed989](https://github.com/vanducng/miu-cr/commit/04ed989d329195df3dc580712e20e18a03bb01e7))
+
 ## [0.54.0](https://github.com/vanducng/miu-cr/compare/v0.53.0...v0.54.0) (2026-06-27)
 
 
