@@ -201,6 +201,9 @@ func (h *HostRunner) loadReload(ctx stdctx.Context) (HostReload, error) {
 	if err != nil {
 		return HostReload{}, err
 	}
+	if next.Repos == nil && next.TokenSources == nil {
+		return next, nil
+	}
 	if err := validateHostRunnerRepos(next.Repos, next.TokenSources); err != nil {
 		return HostReload{}, err
 	}

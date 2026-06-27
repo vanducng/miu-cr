@@ -431,17 +431,159 @@ func buildServeHostSnapshot(ctx stdctx.Context, cfg config.HostConfig, path stri
 	}, nil
 }
 
+type serveHostReloader struct {
+	path                string
+	pollInterval        time.Duration
+	pollIntervalChanged bool
+	pollSource          string
+	pollSourceChanged   bool
+	fingerprint         string
+}
+
 func buildServeHostReloader(path string, pollInterval time.Duration, pollIntervalChanged bool, pollSource string, pollSourceChanged bool) serve.HostReloadFunc {
-	return func(ctx stdctx.Context) (serve.HostReload, error) {
-		cfg, err := config.LoadHost(path)
-		if err != nil {
-			return serve.HostReload{}, err
-		}
-		if _, err := serveHostPollSource(cfg, pollSource, pollSourceChanged); err != nil {
-			return serve.HostReload{}, err
-		}
-		return buildServeHostSnapshot(ctx, cfg, path, pollInterval, pollIntervalChanged)
+	r := &serveHostReloader{path: path, pollInterval: pollInterval, pollIntervalChanged: pollIntervalChanged, pollSource: pollSource, pollSourceChanged: pollSourceChanged}
+	return r.reload
+}
+
+func (r *serveHostReloader) reload(ctx stdctx.Context) (serve.HostReload, error) {
+	cfg, err := config.LoadHost(r.path)
+	if err != nil {
+		return serve.HostReload{}, err
 	}
+	if _, err := serveHostPollSource(cfg, r.pollSource, r.pollSourceChanged); err != nil {
+		return serve.HostReload{}, err
+	}
+	fingerprint, cacheable, err := hostReloadFingerprint(cfg, r.path)
+	if err != nil {
+		return serve.HostReload{}, err
+	}
+	if cacheable && fingerprint == r.fingerprint {
+		return serve.HostReload{}, nil
+	}
+	next, err := buildServeHostSnapshot(ctx, cfg, r.path, r.pollInterval, r.pollIntervalChanged)
+	if err != nil {
+		return serve.HostReload{}, err
+	}
+	if cacheable {
+		r.fingerprint = fingerprint
+	} else {
+		r.fingerprint = ""
+	}
+	return next, nil
+}
+
+type hostReloadTextFingerprint struct {
+	Ref  string `json:"ref"`
+	Hash string `json:"hash"`
+}
+
+type hostReloadFileFingerprint struct {
+	Ref     string `json:"ref"`
+	Path    string `json:"path"`
+	Size    int64  `json:"size"`
+	Mode    string `json:"mode"`
+	ModTime int64  `json:"mod_time"`
+}
+
+func hostReloadFingerprint(cfg config.HostConfig, path string) (string, bool, error) {
+	baseDir := filepath.Dir(path)
+	prompts, err := hostPromptFingerprints(baseDir, cfg)
+	if err != nil {
+		return "", false, err
+	}
+	rules, err := hostRuleFingerprints(baseDir, cfg)
+	if err != nil {
+		return "", false, err
+	}
+	keyFiles, cacheable, err := hostKeyFileFingerprints(cfg)
+	if err != nil {
+		return "", false, err
+	}
+	return serve.HashJSON(struct {
+		Config   config.HostConfig           `json:"config"`
+		Prompts  []hostReloadTextFingerprint `json:"prompts"`
+		Rules    []hostReloadTextFingerprint `json:"rules"`
+		KeyFiles []hostReloadFileFingerprint `json:"key_files"`
+	}{cfg, prompts, rules, keyFiles}), cacheable, nil
+}
+
+func hostPromptFingerprints(baseDir string, cfg config.HostConfig) ([]hostReloadTextFingerprint, error) {
+	var out []hostReloadTextFingerprint
+	if strings.TrimSpace(cfg.Agent.SystemPromptFile) != "" {
+		text, err := hostPrompt(baseDir, cfg.Agent)
+		if err != nil {
+			return nil, err
+		}
+		out = append(out, hostReloadTextFingerprint{Ref: cfg.Agent.SystemPromptFile, Hash: hashString(text)})
+	}
+	for _, repo := range cfg.Repos {
+		if strings.TrimSpace(repo.Agent.SystemPromptFile) == "" {
+			continue
+		}
+		text, err := hostPrompt(baseDir, repo.Agent)
+		if err != nil {
+			return nil, err
+		}
+		out = append(out, hostReloadTextFingerprint{Ref: repo.Slug + ":" + repo.Agent.SystemPromptFile, Hash: hashString(text)})
+	}
+	return out, nil
+}
+
+func hostRuleFingerprints(baseDir string, cfg config.HostConfig) ([]hostReloadTextFingerprint, error) {
+	var out []hostReloadTextFingerprint
+	for _, repo := range cfg.Repos {
+		_, rulesHash, err := hostRuleText(baseDir, repo.Rules)
+		if err != nil {
+			return nil, err
+		}
+		out = append(out, hostReloadTextFingerprint{Ref: repo.Slug, Hash: rulesHash})
+	}
+	return out, nil
+}
+
+func hostKeyFileFingerprints(cfg config.HostConfig) ([]hostReloadFileFingerprint, bool, error) {
+	names := make([]string, 0, len(cfg.Github.Accounts))
+	for name := range cfg.Github.Accounts {
+		names = append(names, name)
+	}
+	sort.Strings(names)
+	out := make([]hostReloadFileFingerprint, 0, len(names))
+	cacheable := true
+	for _, name := range names {
+		acct := cfg.Github.Accounts[name]
+		if acct.Mode != "app" {
+			continue
+		}
+		path := firstHostValue(acct.PrivateKeyPath, os.Getenv(acct.PrivateKeyPathEnv))
+		if path == "" {
+			if len(acct.PrivateKeyCommand) > 0 {
+				cacheable = false
+			}
+			continue
+		}
+		fp, err := hostFileFingerprint(name, path)
+		if err != nil {
+			return nil, false, err
+		}
+		out = append(out, fp)
+	}
+	return out, cacheable, nil
+}
+
+func hostFileFingerprint(ref, path string) (hostReloadFileFingerprint, error) {
+	f, err := os.OpenFile(path, os.O_RDONLY|oNoFollow, 0)
+	if err != nil {
+		return hostReloadFileFingerprint{}, &CLIError{Code: "config.invalid", Message: config.RedactString(err.Error()), Hint: "fix host watched file " + ref, Exit: 2}
+	}
+	defer f.Close()
+	info, err := f.Stat()
+	if err != nil {
+		return hostReloadFileFingerprint{}, &CLIError{Code: "config.invalid", Message: config.RedactString(err.Error()), Hint: "fix host watched file " + ref, Exit: 2}
+	}
+	if info.Mode()&os.ModeSymlink != 0 || info.IsDir() {
+		return hostReloadFileFingerprint{}, &CLIError{Code: "config.invalid", Message: "host watched file must be a regular file: " + ref, Hint: "use a regular mounted file", Exit: 2}
+	}
+	return hostReloadFileFingerprint{Ref: ref, Path: path, Size: info.Size(), Mode: info.Mode().String(), ModTime: info.ModTime().UnixNano()}, nil
 }
 
 func buildServeHostRepos(ctx stdctx.Context, cfg config.HostConfig, path string) ([]serve.HostRepoConfig, time.Duration, error) {

@@ -303,6 +303,13 @@ repos:
 	if err != nil {
 		t.Fatalf("first reload: %v", err)
 	}
+	unchanged, err := reload(stdctx.Background())
+	if err != nil {
+		t.Fatalf("unchanged reload: %v", err)
+	}
+	if unchanged.Repos != nil || unchanged.TokenSources != nil {
+		t.Fatalf("unchanged reload returned snapshot: %+v", unchanged)
+	}
 	if err := os.WriteFile(promptPath, []byte("prompt v2"), 0o600); err != nil {
 		t.Fatal(err)
 	}
