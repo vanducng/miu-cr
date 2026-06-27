@@ -93,7 +93,7 @@ jobs:
         if: startsWith(github.ref, 'refs/tags/v')
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        run: gh workflow run "Deploy Documentation" --ref main
+        run: gh workflow run docs.yml --ref main
 
   # release-please creates the release; rewrite its body after goreleaser uploads assets.
   marketplace-release-notes:
