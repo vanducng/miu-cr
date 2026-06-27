@@ -318,7 +318,8 @@ Anything else degrades to the safe plain hint. Suggestions are **author-applied*
 miucr never pushes or commits to the PR branch.
 
 **`--approve-clean`** submits `Event=APPROVE` instead of the default `COMMENT` only
-when **every** precondition holds: gate clean, **not a fork**, **trusted author**
+when **every** precondition holds: zero findings in the latest review attempt,
+gate clean, **not a fork**, **trusted author**
 (`AuthorAssociation` ∉ `{NONE, FIRST_TIME_CONTRIBUTOR, FIRST_TIMER}`), **≥1 file
 actually reviewed**, **head unchanged** (the head SHA is re-fetched immediately
 before submitting the review), and **not already approved** at the current head SHA. A

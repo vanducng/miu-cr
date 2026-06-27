@@ -367,8 +367,9 @@ The count emitted this run is reported as `suggestions_posted`.
 ### `--approve-clean`: APPROVE only on a clean, trusted PR
 
 Submits `Event=APPROVE` instead of `COMMENT`, but **only** when every safety
-precondition holds: the PR is clean (no finding reaches the gate), is **not a
-fork**, the author is **trusted** (`AuthorAssociation` not `NONE` /
+precondition holds: the latest review attempt has **zero findings**, no finding
+reaches the gate, the PR is **not a fork**, the author is **trusted**
+(`AuthorAssociation` not `NONE` /
 `FIRST_TIME_CONTRIBUTOR` / `FIRST_TIMER`), **at least one file was actually
 reviewed**, the **head SHA is unchanged** (re-fetched right before submitting),
 and no `APPROVED` review already exists at that SHA. Re-runs at the same head SHA
@@ -377,8 +378,8 @@ post **no second APPROVE**.
 Any missed precondition silently **degrades to `COMMENT`** with a reason; it
 **never fails the run**. The outcome is reported as `approve_action`
 (`approved` | `commented`) and `approve_reason` (e.g. `gate_failed`, `fork`,
-`untrusted_author`, `nothing_reviewed`, `head_moved`, `already_approved`,
-`self_approve_forbidden`).
+`findings_present`, `untrusted_author`, `nothing_reviewed`, `head_moved`,
+`already_approved`, `self_approve_forbidden`).
 
 > **`--approve-clean` is not advisory.** A review submitted by a **PAT satisfies
 > branch-protection required-reviews** and can enable auto-merge, so a human does

@@ -20,30 +20,32 @@ func TestResolveEvent(t *testing.T) {
 		opts          PostReviewOptions
 		info          PRInfo
 		gateClean     bool
+		findingsCount int
 		reviewedFiles int
 		headUnchanged bool
 		wantEvent     string
 		wantReason    string
 	}{
-		{"approve all pass", on, base, true, 3, true, "APPROVE", approveReasonApproved},
-		{"trusted owner", on, withAssoc(base, "OWNER"), true, 3, true, "APPROVE", approveReasonApproved},
-		{"trusted collaborator", on, withAssoc(base, "COLLABORATOR"), true, 3, true, "APPROVE", approveReasonApproved},
-		{"not requested", PostReviewOptions{}, base, true, 3, true, "COMMENT", approveReasonNotRequested},
-		{"gate failed", on, base, false, 3, true, "COMMENT", approveReasonGateFailed},
-		{"fork", on, withFork(base), true, 3, true, "COMMENT", approveReasonFork},
-		{"untrusted none", on, withAssoc(base, "NONE"), true, 3, true, "COMMENT", approveReasonUntrusted},
-		{"untrusted first-timer", on, withAssoc(base, "FIRST_TIMER"), true, 3, true, "COMMENT", approveReasonUntrusted},
-		{"untrusted first-time-contrib", on, withAssoc(base, "FIRST_TIME_CONTRIBUTOR"), true, 3, true, "COMMENT", approveReasonUntrusted},
-		{"untrusted contributor", on, withAssoc(base, "CONTRIBUTOR"), true, 3, true, "COMMENT", approveReasonUntrusted},
-		{"untrusted empty fails closed", on, withAssoc(base, ""), true, 3, true, "COMMENT", approveReasonUntrusted},
-		{"untrusted unknown tier", on, withAssoc(base, "MANNEQUIN"), true, 3, true, "COMMENT", approveReasonUntrusted},
-		{"nothing reviewed", on, base, true, 0, true, "COMMENT", approveReasonNothingDone},
-		{"head moved", on, base, true, 3, false, "COMMENT", approveReasonHeadMoved},
-		{"head unknown beats unchanged", on, withHead(base, ""), true, 3, true, "COMMENT", approveReasonHeadUnknown},
+		{"approve all pass", on, base, true, 0, 3, true, "APPROVE", approveReasonApproved},
+		{"trusted owner", on, withAssoc(base, "OWNER"), true, 0, 3, true, "APPROVE", approveReasonApproved},
+		{"trusted collaborator", on, withAssoc(base, "COLLABORATOR"), true, 0, 3, true, "APPROVE", approveReasonApproved},
+		{"not requested", PostReviewOptions{}, base, true, 0, 3, true, "COMMENT", approveReasonNotRequested},
+		{"gate failed", on, base, false, 1, 3, true, "COMMENT", approveReasonGateFailed},
+		{"below-gate findings present", on, base, true, 1, 3, true, "COMMENT", approveReasonFindingsPresent},
+		{"fork", on, withFork(base), true, 0, 3, true, "COMMENT", approveReasonFork},
+		{"untrusted none", on, withAssoc(base, "NONE"), true, 0, 3, true, "COMMENT", approveReasonUntrusted},
+		{"untrusted first-timer", on, withAssoc(base, "FIRST_TIMER"), true, 0, 3, true, "COMMENT", approveReasonUntrusted},
+		{"untrusted first-time-contrib", on, withAssoc(base, "FIRST_TIME_CONTRIBUTOR"), true, 0, 3, true, "COMMENT", approveReasonUntrusted},
+		{"untrusted contributor", on, withAssoc(base, "CONTRIBUTOR"), true, 0, 3, true, "COMMENT", approveReasonUntrusted},
+		{"untrusted empty fails closed", on, withAssoc(base, ""), true, 0, 3, true, "COMMENT", approveReasonUntrusted},
+		{"untrusted unknown tier", on, withAssoc(base, "MANNEQUIN"), true, 0, 3, true, "COMMENT", approveReasonUntrusted},
+		{"nothing reviewed", on, base, true, 0, 0, true, "COMMENT", approveReasonNothingDone},
+		{"head moved", on, base, true, 0, 3, false, "COMMENT", approveReasonHeadMoved},
+		{"head unknown beats unchanged", on, withHead(base, ""), true, 0, 3, true, "COMMENT", approveReasonHeadUnknown},
 	}
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
-			ev, rs := resolveEvent(tc.opts, tc.info, tc.gateClean, tc.reviewedFiles, tc.headUnchanged)
+			ev, rs := resolveEvent(tc.opts, tc.info, tc.gateClean, tc.findingsCount, tc.reviewedFiles, tc.headUnchanged)
 			if ev != tc.wantEvent || rs != tc.wantReason {
 				t.Fatalf("got (%q,%q), want (%q,%q)", ev, rs, tc.wantEvent, tc.wantReason)
 			}
@@ -120,6 +122,21 @@ func TestPostReviewApproveDegradesGateFailedToComment(t *testing.T) {
 	}
 	if res.Event != "COMMENT" || res.Reason != approveReasonGateFailed {
 		t.Fatalf("gate-failed must degrade, got (%q,%q)", res.Event, res.Reason)
+	}
+}
+
+func TestPostReviewApproveDegradesFindingsPresentToComment(t *testing.T) {
+	c := &recordClient{}
+	finding := engine.Finding{File: "p.go", Line: 2, Severity: "low", Category: "style", Rationale: "minor issue"}
+	res, err := PostReview(stdctx.Background(), c, approveInfo(), []engine.Finding{finding}, sampleDiffs(), staticSummary("review"), nil, approveOpts())
+	if err != nil {
+		t.Fatalf("PostReview: %v", err)
+	}
+	if res.Event != "COMMENT" || res.Reason != approveReasonFindingsPresent {
+		t.Fatalf("finding-present must degrade, got (%q,%q)", res.Event, res.Reason)
+	}
+	if c.gotReview.GetEvent() == "APPROVE" {
+		t.Fatal("must not APPROVE when the latest review has findings")
 	}
 }
 
@@ -354,8 +371,7 @@ func TestPostReviewApprove422CommentRetryFailureZeroesPostedAndErrors(t *testing
 		createReviewErrFirst: generic422(), // call 1 (APPROVE) → degrade to COMMENT
 		createReviewErr:      errBoom{},    // call 2 (COMMENT retry) → hard failure
 	}
-	findings := []engine.Finding{{File: "p.go", Line: 2, Severity: "high", Category: "bug", Rationale: "boom"}}
-	res, err := PostReview(stdctx.Background(), c, approveInfo(), findings, sampleDiffs(), staticSummary("review"), nil, approveOpts())
+	res, err := PostReview(stdctx.Background(), c, approveInfo(), nil, nil, staticSummary("review"), nil, approveOpts())
 	if err == nil {
 		t.Fatal("a failed COMMENT retry must surface an error")
 	}

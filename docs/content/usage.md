@@ -195,7 +195,9 @@ Every review gets a built-in baseline plus any project rules under `.miu/cr/rule
 - `--token <pat>`: GitHub PAT, required only for `--post`.
 - `--mode review|checks`: inline review comments (default) or a GitHub CheckRun (survives force-push, works on fork PRs).
 - `--suggest`: emit one-click GitHub suggestions for proven fixes: single-line replacements and wrap/guard/insert fixes (a multi-line patch on a QuotedCode-proven single-line anchor).
-- `--approve-clean`: submit `APPROVE` only on a clean, non-fork, trusted-author PR.
+- `--approve-clean`: submit `APPROVE` only when the latest run has zero findings
+  and the PR is non-fork, trusted-author, reviewed, head-stable, and not already
+  approved at that SHA.
 - `--conversation`: on `--pr`, also fetch the prior PR conversation (the miucr summary, finding threads, and developer replies) and inject it fenced/context-only as Untrusted context (dropped on fork PRs); one extra read pass, no extra LLM call (default OFF).
 - `--force`: re-review even when the head SHA is unchanged since the last saved review. By default an unchanged head SHA short-circuits (`skipped_unchanged`, no LLM pass); a new commit always re-reviews. See [GitHub PR review](/github-pr/).
 

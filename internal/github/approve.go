@@ -12,6 +12,7 @@ const (
 	approveReasonApproved              = "approved"
 	approveReasonNotRequested          = "not_requested"
 	approveReasonGateFailed            = "gate_failed"
+	approveReasonFindingsPresent       = "findings_present"
 	approveReasonFork                  = "fork"
 	approveReasonUntrusted             = "untrusted_author"
 	approveReasonNothingDone           = "nothing_reviewed"
@@ -44,12 +45,15 @@ func trustedAuthor(info PRInfo) bool {
 // approve-clean is requested AND every safety predicate holds; otherwise COMMENT
 // with a reason. self_approve_forbidden is NOT decided here, it is a reactive
 // 422 catch in PostReview, so it never appears as a resolveEvent reason.
-func resolveEvent(opts PostReviewOptions, info PRInfo, gateClean bool, reviewedFiles int, headUnchanged bool) (event, reason string) {
+func resolveEvent(opts PostReviewOptions, info PRInfo, gateClean bool, findingsCount int, reviewedFiles int, headUnchanged bool) (event, reason string) {
 	if !opts.ApproveClean {
 		return "COMMENT", approveReasonNotRequested
 	}
 	if !gateClean {
 		return "COMMENT", approveReasonGateFailed
+	}
+	if findingsCount > 0 {
+		return "COMMENT", approveReasonFindingsPresent
 	}
 	if info.IsFork {
 		return "COMMENT", approveReasonFork
