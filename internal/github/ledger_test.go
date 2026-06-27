@@ -196,7 +196,11 @@ func TestRenderSummaryLedgerGroupedTables(t *testing.T) {
 		{FP: "aaaaaaaaaaaaaaaa", Path: "api/db.go", Line: 42, Title: "SQL injection", Category: "security", Status: statusOpen, Sev: "critical", FirstSev: "critical", OpenSHA: "a1b2c3d4", FirstAt: now.Format(time.RFC3339)},
 		{FP: "bbbbbbbbbbbbbbbb", Path: "fs/read.go", Line: 12, Title: "Path traversal", Category: "security", Status: statusResolved, Sev: "high", FirstSev: "high", OpenSHA: "a1b2c3d4", ResSHA: "e4f5a6b7", FirstAt: now.Format(time.RFC3339), ResAt: now.Format(time.RFC3339)},
 	}
-	out := RenderSummaryFull(info, nil, nil, 0, nil, nil, SummaryOptions{Ledger: ledger, Now: now, Version: "v0.44.0", Walkthrough: "- adds a thing\n- removes another"})
+	// InlineURLs set for the OPEN finding → its Location links to the discussion
+	// thread (end-to-end: SummaryOptions → renderLedger → ledgerLocation). The
+	// resolved finding has no inline URL → blob fallback.
+	inlineURLs := map[string]string{"aaaaaaaaaaaaaaaa": "https://github.com/o/r/pull/1#discussion_r123"}
+	out := RenderSummaryFull(info, nil, nil, 0, nil, nil, SummaryOptions{Ledger: ledger, Now: now, Version: "v0.44.0", Walkthrough: "- adds a thing\n- removes another", InlineURLs: inlineURLs})
 
 	for _, want := range []string{
 		"**⚠️ Open (1)**",    // bold (not H3), calm warning marker
@@ -204,10 +208,10 @@ func TestRenderSummaryLedgerGroupedTables(t *testing.T) {
 		"| Priority |",       // column renamed from Sev
 		"SQL injection",
 		"Path traversal",
-		"→✅",                                 // severity before→after for the resolved row
+		"#discussion_r123",                   // open finding Location links to its inline thread
 		"Last reviewed 2026-06-26 22:51 UTC", // footer timestamp
 		"/commit/a1b2c3d4",                   // linked origin commit
-		"/commit/e4f5a6b7",                   // linked resolved commit
+		"/commit/e4f5a6b7",                   // linked resolved commit (distinct → "opened → resolved")
 		"<!-- " + ledgerPrefix,               // embedded ledger marker for the next run
 	} {
 		if !strings.Contains(out, want) {
@@ -222,6 +226,7 @@ func TestRenderSummaryLedgerGroupedTables(t *testing.T) {
 		"<summary>✅ Resolved", // resolved table is no longer collapsed
 		"| Sev |",             // old column header
 		"Opened → Resolved",   // resolved column header simplified to "Resolved"
+		"→✅",                  // resolved Priority cell is plain severity (no →✅ transition)
 		"Review the",          // inline-comment pointer removed in ledger mode
 	} {
 		if strings.Contains(out, absent) {
@@ -375,8 +380,10 @@ func TestRenderLedgerResolvedRowCap(t *testing.T) {
 	}
 	out := RenderSummaryFull(info, nil, nil, 0, nil, nil, SummaryOptions{Ledger: ledger, Now: now})
 
-	// The resolved table is capped at maxResolvedRows visible rows (each carries →✅).
-	if n := strings.Count(out, "→✅"); n != maxResolvedRows {
+	// The resolved table is capped at maxResolvedRows visible rows. Each resolved
+	// row here has distinct open/resolved SHAs, so it carries an "opened → resolved"
+	// arrow; the lone open row (no escalation) has none, so the count = shown rows.
+	if n := strings.Count(out, " → "); n != maxResolvedRows {
 		t.Fatalf("want %d rendered resolved rows, got %d", maxResolvedRows, n)
 	}
 	if !strings.Contains(out, fmt.Sprintf("_+%d older resolved finding(s) tracked but not shown._", 30-maxResolvedRows)) {
@@ -385,6 +392,23 @@ func TestRenderLedgerResolvedRowCap(t *testing.T) {
 	// But the persisted marker still tracks ALL of them.
 	if got := ParseLedger(out); len(got) != 31 {
 		t.Fatalf("marker should still carry all 31 entries, got %d", len(got))
+	}
+}
+
+func TestRenderLedgerSameCommitNoArrow(t *testing.T) {
+	info := &PRInfo{HeadSHA: "deadbeef", HTMLBase: "https://github.com/o/r"}
+	now := time.Date(2026, 6, 26, 22, 0, 0, 0, time.UTC)
+	// Opened AND resolved at the same commit (e.g. a same-SHA re-review): the
+	// Resolved column shows ONE SHA, no "opened → resolved" arrow.
+	ledger := []LedgerEntry{
+		{FP: fpStr(1), Path: "a.go", Title: "x", Status: statusResolved, Sev: "low", FirstSev: "low", OpenSHA: "0519d5d", ResSHA: "0519d5d", ResAt: now.Format(time.RFC3339)},
+	}
+	out := RenderSummaryFull(info, nil, nil, 0, nil, nil, SummaryOptions{Ledger: ledger, Now: now})
+	if strings.Contains(out, " → ") {
+		t.Fatalf("same opened/resolved commit must not render a transition arrow:\n%s", out)
+	}
+	if !strings.Contains(out, "/commit/0519d5d") {
+		t.Fatalf("want the single resolved commit link:\n%s", out)
 	}
 }
 
@@ -407,18 +431,30 @@ func TestRenderLedgerReopenPrefix(t *testing.T) {
 
 func TestLedgerLocation(t *testing.T) {
 	info := &PRInfo{HeadSHA: "deadbeef", HTMLBase: "https://github.com/o/r"}
-	got := ledgerLocation(info, LedgerEntry{Path: "api/db.go", Line: 42})
+	got := ledgerLocation(info, LedgerEntry{Path: "api/db.go", Line: 42}, nil)
 	if !strings.Contains(got, "https://github.com/o/r/blob/deadbeef/api/db.go#L42") || !strings.Contains(got, "`api/db.go:42`") {
 		t.Fatalf("want blob permalink + file:line label, got %q", got)
 	}
+	// When an inline-comment URL exists for the fp, the cell links to the THREAD
+	// (not the blob), keeping the file:line label.
+	withURL := ledgerLocation(info, LedgerEntry{FP: "abcd", Path: "api/db.go", Line: 42}, map[string]string{"abcd": "https://github.com/o/r/pull/9#discussion_r123"})
+	if !strings.Contains(withURL, "(<https://github.com/o/r/pull/9#discussion_r123>)") {
+		t.Fatalf("want a link to the inline discussion thread, got %q", withURL)
+	}
+	if strings.Contains(withURL, "/blob/") {
+		t.Fatalf("an inline thread URL must take precedence over the blob link, got %q", withURL)
+	}
+	if !strings.Contains(withURL, "`api/db.go:42`") {
+		t.Fatalf("thread link must keep the file:line label, got %q", withURL)
+	}
 	// No head SHA → bare code span (blobURL returns "").
-	if got := ledgerLocation(&PRInfo{}, LedgerEntry{Path: "a.go", Line: 3}); got != "`a.go:3`" {
+	if got := ledgerLocation(&PRInfo{}, LedgerEntry{Path: "a.go", Line: 3}, nil); got != "`a.go:3`" {
 		t.Fatalf("fallback must be a bare code span, got %q", got)
 	}
 	// Tampered path: newline (row breakout), pipe (cell delimiter), backtick and
 	// brackets (span/link breakout) must all be neutralized.
 	mal := "a.go\n\n![x](http://evil/x.png)\n\n| junk`["
-	got = ledgerLocation(&PRInfo{}, LedgerEntry{Path: mal})
+	got = ledgerLocation(&PRInfo{}, LedgerEntry{Path: mal}, nil)
 	if strings.Contains(got, "\n") {
 		t.Fatalf("newline must be collapsed (no table-row breakout): %q", got)
 	}

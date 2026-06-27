@@ -164,7 +164,7 @@ func TestStoreReopen(t *testing.T) {
 	fpF := mgithub.Fingerprint(findingB())
 	// The run-A marker must still be live so the union can't help us.
 	existing, _ := mgithub.ExistingFingerprints(stdctx.Background(), client, info)
-	if !existing[fpF] {
+	if _, ok := existing[fpF]; !ok {
 		t.Fatalf("run-A marker for F must persist in ExistingFingerprints")
 	}
 

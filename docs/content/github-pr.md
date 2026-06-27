@@ -133,9 +133,11 @@ bullets** (one short line each), kept above the tracking tables as a quick skim.
 **finding lifecycle ledger**, two ALWAYS-VISIBLE tables labelled in bold (not oversized H3):
 **⚠️ Open (N)** and **✅ Resolved (N)**. Each row is keyed by the finding's line-independent
 fingerprint with a **Priority** column (P0–P4 + emoji), its **severity before→after** (e.g.
-`🟡→🔴` on escalation, `🟠→✅` when fixed), its location, and the linked **origin commit** (plus,
-for resolved rows, the linked **resolved commit**). This is what lets a re-run show how each
-issue *progressed* instead of only the latest snapshot. A finding flips to resolved only when
+`🟡→🔴` on escalation, `🟠→✅` when fixed), a **Location** (the `file:line` label links to the
+finding's **inline review thread** — the `#discussion_r…` anchor — when a comment exists for it,
+else to the file blob), and the linked **origin commit** (plus, for resolved rows, the linked
+**resolved commit**). This is what lets a re-run show how each issue *progressed* instead of only
+the latest snapshot. A finding flips to resolved only when
 it is absent from a run AND its file is still in the diff (absence off-diff is not treated as a
 fix). The collapsible **Important Files Changed** table
 (File · Δ · Findings · Overview, the Overview from the per-file digests), sorted

@@ -339,9 +339,12 @@ func Fingerprint(f engine.Finding) string { return fingerprint(f) }
 func fpMarker(fp string) string { return fmt.Sprintf("<!-- %s%s -->", fpPrefix, fp) }
 
 // ExistingFingerprints scans posted inline review comments for our hidden fp
-// markers so PostReview can skip findings already commented in a prior run.
-func ExistingFingerprints(ctx stdctx.Context, client Client, info *PRInfo) (map[string]bool, error) {
-	fps := map[string]bool{}
+// markers and returns fp -> the comment's HTML URL (the #discussion_r… thread
+// anchor). The KEYS are the dedup set (PostReview skips findings already
+// commented in a prior run); the VALUES let the summary's Location column link
+// straight to the inline thread. First (root) comment wins per fp.
+func ExistingFingerprints(ctx stdctx.Context, client Client, info *PRInfo) (map[string]string, error) {
+	fps := map[string]string{}
 	opts := &gh.PullRequestListCommentsOptions{ListOptions: gh.ListOptions{PerPage: 100}}
 	for {
 		comments, resp, err := client.ListReviewComments(ctx, info.Owner, info.Repo, info.Number, opts)
@@ -350,7 +353,9 @@ func ExistingFingerprints(ctx stdctx.Context, client Client, info *PRInfo) (map[
 		}
 		for _, c := range comments {
 			for _, m := range fpMarkerRe.FindAllStringSubmatch(c.GetBody(), -1) {
-				fps[m[1]] = true
+				if _, seen := fps[m[1]]; !seen {
+					fps[m[1]] = c.GetHTMLURL()
+				}
 			}
 		}
 		if resp == nil || resp.NextPage == 0 {

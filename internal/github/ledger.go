@@ -240,8 +240,9 @@ func ledgerResultLine(entries []LedgerEntry) string {
 // (not collapsed) — the tracking history is the point of the section. Section
 // labels are bold (not H3) so the marker emoji stays normal-sized; ⚠️ flags Open
 // (attention, not alarm) and ✅ flags Resolved. Untrusted title/path text is
-// escaped; commit SHAs link to their commit page.
-func renderLedger(b *strings.Builder, info *PRInfo, entries []LedgerEntry) {
+// escaped; commit SHAs link to their commit page. inlineURLs (fp -> inline
+// comment URL) links the Location cell to the review thread when one exists.
+func renderLedger(b *strings.Builder, info *PRInfo, entries []LedgerEntry, inlineURLs map[string]string) {
 	var open, resolved []LedgerEntry
 	for _, e := range entries {
 		if e.Status == statusResolved {
@@ -256,7 +257,7 @@ func renderLedger(b *strings.Builder, info *PRInfo, entries []LedgerEntry) {
 		fmt.Fprintf(b, "**⚠️ Open (%d)**\n\n", len(open))
 		b.WriteString("| Priority | Issue | Location | Opened |\n|----------|-------|----------|--------|\n")
 		for _, e := range open {
-			fmt.Fprintf(b, "| %s | %s | %s | %s |\n", ledgerSevCell(e, false), ledgerIssue(e), ledgerLocation(info, e), shaLink(info, e.OpenSHA))
+			fmt.Fprintf(b, "| %s | %s | %s | %s |\n", ledgerSevCell(e, false), ledgerIssue(e), ledgerLocation(info, e, inlineURLs), shaLink(info, e.OpenSHA))
 		}
 		b.WriteString("\n")
 	}
@@ -271,7 +272,14 @@ func renderLedger(b *strings.Builder, info *PRInfo, entries []LedgerEntry) {
 			shown = shown[:maxResolvedRows]
 		}
 		for _, e := range shown {
-			fmt.Fprintf(b, "| %s | %s | %s | %s → %s |\n", ledgerSevCell(e, true), ledgerIssue(e), ledgerLocation(info, e), shaLink(info, e.OpenSHA), shaLink(info, e.ResSHA))
+			// Show "opened → resolved" only when they are DIFFERENT commits (a real
+			// cross-commit fix); when a finding opened and resolved at the same commit
+			// (e.g. a re-review of the same SHA) the transition is noise — show one SHA.
+			resolvedCell := shaLink(info, e.ResSHA)
+			if e.OpenSHA != "" && e.OpenSHA != e.ResSHA {
+				resolvedCell = shaLink(info, e.OpenSHA) + " → " + resolvedCell
+			}
+			fmt.Fprintf(b, "| %s | %s | %s | %s |\n", ledgerSevCell(e, true), ledgerIssue(e), ledgerLocation(info, e, inlineURLs), resolvedCell)
 		}
 		if extra > 0 {
 			fmt.Fprintf(b, "\n_+%d older resolved finding(s) tracked but not shown._\n", extra)
@@ -280,15 +288,13 @@ func renderLedger(b *strings.Builder, info *PRInfo, entries []LedgerEntry) {
 	}
 }
 
-// ledgerSevCell renders severity-before→after: a resolved finding shows
-// <sev>→✅; an open finding that escalated shows <first>→<current>; otherwise
-// just the current severity. P-level reflects the latest severity.
+// ledgerSevCell renders the Priority cell. Resolved rows show the plain
+// severity (the ✅ Resolved table heading already conveys resolution, so no
+// →✅). An OPEN finding that escalated shows <first>→<current>; otherwise just
+// the current severity. P-level reflects the latest severity.
 func ledgerSevCell(e LedgerEntry, resolved bool) string {
 	emoji, p, _ := severityMeta(e.Sev)
-	if resolved {
-		return fmt.Sprintf("%s→✅ %s", emoji, p)
-	}
-	if e.FirstSev != "" && !strings.EqualFold(e.FirstSev, e.Sev) {
+	if !resolved && e.FirstSev != "" && !strings.EqualFold(e.FirstSev, e.Sev) {
 		first, _, _ := severityMeta(e.FirstSev)
 		return fmt.Sprintf("%s→%s %s", first, emoji, p)
 	}
@@ -311,13 +317,19 @@ func ledgerIssue(e LedgerEntry) string {
 	return t
 }
 
-// ledgerLocation renders the file:line as a head-blob link when possible. The
-// path is an UNTRUSTED field (it round-trips through the editable PR comment),
-// so it is neutralized via mdPathLabel before rendering into the table cell.
-func ledgerLocation(info *PRInfo, e LedgerEntry) string {
+// ledgerLocation renders the `file:line` label, linked to the inline review
+// THREAD when one exists for this finding (inlineURLs[fp], the #discussion_r…
+// anchor) — a direct jump to the discussion is more useful than the raw file.
+// It falls back to the head-blob permalink, then a plain code span. The path is
+// UNTRUSTED (round-trips through the editable comment) so it is neutralized via
+// mdPathLabel; the inline URL is GitHub-server-assigned (trusted), angle-bracketed.
+func ledgerLocation(info *PRInfo, e LedgerEntry, inlineURLs map[string]string) string {
 	label := mdPathLabel(e.Path)
 	if e.Line > 0 {
 		label = fmt.Sprintf("%s:%d", label, e.Line)
+	}
+	if u := inlineURLs[e.FP]; u != "" {
+		return fmt.Sprintf("[`%s`](<%s>)", label, u)
 	}
 	if u := blobURL(info, e.Path, e.Line, 0); u != "" {
 		return fmt.Sprintf("[`%s`](%s)", label, u)

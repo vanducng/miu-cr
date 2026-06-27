@@ -502,12 +502,16 @@ func publishReview(ctx stdctx.Context, client mgithub.Client, runner *gitcmd.Run
 		return err
 	}
 
-	// skip is the dedupe set passed to PostReview. With no store it is exactly the
-	// M2/M9 ExistingFingerprints; with a store we layer prior 'posted' fps on top
-	// and then SUBTRACT recurring resolved fps so a fixed-then-reappearing finding
-	// reopens (the lingering marker keeps it in `existing`, so only a set-difference
-	// can re-raise it; a union never could).
-	skip := existing
+	// skip is the dedupe set passed to PostReview, built from the keys of `existing`
+	// (fp -> inline comment URL). With no store it is exactly the M2/M9
+	// ExistingFingerprints; with a store we layer prior 'posted' fps on top and then
+	// SUBTRACT recurring resolved fps so a fixed-then-reappearing finding reopens
+	// (the lingering marker keeps it in `existing`, so only a set-difference can
+	// re-raise it; a union never could).
+	skip := make(map[string]bool, len(existing))
+	for fp := range existing {
+		skip[fp] = true
+	}
 	prKey := store.PRKey{Owner: info.Owner, Repo: info.Repo, Number: info.Number}
 	var prior []store.PRFinding
 	if prStore != nil {
@@ -574,6 +578,7 @@ func publishReview(ctx stdctx.Context, client mgithub.Client, runner *gitcmd.Run
 			RuleCitations: ruleCites,
 			Ledger:        ledger,
 			Now:           now,
+			InlineURLs:    existing,
 		})
 	}
 

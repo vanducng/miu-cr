@@ -132,6 +132,10 @@ type SummaryOptions struct {
 	// Now stamps the footer "Last reviewed" time (UTC); the zero time omits the
 	// stamp (legacy byte-for-byte). Injected so renders stay deterministic in tests.
 	Now time.Time
+	// InlineURLs maps a finding fingerprint to its inline-comment HTML URL (the
+	// #discussion_r… thread anchor). When set, the ledger Location cell links to
+	// the inline review thread instead of the file blob. nil → blob links.
+	InlineURLs map[string]string
 }
 
 // RenderSummaryFull is RenderSummaryWithOverflow plus the LLM-free reviewer-trust
@@ -159,7 +163,7 @@ func RenderSummaryFull(info *PRInfo, findings []engine.Finding, stats map[string
 		// surfaces the inline review thread below).
 		fmt.Fprintf(&b, "**Result:** %s\n\n", ledgerResultLine(opts.Ledger))
 		renderWalkthrough(&b, opts.Walkthrough)
-		renderLedger(&b, info, opts.Ledger)
+		renderLedger(&b, info, opts.Ledger, opts.InlineURLs)
 	} else {
 		lead := severityCounts(findings)
 		if lead != "" {
