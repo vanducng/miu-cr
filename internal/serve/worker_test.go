@@ -62,6 +62,30 @@ func TestPool_DistinctKeysBothRun(t *testing.T) {
 	}
 }
 
+func TestPoolWithWorkersOneRunsSerially(t *testing.T) {
+	started := make(chan int, 2)
+	release := make(chan struct{})
+	reviewFn := func(j Job) error {
+		started <- j.Key.Number
+		<-release
+		return nil
+	}
+	p := NewPoolWithWorkers(reviewFn, discardLog(), 1)
+	if !p.Submit(Job{Key: key("o", "r", 1)}) || !p.Submit(Job{Key: key("o", "r", 2)}) {
+		t.Fatal("submits failed")
+	}
+	if got := <-started; got != 1 {
+		t.Fatalf("first started = %d, want 1", got)
+	}
+	select {
+	case got := <-started:
+		t.Fatalf("second job started before first released: %d", got)
+	case <-time.After(50 * time.Millisecond):
+	}
+	close(release)
+	p.Drain()
+}
+
 func TestPool_FullQueueLoudDrop(t *testing.T) {
 	// Block every worker so the buffered channel fills and the next Submit drops.
 	block := make(chan struct{})

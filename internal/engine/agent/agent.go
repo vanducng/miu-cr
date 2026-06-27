@@ -61,11 +61,12 @@ type Context struct {
 	Instruction string
 	// Conversation is the optional fetched PR conversation (UNTRUSTED). LOCKSTEP:
 	// mirror Instruction in ALL three backends or it is silently dropped.
-	Conversation string
-	RepoDir      string
-	Rev          string
-	Runner       *gitcmd.Runner
-	Progress     func(string) // nil = silent; milestone/tool strings only, never secrets
+	Conversation   string
+	OperatorPrompt string
+	RepoDir        string
+	Rev            string
+	Runner         *gitcmd.Runner
+	Progress       func(string) // nil = silent; milestone/tool strings only, never secrets
 	// Trace, when non-nil, accumulates the raw prompt, per-turn tool calls, and
 	// raw final response for persistence. nil = no capture (mirrors Progress).
 	Trace *engine.ReviewTrace
@@ -190,13 +191,14 @@ func (a *anthropicAgent) Review(ctx stdctx.Context, rc Context) (engine.ReviewOu
 	}
 
 	userPrompt := BuildUserPrompt(PromptParts{Rules: rc.Rules, SemanticContext: rc.SemanticContext, ProjectContext: rc.ProjectContext, RelatedContext: rc.RelatedContext, WantDiagram: rc.WantDiagram, Instruction: rc.Instruction, Conversation: rc.Conversation, Diff: rc.Text})
-	rc.Trace.SetSystemPrompt(systemPrompt)
+	system := reviewSystemPrompt(rc.OperatorPrompt)
+	rc.Trace.SetSystemPrompt(system)
 	rc.Trace.SetModel("anthropic", a.model)
 	rc.Trace.SetPrompt(userPrompt)
 	params := anthropic.MessageNewParams{
 		MaxTokens: maxTokens,
 		Model:     anthropic.Model(a.model),
-		System:    []anthropic.TextBlockParam{{Text: systemPrompt}},
+		System:    []anthropic.TextBlockParam{{Text: system}},
 		Tools:     reviewTools(),
 		Messages: []anthropic.MessageParam{
 			anthropic.NewUserMessage(anthropic.NewTextBlock(userPrompt)),

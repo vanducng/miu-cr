@@ -157,11 +157,12 @@ func (a *openaiAgent) Review(ctx stdctx.Context, rc Context) (engine.ReviewOutpu
 	}
 
 	userPrompt := BuildUserPrompt(PromptParts{Rules: rc.Rules, SemanticContext: rc.SemanticContext, ProjectContext: rc.ProjectContext, RelatedContext: rc.RelatedContext, WantDiagram: rc.WantDiagram, Instruction: rc.Instruction, Conversation: rc.Conversation, Diff: rc.Text})
-	rc.Trace.SetSystemPrompt(systemPrompt)
+	system := reviewSystemPrompt(rc.OperatorPrompt)
+	rc.Trace.SetSystemPrompt(system)
 	rc.Trace.SetModel(string(config.KindOpenAI), a.model)
 	rc.Trace.SetPrompt(userPrompt)
 	messages := []openai.ChatCompletionMessageParamUnion{
-		openai.SystemMessage(systemPrompt),
+		openai.SystemMessage(system),
 		openai.UserMessage(userPrompt),
 	}
 	params := openai.ChatCompletionNewParams{

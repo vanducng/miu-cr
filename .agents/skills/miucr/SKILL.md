@@ -310,6 +310,35 @@ Status lifecycle: `pending` → `done`/`failed`. HTTP map: `400` bad body, `401`
 
 **GitHub App auth** (opt-in alternative to PAT): `[github] mode=app` in config (see below).
 
+**Host mode**: `miucr serve --host` loads YAML from `MIUCR_CONFIG` or
+`~/.config/miu/cr/host.yaml`, requires Postgres (`MIUCR_PG_DSN` preferred), and
+watches multiple repos from one daemon. Validate without opening DB/secrets:
+
+```sh
+MIUCR_CONFIG=examples/review-host/config.example.yaml miucr serve --host --dry-run-config -o json
+```
+
+Dry-run emits envelope kind `serve.host_config` with a redacted config plus
+summary counts (`repos`, `accounts`). Host YAML uses `providers`, `store`,
+`github.accounts`, top-level `review`/`agent`, `host.review`, and `repos[]`;
+layering is defaults -> `review`/`agent` -> `host.review` -> repo overrides.
+PAT accounts support `auth_env`/`auth_file`/`auth_command`; App accounts support
+App/installation ids from literal/env plus private keys from path/env/command.
+Provider credentials also support `auth_env` and `auth_command`.
+
+Repo prompts override the global prompt (`system_prompt` or
+`system_prompt_file`, mutually exclusive). `repos[].rules` can point to markdown
+files or a non-recursive directory of `*.md`; these are trusted host context and
+cannot change the protected finding schema. Host review write policy lives at
+the effective repo level: `post`, `force`, `suggest`, `patch_repair`,
+`approve_clean`. First host mode does not push code.
+
+Host poller state lives in Postgres: repos, PR sessions, queued jobs, attempts,
+workspaces, and poll cursors. Claims use row locks for concurrency, and
+`host.retention` prunes old jobs/attempts/sessions/workspace records/cursors.
+Workspace-size limits are validated but filesystem deletion waits for managed
+host workspaces. Public synthetic compose + config example: `examples/review-host/`.
+
 ### `rules`: project review context
 
 ```sh
@@ -689,8 +718,8 @@ deterministic reviewer/poster, and use the coding agent only for orchestration, 
    - If no head change, checks are green, review state is acceptable, and no actionable feedback remains, stop and report merge-ready unless the user granted merge authority.
    - If merge authority was granted, queue/perform merge only after re-fetching that the head is unchanged and the PR is non-draft, mergeable, green, and free of actionable feedback.
 
-Use `miucr serve --poll --poll-source pulls` for unattended repo-wide polling. For a single PR under agent control,
-prefer the explicit `gh pr view` loop above so every write action is traceable.
+Use `miucr serve --host` with `poll_source: pulls` for unattended multi-repo polling. For a single PR under agent
+control, prefer the explicit `gh pr view` loop above so every write action is traceable.
 
 **Privacy**: never paste a real API key/PAT/bearer into code, tests, docs, or commits; keys come from
 flags/env at runtime and are never persisted. Use synthetic names/diffs in examples.

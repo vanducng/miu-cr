@@ -38,6 +38,17 @@ func NewPool(reviewFn func(Job) error, log *slog.Logger) *Pool {
 	if workers < 2 {
 		workers = 2
 	}
+	return NewPoolWithWorkers(reviewFn, log, workers)
+}
+
+// NewPoolWithWorkers lets host mode bind review concurrency from trusted config.
+func NewPoolWithWorkers(reviewFn func(Job) error, log *slog.Logger, workers int) *Pool {
+	if log == nil {
+		log = slog.Default()
+	}
+	if workers <= 0 {
+		workers = 1
+	}
 	p := &Pool{
 		jobs:     make(chan Job, 4*workers),
 		inflight: make(map[prKey]bool),

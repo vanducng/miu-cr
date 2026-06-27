@@ -36,6 +36,7 @@ type Job struct {
 	Ref     string
 	Token   string
 	Timeout time.Duration
+	Review  *JobReviewOptions
 	// ReviewID is the server-generated id of a REST-initiated review (empty on the
 	// webhook/poll paths). reviewFn persists the FINAL record under this id; the
 	// CLI/webhook/poll paths leave it empty and skip that upsert.
@@ -45,6 +46,29 @@ type Job struct {
 	// webhook path is byte-for-byte unchanged; the poller sets it to record its
 	// dedup cursor only on review success.
 	OnDone func(error)
+}
+
+type JobReviewOptions struct {
+	Post           bool
+	Suggest        bool
+	PatchRepair    bool
+	ApproveClean   bool
+	Force          bool
+	Conversation   bool
+	Gate           string
+	FilterMode     string
+	MinSeverity    string
+	Mode           string
+	Provider       string
+	APIKey         string
+	BaseURL        string
+	AuthToken      string
+	Model          string
+	OperatorPrompt string
+	ExpandWindow   int
+	TokenBudget    int
+	DeepContext    bool
+	ContextHops    int
 }
 
 // Dispatcher accepts review jobs. Submit returns false when the work could not

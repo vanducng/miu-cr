@@ -7,8 +7,11 @@ import (
 	"io"
 	"log/slog"
 	"os"
+	"os/exec"
 	"os/signal"
+	"path/filepath"
 	"runtime/debug"
+	"sort"
 	"strconv"
 	"strings"
 	"syscall"
@@ -39,6 +42,12 @@ var reviewStoreFactory func(ctx stdctx.Context) (serve.ReviewStore, func(), erro
 // REST API. Called once from wire.init before any command runs.
 func SetReviewStoreFactory(f func(ctx stdctx.Context) (serve.ReviewStore, func(), error)) {
 	reviewStoreFactory = f
+}
+
+var hostStoreFactory func(ctx stdctx.Context, cfg config.HostConfig) (store.HostStore, func(), error)
+
+func SetHostStoreFactory(f func(ctx stdctx.Context, cfg config.HostConfig) (store.HostStore, func(), error)) {
+	hostStoreFactory = f
 }
 
 // historyStoreFactory opens the full review store for the `history` command group
@@ -137,11 +146,78 @@ func serveCommand(opts *options) *cobra.Command {
 		poll         bool
 		pollInterval time.Duration
 		pollSource   string
+		host         bool
+		dryRunConfig bool
 	)
 	cmd := &cobra.Command{
 		Use:   "serve",
 		Short: "Run the HMAC webhook daemon (default) and/or the opt-in poll trigger",
 		RunE: func(cmd *cobra.Command, args []string) error {
+			if dryRunConfig && !host {
+				return &CLIError{Code: "serve.host_required", Message: "--dry-run-config requires --host", Hint: "use `miucr serve --host --dry-run-config`", Exit: 2}
+			}
+			if host {
+				hostCfg, hostPath, err := loadHostConfigForServe()
+				if err != nil {
+					return err
+				}
+				src := hostPollSource(hostCfg.Host.PollSource)
+				if cmd.Flags().Changed("poll-source") {
+					src = serve.ParsePollSource(pollSource)
+				}
+				if src != serve.SourcePulls {
+					return &CLIError{Code: "config.invalid", Message: "serve --host currently supports poll_source pulls only", Hint: "set host.poll_source: pulls or pass --poll-source pulls", Exit: 2}
+				}
+				if dryRunConfig {
+					safe := config.RedactHostConfig(hostCfg)
+					return writeSuccess(cmd.OutOrStdout(), "serve", "serve.host_config", safe, map[string]any{
+						"repos":    len(hostCfg.Repos),
+						"accounts": len(hostCfg.Github.Accounts),
+					})
+				}
+				if hostStoreFactory == nil {
+					return &CLIError{Code: "serve.host_store_unwired", Message: "serve --host store is not wired", Exit: 1}
+				}
+				log := slog.New(slog.NewTextHandler(cmd.ErrOrStderr(), &slog.HandlerOptions{Level: slog.LevelInfo}))
+				hostStore, closeStore, err := hostStoreFactory(cmd.Context(), hostCfg)
+				if err != nil {
+					return err
+				}
+				defer closeStore()
+				tokenSources, err := buildHostGitHubTokenSources(cmd.Context(), hostCfg)
+				if err != nil {
+					return err
+				}
+				hostRepos, reviewTO, err := buildServeHostRepos(cmd.Context(), hostCfg, hostPath)
+				if err != nil {
+					return err
+				}
+				workers := hostCfg.Host.Workers
+				if workers <= 0 {
+					workers = 1
+				}
+				pool := serve.NewPoolWithWorkers(buildServeReviewFn(log, "", nil), log, workers)
+				interval := durationOrDefault(hostCfg.Host.PollInterval, time.Minute)
+				if cmd.Flags().Changed("poll-interval") {
+					interval = pollInterval
+				}
+				runner, err := serve.NewHostRunner(serve.HostRunnerConfig{
+					Store:           hostStore,
+					Repos:           hostRepos,
+					TokenSources:    tokenSources,
+					Source:          src,
+					Interval:        interval,
+					Dispatcher:      pool,
+					Logger:          log,
+					ReviewTO:        reviewTO,
+					Prune:           hostPruneConfig(hostCfg.Host),
+					JanitorInterval: durationOrDefault(hostCfg.Host.Retention.JanitorInterval, 15*time.Minute),
+				})
+				if err != nil {
+					return &CLIError{Code: "serve.host_invalid", Message: err.Error(), Hint: "check host config repos, accounts, and poll_source", Exit: 2}
+				}
+				return serve.RunHost(cmd.Context(), pool, runner)
+			}
 			secret := strings.TrimSpace(os.Getenv("WEBHOOK_SECRET"))
 			// Webhook is the default; --poll without a secret runs poll-only,
 			// bypassing the secret requirement. Webhook (with or without poll)
@@ -286,7 +362,503 @@ func serveCommand(opts *options) *cobra.Command {
 	cmd.Flags().BoolVar(&poll, "poll", false, "Opt-in poll trigger: periodically ask GitHub for PRs needing review (webhook stays the default)")
 	cmd.Flags().DurationVar(&pollInterval, "poll-interval", 60*time.Second, "Poll interval floor (effective = max(this, X-Poll-Interval))")
 	cmd.Flags().StringVar(&pollSource, "poll-source", "notifications", "Poll candidate source: notifications (default) or pulls")
+	cmd.Flags().BoolVar(&host, "host", false, "Run Postgres-backed multi-repo review host mode")
+	cmd.Flags().BoolVar(&dryRunConfig, "dry-run-config", false, "Validate host config and print a redacted summary, then exit")
 	return cmd
+}
+
+func loadHostConfigForServe() (config.HostConfig, string, error) {
+	path := strings.TrimSpace(os.Getenv("MIUCR_CONFIG"))
+	if path == "" {
+		var err error
+		path, err = config.HostFilePath()
+		if err != nil {
+			return config.HostConfig{}, "", err
+		}
+	}
+	cfg, err := config.LoadHost(path)
+	return cfg, path, err
+}
+
+func hostPollSource(raw string) serve.PollSource {
+	if strings.TrimSpace(raw) == "" {
+		return serve.SourcePulls
+	}
+	return serve.ParsePollSource(raw)
+}
+
+func buildServeHostRepos(ctx stdctx.Context, cfg config.HostConfig, path string) ([]serve.HostRepoConfig, time.Duration, error) {
+	baseDir := filepath.Dir(path)
+	provider, err := hostProvider(cfg)
+	if err != nil {
+		return nil, 0, err
+	}
+	baseReview := mergeHostReview(config.HostReview{Gate: "high", FilterMode: "diff_context", Timeout: "900s"}, cfg.Review)
+	hostReview := mergeHostReview(baseReview, cfg.Host.Review)
+	reviewTO := durationOrDefault(hostReview.Timeout, 15*time.Minute)
+	out := make([]serve.HostRepoConfig, 0, len(cfg.Repos))
+	hostEnabled := cfg.Host.Enabled == nil || *cfg.Host.Enabled
+	hostPoll := cfg.Host.Poll == nil || *cfg.Host.Poll
+	for _, repo := range cfg.Repos {
+		enabled := hostEnabled && (repo.Enabled == nil || *repo.Enabled)
+		poll := hostPoll && (repo.Poll == nil || *repo.Poll)
+		review := mergeHostReview(hostReview, repo.Review)
+		opts, err := hostReviewOptions(ctx, provider, review)
+		if err != nil {
+			return nil, 0, err
+		}
+		operatorPrompt, promptHash, rulesHash, err := hostOperatorPrompt(baseDir, cfg.Agent, repo.Agent, repo.Rules)
+		if err != nil {
+			return nil, 0, err
+		}
+		opts.OperatorPrompt = operatorPrompt
+		out = append(out, serve.HostRepoConfig{
+			Name:          repo.Name,
+			Owner:         repo.Owner,
+			Repo:          repo.Repo,
+			Slug:          repo.Slug,
+			GitURL:        repo.GitURL,
+			DefaultBranch: repo.DefaultBranch,
+			GithubAccount: repo.GithubAccount,
+			Enabled:       enabled,
+			Poll:          poll,
+			ConfigHash:    serve.HashJSON(repo),
+			PolicyHash:    serve.HashJSON(review),
+			PromptHash:    promptHash,
+			RulesHash:     rulesHash,
+			ReviewTimeout: durationOrDefault(review.Timeout, reviewTO),
+			Review:        opts,
+		})
+	}
+	return out, reviewTO, nil
+}
+
+func hostReviewOptions(ctx stdctx.Context, provider config.HostProvider, review config.HostReview) (serve.JobReviewOptions, error) {
+	opts := serve.JobReviewOptions{
+		Post:         boolPtr(review.Post),
+		Suggest:      boolPtr(review.Suggest),
+		PatchRepair:  boolPtr(review.PatchRepair),
+		ApproveClean: boolPtr(review.ApproveClean),
+		Force:        boolPtr(review.Force),
+		Conversation: boolPtr(review.Conversation),
+		Gate:         review.Gate,
+		FilterMode:   review.FilterMode,
+		MinSeverity:  review.MinSeverity,
+		Mode:         review.Mode,
+		BaseURL:      provider.BaseURL,
+		Model:        provider.Model,
+		ExpandWindow: review.Expand,
+		ContextHops:  review.ContextHops,
+		DeepContext:  boolPtr(review.DeepContext),
+	}
+	if review.TokenBudget != nil {
+		opts.TokenBudget = *review.TokenBudget
+	}
+	switch provider.Kind {
+	case config.KindOpenAI:
+		opts.Provider = string(config.KindOpenAI)
+		secret, err := hostProviderSecret(ctx, provider)
+		if err != nil {
+			return opts, err
+		}
+		opts.APIKey = secret
+	case config.KindAnthropic, "":
+		opts.Provider = string(config.KindAnthropic)
+		secret, err := hostProviderSecret(ctx, provider)
+		if err != nil {
+			return opts, err
+		}
+		if strings.EqualFold(provider.Auth, "api_key") {
+			opts.APIKey = secret
+		} else {
+			opts.AuthToken = secret
+		}
+	default:
+		return opts, &CLIError{Code: "config.invalid", Message: fmt.Sprintf("unknown host provider kind %q", provider.Kind), Hint: "kind must be anthropic or openai", Exit: 2}
+	}
+	return opts, nil
+}
+
+func hostProviderSecret(ctx stdctx.Context, provider config.HostProvider) (string, error) {
+	if strings.TrimSpace(provider.AuthToken) != "" {
+		return strings.TrimSpace(provider.AuthToken), nil
+	}
+	return hostSecret(ctx, provider.AuthEnv, "", provider.AuthCommand)
+}
+
+func hostProvider(cfg config.HostConfig) (config.HostProvider, error) {
+	defaults := config.Defaults()
+	name := strings.TrimSpace(cfg.DefaultProvider)
+	if name == "" {
+		name = defaults.DefaultProvider
+	}
+	if p, ok := cfg.Providers[name]; ok {
+		return p, nil
+	}
+	if p, ok := defaults.Providers[name]; ok {
+		return config.HostProvider{Kind: p.Kind, BaseURL: p.BaseURL, Model: p.Model, AuthToken: p.AuthToken, AuthEnv: p.AuthEnv, AuthCommand: p.AuthCommand, Auth: p.Auth}, nil
+	}
+	return config.HostProvider{}, &CLIError{Code: "agent.unknown_provider", Message: fmt.Sprintf("unknown host provider %q", name), Hint: "define it under providers in the host YAML", Exit: 2}
+}
+
+func hostOperatorPrompt(baseDir string, global, repo config.HostAgent, ruleRefs []string) (string, string, string, error) {
+	prompt, err := hostPrompt(baseDir, global)
+	if err != nil {
+		return "", "", "", err
+	}
+	if repo.SystemPrompt != "" || repo.SystemPromptFile != "" {
+		prompt, err = hostPrompt(baseDir, repo)
+		if err != nil {
+			return "", "", "", err
+		}
+	}
+	rulesText, rulesHash, err := hostRuleText(baseDir, ruleRefs)
+	if err != nil {
+		return "", "", "", err
+	}
+	operator := strings.TrimSpace(prompt)
+	if strings.TrimSpace(rulesText) != "" {
+		if operator != "" {
+			operator += "\n\n"
+		}
+		operator += "Trusted host rules:\n" + rulesText
+	}
+	return operator, hashString(operator), rulesHash, nil
+}
+
+func hostPrompt(baseDir string, agent config.HostAgent) (string, error) {
+	if strings.TrimSpace(agent.SystemPrompt) != "" {
+		return strings.TrimSpace(agent.SystemPrompt), nil
+	}
+	if strings.TrimSpace(agent.SystemPromptFile) == "" {
+		return "", nil
+	}
+	return readHostTextRef(baseDir, agent.SystemPromptFile)
+}
+
+func hostRuleText(baseDir string, refs []string) (string, string, error) {
+	var parts []string
+	for _, ref := range refs {
+		texts, err := readHostRuleRef(baseDir, ref)
+		if err != nil {
+			return "", "", err
+		}
+		for _, text := range texts {
+			if strings.TrimSpace(text) != "" {
+				parts = append(parts, strings.TrimSpace(text))
+			}
+		}
+	}
+	joined := strings.Join(parts, "\n\n")
+	return joined, hashString(joined), nil
+}
+
+func readHostRuleRef(baseDir, ref string) ([]string, error) {
+	path := ref
+	if !filepath.IsAbs(path) {
+		path = filepath.Join(baseDir, path)
+	}
+	info, err := os.Lstat(path)
+	if err != nil {
+		return nil, &CLIError{Code: "config.invalid", Message: config.RedactString(err.Error()), Hint: "fix host prompt/rule path " + ref, Exit: 2}
+	}
+	if info.Mode()&os.ModeSymlink != 0 {
+		return nil, &CLIError{Code: "config.invalid", Message: "host prompt/rule path is a symlink: " + ref, Hint: "use a regular mounted file", Exit: 2}
+	}
+	if !info.IsDir() {
+		text, err := readHostTextFile(path, ref)
+		if err != nil {
+			return nil, err
+		}
+		return []string{text}, nil
+	}
+
+	entries, err := os.ReadDir(path)
+	if err != nil {
+		return nil, &CLIError{Code: "config.invalid", Message: config.RedactString(err.Error()), Hint: "fix host rule directory " + ref, Exit: 2}
+	}
+	sort.Slice(entries, func(i, j int) bool { return entries[i].Name() < entries[j].Name() })
+	var out []string
+	for _, ent := range entries {
+		if ent.IsDir() || filepath.Ext(ent.Name()) != ".md" {
+			continue
+		}
+		childRef := filepath.Join(ref, ent.Name())
+		text, err := readHostTextFile(filepath.Join(path, ent.Name()), childRef)
+		if err != nil {
+			return nil, err
+		}
+		out = append(out, text)
+	}
+	return out, nil
+}
+
+func readHostTextRef(baseDir, ref string) (string, error) {
+	path := ref
+	if !filepath.IsAbs(path) {
+		path = filepath.Join(baseDir, path)
+	}
+	info, err := os.Lstat(path)
+	if err != nil {
+		return "", &CLIError{Code: "config.invalid", Message: config.RedactString(err.Error()), Hint: "fix host prompt/rule path " + ref, Exit: 2}
+	}
+	if info.Mode()&os.ModeSymlink != 0 {
+		return "", &CLIError{Code: "config.invalid", Message: "host prompt/rule path is a symlink: " + ref, Hint: "use a regular mounted file", Exit: 2}
+	}
+	if info.IsDir() {
+		return "", &CLIError{Code: "config.invalid", Message: "host prompt path must be a file: " + ref, Hint: "set system_prompt_file to a regular markdown file", Exit: 2}
+	}
+	return readHostTextFile(path, ref)
+}
+
+func readHostTextFile(path, ref string) (string, error) {
+	info, err := os.Lstat(path)
+	if err != nil {
+		return "", &CLIError{Code: "config.invalid", Message: config.RedactString(err.Error()), Hint: "fix host prompt/rule path " + ref, Exit: 2}
+	}
+	if info.Mode()&os.ModeSymlink != 0 {
+		return "", &CLIError{Code: "config.invalid", Message: "host prompt/rule path is a symlink: " + ref, Hint: "use a regular mounted file", Exit: 2}
+	}
+	if info.IsDir() {
+		return "", &CLIError{Code: "config.invalid", Message: "host prompt/rule path must be a file: " + ref, Hint: "use a regular mounted file", Exit: 2}
+	}
+	if info.Size() > 64*1024 {
+		return "", &CLIError{Code: "config.invalid", Message: "host prompt/rule file is too large: " + ref, Hint: "keep each host prompt/rule file under 64KiB", Exit: 2}
+	}
+	data, err := os.ReadFile(path)
+	if err != nil {
+		return "", &CLIError{Code: "config.invalid", Message: config.RedactString(err.Error()), Hint: "fix host prompt/rule path " + ref, Exit: 2}
+	}
+	return string(data), nil
+}
+
+func buildHostGitHubTokenSources(ctx stdctx.Context, cfg config.HostConfig) (map[string]serve.HostTokenSource, error) {
+	out := make(map[string]serve.HostTokenSource, len(cfg.Github.Accounts))
+	for name, acct := range cfg.Github.Accounts {
+		switch acct.Mode {
+		case "pat":
+			out[name] = hostPATSource{env: acct.AuthEnv, file: acct.AuthFile, command: acct.AuthCommand}
+		case "app":
+			src, err := buildHostAppTokenSource(ctx, acct)
+			if err != nil {
+				return nil, err
+			}
+			out[name] = src
+		default:
+			return nil, &CLIError{Code: "config.invalid", Message: fmt.Sprintf("unknown GitHub account mode %q", acct.Mode), Hint: "use pat or app", Exit: 2}
+		}
+	}
+	return out, nil
+}
+
+type hostPATSource struct {
+	env     string
+	file    string
+	command []string
+}
+
+func (s hostPATSource) Token(ctx stdctx.Context) (string, error) {
+	return hostSecret(ctx, s.env, s.file, s.command)
+}
+
+func buildHostAppTokenSource(ctx stdctx.Context, acct config.HostGithubAccount) (serve.HostTokenSource, error) {
+	appID := firstHostValue(acct.AppID, os.Getenv(acct.AppIDEnv))
+	if appID == "" {
+		return nil, &CLIError{Code: "config.invalid", Message: "github app app_id is required", Hint: "fix github.accounts.*.app_id", Exit: 2}
+	}
+	install := firstHostValue(acct.InstallationID, os.Getenv(acct.InstallationIDEnv))
+	installID, err := strconv.ParseInt(strings.TrimSpace(install), 10, 64)
+	if err != nil || installID <= 0 {
+		return nil, &CLIError{Code: "config.invalid", Message: "github app installation_id must be a positive integer", Hint: "fix github.accounts.*.installation_id", Exit: 2}
+	}
+	keyPath := firstHostValue(acct.PrivateKeyPath, os.Getenv(acct.PrivateKeyPathEnv))
+	var keyPEM []byte
+	if keyPath != "" {
+		key, err := ghub.ReadPrivateKeyFile(keyPath)
+		if err != nil {
+			return nil, &CLIError{Code: "serve.app_key_unreadable", Message: config.RedactString(err.Error()), Hint: "private_key_path must point to a readable RSA PEM", Exit: 2}
+		}
+		return ghub.NewAppTokenSource(strings.TrimSpace(appID), installID, key, ghub.NewAppExchanger(), nil), nil
+	}
+	secret, err := runHostBlobCommand(ctx, acct.PrivateKeyCommand)
+	if err != nil {
+		return nil, err
+	}
+	keyPEM = []byte(secret)
+	key, err := ghub.ParsePrivateKeyPEM(keyPEM)
+	for i := range keyPEM {
+		keyPEM[i] = 0
+	}
+	if err != nil {
+		return nil, &CLIError{Code: "serve.app_key_unreadable", Message: config.RedactString(err.Error()), Hint: "private_key_command must print a readable RSA PEM", Exit: 2}
+	}
+	return ghub.NewAppTokenSource(strings.TrimSpace(appID), installID, key, ghub.NewAppExchanger(), nil), nil
+}
+
+func hostSecret(ctx stdctx.Context, envName, file string, command []string) (string, error) {
+	if strings.TrimSpace(envName) != "" {
+		if v := strings.TrimSpace(os.Getenv(envName)); v != "" {
+			return v, nil
+		}
+		return "", &CLIError{Code: "config.invalid", Message: "configured env secret is empty: " + envName, Hint: "export " + envName, Exit: 2}
+	}
+	if strings.TrimSpace(file) != "" {
+		data, err := os.ReadFile(file)
+		if err != nil {
+			return "", &CLIError{Code: "config.invalid", Message: config.RedactString(err.Error()), Hint: "fix configured secret file path", Exit: 2}
+		}
+		secret := strings.TrimSpace(string(data))
+		if secret == "" {
+			return "", &CLIError{Code: "config.invalid", Message: "configured secret file is empty", Hint: "fix configured secret file path", Exit: 2}
+		}
+		return secret, nil
+	}
+	if len(command) > 0 {
+		return runHostSecretCommand(ctx, command)
+	}
+	return "", nil
+}
+
+func runHostSecretCommand(ctx stdctx.Context, argv []string) (string, error) {
+	secret, err := runHostCommandOutput(ctx, argv)
+	if err != nil {
+		return "", err
+	}
+	if strings.ContainsAny(secret, "\r\n") {
+		return "", &CLIError{Code: "agent.auth_command_failed", Message: "auth_command printed multiple lines", Hint: "ensure the command prints exactly one credential line", Exit: 1}
+	}
+	return secret, nil
+}
+
+func runHostBlobCommand(ctx stdctx.Context, argv []string) (string, error) {
+	return runHostCommandOutput(ctx, argv)
+}
+
+func runHostCommandOutput(ctx stdctx.Context, argv []string) (string, error) {
+	if len(argv) == 0 || strings.TrimSpace(argv[0]) == "" {
+		return "", &CLIError{Code: "config.invalid", Message: "auth_command must be a non-empty argv array", Hint: "set auth_command as a YAML list", Exit: 2}
+	}
+	args := append([]string(nil), argv...)
+	args[0] = strings.TrimSpace(args[0])
+	cctx, cancel := stdctx.WithTimeout(ctx, 30*time.Second)
+	defer cancel()
+	cmd := exec.CommandContext(cctx, args[0], args[1:]...)
+	var stdout secretBuffer
+	stdout.limit = 64 * 1024
+	cmd.Stdout = &stdout
+	err := cmd.Run()
+	if err != nil {
+		return "", &CLIError{Code: "agent.auth_command_failed", Message: "auth_command failed", Hint: "run the configured command directly; stderr is omitted because it may contain secrets", Exit: 1, Cause: err}
+	}
+	secret := strings.TrimSpace(stdout.String())
+	if secret == "" {
+		return "", &CLIError{Code: "agent.auth_command_failed", Message: "auth_command printed no credential", Hint: "ensure the command prints the token to stdout", Exit: 1}
+	}
+	return secret, nil
+}
+
+type secretBuffer struct {
+	buf   strings.Builder
+	limit int
+}
+
+func (b *secretBuffer) Write(p []byte) (int, error) {
+	n := len(p)
+	if b.limit > 0 && b.buf.Len()+len(p) > b.limit {
+		p = p[:b.limit-b.buf.Len()]
+	}
+	if len(p) > 0 {
+		_, _ = b.buf.Write(p)
+	}
+	return n, nil
+}
+
+func (b *secretBuffer) String() string { return b.buf.String() }
+
+func mergeHostReview(base, over config.HostReview) config.HostReview {
+	out := base
+	if over.Gate != "" {
+		out.Gate = over.Gate
+	}
+	if over.FilterMode != "" {
+		out.FilterMode = over.FilterMode
+	}
+	if over.MinSeverity != "" {
+		out.MinSeverity = over.MinSeverity
+	}
+	if over.Timeout != "" {
+		out.Timeout = over.Timeout
+	}
+	if over.Expand != 0 {
+		out.Expand = over.Expand
+	}
+	if over.TokenBudget != nil {
+		out.TokenBudget = over.TokenBudget
+	}
+	if over.ContextHops != 0 {
+		out.ContextHops = over.ContextHops
+	}
+	if over.Mode != "" {
+		out.Mode = over.Mode
+	}
+	if over.DeepContext != nil {
+		out.DeepContext = over.DeepContext
+	}
+	if over.Conversation != nil {
+		out.Conversation = over.Conversation
+	}
+	if over.Post != nil {
+		out.Post = over.Post
+	}
+	if over.Force != nil {
+		out.Force = over.Force
+	}
+	if over.Suggest != nil {
+		out.Suggest = over.Suggest
+	}
+	if over.PatchRepair != nil {
+		out.PatchRepair = over.PatchRepair
+	}
+	if over.ApproveClean != nil {
+		out.ApproveClean = over.ApproveClean
+	}
+	return out
+}
+
+func boolPtr(v *bool) bool { return v != nil && *v }
+
+func durationOrDefault(raw string, fallback time.Duration) time.Duration {
+	if d, err := time.ParseDuration(raw); err == nil && d > 0 {
+		return d
+	}
+	return fallback
+}
+
+func hostPruneConfig(h config.HostRuntime) serve.HostPruneConfig {
+	r := h.Retention
+	dbTTL := durationOrDefault(r.DBTTL, 90*24*time.Hour)
+	return serve.HostPruneConfig{
+		ClosedSessionTTL:     durationOrDefault(r.ClosedWorkspaceTTL, 24*time.Hour),
+		CompletedJobTTL:      dbTTL,
+		FinishedAttemptTTL:   dbTTL,
+		InactiveWorkspaceTTL: durationOrDefault(r.WorkspaceTTL, 168*time.Hour),
+		PollCursorTTL:        dbTTL,
+	}
+}
+
+func firstHostValue(values ...string) string {
+	for _, v := range values {
+		if s := strings.TrimSpace(v); s != "" {
+			return s
+		}
+	}
+	return ""
+}
+
+func hashString(s string) string {
+	return serve.HashJSON(struct {
+		Text string `json:"text"`
+	}{s})
 }
 
 // buildTokenSource builds the GitHub TokenSource from [github]. Default (mode=pat
@@ -341,6 +913,13 @@ func buildTokenSource(g config.Github) (ghub.TokenSource, error) {
 // skip the upsert (byte-for-byte unchanged).
 func buildServeReviewFn(log *slog.Logger, gate string, st serve.ReviewStore) func(serve.Job) error {
 	return func(j serve.Job) error {
+		review := serve.JobReviewOptions{Post: true, Gate: gate}
+		if j.Review != nil {
+			review = *j.Review
+			if review.Gate == "" {
+				review.Gate = gate
+			}
+		}
 		jobCtx := stdctx.Background()
 		if j.Timeout > 0 {
 			var cancel stdctx.CancelFunc
@@ -348,15 +927,29 @@ func buildServeReviewFn(log *slog.Logger, gate string, st serve.ReviewStore) fun
 			defer cancel()
 		}
 		out, err := ReviewPRForServe(jobCtx, PRReviewRequest{
-			Ref:   j.Ref,
-			Token: j.Token,
-			Post:  true,
-			// serve inherits both opt-in write-actions OFF: a webhook/poll-driven
-			// daemon must not auto-suggest or auto-approve by default.
-			Suggest:      false,
-			ApproveClean: false,
-			Gate:         gate,
-			Timeout:      j.Timeout,
+			Ref:            j.Ref,
+			Token:          j.Token,
+			Post:           review.Post,
+			Suggest:        review.Suggest,
+			PatchRepair:    review.PatchRepair,
+			ApproveClean:   review.ApproveClean,
+			Gate:           review.Gate,
+			Provider:       review.Provider,
+			APIKey:         review.APIKey,
+			BaseURL:        review.BaseURL,
+			AuthToken:      review.AuthToken,
+			Model:          review.Model,
+			Timeout:        j.Timeout,
+			ExpandWindow:   review.ExpandWindow,
+			TokenBudget:    review.TokenBudget,
+			DeepContext:    review.DeepContext,
+			ContextHops:    review.ContextHops,
+			FilterMode:     review.FilterMode,
+			MinSeverity:    review.MinSeverity,
+			OperatorPrompt: review.OperatorPrompt,
+			Conversation:   review.Conversation,
+			Mode:           review.Mode,
+			Force:          review.Force,
 		})
 		if err != nil {
 			log.Error("review failed", "ref", j.Ref, "err", config.RedactString(err.Error()))

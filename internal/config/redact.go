@@ -61,6 +61,30 @@ func RedactConfig(cfg Config) Config {
 	return out
 }
 
+func RedactHostConfig(cfg HostConfig) HostConfig {
+	out := cfg
+	out.Providers = make(map[string]HostProvider, len(cfg.Providers))
+	for name, p := range cfg.Providers {
+		if p.AuthToken != "" {
+			p.AuthToken = redactedMask
+		}
+		out.Providers[name] = p
+	}
+	if out.Store.DSN != "" {
+		out.Store.DSN = redactedMask
+	}
+	if cfg.Github.Accounts != nil {
+		out.Github.Accounts = make(map[string]HostGithubAccount, len(cfg.Github.Accounts))
+		for name, acct := range cfg.Github.Accounts {
+			out.Github.Accounts[name] = acct
+		}
+	}
+	if cfg.Repos != nil {
+		out.Repos = append([]HostRepo(nil), cfg.Repos...)
+	}
+	return out
+}
+
 // RedactString masks credentials in an arbitrary string: URL userinfo passwords,
 // key=value secret assignments, Authorization/x-api-key header values, bare Bearer
 // tokens, and delimiter-less provider tokens (sk-, GitHub gh*_, and gateway

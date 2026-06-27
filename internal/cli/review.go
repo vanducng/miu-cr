@@ -75,9 +75,10 @@ type ReviewRequest struct {
 	DeepContext     bool
 	ContextHops     int
 	ContextHopsAuto bool
-	FilterMode      string       // added|diff_context|file|nofilter (default diff_context)
-	WantDiagram     bool         // opt into the mermaid change diagram (default off)
-	Instruction     string       // optional per-review developer steer; injected fenced/context-only into the USER turn
+	FilterMode      string // added|diff_context|file|nofilter (default diff_context)
+	WantDiagram     bool   // opt into the mermaid change diagram (default off)
+	Instruction     string // optional per-review developer steer; injected fenced/context-only into the USER turn
+	OperatorPrompt  string
 	NoSave          bool         // opt out of persisting this run to the local history store
 	Progress        func(string) // nil = silent; stderr milestones, never the stdout envelope
 	// TraceSink, when non-nil, streams each captured trace step (system prompt, diff
@@ -198,10 +199,11 @@ type PRReviewRequest struct {
 	DeepContext     bool
 	ContextHops     int
 	ContextHopsAuto bool
-	FilterMode      string       // added|diff_context|file|nofilter (default diff_context)
-	MinSeverity     string       // inline-posting floor: none|info|low|medium|high|critical (default keeps current behavior)
-	WantDiagram     bool         // opt into the mermaid change diagram (default off)
-	Instruction     string       // optional per-review developer steer; injected fenced/context-only into the USER turn
+	FilterMode      string // added|diff_context|file|nofilter (default diff_context)
+	MinSeverity     string // inline-posting floor: none|info|low|medium|high|critical (default keeps current behavior)
+	WantDiagram     bool   // opt into the mermaid change diagram (default off)
+	Instruction     string // optional per-review developer steer; injected fenced/context-only into the USER turn
+	OperatorPrompt  string
 	Conversation    bool         // opt into fetching the prior PR conversation; injected fenced/context-only, Untrusted, dropped on fork PRs
 	Mode            string       // review (default: inline+summary) | checks (GitHub Checks-API reporter)
 	NoSave          bool         // opt out of persisting this run to the local history store

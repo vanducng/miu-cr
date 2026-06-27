@@ -1,0 +1,50 @@
+services:
+  postgres:
+    image: postgres:17-alpine
+    environment:
+      POSTGRES_DB: miucr
+      POSTGRES_USER: miucr
+      POSTGRES_PASSWORD: miucr
+    ports:
+      - "55432:5432"
+    volumes:
+      - postgres-data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U miucr -d miucr"]
+      interval: 5s
+      timeout: 3s
+      retries: 20
+
+  miucr-host:
+    build:
+      context: ../..
+      dockerfile: examples/docker/Dockerfile
+    image: miucr-host:local
+    depends_on:
+      postgres:
+        condition: service_healthy
+    env_file:
+      - path: .env
+        required: false
+    environment:
+      MIUCR_CONFIG: /etc/miu/cr/host.yaml
+      MIUCR_PG_DSN: ${MIUCR_PG_DSN:-postgres://miucr:miucr@postgres:5432/miucr?sslmode=disable}
+      MIUCR_EXAMPLE_GITHUB_APP_PRIVATE_KEY_PATH: /run/secrets/github-app-private-key.pem
+    volumes:
+      - ${MIUCR_HOST_CONFIG:-./config.example.yaml}:/etc/miu/cr/host.yaml:ro
+      - ./prompts:/etc/miu/cr/prompts:ro
+      - ./rules:/etc/miu/cr/rules:ro
+      - ./secrets:/run/secrets:ro
+      - host-workspaces:/var/lib/miucr/host/workspaces
+    command: ["serve", "--host"]
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "/usr/local/bin/miucr", "version"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 5s
+
+volumes:
+  postgres-data:
+  host-workspaces:

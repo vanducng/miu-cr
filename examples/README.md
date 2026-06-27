@@ -15,6 +15,7 @@ self-contained — read its header comment, copy it into your repo, and adjust.
 | [`mcp-setup/`](mcp-setup/README-mcp.md) | Wire `miucr mcp` into Claude Code, Cursor, or Codex CLI. |
 | [`docker/Dockerfile`](docker/Dockerfile) | Multi-stage, pure-Go (`CGO_ENABLED=0`) distroless image for `miucr serve`. |
 | [`docker/docker-compose.yml`](docker/docker-compose.yml) | Local stand-in for a server deploy (webhook or poll mode). |
+| [`review-host/`](review-host/README.md) | Postgres-backed `miucr serve --host` example for multi-repo polling with YAML config, prompts, rules, and retention. |
 
 ## Local review
 
@@ -59,3 +60,7 @@ for Codex) plus setup notes.
 `docker/Dockerfile` builds a static binary into a distroless nonroot image for
 `miucr serve` (webhook or `--poll`). `docker-compose.yml` is a local
 stand-in; replace the env block with a real secrets source in production.
+
+For a Postgres-backed multi-repo host, see `review-host/`. It uses the same
+Dockerfile but mounts a YAML host config, prompt/rule files, `/run/secrets`, and
+workspace storage.

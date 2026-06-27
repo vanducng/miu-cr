@@ -22,11 +22,16 @@ import (
 var configDir = config.Dir
 
 // pollSource selects how a tick enumerates review candidates.
-type pollSource string
+// PollSource is the internal trigger source selected by serve wiring.
+type PollSource string
+
+type pollSource = PollSource
 
 const (
 	sourceNotifications pollSource = "notifications"
 	sourcePulls         pollSource = "pulls"
+	// SourcePulls is host mode's supported cold-start-complete source.
+	SourcePulls = sourcePulls
 )
 
 // ParsePollSource maps a CLI string to a pollSource; anything but "pulls"

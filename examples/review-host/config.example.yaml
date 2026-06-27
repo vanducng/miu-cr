@@ -1,0 +1,122 @@
+version: 1
+
+default_provider: anthropic
+
+providers:
+  anthropic:
+    kind: anthropic
+    model: claude-sonnet-4-5-20250929
+    auth_env: ANTHROPIC_API_KEY
+
+store:
+  backend: postgres
+
+github:
+  default_account: personal-pat
+  accounts:
+    personal-pat:
+      mode: pat
+      auth_env: GITHUB_TOKEN
+    partner-pat:
+      mode: pat
+      auth_env: GITHUB_COMPANY_TOKEN
+    secret-helper-pat:
+      mode: pat
+      auth_command: ["gopass", "show", "-o", "github/example-partner-token"]
+    company-app:
+      mode: app
+      app_id_env: MIUCR_EXAMPLE_GITHUB_APP_ID
+      installation_id_env: MIUCR_EXAMPLE_GITHUB_APP_INSTALLATION_ID
+      private_key_path_env: MIUCR_EXAMPLE_GITHUB_APP_PRIVATE_KEY_PATH
+
+x:
+  repo_defaults: &repo_defaults
+    default_branch: main
+    enabled: true
+    poll: true
+  review_defaults: &review_defaults
+    gate: high
+    filter_mode: diff_context
+    min_severity: low
+    timeout: 900s
+    expand: 20
+    token_budget: 0
+    deep_context: true
+    context_hops: 1
+    conversation: true
+    mode: review
+
+review:
+  <<: *review_defaults
+
+agent:
+  system_prompt_file: prompts/default-reviewer.md
+
+host:
+  enabled: true
+  addr: ":8080"
+  workers: 4
+  webhook: false
+  poll: true
+  poll_source: pulls
+  poll_interval: 60s
+  workspace_dir: /var/lib/miucr/host/workspaces
+  workspace_strategy: worktree
+  retention:
+    janitor_interval: 15m
+    workspace_ttl: 168h
+    closed_workspace_ttl: 24h
+    max_workspace_bytes: 50GiB
+    max_workspaces: 100
+    min_free_space: 10GiB
+    db_ttl: 2160h
+  review:
+    post: true
+    force: false
+    suggest: true
+    patch_repair: false
+    approve_clean: false
+
+repos:
+  - <<: *repo_defaults
+    name: service-api
+    slug: example-org/service-api
+    git_url: https://github.com/example-org/service-api.git
+    github_account: personal-pat
+    agent:
+      system_prompt_file: prompts/service-reviewer.md
+    rules:
+      - rules/service.md
+    review:
+      min_severity: medium
+      context_hops: 1
+
+  - <<: *repo_defaults
+    name: data-platform
+    slug: example-org/data-platform
+    git_url: https://github.com/example-org/data-platform.git
+    github_account: company-app
+    agent:
+      system_prompt_file: prompts/data-reviewer.md
+    rules:
+      - rules/data
+    review:
+      gate: critical
+      suggest: false
+
+  - <<: *repo_defaults
+    name: infrastructure
+    slug: example-platform/infrastructure
+    git_url: git@github.com:example-platform/infrastructure.git
+    github_account: partner-pat
+    agent:
+      system_prompt: |
+        Review infrastructure changes with emphasis on rollout safety, least
+        privilege, drift risk, and rollback clarity. Do not request cosmetic
+        Terraform rewrites unless they reduce an operational risk.
+    rules:
+      - rules/infrastructure.md
+    review:
+      post: false
+      force: false
+      context_hops: 0

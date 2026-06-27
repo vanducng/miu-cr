@@ -1,0 +1,6 @@
+config.local.yaml
+.env
+postgres-data/
+workspaces/
+secrets/*
+!secrets/.gitkeep

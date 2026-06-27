@@ -1,0 +1,326 @@
+package serve
+
+import (
+	stdctx "context"
+	"errors"
+	"os"
+	"sync"
+	"testing"
+	"time"
+
+	"github.com/google/go-github/v84/github"
+
+	"github.com/vanducng/miu-cr/internal/store"
+)
+
+func TestHostRunnerGroupsReposByAccountAndFailsUnknown(t *testing.T) {
+	cfg := hostRunnerConfig(t)
+	cfg.TokenSources = map[string]HostTokenSource{}
+	if _, err := NewHostRunner(cfg); err == nil {
+		t.Fatal("expected unknown account error")
+	}
+	cfg.TokenSources["main"] = &countTokenSource{token: "tok"}
+	r, err := NewHostRunner(cfg)
+	if err != nil {
+		t.Fatalf("NewHostRunner: %v", err)
+	}
+	groups := r.Groups()
+	if len(groups["main"]) != 1 || groups["main"][0] != "octo/hello" {
+		t.Fatalf("groups = %+v", groups)
+	}
+}
+
+func TestHostRunnerRequiresEnabledPollingRepo(t *testing.T) {
+	cfg := hostRunnerConfig(t)
+	cfg.Repos[0].Poll = false
+	if _, err := NewHostRunner(cfg); err == nil {
+		t.Fatal("expected no enabled polling repo error")
+	}
+}
+
+func TestHostRunnerPollsWithStoreCursorAndNoFileCursor(t *testing.T) {
+	cfg := hostRunnerConfig(t)
+	dir := t.TempDir()
+	orig := configDir
+	configDir = func() (string, error) { return dir, nil }
+	t.Cleanup(func() { configDir = orig })
+	st := cfg.Store.(*fakeHostStore)
+	disp := cfg.Dispatcher.(*pollDispatcher)
+	r, err := NewHostRunner(cfg)
+	if err != nil {
+		t.Fatalf("NewHostRunner: %v", err)
+	}
+	if err := r.Tick(stdctx.Background()); err != nil {
+		t.Fatalf("Tick: %v", err)
+	}
+	if st.cursorWrites != 1 {
+		t.Fatalf("cursor writes = %d, want 1", st.cursorWrites)
+	}
+	if disp.count() != 1 {
+		t.Fatalf("submitted jobs = %d, want 1", disp.count())
+	}
+	path, err := cursorPath()
+	if err != nil {
+		t.Fatalf("cursorPath: %v", err)
+	}
+	if _, err := os.Stat(path); !os.IsNotExist(err) {
+		t.Fatalf("file cursor was touched: %v", err)
+	}
+}
+
+func TestHostRunnerPollsAllPRPages(t *testing.T) {
+	cfg := hostRunnerConfig(t)
+	gh := &fakeNotifGetter{
+		prPages: map[string][][]*github.PullRequest{
+			"octo/hello": {
+				{prWithHead(1, "sha-A")},
+				{prWithHead(2, "sha-B")},
+			},
+		},
+	}
+	cfg.NewNotifGetter = func(token string) notifGetter { return gh }
+	disp := cfg.Dispatcher.(*pollDispatcher)
+	r, err := NewHostRunner(cfg)
+	if err != nil {
+		t.Fatalf("NewHostRunner: %v", err)
+	}
+	if err := r.Tick(stdctx.Background()); err != nil {
+		t.Fatalf("Tick: %v", err)
+	}
+	if gh.listCalls != 2 {
+		t.Fatalf("ListOpenPRs calls = %d, want 2", gh.listCalls)
+	}
+	if disp.count() != 2 {
+		t.Fatalf("submitted jobs = %d, want 2", disp.count())
+	}
+}
+
+func TestHostRunnerRepeatedPollSameHeadDoesNotDuplicate(t *testing.T) {
+	cfg := hostRunnerConfig(t)
+	disp := cfg.Dispatcher.(*pollDispatcher)
+	r, err := NewHostRunner(cfg)
+	if err != nil {
+		t.Fatalf("NewHostRunner: %v", err)
+	}
+	if err := r.Tick(stdctx.Background()); err != nil {
+		t.Fatalf("first tick: %v", err)
+	}
+	if err := r.Tick(stdctx.Background()); err != nil {
+		t.Fatalf("second tick: %v", err)
+	}
+	if disp.count() != 1 {
+		t.Fatalf("submitted jobs = %d, want 1", disp.count())
+	}
+}
+
+func TestHostRunnerFailedReviewRetriesSameHead(t *testing.T) {
+	cfg := hostRunnerConfig(t)
+	disp := cfg.Dispatcher.(*pollDispatcher)
+	disp.failErr = errors.New("review failed")
+	r, err := NewHostRunner(cfg)
+	if err != nil {
+		t.Fatalf("NewHostRunner: %v", err)
+	}
+	if err := r.Tick(stdctx.Background()); err != nil {
+		t.Fatalf("first tick: %v", err)
+	}
+	if err := r.Tick(stdctx.Background()); err != nil {
+		t.Fatalf("second tick: %v", err)
+	}
+	if disp.count() != 2 {
+		t.Fatalf("submitted jobs = %d, want retry", disp.count())
+	}
+}
+
+func TestHostRunnerTokenSourceCalledAcrossTicks(t *testing.T) {
+	cfg := hostRunnerConfig(t)
+	src := cfg.TokenSources["main"].(*countTokenSource)
+	r, err := NewHostRunner(cfg)
+	if err != nil {
+		t.Fatalf("NewHostRunner: %v", err)
+	}
+	if err := r.Tick(stdctx.Background()); err != nil {
+		t.Fatalf("first tick: %v", err)
+	}
+	first := src.calls()
+	if err := r.Tick(stdctx.Background()); err != nil {
+		t.Fatalf("second tick: %v", err)
+	}
+	if src.calls() <= first {
+		t.Fatalf("token source calls did not increase: first=%d now=%d", first, src.calls())
+	}
+}
+
+func TestHostRunnerJanitorBuildsPrunePolicy(t *testing.T) {
+	now := time.Date(2026, 6, 27, 12, 0, 0, 0, time.UTC)
+	cfg := hostRunnerConfig(t)
+	cfg.Now = func() time.Time { return now }
+	cfg.Prune = HostPruneConfig{ClosedSessionTTL: time.Hour, CompletedJobTTL: 2 * time.Hour, FinishedAttemptTTL: 3 * time.Hour, InactiveWorkspaceTTL: 4 * time.Hour, PollCursorTTL: 5 * time.Hour}
+	st := cfg.Store.(*fakeHostStore)
+	r, err := NewHostRunner(cfg)
+	if err != nil {
+		t.Fatalf("NewHostRunner: %v", err)
+	}
+	if err := r.RunJanitor(stdctx.Background()); err != nil {
+		t.Fatalf("RunJanitor: %v", err)
+	}
+	if st.lastPrune.ClosedSessionsBefore != now.Add(-time.Hour) || st.lastPrune.InactiveWorkspacesBefore != now.Add(-4*time.Hour) {
+		t.Fatalf("wrong prune policy: %+v", st.lastPrune)
+	}
+}
+
+func hostRunnerConfig(t *testing.T) HostRunnerConfig {
+	t.Helper()
+	gh := &fakeNotifGetter{
+		prs: map[string][]*github.PullRequest{
+			"octo/hello": {prWithHead(1, "sha-A")},
+		},
+	}
+	return HostRunnerConfig{
+		Store:           newFakeHostStore(),
+		Repos:           []HostRepoConfig{{Name: "hello", Owner: "octo", Repo: "hello", Slug: "octo/hello", GitURL: "https://github.com/octo/hello.git", DefaultBranch: "main", GithubAccount: "main", Enabled: true, Poll: true, PolicyHash: "p", PromptHash: "prompt", RulesHash: "rules", Review: JobReviewOptions{Post: true, Gate: "high"}}},
+		TokenSources:    map[string]HostTokenSource{"main": &countTokenSource{token: "tok"}},
+		Source:          sourcePulls,
+		Interval:        time.Hour,
+		Dispatcher:      newPollDispatcher(),
+		Logger:          discardLog(),
+		ReviewTO:        time.Minute,
+		WorkerID:        "worker",
+		JanitorInterval: time.Hour,
+		NewNotifGetter: func(token string) notifGetter {
+			return gh
+		},
+		Now: time.Now,
+	}
+}
+
+type countTokenSource struct {
+	mu    sync.Mutex
+	token string
+	n     int
+}
+
+func (s *countTokenSource) Token(stdctx.Context) (string, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.n++
+	return s.token, nil
+}
+
+func (s *countTokenSource) calls() int {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.n
+}
+
+type fakeHostStore struct {
+	mu           sync.Mutex
+	nextRepo     int64
+	nextSession  int64
+	nextJob      int64
+	nextAttempt  int64
+	repos        map[string]store.HostRepo
+	jobs         map[string]store.HostJob
+	queued       []string
+	cursorWrites int
+	lastPrune    store.HostPrunePolicy
+}
+
+func newFakeHostStore() *fakeHostStore {
+	return &fakeHostStore{nextRepo: 1, nextSession: 1, nextJob: 1, nextAttempt: 1, repos: map[string]store.HostRepo{}, jobs: map[string]store.HostJob{}}
+}
+
+func (s *fakeHostStore) ReconcileHostRepo(_ stdctx.Context, in store.HostRepoInput) (store.HostRepo, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if r, ok := s.repos[in.Slug]; ok {
+		r.HostRepoInput = in
+		s.repos[in.Slug] = r
+		return r, nil
+	}
+	r := store.HostRepo{ID: s.nextRepo, HostRepoInput: in}
+	s.nextRepo++
+	s.repos[in.Slug] = r
+	return r, nil
+}
+
+func (s *fakeHostStore) UpsertHostPRSession(_ stdctx.Context, in store.HostPRSessionInput) (store.HostPRSession, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	session := store.HostPRSession{ID: s.nextSession, HostPRSessionInput: in}
+	s.nextSession++
+	return session, nil
+}
+
+func (s *fakeHostStore) EnqueueHostJob(_ stdctx.Context, in store.HostJobInput) (store.HostJob, bool, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	in.DedupeKey = store.HostJobDedupeKey(in)
+	if j, ok := s.jobs[in.DedupeKey]; ok {
+		if j.Status == "failed" {
+			j.Status = "queued"
+			j.Error = ""
+			s.jobs[in.DedupeKey] = j
+			s.queued = append(s.queued, in.DedupeKey)
+			return j, true, nil
+		}
+		return j, false, nil
+	}
+	j := store.HostJob{ID: s.nextJob, HostJobInput: in, Status: "queued"}
+	s.nextJob++
+	s.jobs[in.DedupeKey] = j
+	s.queued = append(s.queued, in.DedupeKey)
+	return j, true, nil
+}
+
+func (s *fakeHostStore) ClaimHostJob(_ stdctx.Context, in store.HostJobClaimInput) (store.HostJobClaim, bool, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if len(s.queued) == 0 {
+		return store.HostJobClaim{}, false, nil
+	}
+	key := s.queued[0]
+	s.queued = s.queued[1:]
+	job := s.jobs[key]
+	job.Status = "running"
+	job.LeaseOwner = in.WorkerID
+	s.jobs[key] = job
+	claim := store.HostJobClaim{Job: job, AttemptID: s.nextAttempt}
+	s.nextAttempt++
+	return claim, true, nil
+}
+
+func (s *fakeHostStore) CompleteHostJob(_ stdctx.Context, in store.HostJobCompleteInput) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	for key, job := range s.jobs {
+		if job.ID == in.JobID {
+			job.Status = in.Status
+			s.jobs[key] = job
+			return nil
+		}
+	}
+	return errors.New("job not found")
+}
+
+func (s *fakeHostStore) UpsertHostWorkspace(stdctx.Context, store.HostWorkspaceInput) (store.HostWorkspace, error) {
+	return store.HostWorkspace{}, nil
+}
+
+func (s *fakeHostStore) UpsertHostPollCursor(stdctx.Context, store.HostPollCursorInput) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.cursorWrites++
+	return nil
+}
+
+func (s *fakeHostStore) GetHostPollCursor(stdctx.Context, int64, string) (store.HostPollCursor, bool, error) {
+	return store.HostPollCursor{}, false, nil
+}
+
+func (s *fakeHostStore) PruneHost(_ stdctx.Context, p store.HostPrunePolicy) (store.HostPruneResult, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.lastPrune = p
+	return store.HostPruneResult{}, nil
+}
