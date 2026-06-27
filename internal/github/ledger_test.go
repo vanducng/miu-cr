@@ -261,6 +261,22 @@ func TestLedgerResultLineNoDuplicateResolvedCount(t *testing.T) {
 	}
 }
 
+func TestLedgerResultLineOpenOmitsCountSuffix(t *testing.T) {
+	// With open findings the Result line is just the per-severity chips; the open
+	// total is NOT appended (it lives in the "⚠️ Open (N)" table heading).
+	ledger := []LedgerEntry{
+		{FP: fpStr(1), Status: statusOpen, Sev: "high"},
+		{FP: fpStr(2), Status: statusOpen, Sev: "low"},
+	}
+	line := ledgerResultLine(ledger)
+	if strings.Contains(line, "open") {
+		t.Fatalf("Result line must not append the open count, got %q", line)
+	}
+	if !strings.Contains(line, "P1") || !strings.Contains(line, "P3") {
+		t.Fatalf("Result line must show per-severity chips, got %q", line)
+	}
+}
+
 func TestRenderSummaryLegacyUnchangedWithoutLedger(t *testing.T) {
 	// Zero SummaryOptions (Ledger nil) must keep the legacy badge + no timestamp.
 	out := RenderSummaryFull(&PRInfo{HeadSHA: "h"}, nil, nil, 0, nil, nil, SummaryOptions{})

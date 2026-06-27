@@ -79,7 +79,7 @@ func renderWalkthrough(b *strings.Builder, walkthrough string) {
 		return
 	}
 	b.WriteString("**What changed:**\n")
-	b.WriteString(mdProse(walkthrough))
+	b.WriteString(mdWalkthrough(walkthrough))
 	b.WriteString("\n\n")
 }
 

@@ -225,13 +225,15 @@ func ledgerResultLine(entries []LedgerEntry) string {
 	if open == 0 {
 		return "<sub><sub>![Review passed](https://img.shields.io/badge/Review_passed-brightgreen?style=flat)</sub></sub> · all clear 🎉"
 	}
+	// Just the per-severity chips. The open total is NOT appended — it already
+	// shows in the "⚠️ Open (N)" tracking-table heading below.
 	var chips []string
 	for _, sev := range severityOrder {
 		if n := counts[sev]; n > 0 {
 			chips = append(chips, severityCountBadge(sev, n))
 		}
 	}
-	return strings.Join(chips, " ") + fmt.Sprintf(" · %d open", open)
+	return strings.Join(chips, " ")
 }
 
 // renderLedger writes the grouped lifecycle tables. Both are ALWAYS VISIBLE

@@ -3,6 +3,7 @@ package github
 import (
 	"fmt"
 	"net/url"
+	"regexp"
 	"strings"
 	"time"
 
@@ -430,6 +431,23 @@ func mdInline(s string) string {
 // links, so prose stays readable. GitHub renders &lt;/&gt; back to </>.
 func mdProse(s string) string {
 	return strings.NewReplacer("<", "&lt;", ">", "&gt;", "`", "\\`").Replace(s)
+}
+
+// fenceRe matches a run of 3+ backticks (a fenced code-block delimiter).
+var fenceRe = regexp.MustCompile("`{3,}")
+
+// mdWalkthrough escapes the HTML/comment breakout vectors in the untrusted model
+// walkthrough (< >) and DEFUSES triple-backtick fences (which would otherwise
+// open a code block that swallows the tracking tables rendered after it), while
+// PRESERVING single/double backticks so the model's `code` spans render as
+// monospace. Unlike mdProse — used for an inline rationale that is immediately
+// followed by a patch fence, so it must escape every backtick — the walkthrough
+// has no trailing fence, so inline code spans are safe and desirable.
+func mdWalkthrough(s string) string {
+	s = strings.NewReplacer("<", "&lt;", ">", "&gt;").Replace(s)
+	return fenceRe.ReplaceAllStringFunc(s, func(run string) string {
+		return strings.Repeat("\\`", len(run))
+	})
 }
 
 func known(sev string) bool {

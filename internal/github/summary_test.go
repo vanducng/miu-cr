@@ -455,8 +455,8 @@ func TestRenderSummaryFullNoSummaryColumnWhenAbsent(t *testing.T) {
 
 func TestRenderSummaryFullEscapesUntrustedWalkthrough(t *testing.T) {
 	info, diffs, findings := presentationFixture()
-	// Bullets with HTML/comment + fence breakout vectors; newlines must survive.
-	walkthrough := "- adds a guard\n- closes </details><script>alert(1)</script>\n- ```fence``` should not open a block"
+	// Bullets with HTML/comment + fence breakout vectors AND a legit `code span`.
+	walkthrough := "- adds a guard\n- closes </details><script>alert(1)</script>\n- ```fence``` should not open a block\n- run `miucr serve --host` to start"
 	out := RenderSummaryFull(info, findings, nil, 0, nil, nil, SummaryOptions{
 		Diffs: diffs, ReviewID: "rev_x", Walkthrough: walkthrough})
 	if strings.Contains(out, "<script>") || strings.Contains(out, "</script>") {
@@ -465,12 +465,20 @@ func TestRenderSummaryFullEscapesUntrustedWalkthrough(t *testing.T) {
 	if !strings.Contains(out, "&lt;/details&gt;&lt;script&gt;") {
 		t.Fatalf("want the walkthrough's </details><script> HTML-escaped:\n%s", out)
 	}
-	// The triple-backtick fence must be neutralized (mdProse escapes backticks)
-	// so it can't open a code block that swallows the rest of the body.
+	// The triple-backtick fence must be DEFUSED so it can't open a code block that
+	// swallows the rest of the body.
 	if strings.Contains(out, "```fence```") {
 		t.Fatalf("walkthrough fence must be neutralized:\n%s", out)
 	}
-	// Bullet newlines survive (mdProse preserves them; mdInline would collapse).
+	// But a legit single-backtick `code span` is PRESERVED (not escaped), so the
+	// model's `miucr serve --host` renders as monospace, not literal backticks.
+	if !strings.Contains(out, "`miucr serve --host`") {
+		t.Fatalf("walkthrough single-backtick code span must be preserved:\n%s", out)
+	}
+	if strings.Contains(out, "\\`miucr") {
+		t.Fatalf("walkthrough code-span backticks must not be escaped:\n%s", out)
+	}
+	// Bullet newlines survive.
 	if !strings.Contains(out, "- adds a guard\n") {
 		t.Fatalf("walkthrough bullet newlines must survive:\n%s", out)
 	}
