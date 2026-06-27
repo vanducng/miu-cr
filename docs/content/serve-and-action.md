@@ -188,6 +188,7 @@ each PR head as a separate review session.
 
 ```sh
 MIUCR_CONFIG=/etc/miu/cr/host.yaml \
+MIUCR_STORE_BACKEND=postgres \
 MIUCR_PG_DSN='postgres://miucr:miucr@localhost:5432/miucr?sslmode=disable' \
   miucr serve --host
 
@@ -305,13 +306,15 @@ that repository.
 
 ### Storage and retention
 
-Host mode stores repo/session/job/cursor state in Postgres. The runner claims
-jobs with row locks so multiple workers or instances do not review the same PR
-head concurrently. Completed jobs, old attempts, closed sessions, inactive
-workspace records, and stale poll cursors are pruned by `host.retention`.
-Startup applies versioned Postgres migrations under an advisory lock and records
-them in `schema_migrations`, so multiple host instances can boot without racing
-schema changes.
+Host mode stores repo/session/job/cursor state in Postgres. Set
+`MIUCR_STORE_BACKEND=postgres` as well so review history and trace records use
+the same Postgres database instead of the default local SQLite store. The runner
+claims jobs with row locks so multiple workers or instances do not review the
+same PR head concurrently. Completed jobs, old attempts, closed sessions,
+inactive workspace records, and stale poll cursors are pruned by
+`host.retention`. Startup applies versioned Postgres migrations under an
+advisory lock and records them in `schema_migrations`, so multiple host
+instances can boot without racing schema changes.
 
 The workspace-size fields are validated and reserved for the managed-workspace
 phase. V1 PR reviews still use the existing temp-clone path, so host mode does

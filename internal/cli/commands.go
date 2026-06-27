@@ -1042,11 +1042,12 @@ func buildServeReviewFn(log *slog.Logger, gate string, st serve.ReviewStore, tra
 			persistFinalReview(log, st, j.ReviewID, "failed", ReviewOutcome{})
 			return err
 		}
-		posted, action := 0, "none"
+		posted, action, headSHA := 0, "none", ""
 		if out.PR != nil {
 			posted, action = out.PR.PostedInline, out.PR.SummaryAction
+			headSHA = out.PR.HeadSHA
 		}
-		log.Info("review done", "ref", j.Ref, "findings", len(out.Findings), "posted_inline", posted, "summary", action)
+		log.Info("review done", "ref", j.Ref, "review_id", out.ReviewID, "head_sha", headSHA, "findings", len(out.Findings), "posted_inline", posted, "summary", action)
 		persistFinalReview(log, st, j.ReviewID, "done", out)
 		return nil
 	}

@@ -567,6 +567,7 @@ func (e *Engine) Review(ctx stdctx.Context, req Request) (ReviewResult, error) {
 		stats["related_context_truncated"] = related.Truncated
 		stats["related_context_ms"] = float64(relatedMS)
 	}
+	addTraceStats(stats, trace)
 
 	repairStart := time.Now()
 	kept = e.repairPatches(ctx, kept, selected, req, stats)
@@ -616,6 +617,27 @@ func (e *Engine) Review(ctx stdctx.Context, req Request) (ReviewResult, error) {
 	}
 
 	return result, nil
+}
+
+func addTraceStats(stats map[string]any, trace *ReviewTrace) {
+	if trace == nil {
+		return
+	}
+	stats["system_prompt_bytes"] = float64(len(trace.SystemPrompt))
+	stats["user_prompt_bytes"] = float64(len(trace.UserPrompt))
+	stats["final_response_bytes"] = float64(len(trace.FinalResponse))
+	stats["tool_calls"] = float64(len(trace.Turns))
+	if len(trace.Turns) == 0 {
+		return
+	}
+	byTool := map[string]float64{}
+	turns := map[int]struct{}{}
+	for _, tr := range trace.Turns {
+		byTool[tr.Tool]++
+		turns[tr.Turn] = struct{}{}
+	}
+	stats["tool_turns"] = float64(len(turns))
+	stats["tool_calls_by_tool"] = byTool
 }
 
 func autoContextHops(selected []diff.Diff) int {

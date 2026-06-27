@@ -330,6 +330,24 @@ func TestReviewCollectsTrace(t *testing.T) {
 	if len(turns) != 2 || turns[0].Tool != "grep" || turns[1].Tool != "file_read" {
 		t.Errorf("transcript turns: %+v", turns)
 	}
+	for key, want := range map[string]float64{
+		"system_prompt_bytes":  float64(len("fake system prompt")),
+		"user_prompt_bytes":    float64(len("fake prompt")),
+		"final_response_bytes": float64(len(`{"findings":[]}`)),
+		"tool_calls":           2,
+		"tool_turns":           2,
+	} {
+		if got, _ := res.Stats[key].(float64); got != want {
+			t.Errorf("%s: got %v, want %v", key, res.Stats[key], want)
+		}
+	}
+	byTool, ok := res.Stats["tool_calls_by_tool"].(map[string]float64)
+	if !ok {
+		t.Fatalf("tool_calls_by_tool missing: %#v", res.Stats["tool_calls_by_tool"])
+	}
+	if byTool["grep"] != 1 || byTool["file_read"] != 1 {
+		t.Errorf("tool_calls_by_tool: %+v", byTool)
+	}
 }
 
 // The persisted trace_json captures the system prompt (the bug fix), diff meta,
