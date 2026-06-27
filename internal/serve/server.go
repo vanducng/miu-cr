@@ -83,6 +83,23 @@ const (
 	SubmitDuplicate
 )
 
+func (r SubmitResult) String() string {
+	switch r {
+	case SubmitQueued:
+		return "queued"
+	case SubmitClosed:
+		return "closed"
+	case SubmitFull:
+		return "full"
+	case SubmitCoalesced:
+		return "coalesced"
+	case SubmitDuplicate:
+		return "duplicate"
+	default:
+		return "unknown"
+	}
+}
+
 // Dispatcher accepts review jobs. The real bounded pool is P2; tests inject a fake.
 type Dispatcher interface {
 	Submit(Job) SubmitResult

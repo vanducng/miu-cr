@@ -164,10 +164,15 @@ func (h *HostRunner) Run(ctx stdctx.Context) {
 			}
 			nextJanitor = start.Add(h.janitorInterval)
 		}
-		if err := h.Tick(ctx); err != nil && ctx.Err() == nil {
+		pollFloor, err := h.tick(ctx)
+		if err != nil && ctx.Err() == nil {
 			h.log.Warn("host: tick failed", "error", config.RedactString(err.Error()))
 		}
-		wait := time.Until(start.Add(h.interval))
+		eff := h.interval
+		if pollFloor > eff {
+			eff = pollFloor
+		}
+		wait := time.Until(start.Add(eff))
 		if wait < 0 {
 			wait = 0
 		}
@@ -208,10 +213,16 @@ func (c HostPruneConfig) policy(now time.Time) store.HostPrunePolicy {
 }
 
 func (h *HostRunner) Tick(ctx stdctx.Context) error {
+	_, err := h.tick(ctx)
+	return err
+}
+
+func (h *HostRunner) tick(ctx stdctx.Context) (time.Duration, error) {
 	reposByID, reposBySlug, err := h.reconcileRepos(ctx)
 	if err != nil {
-		return err
+		return 0, err
 	}
+	var pollFloor time.Duration
 	for _, repo := range h.repos {
 		if !repo.Enabled || !repo.Poll {
 			continue
@@ -220,11 +231,15 @@ func (h *HostRunner) Tick(ctx stdctx.Context) error {
 		if !ok {
 			continue
 		}
-		if err := h.pollRepo(ctx, repo, rec.ID); err != nil {
+		wait, err := h.pollRepo(ctx, repo, rec.ID)
+		if wait > pollFloor {
+			pollFloor = wait
+		}
+		if err != nil {
 			h.log.Warn("host: repo poll failed", "repo", repo.Slug, "error", config.RedactString(err.Error()))
 		}
 	}
-	return h.claimReady(ctx, reposByID)
+	return pollFloor, h.claimReady(ctx, reposByID)
 }
 
 func (h *HostRunner) reconcileRepos(ctx stdctx.Context) (map[int64]HostRepoConfig, map[string]store.HostRepo, error) {
@@ -255,19 +270,19 @@ func (h *HostRunner) reconcileRepos(ctx stdctx.Context) (map[int64]HostRepoConfi
 	return byID, bySlug, nil
 }
 
-func (h *HostRunner) pollRepo(ctx stdctx.Context, repo HostRepoConfig, repoID int64) error {
+func (h *HostRunner) pollRepo(ctx stdctx.Context, repo HostRepoConfig, repoID int64) (time.Duration, error) {
 	token, err := h.tokens[repo.GithubAccount].Token(ctx)
 	if err != nil {
-		return err
+		return 0, err
 	}
 	getter := h.newGetter(token)
-	prs, err := h.listOpenPRs(ctx, getter, repo)
+	prs, pollFloor, err := h.listOpenPRs(ctx, getter, repo)
 	if err != nil {
-		return err
+		return pollFloor, err
 	}
 	now := h.now().UTC()
 	if err := h.store.UpsertHostPollCursor(ctx, store.HostPollCursorInput{RepoID: repoID, Source: string(sourcePulls), Cursor: now.Format(time.RFC3339Nano), LastPolledAt: now}); err != nil {
-		return err
+		return pollFloor, err
 	}
 	for _, pr := range prs {
 		number := int64(pr.GetNumber())
@@ -289,34 +304,40 @@ func (h *HostRunner) pollRepo(ctx stdctx.Context, repo HostRepoConfig, repoID in
 			continue
 		}
 		_, _, err = h.store.EnqueueHostJob(ctx, store.HostJobInput{
-			RepoID:     repoID,
-			SessionID:  session.ID,
-			Number:     number,
-			HeadSHA:    head,
-			BaseSHA:    pr.GetBase().GetSHA(),
-			PolicyHash: repo.PolicyHash,
-			PromptHash: repo.PromptHash,
-			RulesHash:  repo.RulesHash,
+			RepoID:      repoID,
+			SessionID:   session.ID,
+			Number:      number,
+			HeadSHA:     head,
+			BaseSHA:     pr.GetBase().GetSHA(),
+			PolicyHash:  repo.PolicyHash,
+			PromptHash:  repo.PromptHash,
+			RulesHash:   repo.RulesHash,
+			AvailableAt: now,
+			Now:         now,
 		})
 		if err != nil {
 			h.log.Warn("host: failed to enqueue PR review", "repo", repo.Slug, "pr", number, "error", config.RedactString(err.Error()))
 			continue
 		}
 	}
-	return nil
+	return pollFloor, nil
 }
 
-func (h *HostRunner) listOpenPRs(ctx stdctx.Context, getter notifGetter, repo HostRepoConfig) ([]*github.PullRequest, error) {
+func (h *HostRunner) listOpenPRs(ctx stdctx.Context, getter notifGetter, repo HostRepoConfig) ([]*github.PullRequest, time.Duration, error) {
 	opts := &github.PullRequestListOptions{State: "open", ListOptions: github.ListOptions{PerPage: 100}}
 	var out []*github.PullRequest
+	var pollFloor time.Duration
 	for {
 		prs, resp, err := getter.ListOpenPRs(ctx, repo.Owner, repo.Repo, opts)
+		if wait := pollIntervalOf(resp); wait > pollFloor {
+			pollFloor = wait
+		}
 		if err != nil {
-			return nil, err
+			return nil, pollFloor, err
 		}
 		out = append(out, prs...)
 		if resp == nil || resp.NextPage == 0 {
-			return out, nil
+			return out, pollFloor, nil
 		}
 		opts.Page = resp.NextPage
 	}
@@ -376,7 +397,11 @@ func (h *HostRunner) claimReady(ctx stdctx.Context, repos map[int64]HostRepoConf
 		case SubmitCoalesced:
 			now := h.now().UTC()
 			_ = h.store.ReleaseHostJob(ctx, store.HostJobReleaseInput{JobID: jobID, AttemptID: attemptID, Error: "review already in flight for PR", Now: now, AvailableAt: now.Add(h.interval)})
-			return nil
+			continue
+		case SubmitFull:
+			now := h.now().UTC()
+			_ = h.store.ReleaseHostJob(ctx, store.HostJobReleaseInput{JobID: jobID, AttemptID: attemptID, Error: "dispatcher rejected job", Now: now, AvailableAt: now.Add(h.interval)})
+			continue
 		default:
 			now := h.now().UTC()
 			_ = h.store.ReleaseHostJob(ctx, store.HostJobReleaseInput{JobID: jobID, AttemptID: attemptID, Error: "dispatcher rejected job", Now: now, AvailableAt: now})

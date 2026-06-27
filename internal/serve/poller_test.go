@@ -77,6 +77,7 @@ type pollDispatcher struct {
 	jobs    []Job
 	failErr error // when non-nil, OnDone is called with this (review failed)
 	accept  bool
+	results []SubmitResult
 }
 
 func newPollDispatcher() *pollDispatcher { return &pollDispatcher{accept: true} }
@@ -84,6 +85,13 @@ func newPollDispatcher() *pollDispatcher { return &pollDispatcher{accept: true} 
 func (d *pollDispatcher) Submit(j Job) SubmitResult {
 	d.mu.Lock()
 	defer d.mu.Unlock()
+	if len(d.results) > 0 {
+		result := d.results[0]
+		d.results = d.results[1:]
+		if result != SubmitQueued {
+			return result
+		}
+	}
 	if !d.accept {
 		return SubmitFull
 	}

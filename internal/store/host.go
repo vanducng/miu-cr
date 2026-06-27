@@ -74,6 +74,7 @@ type HostJobInput struct {
 	DedupeKey   string
 	Priority    int
 	AvailableAt time.Time
+	Now         time.Time
 }
 
 type HostJob struct {

@@ -141,6 +141,31 @@ func TestHostConcurrentEnqueueDedupe(t *testing.T) {
 	}
 }
 
+func TestHostEnqueueUsesInjectedNow(t *testing.T) {
+	s := openHost(t)
+	ctx := context.Background()
+	repo := mustHostRepo(t, s)
+	session := mustHostSession(t, s, repo.ID, 15, "open")
+	now := time.Date(2026, 6, 27, 9, 15, 0, 0, time.UTC)
+	job, ok, err := s.EnqueueHostJob(ctx, store.HostJobInput{
+		RepoID:     repo.ID,
+		SessionID:  session.ID,
+		Number:     15,
+		HeadSHA:    uniqueName(t, "head"),
+		BaseSHA:    "base",
+		PolicyHash: "policy",
+		PromptHash: "prompt",
+		RulesHash:  "rules",
+		Now:        now,
+	})
+	if err != nil || !ok {
+		t.Fatalf("enqueue ok=%v err=%v", ok, err)
+	}
+	if !job.AvailableAt.Equal(now) || !job.UpdatedAt.Equal(now) {
+		t.Fatalf("timestamps = available %v updated %v, want %v", job.AvailableAt, job.UpdatedAt, now)
+	}
+}
+
 func TestHostConcurrentClaimOneOwnerPerJob(t *testing.T) {
 	s := openHost(t)
 	ctx := context.Background()

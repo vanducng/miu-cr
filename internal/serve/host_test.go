@@ -3,6 +3,7 @@ package serve
 import (
 	stdctx "context"
 	"errors"
+	"net/http"
 	"os"
 	"strings"
 	"sync"
@@ -96,6 +97,28 @@ func TestHostRunnerPollsAllPRPages(t *testing.T) {
 	}
 }
 
+func TestHostRunnerTickReturnsPollIntervalFloor(t *testing.T) {
+	cfg := hostRunnerConfig(t)
+	resp := &github.Response{Response: &http.Response{Header: make(http.Header)}}
+	resp.Header.Set("X-Poll-Interval", "120")
+	gh := &fakeNotifGetter{
+		prs:       map[string][]*github.PullRequest{"octo/hello": {prWithHead(1, "sha-A")}},
+		notifResp: resp,
+	}
+	cfg.NewNotifGetter = func(string) notifGetter { return gh }
+	r, err := NewHostRunner(cfg)
+	if err != nil {
+		t.Fatalf("NewHostRunner: %v", err)
+	}
+	wait, err := r.tick(stdctx.Background())
+	if err != nil {
+		t.Fatalf("tick: %v", err)
+	}
+	if wait != 120*time.Second {
+		t.Fatalf("poll wait = %v, want 120s", wait)
+	}
+}
+
 func TestHostRunnerRepeatedPollSameHeadDoesNotDuplicate(t *testing.T) {
 	cfg := hostRunnerConfig(t)
 	disp := cfg.Dispatcher.(*pollDispatcher)
@@ -130,6 +153,35 @@ func TestHostRunnerFailedReviewRetriesSameHead(t *testing.T) {
 	}
 	if disp.count() != 2 {
 		t.Fatalf("submitted jobs = %d, want retry", disp.count())
+	}
+}
+
+func TestHostRunnerRejectedSubmitContinuesClaimBatch(t *testing.T) {
+	for _, result := range []SubmitResult{SubmitCoalesced, SubmitFull} {
+		t.Run(result.String(), func(t *testing.T) {
+			cfg := hostRunnerConfig(t)
+			cfg.NewNotifGetter = func(string) notifGetter {
+				return &fakeNotifGetter{prs: map[string][]*github.PullRequest{
+					"octo/hello": {prWithHead(1, "sha-A"), prWithHead(2, "sha-B")},
+				}}
+			}
+			disp := cfg.Dispatcher.(*pollDispatcher)
+			disp.results = []SubmitResult{result, SubmitQueued}
+			st := cfg.Store.(*fakeHostStore)
+			r, err := NewHostRunner(cfg)
+			if err != nil {
+				t.Fatalf("NewHostRunner: %v", err)
+			}
+			if err := r.Tick(stdctx.Background()); err != nil {
+				t.Fatalf("Tick: %v", err)
+			}
+			if st.releaseCount != 1 {
+				t.Fatalf("release count = %d, want 1", st.releaseCount)
+			}
+			if disp.count() != 1 {
+				t.Fatalf("submitted jobs = %d, want second job submitted", disp.count())
+			}
+		})
 	}
 }
 
@@ -365,6 +417,9 @@ func (s *fakeHostStore) EnqueueHostJob(_ stdctx.Context, in store.HostJobInput) 
 		return j, false, nil
 	}
 	j := store.HostJob{ID: s.nextJob, HostJobInput: in, Status: "queued"}
+	if j.AvailableAt.IsZero() {
+		j.AvailableAt = time.Now()
+	}
 	s.nextJob++
 	s.jobs[in.DedupeKey] = j
 	s.queued = append(s.queued, in.DedupeKey)
@@ -410,11 +465,14 @@ func (s *fakeHostStore) ReleaseHostJob(_ stdctx.Context, in store.HostJobRelease
 			job.Status = "queued"
 			job.Error = in.Error
 			job.LeaseOwner = ""
+			job.AvailableAt = in.AvailableAt
 			if job.Attempts > 0 {
 				job.Attempts--
 			}
 			s.jobs[key] = job
-			s.queued = append(s.queued, key)
+			if in.AvailableAt.IsZero() || !in.AvailableAt.After(time.Now()) {
+				s.queued = append(s.queued, key)
+			}
 			s.releaseCount++
 			return nil
 		}

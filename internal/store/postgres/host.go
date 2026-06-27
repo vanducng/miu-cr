@@ -58,25 +58,29 @@ RETURNING id, repo_id, number, state, head_sha, base_sha, branch, title, review_
 }
 
 func (s *Store) EnqueueHostJob(ctx context.Context, in store.HostJobInput) (store.HostJob, bool, error) {
+	now := in.Now
+	if now.IsZero() {
+		now = time.Now().UTC()
+	}
 	if in.AvailableAt.IsZero() {
-		in.AvailableAt = time.Now().UTC()
+		in.AvailableAt = now
 	}
 	in.DedupeKey = store.HostJobDedupeKey(in)
 	sessionID := nullInt64(in.SessionID)
 	row := s.db.QueryRowContext(ctx, `
 INSERT INTO host_jobs (repo_id, session_id, number, head_sha, base_sha, policy_hash, prompt_hash, rules_hash, dedupe_key, priority, available_at, updated_at)
-VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,now())
+VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12)
 ON CONFLICT(dedupe_key) DO UPDATE SET
 	status='queued',
 	lease_owner='',
 	lease_until=NULL,
 	error='',
 	available_at=excluded.available_at,
-	updated_at=now(),
+	updated_at=$12,
 	completed_at=NULL
 WHERE host_jobs.status = 'failed'
 RETURNING id, repo_id, session_id, number, head_sha, base_sha, policy_hash, prompt_hash, rules_hash, dedupe_key, priority, available_at, status, attempts, lease_owner, lease_until, review_id, error, created_at, updated_at, completed_at`,
-		in.RepoID, sessionID, in.Number, in.HeadSHA, in.BaseSHA, in.PolicyHash, in.PromptHash, in.RulesHash, in.DedupeKey, in.Priority, in.AvailableAt)
+		in.RepoID, sessionID, in.Number, in.HeadSHA, in.BaseSHA, in.PolicyHash, in.PromptHash, in.RulesHash, in.DedupeKey, in.Priority, in.AvailableAt, now)
 	job, err := scanHostJob(row)
 	if err == nil {
 		return job, true, nil
