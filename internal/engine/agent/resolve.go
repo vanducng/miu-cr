@@ -38,7 +38,6 @@ type Credentials struct {
 	// gateways.
 	AuthToken string
 
-	ProviderName   string
 	AuthSource     string
 	AuthSourceName string
 

@@ -63,6 +63,9 @@ The command must print either a normal `miucr` review envelope or:
 }
 ```
 
+Stdout must contain only that JSON payload. Put logs, progress, and diagnostics
+on stderr so parsing stays deterministic.
+
 Run `miucr` against the suite:
 
 ```sh
@@ -71,8 +74,8 @@ miucr eval --cases eval.json \
   --timeout 10m
 ```
 
-`eval` defaults to a 30m per-case timeout when `--timeout` is omitted; pass a
-shorter timeout for quick smoke runs.
+`eval` defaults to a 30m per-case per-tool timeout when `--timeout` is omitted;
+pass a shorter timeout for quick smoke runs.
 
 Compare another tool by wrapping it into the same finding JSON:
 

@@ -144,6 +144,19 @@ func Run(ctx context.Context, suite Suite, tools []Tool, timeout time.Duration) 
 
 func runCase(ctx context.Context, c Case, index int, tool Tool, timeout time.Duration) CaseResult {
 	start := time.Now()
+	if err := validateCaseEnv(c); err != nil {
+		score, missed := Score{Found: 0}, []Finding(nil)
+		if c.Expected != nil {
+			score, missed = ScoreCase(c.Expected, nil)
+		}
+		return CaseResult{
+			ID:         c.ID,
+			DurationMS: time.Since(start).Milliseconds(),
+			Error:      err.Error(),
+			Score:      score,
+			Missed:     missed,
+		}
+	}
 	runCtx := ctx
 	cancel := func() {}
 	if timeout > 0 {
@@ -167,16 +180,9 @@ func runCase(ctx context.Context, c Case, index int, tool Tool, timeout time.Dur
 	var stdout, stderr bytes.Buffer
 	cmd.Stdout = &stdout
 	cmd.Stderr = &stderr
-	done := make(chan struct{})
-	go func() {
-		select {
-		case <-runCtx.Done():
-			killCommand(cmd)
-		case <-done:
-		}
-	}()
+	stopKill := context.AfterFunc(runCtx, func() { killCommand(cmd) })
 	err := cmd.Run()
-	close(done)
+	stopKill()
 	duration := time.Since(start).Milliseconds()
 
 	exitCode := 0
@@ -218,6 +224,21 @@ func runCase(ctx context.Context, c Case, index int, tool Tool, timeout time.Dur
 		Missed:     missed,
 		Stats:      parsed.Stats,
 	}
+}
+
+func validateCaseEnv(c Case) error {
+	for name, value := range map[string]string{
+		"id":     c.ID,
+		"repo":   c.Repo,
+		"from":   c.From,
+		"to":     c.To,
+		"commit": c.Commit,
+	} {
+		if strings.ContainsAny(value, "\x00\r\n") {
+			return fmt.Errorf("case %s contains an unsupported environment character", name)
+		}
+	}
+	return nil
 }
 
 type parsedOutput struct {

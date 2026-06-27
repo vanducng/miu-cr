@@ -45,7 +45,7 @@ ocr_adapter="$script_dir/open-code-review-json.sh"
 export MIUCR_BIN="${MIUCR_BIN:-miucr}"
 
 run_miucr() {
-  sh -c "$MIUCR_BIN \"\$@\"" sh "$@"
+  "$MIUCR_BIN" "$@"
 }
 
 python3 - "$cases" "$out/repos" "$materialized" "${limit:-0}" <<'PY'
@@ -62,7 +62,9 @@ suite = json.loads(cases_path.read_text())
 repos_dir.mkdir(parents=True, exist_ok=True)
 
 def run(args, cwd=None):
-    subprocess.run(args, cwd=cwd, check=True)
+    result = subprocess.run(args, cwd=cwd, check=False, stderr=subprocess.PIPE, text=True)
+    if result.returncode != 0:
+        raise RuntimeError(f"command {' '.join(args)} failed in {cwd or Path.cwd()}: {result.stderr.strip()}")
 
 out = {"cases": []}
 for i, case in enumerate(suite.get("cases", [])):
@@ -71,16 +73,19 @@ for i, case in enumerate(suite.get("cases", [])):
     owner_repo = case["repo"]
     owner, repo_name = owner_repo.split("/", 1)
     repo_dir = repos_dir / f"{owner}__{repo_name}"
-    if not repo_dir.exists():
-        run(["git", "clone", "--filter=blob:none", "--no-checkout", f"https://github.com/{owner_repo}.git", str(repo_dir)])
-    run(["git", "fetch", "--quiet", "origin", case["from"]], repo_dir)
-    if case.get("number"):
-        run(["git", "fetch", "--quiet", "origin", f"pull/{case['number']}/head:refs/remotes/origin/pr/{case['number']}"], repo_dir)
-    else:
-        run(["git", "fetch", "--quiet", "origin", case["to"]], repo_dir)
-    c = dict(case)
-    c["repo"] = str(repo_dir.resolve())
-    out["cases"].append(c)
+    try:
+        if not repo_dir.exists():
+            run(["git", "clone", "--filter=blob:none", "--no-checkout", f"https://github.com/{owner_repo}.git", str(repo_dir)])
+        run(["git", "fetch", "--quiet", "origin", case["from"]], repo_dir)
+        if case.get("number"):
+            run(["git", "fetch", "--quiet", "origin", f"pull/{case['number']}/head:refs/remotes/origin/pr/{case['number']}"], repo_dir)
+        else:
+            run(["git", "fetch", "--quiet", "origin", case["to"]], repo_dir)
+        c = dict(case)
+        c["repo"] = str(repo_dir.resolve())
+        out["cases"].append(c)
+    except Exception as exc:
+        print(f"warning: skipped case {case.get('id', owner_repo)}: {exc}", file=sys.stderr)
 
 out_path.write_text(json.dumps(out, indent=2) + "\n")
 PY
@@ -94,5 +99,5 @@ run_miucr eval --cases "$materialized" \
   --timeout "$timeout" \
   -o json >"$result"
 
-scripts/eval/benchmark-report.py --result "$result" --cases "$materialized" --out "$report"
+python3 "$script_dir/benchmark-report.py" --result "$result" --cases "$materialized" --out "$report"
 printf '%s\n' "$report"

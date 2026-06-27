@@ -72,6 +72,21 @@ func parseEvalTools(flags []string) ([]eval.Tool, error) {
 
 func evalSummary(result eval.Result) map[string]any {
 	out := map[string]any{"tools": len(result.Tools)}
+	perTool := make([]map[string]any, 0, len(result.Tools))
+	for _, tr := range result.Tools {
+		s := tr.Summary
+		perTool = append(perTool, map[string]any{
+			"name":         tr.Name,
+			"cases":        s.Cases,
+			"expected":     s.Expected,
+			"matched":      s.Matched,
+			"precision":    s.Precision,
+			"recall":       s.Recall,
+			"f1":           s.F1,
+			"failed_cases": s.FailedCases,
+		})
+	}
+	out["per_tool"] = perTool
 	if len(result.Tools) == 1 {
 		s := result.Tools[0].Summary
 		out["cases"] = s.Cases

@@ -149,7 +149,13 @@ jobs:
           Docs: https://cr.miu.sh
           TEMPLATE
 
-          sed -i "s/__TAG__/${TAG_NAME}/g" "$NOTES_FILE"
+          python3 - "$NOTES_FILE" "$TAG_NAME" <<'PY'
+          import pathlib
+          import sys
+
+          path = pathlib.Path(sys.argv[1])
+          path.write_text(path.read_text().replace("__TAG__", sys.argv[2]))
+          PY
 
           gh release edit "$TAG_NAME" \
             --title "$TAG_NAME" \

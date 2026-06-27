@@ -26,6 +26,11 @@ if [[ -z "$cases" || -z "$out" ]]; then
   exit 2
 fi
 
+if ! command -v python3 >/dev/null 2>&1; then
+  echo "error: python3 is required but not found" >&2
+  exit 1
+fi
+
 python3 - "$cases" "$out" <<'PY'
 import json
 import shutil
@@ -41,12 +46,16 @@ repos_dir = out_dir / "repos"
 repos_dir.mkdir(parents=True, exist_ok=True)
 
 def run(args, cwd):
-    subprocess.run(args, cwd=cwd, check=True, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+    result = subprocess.run(args, cwd=cwd, check=False, stdout=subprocess.DEVNULL, stderr=subprocess.PIPE, text=True)
+    if result.returncode != 0:
+        raise SystemExit(f"command {' '.join(args)} failed in {cwd}: {result.stderr.strip()}")
 
 def copy_tree(src, dst):
     for item in src.rglob("*"):
         rel = item.relative_to(src)
         target = dst / rel
+        if item.is_symlink():
+            continue
         if item.is_dir():
             target.mkdir(parents=True, exist_ok=True)
             continue
@@ -69,6 +78,9 @@ for case in suite.get("cases", []):
     if not fixture:
         materialized["cases"].append(case)
         continue
+
+    if "/" in fixture or "\\" in fixture or fixture in {".", ".."}:
+        raise SystemExit(f"invalid fixture name {fixture!r}")
 
     base = root / "testdata" / "eval" / "fixtures" / fixture / "base"
     head = root / "testdata" / "eval" / "fixtures" / fixture / "head"

@@ -32,7 +32,7 @@ def main():
     args = parser.parse_args()
 
     result = envelope_data(load_json(args.result))
-    cases = {c["id"]: c for c in load_json(args.cases).get("cases", [])}
+    cases = {c.get("id"): c for c in load_json(args.cases).get("cases", []) if c.get("id")}
     lines = [
         "# miu-cr Evaluation Report",
         "",
