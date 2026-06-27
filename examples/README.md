@@ -58,8 +58,10 @@ for Codex) plus setup notes.
 ## Docker / server deploy
 
 `docker/Dockerfile` builds a static binary into a nonroot runtime image with
-`git` installed for `miucr serve` (webhook or `--poll`). `docker-compose.yml` is a local
-stand-in; replace the env block with a real secrets source in production.
+`git` installed for `miucr serve` (webhook or `--poll`). The `docker-image`
+workflow publishes the server image as `ghcr.io/<owner>/miu-cr`.
+`docker-compose.yml` is a local stand-in; replace the env block with a real
+secrets source in production.
 
 For a Postgres-backed multi-repo host, see `review-host/`. It uses the same
 Dockerfile but mounts a YAML host config, prompt/rule files, `/run/secrets`, and

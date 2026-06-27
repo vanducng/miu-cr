@@ -316,6 +316,8 @@ not delete arbitrary filesystem children under `workspace_dir`.
 
 A complete runnable example is in
 [`examples/review-host/`](https://github.com/vanducng/miu-cr/tree/main/examples/review-host).
+The Docker publish workflow builds the same runtime image and pushes it as
+`ghcr.io/<owner>/miu-cr` for VPS or Kubernetes deploys.
 
 ## GitHub Action
 
