@@ -122,6 +122,7 @@ type anthropicAgent struct {
 	model       string
 	timeout     time.Duration
 	temperature float64
+	thinking    string
 }
 
 // newAnthropicAgent builds the Anthropic-backed Agent (registered for
@@ -132,6 +133,7 @@ func newAnthropicAgent(creds Credentials, timeout time.Duration) *anthropicAgent
 		model:       creds.Model,
 		timeout:     timeout,
 		temperature: creds.Temperature,
+		thinking:    creds.Thinking,
 	}
 }
 
@@ -192,14 +194,23 @@ func (a *anthropicAgent) Review(ctx stdctx.Context, rc Context) (engine.ReviewOu
 	rc.Trace.SetModel("anthropic", a.model)
 	rc.Trace.SetPrompt(userPrompt)
 	params := anthropic.MessageNewParams{
-		MaxTokens:   maxTokens,
-		Temperature: anthropic.Float(a.temperature),
-		Model:       anthropic.Model(a.model),
-		System:      []anthropic.TextBlockParam{{Text: systemPrompt}},
-		Tools:       reviewTools(),
+		MaxTokens: maxTokens,
+		Model:     anthropic.Model(a.model),
+		System:    []anthropic.TextBlockParam{{Text: systemPrompt}},
+		Tools:     reviewTools(),
 		Messages: []anthropic.MessageParam{
 			anthropic.NewUserMessage(anthropic.NewTextBlock(userPrompt)),
 		},
+	}
+	// Extended thinking (when the model supports it) deepens analysis but REQUIRES
+	// temperature unset (Claude rejects temperature with thinking), and max_tokens
+	// must exceed the thinking budget. Otherwise apply the configured temperature.
+	if wantOn, effort := thinkingSetting(a.thinking); wantOn && supportsAnthropicThinking(a.model) {
+		budget := anthropicThinkingBudget(effort)
+		params.Thinking = anthropic.ThinkingConfigParamOfEnabled(budget)
+		params.MaxTokens = budget + maxTokens
+	} else {
+		params.Temperature = anthropic.Float(a.temperature)
 	}
 
 	emptyRounds := 0

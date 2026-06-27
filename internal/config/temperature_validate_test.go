@@ -25,3 +25,21 @@ func TestValidateReviewTemperature(t *testing.T) {
 		})
 	}
 }
+
+func TestValidateReviewThinking(t *testing.T) {
+	stubReviewValidators(t)
+	tests := []struct {
+		thinking string
+		wantErr  bool
+	}{
+		{"", false}, {"auto", false}, {"off", false}, {"low", false}, {"medium", false}, {"high", false},
+		{"on", true}, {"max", true}, {"0.5", true},
+	}
+	for _, tt := range tests {
+		t.Run(tt.thinking, func(t *testing.T) {
+			if err := ValidateReview(Review{Thinking: tt.thinking}); (err != nil) != tt.wantErr {
+				t.Fatalf("ValidateReview(thinking=%q) err=%v wantErr=%v", tt.thinking, err, tt.wantErr)
+			}
+		})
+	}
+}

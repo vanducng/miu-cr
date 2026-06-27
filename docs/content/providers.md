@@ -67,12 +67,14 @@ gate         = "high"          # default --gate: none|info|low|medium|high|criti
 filter_mode  = "diff_context"  # default --filter-mode (--pr): added|diff_context|file|nofilter
 min_severity = "low"           # default --min-severity (--pr inline floor)
 timeout      = "300s"          # default review timeout (a Go duration: 300s, 5m, …)
-temperature  = 0               # LLM sampling temperature (0–2). Default 0 = deterministic:
-                               # re-reviews of the same diff stay stable instead of churning
-                               # findings. Raise it only if you want more variety. Applies to
-                               # the anthropic + openai backends; codex (reasoning) ignores it.
-                               # Note: OpenAI reasoning models (o-series/gpt-5) on Chat
-                               # Completions only accept temperature 1 — set this to 1 for those.
+thinking     = "auto"          # auto|off|low|medium|high. auto = extended thinking/reasoning
+                               # ON when the model supports it (Claude, gpt-5/o-series, codex) —
+                               # deeper analysis. Off (or unsupported model) falls back to
+                               # temperature. Thinking omits temperature (it forces temp 1).
+temperature  = 0               # LLM sampling temperature (0–2), used when thinking is OFF.
+                               # Default 0 = deterministic: re-reviews of the same diff stay
+                               # stable instead of churning findings. Applies to anthropic +
+                               # openai chat models; reasoning models (which need temp 1) ignore it.
 suggest      = false           # default --suggest (GitHub one-click suggestions on --post)
 
 [review.category_urls]         # map a finding Category → a docs URL (clickable link + SARIF helpUri)

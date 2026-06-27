@@ -46,6 +46,11 @@ func ValidateReview(r Review) error {
 	if r.Temperature != nil && (*r.Temperature < 0 || *r.Temperature > 2) {
 		return invalidReview("temperature", fmt.Sprintf("%v", *r.Temperature), "a number between 0 and 2")
 	}
+	switch r.Thinking {
+	case "", "auto", "off", "low", "medium", "high":
+	default:
+		return invalidReview("thinking", r.Thinking, "auto|off|low|medium|high")
+	}
 	return nil
 }
 

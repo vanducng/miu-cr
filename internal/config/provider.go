@@ -110,14 +110,12 @@ func (h History) On() bool { return h.Enabled == nil || *h.Enabled }
 // built-in defaults), never sourced from repo .miu/cr/rules, so a fork-PR rule
 // cannot inject a link or override a review default.
 type Review struct {
-	Gate        string `toml:"gate,omitempty"`
-	FilterMode  string `toml:"filter_mode,omitempty"`
-	MinSeverity string `toml:"min_severity,omitempty"`
-	Timeout     string `toml:"timeout,omitempty"`
-	// Temperature overrides the LLM sampling temperature for the review pass.
-	// nil → 0 (deterministic; the default that keeps findings stable run-to-run).
-	// Applies to the anthropic + openai backends; codex (reasoning) ignores it.
-	Temperature  *float64          `toml:"temperature,omitempty"`
+	Gate         string            `toml:"gate,omitempty"`
+	FilterMode   string            `toml:"filter_mode,omitempty"`
+	MinSeverity  string            `toml:"min_severity,omitempty"`
+	Timeout      string            `toml:"timeout,omitempty"`
+	Temperature  *float64          `toml:"temperature,omitempty"` // nil → 0 (deterministic); see [review].temperature in providers.md
+	Thinking     string            `toml:"thinking,omitempty"`    // auto|off|low|medium|high; "" → auto (on when the model supports it). Thinking omits temperature.
 	Suggest      *bool             `toml:"suggest,omitempty"`
 	PatchRepair  *bool             `toml:"patch_repair,omitempty"`
 	CategoryURLs map[string]string `toml:"category_urls,omitempty"`

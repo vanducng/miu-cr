@@ -31,6 +31,7 @@ type codexAgent struct {
 	accountID  string
 	model      string
 	timeout    time.Duration
+	thinking   string
 	refresh    func(ctx stdctx.Context) (string, error) // 401 -> new access token
 }
 
@@ -53,6 +54,7 @@ func newCodexAgent(creds Credentials, timeout time.Duration) *codexAgent {
 		accountID:  creds.OAuthAccountID,
 		model:      creds.Model,
 		timeout:    timeout,
+		thinking:   creds.Thinking,
 		refresh:    creds.OAuthRefresh,
 	}
 }
@@ -63,15 +65,22 @@ func newCodexAgent(creds Credentials, timeout time.Duration) *codexAgent {
 // reject/ignore temperature (determinism is governed by reasoning, not
 // sampling), so [review].temperature deliberately does not apply to codex.
 type codexReq struct {
-	Model           string      `json:"model"`
-	Instructions    string      `json:"instructions"`
-	Input           []codexItem `json:"input"`
-	Tools           []codexTool `json:"tools,omitempty"`
-	Store           bool        `json:"store"`
-	MaxOutputTokens int         `json:"max_output_tokens,omitempty"`
+	Model           string          `json:"model"`
+	Instructions    string          `json:"instructions"`
+	Input           []codexItem     `json:"input"`
+	Tools           []codexTool     `json:"tools,omitempty"`
+	Store           bool            `json:"store"`
+	MaxOutputTokens int             `json:"max_output_tokens,omitempty"`
+	Reasoning       *codexReasoning `json:"reasoning,omitempty"`
 	// The codex backend requires stream:true ("Stream must be set to true"); the
 	// response is an SSE stream parsed in post().
 	Stream bool `json:"stream"`
+}
+
+// codexReasoning sets the reasoning effort for the gpt-5.x reasoning model
+// (the Responses API thinking knob). Omitted → the backend's default effort.
+type codexReasoning struct {
+	Effort string `json:"effort"`
 }
 
 type codexItem struct {
@@ -228,6 +237,11 @@ func (a *codexAgent) Review(ctx stdctx.Context, rc Context) (engine.ReviewOutput
 			Tools:        codexTools(),
 			Store:        false,
 			Stream:       true,
+		}
+		// codex IS a reasoning model, so "auto"/level → set its reasoning effort;
+		// "off" leaves the backend default. (No temperature on this transport.)
+		if wantOn, effort := thinkingSetting(a.thinking); wantOn {
+			req.Reasoning = &codexReasoning{Effort: effort}
 		}
 		// Final allowed turn: withdraw tools and force a finalize so a
 		// budget-exhausted diff yields a real review, not a hard failure.
