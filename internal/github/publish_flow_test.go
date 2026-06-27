@@ -89,10 +89,14 @@ func runPublishWithDiffs(t *testing.T, c Client, info *PRInfo, findings []engine
 	if err != nil {
 		t.Fatalf("ExistingFingerprints: %v", err)
 	}
+	skip := make(map[string]bool, len(existing))
+	for fp := range existing {
+		skip[fp] = true
+	}
 	summaryFn := func(omitted int, _ []engine.Finding) string {
 		return RenderSummary(info, findings, nil, omitted)
 	}
-	res, err := PostReview(ctx, c, info, findings, diffs, summaryFn, existing, PostReviewOptions{})
+	res, err := PostReview(ctx, c, info, findings, diffs, summaryFn, skip, PostReviewOptions{})
 	if err != nil {
 		t.Fatalf("PostReview: %v", err)
 	}

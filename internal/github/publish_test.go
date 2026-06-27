@@ -429,7 +429,7 @@ func TestPostReviewSkipsExistingFingerprints(t *testing.T) {
 func TestExistingFingerprints(t *testing.T) {
 	c := &recordClient{
 		reviewComments: [][]*gh.PullRequestComment{
-			{{Body: gh.Ptr("note\n\n<!-- miucr:fp=00112233aabbccdd -->")}},
+			{{Body: gh.Ptr("note\n\n<!-- miucr:fp=00112233aabbccdd -->"), HTMLURL: gh.Ptr("https://github.com/o/r/pull/1#discussion_r42")}},
 			{{Body: gh.Ptr("plain comment, no marker")}},
 		},
 	}
@@ -437,11 +437,31 @@ func TestExistingFingerprints(t *testing.T) {
 	if err != nil {
 		t.Fatalf("ExistingFingerprints: %v", err)
 	}
-	if !got["00112233aabbccdd"] {
-		t.Fatalf("want fp extracted from review comments, got %+v", got)
+	if got["00112233aabbccdd"] != "https://github.com/o/r/pull/1#discussion_r42" {
+		t.Fatalf("want fp mapped to its inline comment URL, got %+v", got)
 	}
 	if len(got) != 1 {
 		t.Fatalf("want exactly 1 fp, got %d", len(got))
+	}
+}
+
+func TestExistingFingerprintsFirstCommentWins(t *testing.T) {
+	// Two comments share one fp marker (root then reply); the ROOT (first) comment's
+	// URL must win so the Location deep-links to the thread, not a reply.
+	c := &recordClient{
+		reviewComments: [][]*gh.PullRequestComment{
+			{
+				{Body: gh.Ptr("root\n<!-- miucr:fp=00112233aabbccdd -->"), HTMLURL: gh.Ptr("https://github.com/o/r/pull/1#discussion_root")},
+				{Body: gh.Ptr("reply\n<!-- miucr:fp=00112233aabbccdd -->"), HTMLURL: gh.Ptr("https://github.com/o/r/pull/1#discussion_reply")},
+			},
+		},
+	}
+	got, err := ExistingFingerprints(stdctx.Background(), c, &PRInfo{Owner: "o", Repo: "r", Number: 1})
+	if err != nil {
+		t.Fatalf("ExistingFingerprints: %v", err)
+	}
+	if got["00112233aabbccdd"] != "https://github.com/o/r/pull/1#discussion_root" {
+		t.Fatalf("first (root) comment URL must win, got %q", got["00112233aabbccdd"])
 	}
 }
 
