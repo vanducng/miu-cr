@@ -430,10 +430,15 @@ func (h *HostRunner) pollRepo(ctx stdctx.Context, snap hostRunnerSnapshot, repo 
 	if err := h.store.UpsertHostPollCursor(ctx, store.HostPollCursorInput{RepoID: repoID, Source: string(sourcePulls), Cursor: now.Format(time.RFC3339Nano), LastPolledAt: now}); err != nil {
 		return pollFloor, err
 	}
+	openNumbers := make([]int64, 0, len(prs))
 	for _, pr := range prs {
 		number := int64(pr.GetNumber())
 		head := pr.GetHead().GetSHA()
-		if number <= 0 || head == "" {
+		if number <= 0 {
+			continue
+		}
+		openNumbers = append(openNumbers, number)
+		if head == "" {
 			continue
 		}
 		session, err := h.store.UpsertHostPRSession(ctx, store.HostPRSessionInput{
@@ -465,6 +470,12 @@ func (h *HostRunner) pollRepo(ctx stdctx.Context, snap hostRunnerSnapshot, repo 
 			h.log.Warn("host: failed to enqueue PR review", "repo", repo.Slug, "pr", number, "error", config.RedactString(err.Error()))
 			continue
 		}
+	}
+	res, err := h.store.ReconcileHostClosedPRs(ctx, store.HostClosedPRsInput{RepoID: repoID, OpenNumbers: openNumbers, Now: now})
+	if err != nil {
+		h.log.Warn("host: failed to reconcile closed PRs", "repo", repo.Slug, "error", config.RedactString(err.Error()))
+	} else if res.SessionsClosed > 0 || res.JobsCanceled > 0 {
+		h.log.Info("host: reconciled closed PRs", "repo", repo.Slug, "sessions_closed", res.SessionsClosed, "jobs_canceled", res.JobsCanceled)
 	}
 	return pollFloor, nil
 }

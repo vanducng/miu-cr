@@ -137,6 +137,53 @@ func TestHostRunnerRepeatedPollSameHeadDoesNotDuplicate(t *testing.T) {
 	}
 }
 
+func TestHostRunnerPollCancelsQueuedJobsForClosedPRs(t *testing.T) {
+	cfg := hostRunnerConfig(t)
+	gh := &fakeNotifGetter{prs: map[string][]*github.PullRequest{
+		"octo/hello": {prWithHead(1, "sha-A"), prWithHead(2, "sha-B")},
+	}}
+	cfg.NewNotifGetter = func(string) notifGetter { return gh }
+	disp := cfg.Dispatcher.(*pollDispatcher)
+	disp.results = []SubmitResult{SubmitDuplicate, SubmitDuplicate}
+	st := cfg.Store.(*fakeHostStore)
+	r, err := NewHostRunner(cfg)
+	if err != nil {
+		t.Fatalf("NewHostRunner: %v", err)
+	}
+	if err := r.Tick(stdctx.Background()); err != nil {
+		t.Fatalf("first tick: %v", err)
+	}
+	// PR #2 closes: it disappears from the open list before the duplicate retry window.
+	gh.prs["octo/hello"] = []*github.PullRequest{prWithHead(1, "sha-A")}
+	if err := r.Tick(stdctx.Background()); err != nil {
+		t.Fatalf("second tick: %v", err)
+	}
+
+	st.mu.Lock()
+	defer st.mu.Unlock()
+	if got := st.lastReconcile.OpenNumbers; len(got) != 1 || got[0] != 1 {
+		t.Fatalf("reconcile open numbers = %v, want [1]", got)
+	}
+	if st.sessions[2].State != "closed" {
+		t.Fatalf("session #2 state = %q, want closed", st.sessions[2].State)
+	}
+	if st.sessions[1].State != "open" {
+		t.Fatalf("session #1 state = %q, want open", st.sessions[1].State)
+	}
+	for _, job := range st.jobs {
+		switch job.Number {
+		case 2:
+			if job.Status != "canceled" {
+				t.Fatalf("closed PR #2 job status = %q, want canceled", job.Status)
+			}
+		case 1:
+			if job.Status != "queued" {
+				t.Fatalf("open PR #1 job status = %q, want queued", job.Status)
+			}
+		}
+	}
+}
+
 func TestHostRunnerReloadsBeforeEachTick(t *testing.T) {
 	cfg := hostRunnerConfig(t)
 	oldRepo := cfg.Repos[0]
@@ -537,17 +584,19 @@ type fakeHostStore struct {
 	nextAttempt   int64
 	repos         map[string]store.HostRepo
 	jobs          map[string]store.HostJob
+	sessions      map[int64]store.HostPRSession
 	queued        []string
 	cursorWrites  int
 	releaseCount  int
 	lastRelease   store.HostJobReleaseInput
 	lastPrune     store.HostPrunePolicy
+	lastReconcile store.HostClosedPRsInput
 	pruneBlock    <-chan struct{}
 	sessionErrFor map[int64]error
 }
 
 func newFakeHostStore() *fakeHostStore {
-	return &fakeHostStore{nextRepo: 1, nextSession: 1, nextJob: 1, nextAttempt: 1, repos: map[string]store.HostRepo{}, jobs: map[string]store.HostJob{}}
+	return &fakeHostStore{nextRepo: 1, nextSession: 1, nextJob: 1, nextAttempt: 1, repos: map[string]store.HostRepo{}, jobs: map[string]store.HostJob{}, sessions: map[int64]store.HostPRSession{}}
 }
 
 func (s *fakeHostStore) ReconcileHostRepo(_ stdctx.Context, in store.HostRepoInput) (store.HostRepo, error) {
@@ -572,7 +621,44 @@ func (s *fakeHostStore) UpsertHostPRSession(_ stdctx.Context, in store.HostPRSes
 	}
 	session := store.HostPRSession{ID: s.nextSession, HostPRSessionInput: in}
 	s.nextSession++
+	s.sessions[in.Number] = session
 	return session, nil
+}
+
+func (s *fakeHostStore) ReconcileHostClosedPRs(_ stdctx.Context, in store.HostClosedPRsInput) (store.HostClosedPRsResult, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.lastReconcile = in
+	open := map[int64]bool{}
+	for _, n := range in.OpenNumbers {
+		open[n] = true
+	}
+	var out store.HostClosedPRsResult
+	for number, session := range s.sessions {
+		if session.State == "open" && !open[number] {
+			session.State = "closed"
+			s.sessions[number] = session
+			out.SessionsClosed++
+		}
+	}
+	canceled := map[string]bool{}
+	for key, job := range s.jobs {
+		if job.Status == "queued" && !open[job.Number] {
+			job.Status = "canceled"
+			job.Error = "PR no longer open"
+			s.jobs[key] = job
+			canceled[key] = true
+			out.JobsCanceled++
+		}
+	}
+	kept := s.queued[:0]
+	for _, key := range s.queued {
+		if !canceled[key] {
+			kept = append(kept, key)
+		}
+	}
+	s.queued = kept
+	return out, nil
 }
 
 func (s *fakeHostStore) EnqueueHostJob(_ stdctx.Context, in store.HostJobInput) (store.HostJob, bool, error) {
@@ -580,10 +666,10 @@ func (s *fakeHostStore) EnqueueHostJob(_ stdctx.Context, in store.HostJobInput) 
 	defer s.mu.Unlock()
 	in.DedupeKey = store.HostJobDedupeKey(in)
 	if j, ok := s.jobs[in.DedupeKey]; ok {
-		if j.Status == "failed" {
-			if j.AvailableAt.After(in.Now) {
-				return j, false, nil
-			}
+		if j.Status == "failed" && j.AvailableAt.After(in.Now) {
+			return j, false, nil
+		}
+		if j.Status == "failed" || j.Status == "canceled" {
 			j.Status = "queued"
 			j.Error = ""
 			s.jobs[in.DedupeKey] = j

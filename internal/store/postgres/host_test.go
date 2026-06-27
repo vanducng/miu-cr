@@ -437,6 +437,98 @@ func TestHostPruneKeepsActiveSessions(t *testing.T) {
 	}
 }
 
+func TestHostReconcileClosedPRsCancelsQueuedJobs(t *testing.T) {
+	s := openHost(t)
+	ctx := context.Background()
+	repo := mustHostRepo(t, s)
+	openSession := mustHostSession(t, s, repo.ID, 31, "open")
+	closedSession := mustHostSession(t, s, repo.ID, 32, "open")
+	openJob, ok, err := s.EnqueueHostJob(ctx, hostJobInput(repo.ID, openSession.ID, 31, "head-open"))
+	if err != nil || !ok {
+		t.Fatalf("enqueue open job ok=%v err=%v", ok, err)
+	}
+	closedJob, ok, err := s.EnqueueHostJob(ctx, hostJobInput(repo.ID, closedSession.ID, 32, "head-closed"))
+	if err != nil || !ok {
+		t.Fatalf("enqueue closed job ok=%v err=%v", ok, err)
+	}
+
+	res, err := s.ReconcileHostClosedPRs(ctx, store.HostClosedPRsInput{RepoID: repo.ID, OpenNumbers: []int64{31}, Now: time.Now().UTC()})
+	if err != nil {
+		t.Fatalf("reconcile: %v", err)
+	}
+	if res.SessionsClosed != 1 || res.JobsCanceled != 1 {
+		t.Fatalf("reconcile result = %+v, want 1 session / 1 job", res)
+	}
+
+	var sessionState, jobStatus string
+	if err := s.db.QueryRowContext(ctx, `SELECT state FROM host_pr_sessions WHERE id=$1`, closedSession.ID).Scan(&sessionState); err != nil {
+		t.Fatalf("query closed session: %v", err)
+	}
+	if sessionState != "closed" {
+		t.Fatalf("closed session state = %q, want closed", sessionState)
+	}
+	if err := s.db.QueryRowContext(ctx, `SELECT state FROM host_pr_sessions WHERE id=$1`, openSession.ID).Scan(&sessionState); err != nil {
+		t.Fatalf("query open session: %v", err)
+	}
+	if sessionState != "open" {
+		t.Fatalf("open session state = %q, want open", sessionState)
+	}
+	if err := s.db.QueryRowContext(ctx, `SELECT status FROM host_jobs WHERE id=$1`, closedJob.ID).Scan(&jobStatus); err != nil {
+		t.Fatalf("query closed job: %v", err)
+	}
+	if jobStatus != "canceled" {
+		t.Fatalf("closed PR job status = %q, want canceled", jobStatus)
+	}
+	if err := s.db.QueryRowContext(ctx, `SELECT status FROM host_jobs WHERE id=$1`, openJob.ID).Scan(&jobStatus); err != nil {
+		t.Fatalf("query open job: %v", err)
+	}
+	if jobStatus != "queued" {
+		t.Fatalf("open PR job status = %q, want queued", jobStatus)
+	}
+}
+
+func TestHostEnqueueRequeuesCanceledJobOnReopen(t *testing.T) {
+	s := openHost(t)
+	ctx := context.Background()
+	repo := mustHostRepo(t, s)
+	session := mustHostSession(t, s, repo.ID, 51, "open")
+	in := hostJobInput(repo.ID, session.ID, 51, "head-51")
+	job, ok, err := s.EnqueueHostJob(ctx, in)
+	if err != nil || !ok {
+		t.Fatalf("enqueue ok=%v err=%v", ok, err)
+	}
+	if _, err := s.ReconcileHostClosedPRs(ctx, store.HostClosedPRsInput{RepoID: repo.ID, OpenNumbers: nil, Now: time.Now().UTC()}); err != nil {
+		t.Fatalf("reconcile: %v", err)
+	}
+	// PR reopens with the same head+policy → same dedupe_key as the canceled job.
+	in.Now = time.Now().UTC()
+	in.AvailableAt = in.Now
+	requeued, ok, err := s.EnqueueHostJob(ctx, in)
+	if err != nil || !ok {
+		t.Fatalf("re-enqueue ok=%v err=%v", ok, err)
+	}
+	if requeued.ID != job.ID || requeued.Status != "queued" {
+		t.Fatalf("canceled job not requeued on reopen: %+v", requeued)
+	}
+}
+
+func TestHostReconcileClosedPRsEmptyOpenSetClosesAll(t *testing.T) {
+	s := openHost(t)
+	ctx := context.Background()
+	repo := mustHostRepo(t, s)
+	session := mustHostSession(t, s, repo.ID, 41, "open")
+	if _, ok, err := s.EnqueueHostJob(ctx, hostJobInput(repo.ID, session.ID, 41, "head-41")); err != nil || !ok {
+		t.Fatalf("enqueue ok=%v err=%v", ok, err)
+	}
+	res, err := s.ReconcileHostClosedPRs(ctx, store.HostClosedPRsInput{RepoID: repo.ID, OpenNumbers: nil, Now: time.Now().UTC()})
+	if err != nil {
+		t.Fatalf("reconcile: %v", err)
+	}
+	if res.SessionsClosed != 1 || res.JobsCanceled != 1 {
+		t.Fatalf("reconcile result = %+v, want all closed/canceled", res)
+	}
+}
+
 func openHost(t *testing.T) *Store {
 	t.Helper()
 	dsn := os.Getenv("MIUCR_TEST_PG_DSN")

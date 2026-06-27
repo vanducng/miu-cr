@@ -97,7 +97,9 @@ FOR UPDATE`, in.DedupeKey))
 	if job.Status == "failed" && job.AvailableAt.After(now) {
 		return job, false, tx.Commit()
 	}
-	if job.Status != "failed" && !expiredRunning {
+	// 'canceled' is re-queueable so a reopened PR (same head+policy → same
+	// dedupe_key as the job we canceled on close) gets reviewed again.
+	if job.Status != "failed" && job.Status != "canceled" && !expiredRunning {
 		return job, false, tx.Commit()
 	}
 	if expiredRunning && job.Attempts > 0 {
@@ -309,6 +311,45 @@ WHERE id=$1`, in.AttemptID, in.Error, now); err != nil {
 		}
 	}
 	return tx.Commit()
+}
+
+// ReconcileHostClosedPRs marks previously-open sessions whose PR has left the
+// open list as closed and cancels their still-queued jobs, so a PR that closed
+// inside a coalesced/duplicate retry window is never claimed and reviewed.
+// Only queued jobs are canceled: running jobs are mid-flight, and failed/done
+// jobs are never re-claimed without a re-enqueue (which a closed PR never gets).
+func (s *Store) ReconcileHostClosedPRs(ctx context.Context, in store.HostClosedPRsInput) (store.HostClosedPRsResult, error) {
+	now := in.Now
+	if now.IsZero() {
+		now = time.Now().UTC()
+	}
+	open := in.OpenNumbers
+	if open == nil {
+		open = []int64{}
+	}
+	var out store.HostClosedPRsResult
+	tx, err := s.db.BeginTx(ctx, nil)
+	if err != nil {
+		return out, err
+	}
+	defer func() { _ = tx.Rollback() }()
+	sessions, err := execRows(ctx, tx, `
+UPDATE host_pr_sessions
+SET state='closed', updated_at=$3
+WHERE repo_id=$1 AND state='open' AND number <> ALL($2::bigint[])`, in.RepoID, open, now)
+	if err != nil {
+		return out, err
+	}
+	out.SessionsClosed = sessions
+	jobs, err := execRows(ctx, tx, `
+UPDATE host_jobs
+SET status='canceled', lease_owner='', lease_until=NULL, error='PR no longer open', updated_at=$3, completed_at=$3
+WHERE repo_id=$1 AND status='queued' AND number <> ALL($2::bigint[])`, in.RepoID, open, now)
+	if err != nil {
+		return out, err
+	}
+	out.JobsCanceled = jobs
+	return out, tx.Commit()
 }
 
 func (s *Store) UpsertHostWorkspace(ctx context.Context, in store.HostWorkspaceInput) (store.HostWorkspace, error) {
