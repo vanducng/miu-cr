@@ -647,9 +647,9 @@ func readHostTextRef(baseDir, ref string) (string, error) {
 }
 
 func openHostPath(path, ref string) (*os.File, os.FileInfo, error) {
-	f, err := os.OpenFile(path, os.O_RDONLY|syscall.O_NOFOLLOW, 0)
+	f, err := os.OpenFile(path, os.O_RDONLY|oNoFollow, 0)
 	if err != nil {
-		if errors.Is(err, syscall.ELOOP) {
+		if isSymlinkLoopErr(err) {
 			return nil, nil, &CLIError{Code: "config.invalid", Message: "host prompt/rule path is a symlink: " + ref, Hint: "use a regular mounted file", Exit: 2}
 		}
 		return nil, nil, &CLIError{Code: "config.invalid", Message: config.RedactString(err.Error()), Hint: "fix host prompt/rule path " + ref, Exit: 2}
@@ -761,9 +761,9 @@ func hostSecret(ctx stdctx.Context, envName, file string, command []string) (str
 }
 
 func readHostSecretFile(path string) (string, error) {
-	f, err := os.OpenFile(path, os.O_RDONLY|syscall.O_NOFOLLOW, 0)
+	f, err := os.OpenFile(path, os.O_RDONLY|oNoFollow, 0)
 	if err != nil {
-		if errors.Is(err, syscall.ELOOP) {
+		if isSymlinkLoopErr(err) {
 			return "", &CLIError{Code: "config.invalid", Message: "configured secret file is a symlink", Hint: "use a regular mounted secret file", Exit: 2}
 		}
 		return "", &CLIError{Code: "config.invalid", Message: config.RedactString(err.Error()), Hint: "fix configured secret file path", Exit: 2}

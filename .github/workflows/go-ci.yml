@@ -41,6 +41,15 @@ jobs:
             exit 1
           fi
 
+      # Compile every goreleaser target so a GOOS-specific break (e.g. a
+      # Unix-only syscall) fails here, not at release time.
+      - name: Cross-compile release targets
+        run: |
+          for t in windows/amd64 darwin/amd64 darwin/arm64; do
+            echo "building $t"
+            GOOS=${t%/*} GOARCH=${t#*/} CGO_ENABLED=0 go build -o /dev/null ./cmd/miucr
+          done
+
   # Additive (non-required) job: runs the shared backend-conformance suite against
   # REAL Postgres via a service container, so the Postgres path is exercised every
   # PR (an env-gated-only test that nothing sets in CI would rot). Still keyless —
