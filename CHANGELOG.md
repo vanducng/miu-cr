@@ -55,6 +55,13 @@ comment with a new marker); subsequent re-runs dedupe normally. On a
 first M5 review **manually** (or off-hours) to absorb the one-time re-post before
 the next scheduled run.
 
+## [0.56.0](https://github.com/vanducng/miu-cr/compare/v0.55.0...v0.56.0) (2026-06-27)
+
+
+### Features
+
+* **host:** hot reload review config ([6048013](https://github.com/vanducng/miu-cr/commit/6048013d7190447e6afc02de3db5064ece5e923d))
+
 ## [0.55.0](https://github.com/vanducng/miu-cr/compare/v0.54.0...v0.55.0) (2026-06-27)
 
 
