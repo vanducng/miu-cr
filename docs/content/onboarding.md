@@ -10,7 +10,7 @@ From zero to a reviewed diff in about five minutes: **install**, run
 ## 1. Install
 
 ```sh
-curl -fsSL https://raw.githubusercontent.com/vanducng/miu-cr/main/install.sh | sh
+curl -fsSL https://cr.miu.sh/install.sh | sh
 ```
 
 The script verifies a SHA-256 checksum and installs `miucr` to `/usr/local/bin`

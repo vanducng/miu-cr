@@ -24,6 +24,9 @@ jobs:
           fetch-depth: 0
       - name: Resolve version
         run: echo "PUBLIC_MIUCR_VERSION=$(git describe --tags --abbrev=0 2>/dev/null || echo dev)" >> "$GITHUB_ENV"
+      # Serve the canonical installer at cr.miu.sh/install.sh (single source: root install.sh).
+      - name: Stage installer at site root
+        run: cp install.sh docs/public/install.sh
       - name: Build with Astro
         uses: withastro/action@v6
         with:

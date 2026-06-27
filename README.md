@@ -16,7 +16,7 @@ AI code review for the CLI, CI, and MCP hosts. Review staged changes locally, ga
 
 ```sh
 # macOS / Linux — detects OS/arch, verifies checksum:
-curl -fsSL https://raw.githubusercontent.com/vanducng/miu-cr/main/install.sh | sh
+curl -fsSL https://cr.miu.sh/install.sh | sh
 
 # Homebrew:
 brew install vanducng/tap/miucr

@@ -8,13 +8,13 @@ The binary is named `miucr`. Releases ship prebuilt static binaries for macOS (a
 ## Install script (macOS / Linux)
 
 ```sh
-curl -fsSL https://raw.githubusercontent.com/vanducng/miu-cr/main/install.sh | sh
+curl -fsSL https://cr.miu.sh/install.sh | sh
 ```
 
 Pin a specific version:
 
 ```sh
-curl -fsSL https://raw.githubusercontent.com/vanducng/miu-cr/main/install.sh | sh -s -- vX.Y.Z   # see github.com/vanducng/miu-cr/releases
+curl -fsSL https://cr.miu.sh/install.sh | sh -s -- vX.Y.Z   # see github.com/vanducng/miu-cr/releases
 ```
 
 The script detects your OS/arch, downloads the matching archive, **verifies its SHA-256 checksum** against `checksums.txt`, and installs `miucr` to `/usr/local/bin` when that is writable (no sudo) or `~/.local/bin` otherwise. It warns if the chosen directory is not on your `PATH`.

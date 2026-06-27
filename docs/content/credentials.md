@@ -106,7 +106,7 @@ jobs:
     runs-on: ubuntu-latest
     if: ${{ github.event.pull_request.head.repo.fork != true }}   # never run on fork PR code
     steps:
-      - run: curl -fsSL https://raw.githubusercontent.com/vanducng/miu-cr/main/install.sh | sh
+      - run: curl -fsSL https://cr.miu.sh/install.sh | sh
       - name: Review PR on OpenAI
         env:
           OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}   # step-level secret export

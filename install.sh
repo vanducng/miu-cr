@@ -2,7 +2,7 @@
 # miucr installer — downloads the matching release archive, verifies its checksum,
 # and installs the miucr binary to a writable bin dir (no sudo when avoidable).
 #
-#   curl -fsSL https://raw.githubusercontent.com/vanducng/miu-cr/main/install.sh | sh
+#   curl -fsSL https://cr.miu.sh/install.sh | sh
 #   curl -fsSL .../install.sh | sh -s -- v0.2.0      # pin a version
 #
 # Env knobs: MIUCR_VERSION (tag), MIUCR_INSTALL_DIR (target bin dir).

@@ -36,3 +36,6 @@ __pycache__/
 .agents/*
 !.agents/skills/
 !.agents/skills/**
+
+# CI stages the canonical root install.sh here at docs build time
+docs/public/install.sh
