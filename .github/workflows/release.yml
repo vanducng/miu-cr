@@ -95,91 +95,67 @@ jobs:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: gh workflow run "Deploy Documentation" --ref main
 
-  # release-please publishes a bare release body (auto-generated notes only) and goreleaser
-  # uploads binaries with mode:keep-existing, so that bare body is never enriched. action.yml
-  # is listed on the GitHub Marketplace, which renders whatever the release body contains.
-  # This job rewrites every tagged release with a rich, human-readable description (usage,
-  # inputs, how-it-works) plus the matching CHANGELOG section, so the Marketplace listing
-  # stays informative automatically with no manual editing per release.
+  # release-please creates the release; rewrite its body after goreleaser uploads assets.
   marketplace-release-notes:
     if: startsWith(github.ref, 'refs/tags/v')
     needs: goreleaser
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      - name: Enrich Marketplace release notes
+      - name: Write release notes
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
           set -euo pipefail
           TAG_NAME="${GITHUB_REF_NAME}"
-          VERSION="${TAG_NAME#v}"
           NOTES_FILE="$(mktemp)"
 
-          # Quoted heredoc keeps the markdown literal (no shell expansion of backticks or $).
-          # __TAG__ is the only placeholder, substituted with the real tag just below.
-          # The api-key line uses GitHub's ${{ '<expr>' }} escape so the runner emits the
-          # literal "${{ secrets.ANTHROPIC_API_KEY }}" text instead of evaluating the secret.
           cat > "$NOTES_FILE" <<'TEMPLATE'
-          ## miu-cr PR Review — __TAG__
+          ## miu-cr __TAG__
 
-          **AI-powered pull request code review as a GitHub Action.** Drop it into any workflow to get inline comments, severity-gated CI checks, and idempotent re-runs — all powered by your own LLM key (Anthropic or OpenAI-compatible).
+          AI code review for local changes and GitHub pull requests. Use it as a CLI, CI gate, or GitHub Action with your own LLM key.
 
-          ### Usage
+          ### Install
 
-          ```yaml
-          - uses: actions/checkout@v4
-          - uses: vanducng/miu-cr@__TAG__
-            with:
-              api-key: ${{ '${{ secrets.ANTHROPIC_API_KEY }}' }}
-              gate: high   # fail CI if any finding reaches this severity
+          ```sh
+          curl -fsSL https://raw.githubusercontent.com/vanducng/miu-cr/main/install.sh | sh -s -- __TAG__
+          brew install vanducng/tap/miucr
+          go install github.com/vanducng/miu-cr/cmd/miucr@__TAG__
           ```
 
-          **Required permission:**
+          GitHub Action:
+
           ```yaml
           permissions:
             pull-requests: write
+
+          steps:
+            - uses: actions/checkout@v4
+            - uses: vanducng/miu-cr@__TAG__
+              with:
+                api-key: ${{ '${{ secrets.ANTHROPIC_API_KEY }}' }}
           ```
 
-          ### Inputs
+          ### Common commands
 
-          | Input | Required | Default | Description |
-          |-------|----------|---------|-------------|
-          | `api-key` | ✅ | — | Anthropic (or compatible) API key |
-          | `github-token` | ❌ | `github.token` | Token to read PR and post comments |
-          | `gate` | ❌ | `high` | Severity gate: `none\|low\|medium\|high\|critical` |
-          | `version` | ❌ | `latest` | Pin a specific `miucr` binary version |
-          | `base-url` | ❌ | — | Anthropic-compatible gateway URL (e.g. GLM/z.ai) |
-          | `model` | ❌ | — | Model override for the provider |
+          ```sh
+          miucr login --provider openai
+          miucr review --staged
+          miucr review --from main --to HEAD --gate high
+          miucr review --pr owner/repo#123 --post
+          miucr upgrade
+          ```
 
-          ### How it works
-
-          1. Installs the `miucr` binary (static, pure-Go — no Docker, no extra deps).
-          2. Runs `miucr review --pr <repo>#<PR> --post --gate <gate>`.
-          3. Posts inline review comments anchored to exact diff lines; re-runs are idempotent (summary is edited, duplicate comments skipped).
-          4. Exits non-zero if any finding meets or exceeds the configured severity gate.
-
-          > **Note:** Only works on `pull_request` events from the same repo. Fork PRs are guarded against secret leakage; automated fork review is the serve daemon's job.
-
-          ### Full documentation
-
-          https://cr.miu.sh
+          Docs: https://cr.miu.sh
           TEMPLATE
 
-          sed -i "s/__TAG__/${TAG_NAME}/g" "$NOTES_FILE"
+          python3 - "$NOTES_FILE" "$TAG_NAME" <<'PY'
+          import pathlib
+          import sys
 
-          # Append this version's CHANGELOG section (from its header to the next "## [" header).
-          CHANGES="$(awk -v ver="$VERSION" '
-            index($0, "## [" ver "]") == 1 { capture = 1; next }
-            capture && /^## \[/ { capture = 0 }
-            capture { print }
-          ' CHANGELOG.md | sed -e '/./,$!d')"
-          if [ -n "$CHANGES" ]; then
-            {
-              printf '\n## What changed\n\n'
-              printf '%s\n' "$CHANGES"
-            } >> "$NOTES_FILE"
-          fi
+          path = pathlib.Path(sys.argv[1])
+          path.write_text(path.read_text().replace("__TAG__", sys.argv[2]))
+          PY
 
           gh release edit "$TAG_NAME" \
             --title "$TAG_NAME" \

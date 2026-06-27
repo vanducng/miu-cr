@@ -149,6 +149,11 @@ func TestReviewPipelineEndToEnd(t *testing.T) {
 	if d, _ := res.Stats["findings_dropped"].(float64); d != 1 {
 		t.Errorf("findings_dropped: want 1, got %v", res.Stats["findings_dropped"])
 	}
+	for _, key := range []string{"context_bytes", "rules_bytes", "context_ms", "provider_ms"} {
+		if _, ok := res.Stats[key].(float64); !ok {
+			t.Errorf("%s: missing numeric stat in %+v", key, res.Stats)
+		}
+	}
 	if engine.GateFailed(res.Findings, "high") != true {
 		t.Error("high finding must trip high gate")
 	}

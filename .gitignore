@@ -10,6 +10,7 @@ oauth.json
 
 # internal planning artifacts — kept private (public repo)
 .workbench/
+.vd.json
 
 # built binaries
 /miucr
@@ -22,6 +23,7 @@ docs/dist/
 
 # misc
 .DS_Store
+__pycache__/
 *.test
 *.out
 

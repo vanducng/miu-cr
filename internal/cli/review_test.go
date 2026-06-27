@@ -270,7 +270,7 @@ func TestReviewDeepContextDefaults(t *testing.T) {
 	if _, err := runReview(t, r, "--staged", "--deep-context"); err != nil {
 		t.Fatalf("review: %v", err)
 	}
-	if r.gotReq.ExpandWindow != 20 || r.gotReq.TokenBudget != 0 || r.gotReq.Timeout != deepContextTimeout || !r.gotReq.DeepContext || !r.gotReq.ContextHopsAuto || r.gotReq.ContextHops != 0 {
+	if r.gotReq.ExpandWindow != 20 || r.gotReq.TokenBudget != 0 || r.gotReq.Timeout != defaultReviewTimeout || !r.gotReq.DeepContext || !r.gotReq.ContextHopsAuto || r.gotReq.ContextHops != 0 {
 		t.Fatalf("deep defaults = expand %d budget %d timeout %s deep %v auto %v hops %d", r.gotReq.ExpandWindow, r.gotReq.TokenBudget, r.gotReq.Timeout, r.gotReq.DeepContext, r.gotReq.ContextHopsAuto, r.gotReq.ContextHops)
 	}
 
@@ -296,6 +296,16 @@ func TestReviewDeepContextDefaults(t *testing.T) {
 	}
 	if r.gotReq.ExpandWindow != 7 || r.gotReq.TokenBudget != 123 || r.gotReq.Timeout != 42*time.Second || r.gotReq.ContextHopsAuto || r.gotReq.ContextHops != 4 {
 		t.Fatalf("explicit flags = expand %d budget %d timeout %s auto %v hops %d", r.gotReq.ExpandWindow, r.gotReq.TokenBudget, r.gotReq.Timeout, r.gotReq.ContextHopsAuto, r.gotReq.ContextHops)
+	}
+}
+
+func TestReviewCapabilityFirstDefaults(t *testing.T) {
+	r := &fakeReviewer{outcome: ReviewOutcome{Findings: []ReviewFinding{}}}
+	if _, err := runReview(t, r, "--staged"); err != nil {
+		t.Fatalf("review: %v", err)
+	}
+	if r.gotReq.TokenBudget != 0 || r.gotReq.Timeout != defaultReviewTimeout {
+		t.Fatalf("defaults = budget %d timeout %s, want no budget cap and %s", r.gotReq.TokenBudget, r.gotReq.Timeout, defaultReviewTimeout)
 	}
 }
 

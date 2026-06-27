@@ -272,8 +272,15 @@ func TestSystemPromptConventionGuidance(t *testing.T) {
 	// (so it's part of the trusted contract, not injectable USER prose).
 	for _, want := range []string{
 		"INCONSISTENT with an established pattern",
+		"no bug",
 		"differs from <name>",
 		"never invent one",
+		"metadata, descriptor fields, wrapper state",
+		"lazy/proxy wrappers",
+		"Missing propagation is a finding only when a changed line",
+		"structured parser or validator",
+		"substring/split logic",
+		"host:port strings",
 	} {
 		if !contains(systemPrompt, want) {
 			t.Fatalf("systemPrompt missing convention guidance %q", want)

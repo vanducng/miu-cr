@@ -1,24 +1,26 @@
 ---
 name: miucr
-description: Review code/diffs/PRs with the owned `miucr` CLI (miu-cr, a pure-Go AI code reviewer). Use when asked to review staged changes, a commit, a ref range, or a GitHub PR; to run/parse a gated review; to drive reviews over MCP; or to run the serve webhook/poll daemon or GitHub Action. Output is the stable `miucr.cli/v1` JSON envelope; parse it, don't grep prose.
+description: Review code/diffs/PRs with the owned `miucr` CLI (miu-cr, a pure-Go AI code reviewer). Use when asked to review staged changes, a commit, a ref range, or a GitHub PR; to run/parse a gated review; compare reviewer quality with eval; to drive reviews over MCP; or to run the serve webhook/poll daemon or GitHub Action. Output is the stable `miucr.cli/v1` JSON envelope; parse it, don't grep prose.
 ---
 
-# miucr: owned AI code-review CLI (v0.39.0)
+# miucr: owned AI code-review CLI (v0.48.0)
 
 `miucr` (the **miu-cr** project) is a fast, **pure-Go** (`CGO_ENABLED=0`) AI code reviewer.
 It keeps the correctness-critical parts **deterministic** (file selection, context assembly,
 line-anchoring, severity gating, dedupe) and uses the LLM only for judgment (finding bugs,
-proposing fixes). It runs four ways:
+proposing fixes). It runs five review ways:
 
 - **Local review**: `miucr review` over a staged diff, a commit, or a ref range.
 - **GitHub PR review**: `miucr review --pr` (dry-run by default; `--post` upserts ONE summary issue comment + posts inline comments as a PR review).
 - **serve daemon**: HMAC webhook (default) and/or opt-in poll trigger; optional REST API + GitHub App auth.
 - **MCP server**: `miucr mcp` exposes `review_run` / `review_get` over stdio to any agent host.
+- **Evaluation**: `miucr eval` compares miu-cr and other reviewer commands against JSON expected findings.
 
 **Review behavior worth knowing (design choices that prevent noise):**
 - **One upserted summary, posted first.** `--post` writes ONE summary *issue comment*, edited in place on re-runs (never stacked), and posts it BEFORE the inline review so it anchors on top (overview → details). Inline findings are a separate PR review. `review_id` is NOT shown in the comment (it only resolves on the local store; it stays in the JSON envelope).
 - **The summary is a per-finding lifecycle ledger, not just the latest run.** Below a concise ≤5-bullet "What changed" summary, it renders two always-visible tracking tables — **⚠️ Open (N)** and **✅ Resolved (N)** — each finding tracked by its line-independent fingerprint across commits: a **Priority** column (P0–P4), status (`open` / `resolved` / `reopened`), the **origin commit** it was first raised on and the **resolved commit** it disappeared on (both linked), **severity before→after** (escalation shown `🟡→🔴`, a fix shown `🟠→✅`), and first-seen / resolved timestamps. A clean review shows **Review passed · all clear 🎉** (not "No findings"). The footer is always the latest reviewed commit + **Last reviewed `<UTC>`** + the miu-cr release. Lifecycle state is **storeless**: it lives in a hidden `<!-- miu-cr-ledger:<base64> -->` marker inside the comment (like the runs counter), so it survives ephemeral CI with no DB. A finding resolves only when it is absent AND its file is still in the diff (absence off-diff ≠ fix).
 - **Inline comments persist; resolving the threads is left to you / your coding agent.** Each finding's inline comment is posted ONCE and deduped across re-runs via a hidden `<!-- miucr:fp=… -->` marker, so a re-review never re-posts or deletes it. miucr does NOT click "Resolve conversation": when a finding is fixed, GitHub auto-marks the thread *Outdated* and the summary ledger moves it to **✅ Resolved**, but the inline thread itself stays open for the developer/coding agent to resolve. So an agent acting on a review should read the inline threads, apply the fixes, then resolve the threads itself — miucr deliberately leaves them in place.
+- **Repeat-run stability is deterministic inputs + low-variance generation.** For the same repo/ref/config, file selection, context assembly, rules, anchoring, gating, fingerprints, and comment dedupe are deterministic. SDK-backed Anthropic/OpenAI calls use `temperature: 0`; exact model output can still vary, so PR posting is idempotent rather than duplicate-prone.
 - **One-click suggestions are conservative + model-controlled.** `--suggest` emits a native GitHub ` ```suggestion ` block ONLY when the patch *deterministically* replaces the exact anchored line(s) AND the model is certain of a grounded mechanical fix (a cited rule or an obvious best practice). It NEVER guesses an unverifiable value (a URL, path, route, ID, version, config key, API signature); such concerns become a verification-question in the rationale instead. `--patch-repair` (requires `--suggest`) runs one focused 2nd LLM pass to recover a near-miss single-line patch. `--approve-clean` submits APPROVE only on a clean, non-fork, trusted-author PR.
 - **`-o pretty`** is the human-readable local format; **`-o json`** is for agents; `-o sarif` for editors/CI.
 - **Multi-provider profiles.** Add a named provider (e.g. z.ai/glm) with `kind`, `base_url`, `model`, `auth`, and either `auth_env` or `auth_command`; select with `--provider <name>`. Built-in kinds: `anthropic`, `openai` (ChatGPT-plan OAuth via `miucr login`). Transient GitHub/network errors auto-retry with backoff.
@@ -53,7 +55,7 @@ Every command prints **one JSON object** on stdout (default `-o json`). Field or
 ```
 
 `kind` per command: `version`, `review.result`, `config.show`, `rules.check`, `rules.init`, `init.result`, `login.result`,
-`whoami`, `logout`, `history.list`, `history.record`, `history.prune`, `trace.show`, `error`
+`whoami`, `logout`, `history.list`, `history.record`, `history.prune`, `eval.result`, `trace.show`, `error`
 (REST: `review.accepted` / `review.result`). **Secrets never appear** in the envelope, logs, or on disk
 (credential-named fields are scrubbed; finding `rationale`/`suggested_patch` prose is exempt).
 The `--instruction`/`--conversation` flags and the `/miucr review <prompt>` comment trigger only add
@@ -81,7 +83,7 @@ The day-1 provider/auth/timeout failures classify into a **stable taxonomy** (sa
 | `agent.auth_expired` | expired OAuth (401/403; codex incl. still-401-after-refresh) | `false` | `miucr login --provider openai` |
 | `provider.rate_limited` | 429 | `true` | wait for the reset window and retry |
 | `agent.unavailable` | 5xx / 529 | `true` | retry shortly |
-| `review.timeout` | the review exceeded `--timeout` | `true` | raise `--timeout` (e.g. `600s`) or narrow the diff |
+| `review.timeout` | the review exceeded `--timeout` | `true` | raise `--timeout` (e.g. `1800s`) or narrow the diff |
 | `review.canceled` | ctx canceled (Ctrl-C / SIGINT), exit `130` | `false` | - |
 | `config.invalid` | malformed `config.toml` / bad enum or `auth` value / an `openai`-kind gateway profile with a key but no `base_url` (exit `2`; same code across review/history/serve) | `false` | fix the named field / set `base_url` for the gateway profile |
 | `github.auth` | PR fetch hit `401`/`403` (bad/missing `GITHUB_TOKEN` or insufficient scope) | `false` | check `GITHUB_TOKEN` / its repo scope |
@@ -165,7 +167,7 @@ unchanged head SHA short-circuits (there is no `--force` on the comment path yet
 ## Commands & exact flags
 
 Global flags (all commands): `-o, --output json|pretty|sarif` (default `json`), `--timeout <dur>`
-(default `30s`; `review` auto-bumps to `300s` unless `--timeout` is set explicitly).
+(default `30s`; `review` auto-bumps to `900s` and `eval` to `30m` unless `--timeout` is set explicitly).
 `sarif` is **review-only**: it emits a SARIF 2.1.0 document (NOT the envelope) for
 code-scanning/IDEs (`ruleId`=category, `level` from severity, repo-relative paths);
 upload it with `github/codeql-action/upload-sarif`. `pretty` is a local reporter
@@ -196,8 +198,8 @@ miucr review --pr owner/repo#123 --conversation                   # also read th
 | `--include` / `--exclude` | - | Repeatable doublestar globs (path must match / drop). |
 | `--ext go,ts,...` | - | Restrict to these file extensions. |
 | `--expand <n>` | `5` | Context lines above/below each hunk (`0` disables). |
-| `--token-budget <n>` | `100000` | Approx token budget; over budget degrades context (`0` disables). |
-| `--deep-context` | OFF | Heavier context defaults for large reviews: `--expand 20`, `--token-budget 0`, `--timeout 900s`, and auto related-file hop depth unless those flags are set; also reads root `AGENTS.md` / `CLAUDE.md` from the reviewed revision when present. |
+| `--token-budget <n>` | `0` | Approx token budget; over budget degrades context (`0` disables, so the default is no cap). |
+| `--deep-context` | OFF | Heavier file context for large reviews: `--expand 20`, auto related-file hop depth, and root `AGENTS.md` / `CLAUDE.md` from the reviewed revision unless those flags are set. Timeout and token budget are already capability-first by default. |
 | `--context-hops <n>` | `0` | Override related-file context depth from changed files (`0` disables, max `5`); follows Go package imports/reverse imports and basic relative JS/TS/Python imports from the reviewed revision. Skipped on fork PRs. |
 | `--provider anthropic\|openai\|<name>\|auto` | `auto` | LLM profile. |
 | `--api-key` / `--base-url` / `--auth-token` / `--model` | - | Provider overrides; **never persisted**. |
@@ -369,6 +371,56 @@ miucr history prune --older-than 30d --yes      # delete records older than a sp
 Errors: `history.unavailable`, `history.not_found`, `history.prune_policy_required`,
 `history.prune_confirm_required`, `history.bad_pr`, `history.bad_time`.
 
+### `eval`: compare reviewer quality against expected findings
+
+`miucr eval` runs one or more reviewer commands over a JSON suite and scores them by
+file+line overlap against expected findings. Use synthetic/public fixtures only.
+For unlabeled public-PR smoke suites, read unmatched findings as review output to
+inspect, not as confirmed invalid findings.
+
+```json
+{
+  "cases": [
+    {
+      "id": "go-sql-injection",
+      "repo": "/tmp/review-fixtures/go-api",
+      "from": "clean",
+      "to": "buggy",
+      "expected": [
+        { "id": "sql-injection", "file": "internal/users.go", "line": 42, "severity": "critical", "category": "security" }
+      ]
+    }
+  ]
+}
+```
+
+```sh
+miucr eval --cases eval.json \
+  --tool 'miucr=miucr review --repo "$MIUCR_EVAL_REPO" --from "$MIUCR_EVAL_FROM" --to "$MIUCR_EVAL_TO" --gate none --deep-context --no-save -o json' \
+  --tool 'other=./scripts/run-other-reviewer-json "$MIUCR_EVAL_REPO" "$MIUCR_EVAL_FROM" "$MIUCR_EVAL_TO"' \
+  --timeout 30m
+```
+
+Each tool command runs once per case with `MIUCR_EVAL_CASE_ID`, `MIUCR_EVAL_REPO`,
+`MIUCR_EVAL_FROM`, `MIUCR_EVAL_TO`, and `MIUCR_EVAL_COMMIT` set. The command must
+print either a normal `miucr review` envelope or `{"findings":[{"file":"...","line":1}]}`.
+Tool commands run from the case repo, so use `PATH` commands or absolute paths for
+repo-local scripts/binaries.
+
+Reusable local benchmark:
+
+```sh
+scripts/eval/materialize-fixtures.sh --cases testdata/eval/miucr-quality.json --out .workbench/features/miucr-eval/fixtures
+# testdata/eval/public-prs.json is unlabeled; use it for runtime/finding-volume review.
+MIUCR_BIN=/absolute/path/to/miucr scripts/eval/run-public-pr-benchmark.sh --cases testdata/eval/public-prs.json --out .workbench/features/miucr-eval/public-prs --limit 20 --timeout 30m
+```
+
+`eval.result` data is `{tools:[{name, summary, cases}]}`. Scores include `expected`,
+`found`, `matched`, `missed`, `false_positives`, `precision`, `recall`, `f1`,
+`duration_ms`, and `failed_cases`. Per-case `stats` preserves reviewer stats such as
+`context_ms` and `provider_ms` when the tool prints a `miucr review` envelope.
+Duplicate findings count as false positives.
+
 ### `trace`: inspect a review's full trace
 
 Every saved review keeps a **redacted trace** (system prompt, diff identification, selected files,
@@ -527,11 +579,16 @@ private_key_path = "/etc/miucr/app-key.pem"   # app mode: PATH to RSA PEM (never
 gate         = "high"                   # default --gate: none|info|low|medium|high|critical
 filter_mode  = "diff_context"           # default --filter-mode (--pr): added|diff_context|file|nofilter
 min_severity = "low"                    # default --min-severity (--pr inline floor)
-timeout      = "300s"                   # default review timeout (Go duration: 300s, 5m, …)
+timeout      = "900s"                   # default review timeout (Go duration: 900s, 15m, …)
+expand       = 20                       # default --expand
+token_budget = 0                        # default --token-budget; 0 = no cap
+deep_context = true                     # default --deep-context
+conversation = true                     # default --conversation on --pr
 suggest      = false                    # default --suggest (one-click suggestions on --post)
 patch_repair = false                    # default --patch-repair (2nd-pass one-click recovery; only takes effect with suggest=true)
 category_urls = { security = "https://docs.example.com/security" }   # case-insensitive Category -> http(s) URL; PR-comment/summary link + SARIF helpUri
-# NB: no approve_clean config (write-action default-on is a footgun); a bad [review] enum/timeout → config.invalid (exit 2)
+# context_hops = 3                      # optional override; omit to let deep_context choose automatically
+# NB: no post/force/approve_clean config (write-action/repeat-spend defaults are footguns); a bad [review] value → config.invalid (exit 2)
 ```
 
 See the effective config any time with `miucr config show` (below).
@@ -578,11 +635,11 @@ Runs on same-repo PRs only (fork-safe automated review is the `serve` path's job
 
 ## Driving a review as an agent
 
-1. **Local pre-PR check**: `miucr review --staged -o json --gate high`, parse `.data.findings`, act on
+1. **Local pre-PR check**: `miucr review --staged --deep-context -o json --gate high`, parse `.data.findings`, act on
    `severity` ≥ your bar. Exit 2 means the gate tripped (findings still printed in the envelope).
-2. **Review a PR (dry-run)**: `env -u GITHUB_TOKEN -u GH_TOKEN miucr review --pr owner/repo#N --no-post -o json`
+2. **Review a PR (dry-run)**: `env -u GITHUB_TOKEN -u GH_TOKEN miucr review --pr owner/repo#N --no-post --deep-context --conversation --force -o json`
    (public repo, no PAT). Read `.data.pr` + `.data.findings`.
-3. **Publish**: `miucr review --pr owner/repo#N --post --token <pat>`; **upserts ONE summary issue
+3. **Publish**: `miucr review --pr owner/repo#N --post --deep-context --conversation --token <pat>`; **upserts ONE summary issue
    comment** (`summary_action:created` first time, `edited` on every re-run) and posts inline findings as a
    PR review. A **same-commit `--post` re-run edits** the summary in place (no longer skipped). Add
    `--suggest`/`--approve-clean` only when you intend write-actions. A **dry-run** (`--no-post`) on an
@@ -607,7 +664,7 @@ deterministic reviewer/poster, and use the coding agent only for orchestration, 
    - Make one agent or daemon the controller for this PR; do not run this loop beside `miucr serve --poll` on the same PR.
 2. **Post exactly one reviewer pass per new head SHA**:
    - Track the last reviewed `headRefOid`; re-fetch it immediately before posting.
-   - Run `miucr review --pr owner/repo#N --post --suggest --patch-repair --conversation -o json`.
+   - Run `miucr review --pr owner/repo#N --post --deep-context --suggest --patch-repair --conversation -o json`.
    - Add `--force` only for an intentional same-SHA re-review; do not force every poll.
    - Parse the envelope, not prose. Record `data.review_id`, `data.pr.head_sha`, posted counts, and findings by severity.
    - Re-fetch `headRefOid` after the run; if it changed, discard local decisions from that run and repeat on the new head.

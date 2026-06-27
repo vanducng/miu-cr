@@ -54,8 +54,8 @@ default_provider = "anthropic"
 # model    = "glm-5.2"
 # auth     = "bearer"                    # profile credential goes in Authorization: Bearer
 # auth_env = "ZAI_API_KEY"               # name of the env var holding the token
-# # auth_command = ["gopass", "show", "-o", "ai/zai"]  # argv only; no shell
-# # auth_token = "<token>"               # discouraged: plaintext on disk
+# # auth_command = ["gopass", "show", "-o", "ai/zai"]  # argv only; stdout is the token
+# # auth_token = "<token>"               # discouraged: plaintext on disk — prefer auth_env
 
 # ── Example: a generic OpenAI-compatible gateway (DeepSeek, Moonshot, self-hosted, …) ──
 # Any endpoint speaking the OpenAI chat-completions API. The credential is sent
@@ -66,8 +66,8 @@ default_provider = "anthropic"
 # model    = "your-model-id"
 # auth     = "api_key"                   # profile credential goes in the OpenAI API-key slot
 # auth_env = "MY_GATEWAY_TOKEN"          # name of the env var holding the token
-# # auth_command = ["op", "read", "op://vault/item/token"]  # argv only; no shell
-# # auth_token = "<token>"               # discouraged: plaintext on disk
+# # auth_command = ["gopass", "show", "-o", "ai/my-gateway"]  # argv only; stdout is the token
+# # auth_token = "<token>"               # discouraged: plaintext on disk — prefer auth_env
 
 # ── Store backend (optional; default = sqlite) ──
 # SQLite is the default and needs no config. Postgres is opt-in for shared/serve.

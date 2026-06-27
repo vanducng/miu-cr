@@ -259,6 +259,9 @@ func TestOpenAIAgentRepairPatch(t *testing.T) {
 	if p.MaxTokens.Value != int64(repairMaxTokens) {
 		t.Fatalf("repair must use low max tokens, got %v", p.MaxTokens)
 	}
+	if !p.Temperature.Valid() || p.Temperature.Value != 0 {
+		t.Fatalf("repair temperature = %+v, want 0", p.Temperature)
+	}
 	if len(p.Tools) != 0 {
 		t.Fatalf("repair must offer no tools, got %d", len(p.Tools))
 	}
@@ -292,6 +295,9 @@ func TestOpenAIUsesMaxTokens(t *testing.T) {
 	p := fc.seen[0]
 	if p.MaxTokens.Value != int64(maxTokens) {
 		t.Fatalf("max_tokens not set: got %v, want %d", p.MaxTokens, maxTokens)
+	}
+	if !p.Temperature.Valid() || p.Temperature.Value != 0 {
+		t.Fatalf("review temperature = %+v, want 0", p.Temperature)
 	}
 	if p.MaxCompletionTokens.Valid() {
 		t.Fatalf("max_completion_tokens must be unset for gateway compatibility, got %v", p.MaxCompletionTokens)

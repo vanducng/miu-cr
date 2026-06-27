@@ -53,6 +53,7 @@ Full guide: [Getting started](https://cr.miu.sh/onboarding/)
 - **GitHub PR review** — inline comments, one upserted summary, head-SHA anchoring, fork-safe
 - **CI / GitHub Action** — drop-in reusable action; see [`examples/workflows/`](examples/workflows/)
 - **Project rules** — `.miu/cr/rules/*.md` glob-scoped context injected per file
+- **Evaluation** — `miucr eval` compares reviewer commands against expected findings
 - **MCP server** — `miucr mcp` exposes `review_run` / `review_get` over stdio
 
 Full reference: [cr.miu.sh](https://cr.miu.sh)

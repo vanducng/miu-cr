@@ -15,7 +15,7 @@ import Version from '../src/components/Version.astro';
 Diff-only review misses cross-file bugs; bare-agent review drifts and burns tokens. miu-cr keeps the **correctness-critical parts deterministic** — file selection, context assembly, line-anchoring, severity gating, dedupe — and uses the LLM only where judgment helps: finding bugs and proposing fixes.
 
 :::note[What ships today]
-Local review, GitHub PR review, project rules, the serve/poll daemon + GitHub Action, SQLite/Postgres stores, opt-in semantic code-recall, a REST API + GitHub App auth, and an MCP server all ship today.
+Local review, GitHub PR review, project rules, reviewer evaluation, the serve/poll daemon + GitHub Action, SQLite/Postgres stores, opt-in semantic code-recall, a REST API + GitHub App auth, and an MCP server all ship today.
 :::
 
 ## Start here
@@ -28,6 +28,7 @@ Local review, GitHub PR review, project rules, the serve/poll daemon + GitHub Ac
   <LinkCard title="Serve & Action" href="/serve-and-action/" description="HMAC webhook daemon, opt-in poll trigger, and the reusable GitHub Action." />
   <LinkCard title="MCP integration" href="/mcp/" description="Run review_run / review_get as first-class tools in Claude Code or Codex." />
   <LinkCard title="Review history" href="/history/" description="Every review auto-saves; browse with miucr history, history show, and history prune." />
+  <LinkCard title="Evaluation" href="/evaluation/" description="Compare reviewer commands against expected findings with precision, recall, and F1." />
   <LinkCard title="How it works" href="/how-it-works/" description="The deterministic engine and drift-reject line-anchoring." />
 </CardGrid>
 
@@ -60,6 +61,8 @@ Local review, GitHub PR review, project rules, the serve/poll daemon + GitHub Ac
   - All three funnel into the same review path.
 - **MCP server** — [MCP integration](/mcp/)
   - `miucr mcp` exposes `review_run` / `review_get` over stdio.
+- **Evaluation** — [Evaluation](/evaluation/)
+  - `miucr eval` compares miu-cr and other reviewer commands against expected findings.
 - **REST API + GitHub App** — [REST API & GitHub App](/rest-api-and-github-app/)
   - `MIUCR_API_TOKEN` registers `/v1/reviews`.
   - `[github] mode = app` swaps PAT auth for App installation auth.

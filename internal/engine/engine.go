@@ -468,10 +468,12 @@ func (e *Engine) Review(ctx stdctx.Context, req Request) (ReviewResult, error) {
 
 	rulesText, rulesApplied, rulesTruncated := e.buildRules(req, selected, trace)
 
+	assembleStart := time.Now()
 	assembled := enginectx.AssembleContext(selected, enginectx.AssembleOptions{
 		TokenBudget:  diffBudget(req.TokenBudget, req.RulesTokenBudget),
 		ExpandWindow: req.ExpandWindow,
 	})
+	assembleMS := time.Since(assembleStart).Milliseconds()
 
 	req.progress(fmt.Sprintf("reviewing %d files (%d changed)…", len(selected), len(diffs)))
 	if lvl, _ := assembled.Stats["truncation_level"].(string); lvl != "" && lvl != "full" {
@@ -479,22 +481,31 @@ func (e *Engine) Review(ctx stdctx.Context, req Request) (ReviewResult, error) {
 	}
 
 	rev := selected[0].Ref
+	semanticStart := time.Now()
 	semanticContext, semanticStat := retrieveSemantic(ctx, req.Retriever, selected)
+	semanticMS := time.Since(semanticStart).Milliseconds()
 	projectContext, projectContextFileCount, projectContextTruncated := "", 0, false
+	projectContextMS := int64(0)
 	if req.ProjectContext {
+		projectStart := time.Now()
 		projectContext, projectContextFileCount, projectContextTruncated = e.loadProjectContext(ctx, req.RepoDir, rev)
+		projectContextMS = time.Since(projectStart).Milliseconds()
 	}
 	relatedHops := req.ContextHops
 	if req.ContextHopsAuto {
 		relatedHops = autoContextHops(selected)
 	}
 	related := enginectx.RelatedResult{}
+	relatedMS := int64(0)
 	if relatedHops > 0 {
+		relatedStart := time.Now()
 		related = enginectx.BuildRelatedContext(ctx, req.RepoDir, rev, selected, e.Runner, enginectx.RelatedOptions{HopDepth: relatedHops})
+		relatedMS = time.Since(relatedStart).Milliseconds()
 	}
 
 	trace.SetModel(req.Provider, req.Model)
 
+	agentStart := time.Now()
 	out, err := e.Agent.Review(ctx, AgentContext{
 		Text:            assembled.Text,
 		Rules:           rulesText,
@@ -510,6 +521,7 @@ func (e *Engine) Review(ctx stdctx.Context, req Request) (ReviewResult, error) {
 		Progress:        req.Progress,
 		Trace:           trace,
 	})
+	agentMS := time.Since(agentStart).Milliseconds()
 	if err != nil {
 		return ReviewResult{}, err
 	}
@@ -531,21 +543,32 @@ func (e *Engine) Review(ctx stdctx.Context, req Request) (ReviewResult, error) {
 		"truncation_level": assembled.Stats["truncation_level"],
 		"rules_applied":    float64(rulesApplied),
 		"rules_truncated":  rulesTruncated,
+		"context_bytes":    float64(len(assembled.Text)),
+		"rules_bytes":      float64(len(rulesText)),
+		"context_ms":       float64(assembleMS),
+		"provider_ms":      float64(agentMS),
 	}
 	if semanticStat != "" {
 		stats["semantic_recall"] = semanticStat
+		stats["semantic_recall_ms"] = float64(semanticMS)
 	}
 	if req.ProjectContext {
 		stats["project_context_files"] = float64(projectContextFileCount)
 		stats["project_context_truncated"] = projectContextTruncated
+		stats["project_context_ms"] = float64(projectContextMS)
 	}
 	if relatedHops > 0 {
 		stats["related_context_files"] = float64(len(related.Files))
 		stats["related_context_hops"] = float64(related.Hops)
 		stats["related_context_truncated"] = related.Truncated
+		stats["related_context_ms"] = float64(relatedMS)
 	}
 
+	repairStart := time.Now()
 	kept = e.repairPatches(ctx, kept, selected, req, stats)
+	if req.PatchRepair && req.Post {
+		stats["patch_repair_ms"] = float64(time.Since(repairStart).Milliseconds())
+	}
 
 	result := ReviewResult{Findings: kept, Walkthrough: out.Walkthrough, FileSummaries: out.FileSummaries, Diagram: out.Diagram, Confidence: out.Confidence, ConfidenceReason: out.ConfidenceReason, Stats: stats}
 
@@ -597,8 +620,6 @@ func autoContextHops(selected []diff.Diff) int {
 		churn += d.Insertions + d.Deletions
 	}
 	switch {
-	case len(selected) >= 25 || churn >= 800:
-		return 5
 	case len(selected) >= 10 || churn >= 300:
 		return 3
 	default:

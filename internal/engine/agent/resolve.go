@@ -38,6 +38,9 @@ type Credentials struct {
 	// gateways.
 	AuthToken string
 
+	AuthSource     string
+	AuthSourceName string
+
 	// Backend, when "codex", routes to the codex Responses backend (the OAuth /
 	// ChatGPT-plan path) instead of the openai-go SDK. The fields below carry the
 	// OAuth credential; they are set ONLY when no explicit key/env/profile key
@@ -170,28 +173,38 @@ func resolveAnthropic(in ResolveInput, prof config.Provider) (Credentials, error
 	default:
 		return Credentials{}, invalidAuthMode(authMode, "use \"api_key\", \"bearer\", or omit for legacy auto")
 	}
-	authToken := firstNonEmpty(in.AuthToken, os.Getenv("ANTHROPIC_AUTH_TOKEN"))
-	apiKey := firstNonEmpty(in.APIKey, os.Getenv("ANTHROPIC_API_KEY"))
-	if apiKey == "" && authToken == "" {
-		profileCred, err := profileCredential(resolveContext(in), prof)
+
+	authToken := firstCredential(
+		credential{Value: in.AuthToken, Source: "flag", Name: "--auth-token"},
+		envCredential("ANTHROPIC_AUTH_TOKEN"),
+	)
+	apiKey := firstCredential(
+		credential{Value: in.APIKey, Source: "flag", Name: "--api-key"},
+		envCredential("ANTHROPIC_API_KEY"),
+	)
+	var profile credential
+	if apiKey.Value == "" && authToken.Value == "" {
+		var err error
+		profile, err = profileCredential(resolveContext(in), prof)
 		if err != nil {
 			return Credentials{}, err
 		}
-		if profileCred != "" {
+		if profile.Value != "" {
 			if authMode == "api_key" {
-				apiKey = profileCred
+				apiKey = profile
 			} else {
-				authToken = profileCred
+				authToken = profile
 			}
 		}
 	}
 	baseURL := firstNonEmpty(in.BaseURL, os.Getenv("ANTHROPIC_BASE_URL"), prof.BaseURL)
 
-	if apiKey == "" && authToken == "" {
+	if apiKey.Value == "" && authToken.Value == "" {
 		return Credentials{}, &clierr.CLIError{
 			Code:    "agent.no_credentials",
 			Message: "no Anthropic credentials: set ANTHROPIC_API_KEY or ANTHROPIC_AUTH_TOKEN, configure a provider in " + config.FilePathOrEmpty() + ", or pass --api-key / --auth-token",
 			Hint:    "export ANTHROPIC_API_KEY=... or run with --api-key; see config.example.toml for provider profiles (auth_env/auth_command)",
+			Details: authDetails("anthropic", config.KindAnthropic, profile),
 			Exit:    1,
 		}
 	}
@@ -199,22 +212,29 @@ func resolveAnthropic(in ResolveInput, prof config.Provider) (Credentials, error
 	// A Bearer auth_token only makes sense for an Anthropic-compatible gateway,
 	// which requires a base_url. Without one it would be sent to api.anthropic.com
 	// (which uses x-api-key, not Bearer), leaking the token and failing the call.
-	if authToken != "" && baseURL == "" {
+	if authToken.Value != "" && baseURL == "" {
 		return Credentials{}, &clierr.CLIError{
 			Code:    "agent.auth_token_requires_base_url",
 			Message: "profile Bearer credential is for an Anthropic-compatible gateway, but no base_url is configured",
 			Hint:    "set base_url on the provider profile (or ANTHROPIC_BASE_URL), or use an API key (ANTHROPIC_API_KEY / --api-key)",
+			Details: authDetails("anthropic", config.KindAnthropic, authToken),
 			Exit:    1,
 		}
 	}
 
 	model := firstNonEmpty(in.Model, os.Getenv("ANTHROPIC_MODEL"), prof.Model, config.DefaultAnthropicModel)
+	source := apiKey
+	if authToken.Value != "" {
+		source = authToken
+	}
 	return Credentials{
-		Kind:      config.KindAnthropic,
-		APIKey:    apiKey,
-		AuthToken: authToken,
-		BaseURL:   baseURL,
-		Model:     model,
+		Kind:           config.KindAnthropic,
+		APIKey:         apiKey.Value,
+		AuthToken:      authToken.Value,
+		BaseURL:        baseURL,
+		Model:          model,
+		AuthSource:     source.Source,
+		AuthSourceName: source.Name,
 	}, nil
 }
 
@@ -246,11 +266,15 @@ func resolveOpenAI(in ResolveInput, prof config.Provider) (Credentials, error) {
 			Exit:    2,
 		}
 	}
-	apiKeyCreds := func(k string) (Credentials, error) {
+	apiKeyCreds := func(k credential) (Credentials, error) {
 		if preDefaultBase == "" {
-			return gatewayBaseRequired()
+			creds, err := gatewayBaseRequired()
+			if ce, ok := err.(*clierr.CLIError); ok {
+				ce.Details = authDetails("openai", config.KindOpenAI, k)
+			}
+			return creds, err
 		}
-		return Credentials{Kind: config.KindOpenAI, APIKey: k, BaseURL: baseURL, Model: model}, nil
+		return Credentials{Kind: config.KindOpenAI, APIKey: k.Value, BaseURL: baseURL, Model: model, AuthSource: k.Source, AuthSourceName: k.Name}, nil
 	}
 
 	noCred := func(msg string) (Credentials, error) {
@@ -267,52 +291,47 @@ func resolveOpenAI(in ResolveInput, prof config.Provider) (Credentials, error) {
 		return resolveOAuthCodex(in, prof)
 	}
 
-	// --api-key is the most explicit (per-call) credential and always wins.
 	if k := strings.TrimSpace(in.APIKey); k != "" {
-		return apiKeyCreds(k)
+		return apiKeyCreds(credential{Value: k, Source: "flag", Name: "--api-key"})
 	}
 
-	// `auth` pins the method explicitly when set.
-	switch authMode := normalizeAuthMode(prof.Auth); authMode {
-	case "oauth":
-		if hasProfileCredentialSource(prof) {
-			return Credentials{}, invalidAuthMode(authMode, "remove auth_env/auth_command/auth_token when auth = \"oauth\"")
+	authMode := normalizeAuthMode(prof.Auth)
+	if authMode != "" {
+		switch authMode {
+		case "oauth":
+			if hasProfileCredentialSource(prof) {
+				return Credentials{}, invalidAuthMode(authMode, "remove auth_env/auth_command/auth_token when auth = \"oauth\"")
+			}
+			creds, ok, err := tryOAuth()
+			if err != nil {
+				return Credentials{}, err
+			}
+			if ok {
+				return creds, nil
+			}
+			return noCred("provider auth = \"oauth\" but no `miucr login` session — run `miucr login --provider openai`")
+		case "api_key", "apikey", "key":
+			profile, err := profileCredential(resolveContext(in), prof)
+			if err != nil {
+				return Credentials{}, err
+			}
+			if k := firstCredential(profile, envCredential("OPENAI_API_KEY")); k.Value != "" {
+				return apiKeyCreds(k)
+			}
+			return noCred("provider auth = \"api_key\" but no key — set OPENAI_API_KEY, a profile auth_env, or pass --api-key")
+		case "bearer":
+			return Credentials{}, invalidAuthMode(authMode, "bearer is only valid for kind = \"anthropic\"")
+		default:
+			return Credentials{}, invalidAuthMode(authMode, "use \"oauth\", \"api_key\", or omit for auto")
 		}
-		creds, ok, err := tryOAuth()
-		if err != nil {
-			return Credentials{}, err
-		}
-		if ok {
-			return creds, nil
-		}
-		return noCred("provider auth = \"oauth\" but no `miucr login` session — run `miucr login --provider openai`")
-	case "api_key", "apikey", "key":
-		profileCred, err := profileCredential(resolveContext(in), prof)
-		if err != nil {
-			return Credentials{}, err
-		}
-		if k := firstNonEmpty(profileCred, os.Getenv("OPENAI_API_KEY")); k != "" {
-			return apiKeyCreds(k)
-		}
-		return noCred("provider auth = \"api_key\" but no key — set OPENAI_API_KEY, a profile auth_env, or pass --api-key")
-	case "bearer":
-		return Credentials{}, invalidAuthMode(authMode, "bearer is only valid for kind = \"anthropic\"")
-	case "":
-		// fall through to the intent-ordered auto-precedence below
-	default:
-		return Credentials{}, invalidAuthMode(authMode, "use \"oauth\", \"api_key\", or omit for auto")
 	}
 
-	// auth unset: intent-ordered so an ambient OPENAI_API_KEY (often set for other
-	// tools) never overrides a deliberate choice:
-	//   1. a profile-configured key (auth_env/auth_command/auth_token)
-	//   2. a cached `miucr login` (OAuth) -> the codex/ChatGPT-plan backend
-	//   3. zero-config fallback: an ambient OPENAI_API_KEY env var
-	profileCred, err := profileCredential(resolveContext(in), prof)
+	// Unset auth tries profile, OAuth, then OPENAI_API_KEY.
+	profile, err := profileCredential(resolveContext(in), prof)
 	if err != nil {
 		return Credentials{}, err
 	}
-	if k := profileCred; k != "" {
+	if k := profile; k.Value != "" {
 		return apiKeyCreds(k)
 	}
 	creds, ok, oauthErr := tryOAuth()
@@ -320,13 +339,10 @@ func resolveOpenAI(in ResolveInput, prof config.Provider) (Credentials, error) {
 		return creds, nil
 	}
 	if k := strings.TrimSpace(os.Getenv("OPENAI_API_KEY")); k != "" {
-		creds, kerr := apiKeyCreds(k) // fall back to the env key even if a stale OAuth session errored
+		creds, kerr := apiKeyCreds(credential{Value: k, Source: "env", Name: "OPENAI_API_KEY"})
 		if kerr == nil {
 			return creds, nil
 		}
-		// The env-key fallback itself failed (e.g. gatewayBaseRequired). Surface that
-		// (it is the more actionable failure) but preserve any prior OAuth error as the
-		// cause so a stale-session failure isn't silently dropped.
 		if oauthErr != nil {
 			if ce, ok := kerr.(*clierr.CLIError); ok && ce.Cause == nil {
 				ce.Cause = oauthErr
@@ -340,9 +356,6 @@ func resolveOpenAI(in ResolveInput, prof config.Provider) (Credentials, error) {
 	return noCred("no OpenAI credential: run `miucr login` to use your ChatGPT plan, set OPENAI_API_KEY, configure a provider in " + config.FilePathOrEmpty() + ", or pass --api-key")
 }
 
-// resolveOAuthCodex turns an injected login credential into codex-backend
-// Credentials. The codex backend rejects api.openai.com models (e.g. gpt-4o),
-// so it defaults to DefaultCodexModel; an explicit --model still wins.
 func resolveOAuthCodex(in ResolveInput, prof config.Provider) (Credentials, bool, error) {
 	ctx := in.Ctx
 	if ctx == nil {
@@ -361,11 +374,7 @@ func resolveOAuthCodex(in ResolveInput, prof config.Provider) (Credentials, bool
 	if !ok {
 		return Credentials{}, false, nil
 	}
-	// The codex backend only accepts codex models, never the merged gpt-4o
-	// default (an api.openai.com model it rejects). codexConfigModel honors an
-	// EXPLICIT non-gpt-4o config model while filtering that leaked default.
-	// Precedence: --model > MIUCR_CODEX_MODEL > explicit config model (not gpt-4o)
-	// > DefaultCodexModel (gpt-5.5). The allow-list varies by plan.
+	// Keep api.openai.com defaults out of the codex backend.
 	model := firstNonEmpty(in.Model, os.Getenv("MIUCR_CODEX_MODEL"), codexConfigModel(prof.Model), config.DefaultCodexModel)
 	return Credentials{
 		Kind:           config.KindOpenAI,
@@ -375,6 +384,8 @@ func resolveOAuthCodex(in ResolveInput, prof config.Provider) (Credentials, bool
 		OAuthRefresh:   cred.Refresh,
 		BaseURL:        cred.BackendBaseURL,
 		Model:          model,
+		AuthSource:     "oauth",
+		AuthSourceName: "miucr login",
 	}, true, nil
 }
 
@@ -392,27 +403,40 @@ func resolveContext(in ResolveInput) stdctx.Context {
 	return stdctx.Background()
 }
 
-func profileCredential(ctx stdctx.Context, prof config.Provider) (string, error) {
+type credential struct {
+	Value  string
+	Source string
+	Name   string
+}
+
+func profileCredential(ctx stdctx.Context, prof config.Provider) (credential, error) {
 	if s := strings.TrimSpace(prof.AuthToken); s != "" {
 		plaintextAuthTokenWarn.Do(func() {
 			fmt.Fprintln(os.Stderr, "miu-cr: warning: provider auth_token is stored in plaintext on disk; prefer auth_env or auth_command")
 		})
-		return s, nil
+		return credential{Value: s, Source: "auth_token", Name: "auth_token"}, nil
 	}
 	if prof.AuthEnv != "" {
 		if s := strings.TrimSpace(os.Getenv(prof.AuthEnv)); s != "" {
-			return s, nil
+			return credential{Value: s, Source: "auth_env", Name: prof.AuthEnv}, nil
 		}
 	}
-	if len(prof.AuthCommand) > 0 {
-		return runAuthCommand(ctx, prof.AuthCommand)
+	if len(prof.AuthCommand) != 0 {
+		secret, err := runAuthCommand(ctx, prof.AuthCommand)
+		if err != nil {
+			return credential{}, err
+		}
+		return credential{Value: secret, Source: "auth_command", Name: strings.TrimSpace(prof.AuthCommand[0])}, nil
 	}
-	return "", nil
+	if prof.AuthEnv != "" {
+		return credential{Source: "auth_env", Name: prof.AuthEnv}, nil
+	}
+	return credential{}, nil
 }
 
 func runAuthCommand(ctx stdctx.Context, argv []string) (string, error) {
 	if len(argv) == 0 || strings.TrimSpace(argv[0]) == "" {
-		return "", &clierr.CLIError{Code: "config.invalid", Message: "auth_command must be a non-empty argv array", Hint: "set auth_command = [\"gopass\", \"show\", \"-o\", \"path/to/secret\"]", Exit: 2}
+		return "", &clierr.CLIError{Code: "config.invalid", Message: "auth_command must be a non-empty argv array", Hint: "set auth_command = [\"gopass\", \"show\", \"-o\", \"path/to/secret\"]", Exit: 2, Details: map[string]any{"auth_source": "auth_command"}}
 	}
 	args := append([]string(nil), argv...)
 	args[0] = strings.TrimSpace(args[0])
@@ -426,18 +450,18 @@ func runAuthCommand(ctx stdctx.Context, argv []string) (string, error) {
 	if err != nil {
 		switch ctx.Err() {
 		case stdctx.DeadlineExceeded:
-			return "", &clierr.CLIError{Code: "agent.auth_command_failed", Message: "auth_command timed out", Hint: "make the credential command non-interactive or increase shell/keychain availability", Exit: 1, Cause: err}
+			return "", &clierr.CLIError{Code: "agent.auth_command_failed", Message: "auth_command timed out", Hint: "make the credential command non-interactive or increase shell/keychain availability", Exit: 1, Cause: err, Details: map[string]any{"auth_source": "auth_command", "auth_command": args[0]}}
 		case stdctx.Canceled:
-			return "", &clierr.CLIError{Code: "agent.auth_command_cancelled", Message: "auth_command cancelled", Hint: "the parent context was cancelled", Exit: 1, Cause: err}
+			return "", &clierr.CLIError{Code: "agent.auth_command_cancelled", Message: "auth_command cancelled", Hint: "the parent context was cancelled", Exit: 1, Cause: err, Details: map[string]any{"auth_source": "auth_command", "auth_command": args[0]}}
 		}
-		return "", &clierr.CLIError{Code: "agent.auth_command_failed", Message: "auth_command failed", Hint: "run the configured auth_command directly; miu-cr omits stderr because it may contain secrets", Exit: 1, Cause: err}
+		return "", &clierr.CLIError{Code: "agent.auth_command_failed", Message: "auth_command failed", Hint: "run the configured auth_command directly; miu-cr omits stderr because it may contain secrets", Exit: 1, Cause: err, Details: map[string]any{"auth_source": "auth_command", "auth_command": args[0]}}
 	}
 	secret := strings.TrimSpace(stdout.String())
 	if secret == "" {
-		return "", &clierr.CLIError{Code: "agent.auth_command_failed", Message: "auth_command printed no credential", Hint: "ensure the command prints the token to stdout", Exit: 1}
+		return "", &clierr.CLIError{Code: "agent.auth_command_failed", Message: "auth_command printed no credential", Hint: "ensure the command prints the token to stdout", Exit: 1, Details: map[string]any{"auth_source": "auth_command", "auth_command": args[0]}}
 	}
 	if strings.ContainsAny(secret, "\r\n") {
-		return "", &clierr.CLIError{Code: "agent.auth_command_failed", Message: "auth_command printed multiple lines", Hint: "ensure the command prints exactly one credential line", Exit: 1}
+		return "", &clierr.CLIError{Code: "agent.auth_command_failed", Message: "auth_command printed multiple lines", Hint: "ensure the command prints exactly one credential line", Exit: 1, Details: map[string]any{"auth_source": "auth_command", "auth_command": args[0]}}
 	}
 	return secret, nil
 }
@@ -478,6 +502,33 @@ func invalidAuthMode(authMode, hint string) error {
 		Hint:    hint + "; configure auth in " + config.FilePathOrEmpty(),
 		Exit:    2,
 	}
+}
+
+func envCredential(name string) credential {
+	if s := strings.TrimSpace(os.Getenv(name)); s != "" {
+		return credential{Value: s, Source: "env", Name: name}
+	}
+	return credential{}
+}
+
+func firstCredential(vals ...credential) credential {
+	for _, v := range vals {
+		if strings.TrimSpace(v.Value) != "" {
+			return v
+		}
+	}
+	return credential{}
+}
+
+func authDetails(provider string, kind config.Kind, c credential) map[string]any {
+	out := map[string]any{"provider": provider, "kind": string(kind)}
+	if c.Source != "" {
+		out["auth_source"] = c.Source
+	}
+	if c.Name != "" {
+		out["auth_source_name"] = c.Name
+	}
+	return out
 }
 
 // codexConfigModel returns an explicitly-configured codex model, dropping the

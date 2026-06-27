@@ -40,10 +40,11 @@ func TestSaveRoundTripEnvNameOnly(t *testing.T) {
 	cfg := Defaults()
 	cfg.DefaultProvider = "zai"
 	cfg.Providers["zai"] = Provider{
-		Kind:    KindAnthropic,
-		BaseURL: "https://api.z.ai/api/anthropic",
-		Model:   "glm-4.6",
-		AuthEnv: "ZAI_API_KEY",
+		Kind:        KindAnthropic,
+		BaseURL:     "https://api.z.ai/api/anthropic",
+		Model:       "glm-4.6",
+		AuthEnv:     "ZAI_API_KEY",
+		AuthCommand: []string{"gopass", "show", "-o", "ai/zai"},
 	}
 
 	if err := Save(cfg); err != nil {
@@ -58,7 +59,7 @@ func TestSaveRoundTripEnvNameOnly(t *testing.T) {
 		t.Fatalf("default_provider round-trip: got %q", got.DefaultProvider)
 	}
 	z := got.Providers["zai"]
-	if z.Kind != KindAnthropic || z.BaseURL != "https://api.z.ai/api/anthropic" || z.Model != "glm-4.6" || z.AuthEnv != "ZAI_API_KEY" {
+	if z.Kind != KindAnthropic || z.BaseURL != "https://api.z.ai/api/anthropic" || z.Model != "glm-4.6" || z.AuthEnv != "ZAI_API_KEY" || len(z.AuthCommand) != 4 {
 		t.Fatalf("zai profile round-trip: %+v", z)
 	}
 	// Built-ins still resolve after load (layered, not from disk).

@@ -113,7 +113,7 @@ jobs:
           GITHUB_TOKEN:   ${{ secrets.GITHUB_TOKEN }}
         run: |
           miucr review --pr "${GITHUB_REPOSITORY}#${{ github.event.pull_request.number }}" \
-            --provider openai --post --gate high --timeout 300s
+            --provider openai --post --gate high --deep-context --conversation --timeout 900s
 ```
 
 ### Security note

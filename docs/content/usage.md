@@ -3,7 +3,7 @@ title: Usage
 description: Review modes, flags, the severity gate, output formats, and exit codes.
 ---
 
-`miucr` has these commands: `init`, `login`, `whoami`, `logout`, `review`, `config`, `mcp`, `serve`, `rules`, `history`, `upgrade`, and `version`. This page covers `review`, the day-to-day loop. See the dedicated pages for [serve & action](/serve-and-action/), [rules](/rules/), [history](/history/), [providers](/providers/) (`config show` + the `[review]` defaults table), and [credentials](/credentials/); for the MCP server see [MCP integration](/mcp/).
+`miucr` has these commands: `init`, `login`, `whoami`, `logout`, `review`, `config`, `mcp`, `serve`, `rules`, `history`, `eval`, `upgrade`, and `version`. This page covers `review`, the day-to-day loop. See the dedicated pages for [serve & action](/serve-and-action/), [rules](/rules/), [history](/history/), [evaluation](/evaluation/), [providers](/providers/) (`config show` + the `[review]` defaults table), and [credentials](/credentials/); for the MCP server see [MCP integration](/mcp/).
 
 :::tip[Looking for copy-paste workflows?]
 [Use cases & recipes](/use-cases/) collects the flags below into concrete local-review recipes: pre-commit gate, pre-PR branch check, agent fix-loop, SARIF in your editor, and a Makefile quality gate.
@@ -156,14 +156,17 @@ miucr review --staged --exclude '**/*_test.go'          # doublestar globs to dr
 
 ## Context & budget flags
 
+All of these can also be set under `[review]` in `~/.config/miu/cr/config.toml`;
+an explicit CLI flag still wins.
+
 - `--expand <n>`: context lines added above/below each changed hunk in the new-content window (default `5`; `0` disables).
-- `--token-budget <n>`: approximate token budget; over budget, context degrades through the truncation ladder (default `100000`; pass `0` to disable).
+- `--token-budget <n>`: approximate token budget; over budget, context degrades through the truncation ladder (default `0`, no budget cap).
 - `--timeout <dur>`: operation timeout. The root default is `30s`, but `review`
-  uses `300s` by default unless you set `--timeout` or `[review].timeout`.
+  uses `900s` by default unless you set `--timeout` or `[review].timeout`.
 - `--deep-context`: heavier defaults for large reviews (`--expand 20`,
-  `--token-budget 0`, `--timeout 900s`, auto related-file hop depth) unless you
-  set those flags explicitly. It also injects root `AGENTS.md` / `CLAUDE.md`
-  context from the reviewed revision when present.
+  auto related-file hop depth, and root `AGENTS.md` / `CLAUDE.md` context from
+  the reviewed revision when present). Token budget and timeout are already
+  capability-first by default.
 - `--context-hops <n>`: include related-file context up to `n` hops from the
   changed files (`0` disables, max `5`). This overrides the `--deep-context`
   auto depth. The hop walker reads the reviewed revision, follows Go package

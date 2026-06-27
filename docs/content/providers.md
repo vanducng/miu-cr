@@ -35,12 +35,15 @@ kind       = "anthropic"         # or "openai"; the first-class family
 base_url   = "https://…"         # optional; gateway/endpoint override
 model      = "…"                 # optional; default model for this profile
 auth_env   = "MY_TOKEN"          # RECOMMENDED; NAME of an env var holding the credential
-auth_command = ["gopass", "show", "-o", "ai/provider"]  # argv; stdout is credential
+auth_command = ["gopass", "show", "-o", "ai/provider"] # argv only; stdout is the token
 auth_token = "…"                 # discouraged literal credential; plaintext on disk
 auth       = "bearer"            # "bearer" | "api_key" | "oauth" | omit for legacy auto
 ```
 
 The two built-in profiles `anthropic` and `openai` always exist; you only declare a `[providers.<name>]` block to add a vendor or override a built-in's `model`/`base_url`. Standard env vars and CLI flags still override profile credentials.
+Profile credential precedence is `auth_token` > non-empty `auth_env` > `auth_command`.
+`auth_command` executes the argv directly, not through a shell; stdout is trimmed
+as the token and stderr is omitted from errors because it may contain secrets.
 
 `kind` selects the protocol family. `auth` selects the credential mechanism:
 
@@ -66,7 +69,12 @@ The optional `[review]` table sets defaults for `miucr review` flags. An **expli
 gate         = "high"          # default --gate: none|info|low|medium|high|critical
 filter_mode  = "diff_context"  # default --filter-mode (--pr): added|diff_context|file|nofilter
 min_severity = "low"           # default --min-severity (--pr inline floor)
-timeout      = "300s"          # default review timeout (a Go duration: 300s, 5m, …)
+timeout      = "900s"          # default review timeout (a Go duration: 900s, 15m, …)
+expand       = 20              # default --expand
+token_budget = 0               # default --token-budget; 0 = no cap
+deep_context = true            # default --deep-context
+# context_hops = 3             # optional override; omit to let deep_context choose automatically
+conversation = true            # default --conversation on --pr
 thinking     = "auto"          # auto|off|low|medium|high. auto = extended thinking/reasoning
                                # ON when the model supports it (Claude, gpt-5/o-series, codex) —
                                # deeper analysis. Off (or unsupported model) falls back to
@@ -76,12 +84,13 @@ temperature  = 0               # LLM sampling temperature (0–2), used when thi
                                # stable instead of churning findings. Applies to anthropic +
                                # openai chat models; reasoning models (which need temp 1) ignore it.
 suggest      = false           # default --suggest (GitHub one-click suggestions on --post)
+patch_repair = false           # default --patch-repair; requires suggest=true
 
 [review.category_urls]         # map a finding Category → a docs URL (clickable link + SARIF helpUri)
 "security" = "https://example.com/docs/security"
 ```
 
-Only these review attributes can be defaulted from config; there is intentionally **no** `approve_clean` config (a write-action defaulting on is a footgun).
+Only these review attributes can be defaulted from config; there is intentionally **no** `post`, `force`, or `approve_clean` config (write-action and repeat-spend defaults are footguns).
 
 ### Viewing and editing config (`config show` / `set` / `edit`)
 

@@ -145,6 +145,21 @@ func mergeReview(base, file Review) Review {
 	if file.Thinking != "" {
 		out.Thinking = file.Thinking
 	}
+	if file.Expand != nil {
+		out.Expand = file.Expand
+	}
+	if file.TokenBudget != nil {
+		out.TokenBudget = file.TokenBudget
+	}
+	if file.DeepContext != nil {
+		out.DeepContext = file.DeepContext
+	}
+	if file.ContextHops != nil {
+		out.ContextHops = file.ContextHops
+	}
+	if file.Conversation != nil {
+		out.Conversation = file.Conversation
+	}
 	if file.Suggest != nil {
 		out.Suggest = file.Suggest
 	}
