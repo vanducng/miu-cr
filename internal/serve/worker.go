@@ -18,7 +18,7 @@ import (
 type Pool struct {
 	jobs     chan Job
 	mu       sync.Mutex
-	inflight map[prKey]bool
+	inflight map[prKey]string
 	closed   bool // guarded by mu; once true, Submit refuses and jobs is closed
 	wg       sync.WaitGroup
 	reviewFn func(Job) error
@@ -51,7 +51,7 @@ func NewPoolWithWorkers(reviewFn func(Job) error, log *slog.Logger, workers int)
 	}
 	p := &Pool{
 		jobs:     make(chan Job, 4*workers),
-		inflight: make(map[prKey]bool),
+		inflight: make(map[prKey]string),
 		reviewFn: reviewFn,
 		log:      log,
 	}
@@ -62,32 +62,31 @@ func NewPoolWithWorkers(reviewFn func(Job) error, log *slog.Logger, workers int)
 	return p
 }
 
-// Submit enqueues a job. It returns false (without enqueuing) after Drain (the
-// pool is closed), when the same PR is already in flight (coalesced), or when the
-// queue is full (loud-logged + counted). The closed check and the channel send
-// both happen under p.mu, and Drain closes the channel under the same lock, so
-// Submit can never send on a closed channel (no "send on closed channel" panic).
-func (p *Pool) Submit(j Job) bool {
+// Submit enqueues a job and classifies non-queued outcomes for durable callers.
+func (p *Pool) Submit(j Job) SubmitResult {
 	p.mu.Lock()
 	if p.closed {
 		p.mu.Unlock()
-		return false
+		return SubmitClosed
 	}
-	if p.inflight[j.Key] {
+	if head, ok := p.inflight[j.Key]; ok {
 		p.mu.Unlock()
 		p.log.Info("review coalesced: PR already in flight", "repo", j.Key.Owner+"/"+j.Key.Repo, "number", j.Key.Number)
-		return false
+		if head != "" && j.HeadSHA != "" && head == j.HeadSHA {
+			return SubmitDuplicate
+		}
+		return SubmitCoalesced
 	}
 	select {
 	case p.jobs <- j:
-		p.inflight[j.Key] = true
+		p.inflight[j.Key] = j.HeadSHA
 		p.mu.Unlock()
-		return true
+		return SubmitQueued
 	default:
 		p.mu.Unlock()
 		p.drops.Add(1)
 		p.log.Warn("review dropped: queue full", "repo", j.Key.Owner+"/"+j.Key.Repo, "number", j.Key.Number, "drops", p.drops.Load())
-		return false
+		return SubmitFull
 	}
 }
 

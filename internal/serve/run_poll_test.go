@@ -222,7 +222,7 @@ func TestRunPoll_DrainsExactlyOnceOnCancel(t *testing.T) {
 	}
 	// Pool is drained → Submit must now refuse (closed), proving exactly-one drain
 	// happened (idempotent Drain means a second call would be a safe no-op).
-	if pool.Submit(Job{Key: prKey{Owner: "o", Repo: "r", Number: 1}}) {
+	if pool.Submit(Job{Key: prKey{Owner: "o", Repo: "r", Number: 1}}) == SubmitQueued {
 		t.Error("pool should be closed (drained) after RunPoll, Submit accepted a job")
 	}
 }

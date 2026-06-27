@@ -117,7 +117,7 @@ func (s *Server) handleWebhook(w http.ResponseWriter, r *http.Request) {
 		Token:   token,
 		Timeout: s.reviewTO,
 	}
-	if !s.dispatcher.Submit(job) {
+	if s.dispatcher.Submit(job) != SubmitQueued {
 		// Dropped (queue full): the 200'd delivery won't be redelivered by GitHub,
 		// so surface it loudly here instead of silently losing the review.
 		s.log.Error("webhook: job dropped, dispatch queue full",

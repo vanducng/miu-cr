@@ -2,6 +2,7 @@ package postgres
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"os"
 	"strings"
@@ -200,8 +201,8 @@ func TestHostStaleAttemptCompletionDoesNotOverwriteCurrentClaim(t *testing.T) {
 	if err != nil || !ok {
 		t.Fatalf("second claim ok=%v err=%v", ok, err)
 	}
-	if err := s.CompleteHostJob(ctx, store.HostJobCompleteInput{JobID: job.ID, AttemptID: first.AttemptID, Status: "done", Now: now.Add(3 * time.Second)}); err != nil {
-		t.Fatalf("stale complete: %v", err)
+	if err := s.CompleteHostJob(ctx, store.HostJobCompleteInput{JobID: job.ID, AttemptID: first.AttemptID, Status: "done", Now: now.Add(3 * time.Second)}); !errors.Is(err, store.ErrHostStaleAttempt) {
+		t.Fatalf("stale complete err = %v, want ErrHostStaleAttempt", err)
 	}
 	var status, owner, firstAttemptStatus string
 	var attempts int

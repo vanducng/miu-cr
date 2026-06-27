@@ -146,6 +146,34 @@ repos:
 	}
 }
 
+func TestLoadHostRejectsProviderAuthToken(t *testing.T) {
+	path := writeHostConfig(t, `version: 1
+default_provider: local
+providers:
+  local:
+    kind: anthropic
+    auth_token: literal-provider-secret
+store:
+  backend: postgres
+github:
+  default_account: pat
+  accounts:
+    pat:
+      mode: pat
+      auth_env: GITHUB_TOKEN
+host:
+  poll_source: pulls
+repos:
+  - name: service-api
+    slug: example-org/service-api
+    git_url: https://github.com/example-org/service-api.git
+`)
+	err := loadHostErr(path)
+	if !isConfigInvalid(err) || !strings.Contains(err.Error(), "providers.local.auth_token") {
+		t.Fatalf("want provider auth_token config.invalid, got %v", err)
+	}
+}
+
 func TestLoadHostUnknownAccountFails(t *testing.T) {
 	path := writeHostConfig(t, minimalHostYAML()+`
 repos:

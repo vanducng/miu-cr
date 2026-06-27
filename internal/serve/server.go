@@ -37,6 +37,7 @@ type Job struct {
 	Token   string
 	Timeout time.Duration
 	Review  *JobReviewOptions
+	HeadSHA string
 	// ReviewID is the server-generated id of a REST-initiated review (empty on the
 	// webhook/poll paths). reviewFn persists the FINAL record under this id; the
 	// CLI/webhook/poll paths leave it empty and skip that upsert.
@@ -71,11 +72,20 @@ type JobReviewOptions struct {
 	ContextHops    int
 }
 
-// Dispatcher accepts review jobs. Submit returns false when the work could not
-// be enqueued (full queue) so the caller can loud-log + count, never silently
-// drop. The real bounded pool is P2; tests inject a fake.
+// SubmitResult tells callers why a job was not enqueued.
+type SubmitResult int
+
+const (
+	SubmitQueued SubmitResult = iota
+	SubmitClosed
+	SubmitFull
+	SubmitCoalesced
+	SubmitDuplicate
+)
+
+// Dispatcher accepts review jobs. The real bounded pool is P2; tests inject a fake.
 type Dispatcher interface {
-	Submit(Job) bool
+	Submit(Job) SubmitResult
 }
 
 // repoRef is the structural allowlist key. Comparing {owner,repo} fields (rather

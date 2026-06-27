@@ -4,6 +4,7 @@ import (
 	stdctx "context"
 	"errors"
 	"os"
+	"strings"
 	"sync"
 	"testing"
 	"time"
@@ -238,6 +239,28 @@ func TestHostRunnerJanitorBuildsPrunePolicy(t *testing.T) {
 	}
 }
 
+func TestRunHostReturnsWhenRunnerDoesNotStop(t *testing.T) {
+	oldGrace := runHostDrainGrace
+	runHostDrainGrace = 5 * time.Millisecond
+	t.Cleanup(func() { runHostDrainGrace = oldGrace })
+
+	cfg := hostRunnerConfig(t)
+	block := make(chan struct{})
+	cfg.Prune = HostPruneConfig{CompletedJobTTL: time.Hour}
+	cfg.Store.(*fakeHostStore).pruneBlock = block
+	r, err := NewHostRunner(cfg)
+	if err != nil {
+		t.Fatalf("NewHostRunner: %v", err)
+	}
+	ctx, cancel := stdctx.WithCancel(stdctx.Background())
+	cancel()
+	err = RunHost(ctx, nil, r)
+	close(block)
+	if err == nil || !strings.Contains(err.Error(), "did not stop") {
+		t.Fatalf("RunHost error = %v, want stop deadline", err)
+	}
+}
+
 func hostRunnerConfig(t *testing.T) HostRunnerConfig {
 	t.Helper()
 	gh := &fakeNotifGetter{
@@ -294,6 +317,7 @@ type fakeHostStore struct {
 	cursorWrites  int
 	releaseCount  int
 	lastPrune     store.HostPrunePolicy
+	pruneBlock    <-chan struct{}
 	sessionErrFor map[int64]error
 }
 
@@ -414,6 +438,9 @@ func (s *fakeHostStore) GetHostPollCursor(stdctx.Context, int64, string) (store.
 }
 
 func (s *fakeHostStore) PruneHost(_ stdctx.Context, p store.HostPrunePolicy) (store.HostPruneResult, error) {
+	if s.pruneBlock != nil {
+		<-s.pruneBlock
+	}
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	s.lastPrune = p

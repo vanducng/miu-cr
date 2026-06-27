@@ -29,12 +29,12 @@ func TestPool_CoalescesSameKey(t *testing.T) {
 	p := NewPool(reviewFn, discardLog())
 
 	k := key("octocat", "hello", 1)
-	if !p.Submit(Job{Key: k, Ref: "octocat/hello#1"}) {
+	if p.Submit(Job{Key: k, Ref: "octocat/hello#1"}) != SubmitQueued {
 		t.Fatal("first Submit should enqueue")
 	}
 	<-started // ensure the job is in flight (in the inflight set)
-	if p.Submit(Job{Key: k, Ref: "octocat/hello#1"}) {
-		t.Fatal("second Submit for same key should be coalesced (false)")
+	if got := p.Submit(Job{Key: k, Ref: "octocat/hello#1"}); got != SubmitCoalesced {
+		t.Fatalf("second Submit for same key = %v, want coalesced", got)
 	}
 	close(release)
 	p.Drain()
@@ -44,15 +44,39 @@ func TestPool_CoalescesSameKey(t *testing.T) {
 	}
 }
 
+func TestPool_CoalesceDistinguishesSameHead(t *testing.T) {
+	started := make(chan struct{})
+	release := make(chan struct{})
+	reviewFn := func(Job) error {
+		started <- struct{}{}
+		<-release
+		return nil
+	}
+	p := NewPool(reviewFn, discardLog())
+	k := key("octocat", "hello", 1)
+	if got := p.Submit(Job{Key: k, HeadSHA: "same"}); got != SubmitQueued {
+		t.Fatalf("first submit = %v, want queued", got)
+	}
+	<-started
+	if got := p.Submit(Job{Key: k, HeadSHA: "same"}); got != SubmitDuplicate {
+		t.Fatalf("same-head submit = %v, want duplicate", got)
+	}
+	if got := p.Submit(Job{Key: k, HeadSHA: "next"}); got != SubmitCoalesced {
+		t.Fatalf("different-head submit = %v, want coalesced", got)
+	}
+	close(release)
+	p.Drain()
+}
+
 func TestPool_DistinctKeysBothRun(t *testing.T) {
 	var calls atomic.Int64
 	reviewFn := func(Job) error { calls.Add(1); return nil }
 	p := NewPool(reviewFn, discardLog())
 
-	if !p.Submit(Job{Key: key("o", "r", 1)}) {
+	if p.Submit(Job{Key: key("o", "r", 1)}) != SubmitQueued {
 		t.Fatal("Submit 1 failed")
 	}
-	if !p.Submit(Job{Key: key("o", "r", 2)}) {
+	if p.Submit(Job{Key: key("o", "r", 2)}) != SubmitQueued {
 		t.Fatal("Submit 2 failed")
 	}
 	p.Drain()
@@ -71,7 +95,7 @@ func TestPoolWithWorkersOneRunsSerially(t *testing.T) {
 		return nil
 	}
 	p := NewPoolWithWorkers(reviewFn, discardLog(), 1)
-	if !p.Submit(Job{Key: key("o", "r", 1)}) || !p.Submit(Job{Key: key("o", "r", 2)}) {
+	if p.Submit(Job{Key: key("o", "r", 1)}) != SubmitQueued || p.Submit(Job{Key: key("o", "r", 2)}) != SubmitQueued {
 		t.Fatal("submits failed")
 	}
 	if got := <-started; got != 1 {
@@ -102,7 +126,7 @@ func TestPool_FullQueueLoudDrop(t *testing.T) {
 	ran.Add(numWorkers(p))
 	n := 0
 	for ; n < occupy; n++ {
-		if !p.Submit(Job{Key: key("o", "r", n)}) {
+		if p.Submit(Job{Key: key("o", "r", n)}) != SubmitQueued {
 			break // queue filled early
 		}
 	}
@@ -110,7 +134,7 @@ func TestPool_FullQueueLoudDrop(t *testing.T) {
 	// One more distinct-key Submit must be dropped (loud + counted).
 	dropped := false
 	for try := 0; try < 1000; try++ {
-		if !p.Submit(Job{Key: key("o", "r", 100000+try)}) {
+		if p.Submit(Job{Key: key("o", "r", 100000+try)}) != SubmitQueued {
 			dropped = true
 			break
 		}
@@ -141,11 +165,11 @@ func TestPool_PanicSurvival(t *testing.T) {
 	}
 	p := NewPool(reviewFn, discardLog())
 
-	if !p.Submit(Job{Key: key("o", "r", 1)}) {
+	if p.Submit(Job{Key: key("o", "r", 1)}) != SubmitQueued {
 		t.Fatal("panic-job Submit failed")
 	}
 	<-first
-	if !p.Submit(Job{Key: key("o", "r", 2)}) {
+	if p.Submit(Job{Key: key("o", "r", 2)}) != SubmitQueued {
 		t.Fatal("post-panic Submit failed")
 	}
 
@@ -168,7 +192,7 @@ func TestPool_DrainWaitsInFlight(t *testing.T) {
 		return nil
 	}
 	p := NewPool(reviewFn, discardLog())
-	if !p.Submit(Job{Key: key("o", "r", 1)}) {
+	if p.Submit(Job{Key: key("o", "r", 1)}) != SubmitQueued {
 		t.Fatal("Submit failed")
 	}
 	p.Drain()
@@ -199,7 +223,7 @@ func TestPool_SubmitRacesDrainNoPanic(t *testing.T) {
 	p.Drain() // races the Submit goroutines above
 	wg.Wait()
 
-	if p.Submit(Job{Key: key("o", "r", 999)}) {
+	if p.Submit(Job{Key: key("o", "r", 999)}) == SubmitQueued {
 		t.Fatal("Submit after Drain must return false")
 	}
 }

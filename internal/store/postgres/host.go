@@ -101,14 +101,27 @@ func (s *Store) ClaimHostJob(ctx context.Context, in store.HostJobClaimInput) (s
 	}
 	leaseUntil := now.Add(in.LeaseDuration)
 	row := s.db.QueryRowContext(ctx, `
-WITH picked AS (
+WITH picked_queued AS (
 	SELECT id
 	FROM host_jobs
-	WHERE (status = 'queued' AND available_at <= $1)
-	   OR (status = 'running' AND lease_until <= $1)
+	WHERE status = 'queued'
+	  AND available_at <= $1
 	ORDER BY priority DESC, created_at ASC
 	FOR UPDATE SKIP LOCKED
 	LIMIT 1
+), picked_expired AS (
+	SELECT id
+	FROM host_jobs
+	WHERE status = 'running'
+	  AND lease_until <= $1
+	  AND NOT EXISTS (SELECT 1 FROM picked_queued)
+	ORDER BY priority DESC, created_at ASC
+	FOR UPDATE SKIP LOCKED
+	LIMIT 1
+), picked AS (
+	SELECT id FROM picked_queued
+	UNION ALL
+	SELECT id FROM picked_expired
 ), updated AS (
 	UPDATE host_jobs j
 	SET status='running',
@@ -179,7 +192,10 @@ WHERE id=$1`, in.AttemptID, now); err != nil {
 				return err
 			}
 		}
-		return tx.Commit()
+		if err := tx.Commit(); err != nil {
+			return err
+		}
+		return store.ErrHostStaleAttempt
 	}
 	if in.AttemptID != 0 {
 		if _, err := tx.ExecContext(ctx, `

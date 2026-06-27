@@ -198,6 +198,9 @@ func ValidateHost(cfg HostConfig, path string) error {
 	if err := validatePoll(path, cfg.Host); err != nil {
 		return err
 	}
+	if err := validateHostProviders(path, cfg.Providers); err != nil {
+		return err
+	}
 	if err := validateGithubAccounts(path, cfg.Github); err != nil {
 		return err
 	}
@@ -208,6 +211,18 @@ func ValidateHost(cfg HostConfig, path string) error {
 		return err
 	}
 	return validateHostPatchRepair(path, cfg)
+}
+
+func validateHostProviders(path string, providers map[string]HostProvider) error {
+	for name, provider := range providers {
+		if strings.TrimSpace(name) == "" {
+			return invalidHost(path, "providers", "", "non-empty provider names")
+		}
+		if strings.TrimSpace(provider.AuthToken) != "" {
+			return invalidHost(path, "providers."+name+".auth_token", provider.AuthToken, "auth_env or auth_command")
+		}
+	}
+	return nil
 }
 
 func normalizeHost(cfg *HostConfig) {

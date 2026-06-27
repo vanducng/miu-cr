@@ -288,9 +288,9 @@ func (p *Poller) dispatchCandidate(ctx stdctx.Context, c candidate, token string
 			p.mu.Unlock()
 		},
 	}
-	// Submit==false leaves Seen/NotifSeen unrecorded on purpose: the head is
+	// A rejected submit leaves Seen/NotifSeen unrecorded on purpose: the head is
 	// re-enumerated and retried next tick (no cursor advance for this candidate).
-	if !p.disp.Submit(job) {
+	if p.disp.Submit(job) != SubmitQueued {
 		p.log.Warn("poll: job not enqueued (coalesced/full); retry next tick",
 			"repo", c.owner+"/"+c.repo, "number", c.number)
 		return

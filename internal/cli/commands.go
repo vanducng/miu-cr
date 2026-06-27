@@ -397,7 +397,18 @@ func buildServeHostRepos(ctx stdctx.Context, cfg config.HostConfig, path string)
 	if err != nil {
 		return nil, 0, err
 	}
-	baseReview := mergeHostReview(config.HostReview{Gate: "high", FilterMode: "diff_context", Timeout: "900s"}, cfg.Review)
+	baseReview := mergeHostReview(config.HostReview{
+		Gate:         "high",
+		FilterMode:   "diff_context",
+		Timeout:      "900s",
+		Post:         boolSetting(true),
+		Suggest:      boolSetting(false),
+		PatchRepair:  boolSetting(false),
+		ApproveClean: boolSetting(false),
+		Force:        boolSetting(false),
+		Conversation: boolSetting(false),
+		DeepContext:  boolSetting(false),
+	}, cfg.Review)
 	hostReview := mergeHostReview(baseReview, cfg.Host.Review)
 	reviewTO := durationOrDefault(hostReview.Timeout, 15*time.Minute)
 	if provider.Kind != config.KindOpenAI && provider.Kind != config.KindAnthropic && provider.Kind != "" {
@@ -446,12 +457,12 @@ func buildServeHostRepos(ctx stdctx.Context, cfg config.HostConfig, path string)
 
 func hostReviewOptions(provider config.HostProvider, secret string, review config.HostReview) (serve.JobReviewOptions, error) {
 	opts := serve.JobReviewOptions{
-		Post:         boolPtr(review.Post),
-		Suggest:      boolPtr(review.Suggest),
-		PatchRepair:  boolPtr(review.PatchRepair),
-		ApproveClean: boolPtr(review.ApproveClean),
-		Force:        boolPtr(review.Force),
-		Conversation: boolPtr(review.Conversation),
+		Post:         boolValue(review.Post),
+		Suggest:      boolValue(review.Suggest),
+		PatchRepair:  boolValue(review.PatchRepair),
+		ApproveClean: boolValue(review.ApproveClean),
+		Force:        boolValue(review.Force),
+		Conversation: boolValue(review.Conversation),
 		Gate:         review.Gate,
 		FilterMode:   review.FilterMode,
 		MinSeverity:  review.MinSeverity,
@@ -460,7 +471,7 @@ func hostReviewOptions(provider config.HostProvider, secret string, review confi
 		Model:        provider.Model,
 		ExpandWindow: review.Expand,
 		ContextHops:  review.ContextHops,
-		DeepContext:  boolPtr(review.DeepContext),
+		DeepContext:  boolValue(review.DeepContext),
 	}
 	if review.TokenBudget != nil {
 		opts.TokenBudget = *review.TokenBudget
@@ -846,7 +857,9 @@ func mergeHostReview(base, over config.HostReview) config.HostReview {
 	return out
 }
 
-func boolPtr(v *bool) bool { return v != nil && *v }
+func boolValue(v *bool) bool { return v != nil && *v }
+
+func boolSetting(v bool) *bool { return &v }
 
 func durationOrDefault(raw string, fallback time.Duration) time.Duration {
 	if d, err := time.ParseDuration(raw); err == nil && d > 0 {

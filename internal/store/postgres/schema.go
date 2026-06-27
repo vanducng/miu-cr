@@ -132,6 +132,7 @@ CREATE TABLE IF NOT EXISTS host_poll_cursors (
 
 CREATE INDEX IF NOT EXISTS host_jobs_claim_idx ON host_jobs (status, available_at, priority DESC, created_at);
 CREATE INDEX IF NOT EXISTS host_jobs_lease_idx ON host_jobs (status, lease_until);
+CREATE UNIQUE INDEX IF NOT EXISTS host_job_attempts_job_attempt_idx ON host_job_attempts (job_id, attempt);
 CREATE INDEX IF NOT EXISTS host_sessions_state_idx ON host_pr_sessions (state, updated_at);
 CREATE INDEX IF NOT EXISTS host_workspaces_prune_idx ON host_workspaces (state, last_used_at);
 `

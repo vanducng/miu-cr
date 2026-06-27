@@ -5,8 +5,11 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
+	"errors"
 	"time"
 )
+
+var ErrHostStaleAttempt = errors.New("host job attempt is stale")
 
 type HostStore interface {
 	ReconcileHostRepo(context.Context, HostRepoInput) (HostRepo, error)

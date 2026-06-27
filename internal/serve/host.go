@@ -19,6 +19,8 @@ import (
 
 const maxHostClaimsPerTick = 32
 
+var runHostDrainGrace = 10 * time.Second
+
 type HostTokenSource interface {
 	Token(stdctx.Context) (string, error)
 }
@@ -352,6 +354,7 @@ func (h *HostRunner) claimReady(ctx stdctx.Context, repos map[int64]HostRepoConf
 			Token:   token,
 			Timeout: timeout,
 			Review:  &review,
+			HeadSHA: claim.Job.HeadSHA,
 			OnDone: func(runErr error) {
 				status := "done"
 				msg := ""
@@ -361,10 +364,20 @@ func (h *HostRunner) claimReady(ctx stdctx.Context, repos map[int64]HostRepoConf
 				}
 				cctx, cancel := stdctx.WithTimeout(stdctx.Background(), 10*time.Second)
 				defer cancel()
-				_ = h.store.CompleteHostJob(cctx, store.HostJobCompleteInput{JobID: jobID, AttemptID: attemptID, Status: status, Error: msg, Now: h.now().UTC()})
+				if err := h.store.CompleteHostJob(cctx, store.HostJobCompleteInput{JobID: jobID, AttemptID: attemptID, Status: status, Error: msg, Now: h.now().UTC()}); err != nil {
+					h.log.Warn("host: failed to complete job", "job", jobID, "error", config.RedactString(err.Error()))
+				}
 			},
 		}
-		if !h.disp.Submit(job) {
+		switch h.disp.Submit(job) {
+		case SubmitQueued:
+		case SubmitDuplicate:
+			_ = h.store.CompleteHostJob(ctx, store.HostJobCompleteInput{JobID: jobID, AttemptID: attemptID, Status: "canceled", Error: "duplicate review already in flight", Now: h.now().UTC()})
+		case SubmitCoalesced:
+			now := h.now().UTC()
+			_ = h.store.ReleaseHostJob(ctx, store.HostJobReleaseInput{JobID: jobID, AttemptID: attemptID, Error: "review already in flight for PR", Now: now, AvailableAt: now.Add(h.interval)})
+			return nil
+		default:
 			now := h.now().UTC()
 			_ = h.store.ReleaseHostJob(ctx, store.HostJobReleaseInput{JobID: jobID, AttemptID: attemptID, Error: "dispatcher rejected job", Now: now, AvailableAt: now})
 			return nil
@@ -380,7 +393,19 @@ func RunHost(ctx stdctx.Context, pool *Pool, runner *HostRunner) error {
 		close(done)
 	}()
 	<-ctx.Done()
-	<-done
+	select {
+	case <-done:
+	case <-time.After(runHostDrainGrace):
+		if pool != nil {
+			pool.Drain()
+		}
+		select {
+		case <-done:
+			return nil
+		case <-time.After(runHostDrainGrace):
+			return errors.New("host runner did not stop before drain deadline")
+		}
+	}
 	if pool != nil {
 		pool.Drain()
 	}

@@ -76,22 +76,22 @@ type pollDispatcher struct {
 	mu      sync.Mutex
 	jobs    []Job
 	failErr error // when non-nil, OnDone is called with this (review failed)
-	accept  bool  // when false, Submit returns false (queue full / coalesced)
+	accept  bool
 }
 
 func newPollDispatcher() *pollDispatcher { return &pollDispatcher{accept: true} }
 
-func (d *pollDispatcher) Submit(j Job) bool {
+func (d *pollDispatcher) Submit(j Job) SubmitResult {
 	d.mu.Lock()
 	defer d.mu.Unlock()
 	if !d.accept {
-		return false
+		return SubmitFull
 	}
 	d.jobs = append(d.jobs, j)
 	if j.OnDone != nil {
 		j.OnDone(d.failErr)
 	}
-	return true
+	return SubmitQueued
 }
 
 func (d *pollDispatcher) count() int {
