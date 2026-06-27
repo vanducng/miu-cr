@@ -121,9 +121,9 @@ written back for the next upsert), a clean `## Code Review Summary` header (no s
 the H2 - it stays small), then an INLINE `**Result:**` line driven by the finding **lifecycle
 ledger** (per-level **shields.io count badges** for currently-OPEN findings — each badge reads
 `Px | severity | count`, with the `Px` label in its severity color and the rest neutral grey,
-critical/high first — followed by `· N open`; a review with nothing open renders a green
-"Review passed" badge plus a friendly `· all clear 🎉`. The resolved count is NOT repeated on
-the Result line; it lives in the Resolved table heading).
+critical/high first; a review with nothing open renders a green "Review passed" badge plus a
+friendly `· all clear 🎉`. Neither the open total nor the resolved count is repeated on the
+Result line — both already show in the `⚠️ Open (N)` / `✅ Resolved (N)` table headings).
 There is no identity line, no confidence line, and no inline-comment pointer: the prior
 `**Reviews (N)**` identity line, the `Confidence: N/5` line, and the `→ Review the N inline
 comment(s) below` pointer were removed (the run count now lives only in the footer; GitHub
@@ -163,7 +163,7 @@ a hidden marker that identifies the comment as miucr-authored:
 <!-- miu-cr-runs:3 -->
 ## Code Review Summary
 
-**Result:** <shields P0 chip> · 1 open
+**Result:** <shields P0 chip>
 
 **What changed:**
 - High-level bullet 1 (up to 5)
@@ -177,7 +177,7 @@ a hidden marker that identifies the comment as miucr-authored:
 
 **✅ Resolved (3)**
 
-| Priority | Issue | Location | Opened → Resolved |
+| Priority | Issue | Location | Resolved |
 |----------|-------|----------|-------------------|
 | 🟠→✅ P1 | Path traversal | fs/read.go:12 | `a1b2c3d` → `e4f5a6b` |
 

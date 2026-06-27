@@ -214,10 +214,14 @@ func TestRenderSummaryLedgerGroupedTables(t *testing.T) {
 			t.Fatalf("rendered ledger summary missing %q:\n%s", want, out)
 		}
 	}
+	if !strings.Contains(out, "| Resolved |") {
+		t.Fatalf("resolved table header should be just 'Resolved':\n%s", out)
+	}
 	for _, absent := range []string{
 		"### 🔴 Open",          // no oversized H3 / alarming red marker
 		"<summary>✅ Resolved", // resolved table is no longer collapsed
 		"| Sev |",             // old column header
+		"Opened → Resolved",   // resolved column header simplified to "Resolved"
 		"Review the",          // inline-comment pointer removed in ledger mode
 	} {
 		if strings.Contains(out, absent) {
@@ -258,6 +262,22 @@ func TestLedgerResultLineNoDuplicateResolvedCount(t *testing.T) {
 	}
 	if !strings.Contains(line, "Review_passed") {
 		t.Fatalf("0-open Result line should be the Review passed message, got %q", line)
+	}
+}
+
+func TestLedgerResultLineOpenOmitsCountSuffix(t *testing.T) {
+	// With open findings the Result line is just the per-severity chips; the open
+	// total is NOT appended (it lives in the "⚠️ Open (N)" table heading).
+	ledger := []LedgerEntry{
+		{FP: fpStr(1), Status: statusOpen, Sev: "high"},
+		{FP: fpStr(2), Status: statusOpen, Sev: "low"},
+	}
+	line := ledgerResultLine(ledger)
+	if strings.Contains(line, "open") {
+		t.Fatalf("Result line must not append the open count, got %q", line)
+	}
+	if !strings.Contains(line, "P1") || !strings.Contains(line, "P3") {
+		t.Fatalf("Result line must show per-severity chips, got %q", line)
 	}
 }
 
