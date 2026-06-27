@@ -19,8 +19,9 @@ type fakeNotifGetter struct {
 	notifResp *github.Response
 	notifErr  error
 	prs       map[string][]*github.PullRequest // owner/repo -> open PRs
-	listErr   map[string]error                 // owner/repo -> ListOpenPRs error
-	getPR     map[string]*github.PullRequest   // owner/repo#n -> PR
+	prPages   map[string][][]*github.PullRequest
+	listErr   map[string]error               // owner/repo -> ListOpenPRs error
+	getPR     map[string]*github.PullRequest // owner/repo#n -> PR
 	getPRErr  error
 
 	notifCalls int
@@ -35,10 +36,27 @@ func (f *fakeNotifGetter) ListNotifications(_ stdctx.Context, _ *github.Notifica
 	return f.notifs, f.notifResp, f.notifErr
 }
 
-func (f *fakeNotifGetter) ListOpenPRs(_ stdctx.Context, owner, repo string, _ *github.PullRequestListOptions) ([]*github.PullRequest, *github.Response, error) {
+func (f *fakeNotifGetter) ListOpenPRs(_ stdctx.Context, owner, repo string, opts *github.PullRequestListOptions) ([]*github.PullRequest, *github.Response, error) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	f.listCalls++
+	if pages := f.prPages[owner+"/"+repo]; len(pages) > 0 {
+		page := 0
+		if opts != nil {
+			page = opts.Page
+		}
+		if page == 0 {
+			page = 1
+		}
+		if page > len(pages) {
+			return nil, &github.Response{}, nil
+		}
+		resp := &github.Response{}
+		if page < len(pages) {
+			resp.NextPage = page + 1
+		}
+		return pages[page-1], resp, f.listErr[owner+"/"+repo]
+	}
 	return f.prs[owner+"/"+repo], f.notifResp, f.listErr[owner+"/"+repo]
 }
 
@@ -58,22 +76,30 @@ type pollDispatcher struct {
 	mu      sync.Mutex
 	jobs    []Job
 	failErr error // when non-nil, OnDone is called with this (review failed)
-	accept  bool  // when false, Submit returns false (queue full / coalesced)
+	accept  bool
+	results []SubmitResult
 }
 
 func newPollDispatcher() *pollDispatcher { return &pollDispatcher{accept: true} }
 
-func (d *pollDispatcher) Submit(j Job) bool {
+func (d *pollDispatcher) Submit(j Job) SubmitResult {
 	d.mu.Lock()
 	defer d.mu.Unlock()
+	if len(d.results) > 0 {
+		result := d.results[0]
+		d.results = d.results[1:]
+		if result != SubmitQueued {
+			return result
+		}
+	}
 	if !d.accept {
-		return false
+		return SubmitFull
 	}
 	d.jobs = append(d.jobs, j)
 	if j.OnDone != nil {
 		j.OnDone(d.failErr)
 	}
-	return true
+	return SubmitQueued
 }
 
 func (d *pollDispatcher) count() int {

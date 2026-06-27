@@ -28,6 +28,7 @@ import (
 	"github.com/vanducng/miu-cr/internal/rules"
 	"github.com/vanducng/miu-cr/internal/serve"
 	"github.com/vanducng/miu-cr/internal/store"
+	"github.com/vanducng/miu-cr/internal/store/postgres"
 )
 
 // defaultRulesTokenBudget caps the rendered rules section. Always-on baseline so
@@ -86,6 +87,7 @@ func init() {
 	cli.SetPRReviewer(prReviewer{})
 	cli.SetMCPServer(mcpServerImpl{})
 	cli.SetReviewStoreFactory(openReviewStore)
+	cli.SetHostStoreFactory(openHostStore)
 	cli.SetHistoryStoreFactory(openHistoryStoreForCmd)
 }
 
@@ -112,6 +114,31 @@ func openReviewStore(ctx stdctx.Context) (serve.ReviewStore, func(), error) {
 		return nil, nil, err
 	}
 	return s, closeStore, nil
+}
+
+func openHostStore(ctx stdctx.Context, cfg config.HostConfig) (store.HostStore, func(), error) {
+	if cfg.Store.Backend != "" && cfg.Store.Backend != "postgres" {
+		return nil, nil, &cli.CLIError{
+			Code:    "config.invalid",
+			Message: "host store backend must be postgres",
+			Hint:    "set store.backend: postgres",
+			Exit:    2,
+		}
+	}
+	dsn := firstNonEmpty(os.Getenv("MIUCR_PG_DSN"), cfg.Store.DSN)
+	if dsn == "" {
+		return nil, nil, &cli.CLIError{
+			Code:    "config.invalid",
+			Message: "host store backend is postgres but no DSN is configured",
+			Hint:    "set MIUCR_PG_DSN or host store.dsn",
+			Exit:    2,
+		}
+	}
+	s, err := postgres.Open(ctx, dsn)
+	if err != nil {
+		return nil, nil, err
+	}
+	return s, func() { _ = s.Close() }, nil
 }
 
 // oauthResolver bridges the cli OAuth provider registry + the FS-backed oauth
@@ -200,6 +227,7 @@ func (engineReviewer) Review(ctx stdctx.Context, req cli.ReviewRequest) (cli.Rev
 		RulesTokenBudget: defaultRulesTokenBudget,
 		WantDiagram:      req.WantDiagram,
 		Instruction:      req.Instruction,
+		OperatorPrompt:   req.OperatorPrompt,
 		Progress:         req.Progress,
 		TraceSink:        req.TraceSink,
 	})
@@ -404,6 +432,7 @@ func (prReviewer) ReviewPR(ctx stdctx.Context, req cli.PRReviewRequest) (cli.Rev
 		Retriever:        retr,
 		WantDiagram:      req.WantDiagram,
 		Instruction:      req.Instruction,
+		OperatorPrompt:   req.OperatorPrompt,
 		Conversation:     conversation,
 		Progress:         req.Progress,
 		TraceSink:        req.TraceSink,
@@ -766,6 +795,7 @@ func (a agentAdapter) Review(ctx stdctx.Context, rc engine.AgentContext) (engine
 		WantDiagram:     rc.WantDiagram,     // lockstep: forgetting this silently drops the diagram opt-in
 		Instruction:     rc.Instruction,     // lockstep: forgetting this silently drops the developer steer
 		Conversation:    rc.Conversation,    // lockstep: forgetting this silently drops the PR conversation
+		OperatorPrompt:  rc.OperatorPrompt,
 		RepoDir:         rc.RepoDir,
 		Rev:             rc.Rev,
 		Runner:          rc.Runner,

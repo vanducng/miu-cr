@@ -130,7 +130,7 @@ func (s *Server) handleCreateReview(w http.ResponseWriter, r *http.Request) {
 		Timeout:  s.reviewTO,
 		ReviewID: id,
 	}
-	if !s.dispatcher.Submit(job) {
+	if s.dispatcher.Submit(job) != SubmitQueued {
 		// Queue full or coalesced: no worker will ever process this id, so a 202
 		// would promise a result that never comes. Flip the record to failed and
 		// return 503 so the client retries instead of polling an eternal pending.

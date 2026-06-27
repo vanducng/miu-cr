@@ -7,9 +7,9 @@ Two ways to run miu-cr's PR review automatically. Both reuse the exact same
 in-process review path as `miucr review --pr` ([GitHub PR review](/github-pr/)):
 there is no second engine and no shelling out.
 
-- **`miucr serve`**: a long-running webhook daemon you host. GitHub pushes a
-  `pull_request` event; serve verifies the HMAC, responds `200` fast, and runs
-  the review on a bounded background worker.
+- **`miucr serve`**: a long-running daemon you host. The default mode handles
+  webhooks or lightweight polling from CLI flags. Host mode (`--host`) loads a
+  YAML file, uses Postgres, and watches multiple repositories from one process.
 - **The composite GitHub Action**: no daemon to host. A workflow in the target
   repo installs the released binary and runs `miucr review --pr --post`.
 
@@ -178,6 +178,163 @@ Dedup state is a small JSON file under `~/.config/miu/cr/poll-cursor.json`:
 pool is drained **exactly once** (poll-only drains in `RunPoll`; in webhook+poll
 the HTTP server is the sole drainer and the poller never drains), so in-flight
 reviews finish and there is no goroutine leak.
+
+## Host mode (Postgres multi-repo)
+
+`miucr serve --host` is the long-running, multi-repository form of serve. It is
+designed for a local server, VM, or small container deployment where one daemon
+watches several repositories, keeps durable state in Postgres, and dispatches
+each PR head as a separate review session.
+
+```sh
+MIUCR_CONFIG=/etc/miu/cr/host.yaml \
+MIUCR_PG_DSN='postgres://miucr:miucr@localhost:5432/miucr?sslmode=disable' \
+  miucr serve --host
+
+# Validate YAML and print a redacted summary only.
+MIUCR_CONFIG=examples/review-host/config.example.yaml \
+  miucr serve --host --dry-run-config -o json
+```
+
+Host mode currently focuses on `poll_source: pulls` for full open-PR coverage.
+The classic `miucr serve` webhook path above remains available for webhook-only
+deployments; the host YAML reserves webhook fields for the multi-repo host path
+without changing the existing webhook contract.
+
+### Host YAML shape
+
+The host config lives at `~/.config/miu/cr/host.yaml` by default, or at
+`MIUCR_CONFIG` when set. It is YAML, not TOML, so shared blocks can use anchors
+and each repo can stay short:
+
+```yaml
+version: 1
+default_provider: anthropic
+
+providers:
+  anthropic:
+    kind: anthropic
+    auth_env: ANTHROPIC_API_KEY
+
+store:
+  backend: postgres
+
+github:
+  default_account: personal-pat
+  accounts:
+    personal-pat:
+      mode: pat
+      auth_env: GITHUB_TOKEN
+    app-installation:
+      mode: app
+      app_id_env: MIUCR_GITHUB_APP_ID
+      installation_id_env: MIUCR_GITHUB_APP_INSTALLATION_ID
+      private_key_path_env: MIUCR_GITHUB_APP_PRIVATE_KEY_PATH
+
+x:
+  review_defaults: &review_defaults
+    gate: high
+    filter_mode: diff_context
+    min_severity: low
+    timeout: 900s
+    expand: 20
+    token_budget: 0
+    deep_context: true
+    conversation: true
+
+review:
+  <<: *review_defaults
+
+agent:
+  system_prompt_file: prompts/default-reviewer.md
+
+host:
+  workers: 4
+  poll: true
+  poll_source: pulls
+  poll_interval: 60s
+  workspace_dir: /var/lib/miucr/host/workspaces
+  retention:
+    janitor_interval: 15m
+    workspace_ttl: 168h
+    closed_workspace_ttl: 24h
+    max_workspace_bytes: 50GiB
+    max_workspaces: 100
+    min_free_space: 10GiB
+    db_ttl: 2160h
+  review:
+    post: true
+    force: false
+    suggest: true
+    patch_repair: false
+    approve_clean: false
+
+repos:
+  - name: service-api
+    slug: example-org/service-api
+    git_url: https://github.com/example-org/service-api.git
+    github_account: personal-pat
+    agent:
+      system_prompt_file: prompts/service-reviewer.md
+    rules:
+      - rules/service.md
+    review:
+      min_severity: medium
+```
+
+Layering is intentionally simple: built-in defaults -> top-level `review` and
+`agent` -> `host.review` -> `repos[].review` / `repos[].agent`. Repo-level
+settings are where risky write behavior belongs (`post`, `force`, `suggest`,
+`patch_repair`, `approve_clean`) because they decide what the host may do for
+that repository.
+
+### Accounts, prompts, and rules
+
+- `github.accounts` can mix PATs and GitHub App installations. PATs support
+  `auth_env`, `auth_file`, or `auth_command`. App private keys support
+  `private_key_path`, `private_key_path_env`, or `private_key_command`.
+- `providers.*` supports `auth_env` and `auth_command` too. Literal
+  `auth_token` exists for compatibility, but env or command indirection is
+  preferred.
+- `agent.system_prompt` and `agent.system_prompt_file` are mutually exclusive.
+  A repo prompt overrides the global prompt; absent repo prompts inherit it.
+- `repos[].rules` can reference Markdown files or a non-recursive directory of
+  `*.md` files. Host rules are trusted operator context, appended after the
+  system prompt. The built-in finding schema and severity contract remain in the
+  protected system prompt.
+
+### Storage and retention
+
+Host mode stores repo/session/job/cursor state in Postgres. The runner claims
+jobs with row locks so multiple workers or instances do not review the same PR
+head concurrently. Completed jobs, old attempts, closed sessions, inactive
+workspace records, and stale poll cursors are pruned by `host.retention`.
+Startup applies versioned Postgres migrations under an advisory lock and records
+them in `schema_migrations`, so multiple host instances can boot without racing
+schema changes.
+
+The workspace-size fields are validated and reserved for the managed-workspace
+phase. V1 PR reviews still use the existing temp-clone path, so host mode does
+not delete arbitrary filesystem children under `workspace_dir`.
+
+### Host logging and trace payloads
+
+`MIUCR_LOG_LEVEL` controls process logs (`debug`, `info`, `warn`, `error`;
+default `info`). The review-host compose example defaults it to `debug` so local
+dogfood shows poll activity, review progress, tool turns, and lifecycle events.
+
+Live trace payload logging is separate and off by default. Set
+`MIUCR_TRACE_LOG=true` to stream captured review trace steps into debug logs:
+system prompt, user prompt, selected files, injected rules, resolved model,
+tool calls, and final response. Each payload is redacted with the same free-text
+redactor used elsewhere and then truncated to `MIUCR_TRACE_LOG_MAX_BYTES`
+(default `4096`, minimum `256`). Treat it as a local/debug switch because
+payloads can include prompt and diff context.
+
+A complete runnable example is in
+[`examples/review-host/`](https://github.com/vanducng/miu-cr/tree/main/examples/review-host).
+The Docker publish workflow builds the same runtime image and pushes it as
+`ghcr.io/<owner>/miu-cr` for VPS or Kubernetes deploys.
 
 ## GitHub Action
 

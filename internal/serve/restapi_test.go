@@ -110,7 +110,7 @@ func TestREST_PendingThenDone_RoundTrip(t *testing.T) {
 	st := newMemStore()
 	// A dispatcher that, on submit, marks the review done via UpsertReview to
 	// simulate the worker's final persist.
-	disp := dispatcherFunc(func(j Job) bool {
+	disp := dispatcherFunc(func(j Job) SubmitResult {
 		_, _ = st.UpsertReview(context.Background(), store.ReviewRecord{
 			ID:       j.ReviewID,
 			Status:   "done",
@@ -119,7 +119,7 @@ func TestREST_PendingThenDone_RoundTrip(t *testing.T) {
 			Findings: []engine.Finding{{File: "a.go", Line: 1, Severity: "high", Category: "bug", Rationale: "x"}},
 			Stats:    map[string]any{"files_reviewed": float64(1)},
 		})
-		return true
+		return SubmitQueued
 	})
 	srv := newRESTServer(t, disp, st, testAPIToken, nil)
 
@@ -348,6 +348,6 @@ func TestNew_APITokenWithStore_OK(t *testing.T) {
 }
 
 // dispatcherFunc adapts a func to Dispatcher.
-type dispatcherFunc func(Job) bool
+type dispatcherFunc func(Job) SubmitResult
 
-func (f dispatcherFunc) Submit(j Job) bool { return f(j) }
+func (f dispatcherFunc) Submit(j Job) SubmitResult { return f(j) }

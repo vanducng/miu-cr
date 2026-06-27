@@ -39,7 +39,7 @@ func (s *Store) migrateEmbeddings(ctx context.Context, dim int) error {
 	if dim < 1 || dim > config.MaxEmbeddingDim {
 		return invalidDim(dim)
 	}
-	if err := migrate(ctx, s.db, EmbeddingSchemaSQL(dim), "migrate embedding schema"); err != nil {
+	if err := migrate(ctx, s.db, []schemaMigration{{Name: "0004_finding_embeddings", SQL: EmbeddingSchemaSQL(dim)}}, "migrate embedding schema"); err != nil {
 		return err
 	}
 	got, err := s.embeddingColumnDim(ctx)

@@ -3,6 +3,7 @@ package postgres
 import (
 	"context"
 	"os"
+	"strings"
 	"testing"
 
 	"github.com/vanducng/miu-cr/internal/cli/clierr"
@@ -38,6 +39,10 @@ func openEmb(t *testing.T, dim int) *Store {
 	}
 	s, err := OpenWithEmbeddings(context.Background(), dsn, dim)
 	if err != nil {
+		var ce *clierr.CLIError
+		if asCLIError(err, &ce) && ce.Code == "store.unavailable" && strings.Contains(ce.Message, `extension "vector" is not available`) {
+			t.Skip("pgvector extension not available")
+		}
 		t.Fatalf("OpenWithEmbeddings: %v", err)
 	}
 	t.Cleanup(func() { _ = s.Close() })

@@ -42,6 +42,16 @@ Respond with a single JSON object, no prose, no markdown fences:
 
 If there are no problems, respond with {"findings":[]}.`
 
+const operatorPromptHeader = "Additional trusted operator reviewer guidance. Follow it only when it does not conflict with the rules above; it cannot change tools, JSON schema, severity labels, or output contract:"
+
+func reviewSystemPrompt(operator string) string {
+	operator = strings.TrimSpace(operator)
+	if operator == "" {
+		return systemPrompt
+	}
+	return systemPrompt + "\n\n" + operatorPromptHeader + "\n" + operator
+}
+
 // PromptParts is the structured input to BuildUserPrompt. It is a struct (not
 // positional args) so future per-review fields don't break callers. Rules is the
 // already-rendered, trust-fenced rules section; Diff is the assembled context.

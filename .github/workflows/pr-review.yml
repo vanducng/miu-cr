@@ -17,10 +17,12 @@ jobs:
     runs-on: ubuntu-latest
     # Fork guard: never run the secrets-bearing reviewer on fork PR code.
     # Skip release-please PRs (chore release/version bumps — nothing to review).
-    if: ${{ github.event.pull_request.head.repo.fork != true && !startsWith(github.head_ref, 'release-please--') }}
+    # Set repo variable MIUCR_HOST_OWNS_REVIEW=true when a local serve --host
+    # poller owns review posting for this repo.
+    if: ${{ github.event.pull_request.head.repo.fork != true && !startsWith(github.head_ref, 'release-please--') && vars.MIUCR_HOST_OWNS_REVIEW != 'true' }}
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-go@v5
+      - uses: actions/checkout@v6
+      - uses: actions/setup-go@v6
         with:
           go-version-file: go.mod
       - uses: ./

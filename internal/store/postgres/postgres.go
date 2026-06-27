@@ -64,18 +64,17 @@ func Open(ctx context.Context, dsn string) (*Store, error) {
 		_ = db.Close()
 		return nil, unavailable("connect postgres", err)
 	}
-	if err := migrate(ctx, db, SchemaSQL, "migrate postgres schema"); err != nil {
-		_ = db.Close()
-		return nil, err
-	}
-	// Backfill columns added after reviews first shipped: CREATE TABLE IF NOT
-	// EXISTS is a no-op on an existing table, so ADD COLUMN IF NOT EXISTS is the
-	// idempotent step that adds each one (no-op once present).
-	if err := migrate(ctx, db, alterAddReviewColumnsSQL, "migrate reviews columns"); err != nil {
+	if err := migrate(ctx, db, postgresMigrations, "migrate postgres schema"); err != nil {
 		_ = db.Close()
 		return nil, err
 	}
 	return &Store{db: db}, nil
+}
+
+var postgresMigrations = []schemaMigration{
+	{Name: "0001_reviews_pr_findings", SQL: SchemaSQL},
+	{Name: "0002_reviews_extended_columns", SQL: alterAddReviewColumnsSQL},
+	{Name: "0003_host_schema", SQL: HostSchemaSQL},
 }
 
 // alterAddReviewColumnsSQL idempotently adds the post-ship reviews columns to a
@@ -100,10 +99,21 @@ ALTER TABLE reviews ADD COLUMN IF NOT EXISTS trace_json TEXT NOT NULL DEFAULT ''
 // from parallel test binaries, hitting exactly this race.
 const migrationLockKey int64 = 0x6d697563725f3031 // "miucr_01"
 
-// migrate runs ddl under migrationLockKey inside a transaction so concurrent
-// Open/OpenWithEmbeddings calls serialize their CREATE … IF NOT EXISTS DDL. The
-// xact-scoped advisory lock auto-releases at COMMIT.
-func migrate(ctx context.Context, db *sql.DB, ddl, op string) error {
+type schemaMigration struct {
+	Name string
+	SQL  string
+}
+
+const schemaMigrationsSQL = `
+CREATE TABLE IF NOT EXISTS schema_migrations (
+	name       TEXT PRIMARY KEY,
+	applied_at TIMESTAMPTZ NOT NULL DEFAULT now()
+);`
+
+// migrate runs migrations under migrationLockKey inside a transaction so concurrent
+// Open/OpenWithEmbeddings calls serialize their schema changes. The xact-scoped
+// advisory lock auto-releases at COMMIT.
+func migrate(ctx context.Context, db *sql.DB, migrations []schemaMigration, op string) error {
 	tx, err := db.BeginTx(ctx, nil)
 	if err != nil {
 		return unavailable(op, err)
@@ -112,8 +122,26 @@ func migrate(ctx context.Context, db *sql.DB, ddl, op string) error {
 	if _, err := tx.ExecContext(ctx, `SELECT pg_advisory_xact_lock($1)`, migrationLockKey); err != nil {
 		return unavailable(op, err)
 	}
-	if _, err := tx.ExecContext(ctx, ddl); err != nil {
+	if _, err := tx.ExecContext(ctx, schemaMigrationsSQL); err != nil {
 		return unavailable(op, err)
+	}
+	for _, m := range migrations {
+		if m.Name == "" || m.SQL == "" {
+			return unavailable(op, fmt.Errorf("invalid schema migration"))
+		}
+		applied := false
+		if err := tx.QueryRowContext(ctx, `SELECT EXISTS (SELECT 1 FROM schema_migrations WHERE name=$1)`, m.Name).Scan(&applied); err != nil {
+			return unavailable(op, err)
+		}
+		if applied {
+			continue
+		}
+		if _, err := tx.ExecContext(ctx, m.SQL); err != nil {
+			return unavailable(op, fmt.Errorf("%s: %w", m.Name, err))
+		}
+		if _, err := tx.ExecContext(ctx, `INSERT INTO schema_migrations (name) VALUES ($1)`, m.Name); err != nil {
+			return unavailable(op, err)
+		}
 	}
 	if err := tx.Commit(); err != nil {
 		return unavailable(op, err)

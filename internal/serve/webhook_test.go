@@ -24,11 +24,14 @@ type fakeDispatcher struct {
 	accept bool
 }
 
-func (f *fakeDispatcher) Submit(j Job) bool {
+func (f *fakeDispatcher) Submit(j Job) SubmitResult {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	f.jobs = append(f.jobs, j)
-	return f.accept
+	if !f.accept {
+		return SubmitFull
+	}
+	return SubmitQueued
 }
 
 func (f *fakeDispatcher) submitted() []Job {

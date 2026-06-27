@@ -1,6 +1,6 @@
 ---
 title: Use cases & recipes
-description: "Command-first local-review recipes: pre-commit gates, pre-PR branch checks, agent fix-loops, SARIF in your editor, and Makefile quality gates."
+description: "Command-first local review recipes: pre-commit gates, pre-PR branch checks, agent fix-loops, SARIF in your editor, and Makefile quality gates."
 ---
 
 Concrete, copy-paste workflows for reviewing your own changes **before** they
@@ -8,7 +8,7 @@ leave your machine. Each recipe is the exact command plus a short why/how. The
 review modes, the gate, output formats, and exit codes are covered once in
 [Usage](/usage/); this page is the recipes that compose them. Runnable
 artifacts for several of these (a git hook, a Makefile, an agent script) live in
-[`examples/local-review/`](https://github.com/vanducng/miu-cr/tree/main/examples/local-review).
+[`examples/review-local/`](https://github.com/vanducng/miu-cr/tree/main/examples/review-local).
 
 ## Pre-commit gate
 
@@ -23,7 +23,7 @@ miucr review --staged --gate high
 - `--gate high` exits `2` when any finding reaches `high` or `critical`; `0`
   otherwise. A non-zero exit aborts the commit when run from a hook.
 - Wire it as a git hook so it runs automatically; see the
-  [`pre-commit` example](https://github.com/vanducng/miu-cr/tree/main/examples/local-review)
+  [`pre-commit` example](https://github.com/vanducng/miu-cr/tree/main/examples/review-local)
   (copy to `.git/hooks/pre-commit`, `chmod +x`; bypass once with
   `git commit --no-verify`).
 
@@ -87,7 +87,7 @@ miucr review --staged -o json        # agent parses .data.findings, applies fixe
 - The integrated path is the **MCP server**: `miucr mcp` exposes `review_run`
   and `review_get` so the agent calls a tool instead of shelling out and parsing
   text. See [MCP integration](/mcp/); the
-  [`agent-review.sh` example](https://github.com/vanducng/miu-cr/tree/main/examples/local-review)
+  [`agent-review.sh` example](https://github.com/vanducng/miu-cr/tree/main/examples/review-local)
   shows the shell-loop shape for hosts without MCP.
 
 ## SARIF into your editor / code scanning
@@ -128,7 +128,7 @@ review:
 - `make review` / `npm run review` runs the gate and exits non-zero on a `high`+
   finding, usable as a local pre-push check or a CI step.
 - A ready-made `Makefile` with `review` and `review-range` targets is in
-  [`examples/local-review/`](https://github.com/vanducng/miu-cr/tree/main/examples/local-review).
+  [`examples/review-local/`](https://github.com/vanducng/miu-cr/tree/main/examples/review-local).
 
 ## Project-context-aware review
 

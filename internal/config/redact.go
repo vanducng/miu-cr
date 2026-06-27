@@ -61,6 +61,72 @@ func RedactConfig(cfg Config) Config {
 	return out
 }
 
+func RedactHostConfig(cfg HostConfig) HostConfig {
+	out := cfg
+	out.Providers = make(map[string]HostProvider, len(cfg.Providers))
+	for name, p := range cfg.Providers {
+		if p.AuthToken != "" {
+			p.AuthToken = redactedMask
+		}
+		if len(p.AuthCommand) > 0 {
+			p.AuthCommand = []string{redactedMask}
+		}
+		out.Providers[name] = p
+	}
+	if out.Store.DSN != "" {
+		out.Store.DSN = redactedMask
+	}
+	out.Agent = redactHostAgent(cfg.Agent)
+	if cfg.Github.Accounts != nil {
+		out.Github.Accounts = make(map[string]HostGithubAccount, len(cfg.Github.Accounts))
+		for name, acct := range cfg.Github.Accounts {
+			if acct.AuthFile != "" {
+				acct.AuthFile = redactedMask
+			}
+			if len(acct.AuthCommand) > 0 {
+				acct.AuthCommand = []string{redactedMask}
+			}
+			if acct.AppID != "" {
+				acct.AppID = redactedMask
+			}
+			if acct.ClientID != "" {
+				acct.ClientID = redactedMask
+			}
+			if acct.InstallationID != "" {
+				acct.InstallationID = redactedMask
+			}
+			if acct.PrivateKeyPath != "" {
+				acct.PrivateKeyPath = redactedMask
+			}
+			if len(acct.PrivateKeyCommand) > 0 {
+				acct.PrivateKeyCommand = []string{redactedMask}
+			}
+			out.Github.Accounts[name] = acct
+		}
+	}
+	if cfg.Repos != nil {
+		out.Repos = make([]HostRepo, len(cfg.Repos))
+		for i, repo := range cfg.Repos {
+			repo.Agent = redactHostAgent(repo.Agent)
+			if len(repo.Rules) > 0 {
+				repo.Rules = []string{redactedMask}
+			}
+			out.Repos[i] = repo
+		}
+	}
+	return out
+}
+
+func redactHostAgent(agent HostAgent) HostAgent {
+	if agent.SystemPrompt != "" {
+		agent.SystemPrompt = redactedMask
+	}
+	if agent.SystemPromptFile != "" {
+		agent.SystemPromptFile = redactedMask
+	}
+	return agent
+}
+
 // RedactString masks credentials in an arbitrary string: URL userinfo passwords,
 // key=value secret assignments, Authorization/x-api-key header values, bare Bearer
 // tokens, and delimiter-less provider tokens (sk-, GitHub gh*_, and gateway

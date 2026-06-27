@@ -36,6 +36,8 @@ type Job struct {
 	Ref     string
 	Token   string
 	Timeout time.Duration
+	Review  *JobReviewOptions
+	HeadSHA string
 	// ReviewID is the server-generated id of a REST-initiated review (empty on the
 	// webhook/poll paths). reviewFn persists the FINAL record under this id; the
 	// CLI/webhook/poll paths leave it empty and skip that upsert.
@@ -47,11 +49,60 @@ type Job struct {
 	OnDone func(error)
 }
 
-// Dispatcher accepts review jobs. Submit returns false when the work could not
-// be enqueued (full queue) so the caller can loud-log + count, never silently
-// drop. The real bounded pool is P2; tests inject a fake.
+type JobReviewOptions struct {
+	Post           bool
+	Suggest        bool
+	PatchRepair    bool
+	ApproveClean   bool
+	Force          bool
+	Conversation   bool
+	Gate           string
+	FilterMode     string
+	MinSeverity    string
+	Mode           string
+	Provider       string
+	APIKey         string
+	BaseURL        string
+	AuthToken      string
+	Model          string
+	OperatorPrompt string
+	ExpandWindow   int
+	TokenBudget    int
+	DeepContext    bool
+	ContextHops    int
+}
+
+// SubmitResult tells callers why a job was not enqueued.
+type SubmitResult int
+
+const (
+	SubmitQueued SubmitResult = iota
+	SubmitClosed
+	SubmitFull
+	SubmitCoalesced
+	SubmitDuplicate
+)
+
+func (r SubmitResult) String() string {
+	switch r {
+	case SubmitQueued:
+		return "queued"
+	case SubmitClosed:
+		return "closed"
+	case SubmitFull:
+		return "full"
+	case SubmitCoalesced:
+		return "coalesced"
+	case SubmitDuplicate:
+		return "duplicate"
+	default:
+		return "unknown"
+	}
+}
+
+// Dispatcher accepts review jobs. The real bounded pool is P2; tests inject a fake.
 type Dispatcher interface {
-	Submit(Job) bool
+	Submit(Job) SubmitResult
 }
 
 // repoRef is the structural allowlist key. Comparing {owner,repo} fields (rather

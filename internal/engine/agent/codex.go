@@ -212,7 +212,8 @@ func (a *codexAgent) Review(ctx stdctx.Context, rc Context) (engine.ReviewOutput
 	}
 
 	userPrompt := BuildUserPrompt(PromptParts{Rules: rc.Rules, SemanticContext: rc.SemanticContext, ProjectContext: rc.ProjectContext, RelatedContext: rc.RelatedContext, WantDiagram: rc.WantDiagram, Instruction: rc.Instruction, Conversation: rc.Conversation, Diff: rc.Text})
-	rc.Trace.SetSystemPrompt(systemPrompt)
+	system := reviewSystemPrompt(rc.OperatorPrompt)
+	rc.Trace.SetSystemPrompt(system)
 	rc.Trace.SetModel("codex", a.model)
 	rc.Trace.SetPrompt(userPrompt)
 	input := []codexItem{{
@@ -232,7 +233,7 @@ func (a *codexAgent) Review(ctx stdctx.Context, rc Context) (engine.ReviewOutput
 		rc.progress(fmt.Sprintf("thinking… (turn %d)", turn+1))
 		req := codexReq{
 			Model:        a.model,
-			Instructions: systemPrompt,
+			Instructions: system,
 			Input:        input,
 			Tools:        codexTools(),
 			Store:        false,

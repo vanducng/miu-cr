@@ -371,7 +371,7 @@ func ExistingFingerprints(ctx stdctx.Context, client Client, info *PRInfo) (map[
 // (no suggestions, no approve).
 type PostReviewOptions struct {
 	Suggest       bool       // emit native single-line suggested-changes when proven clean
-	ApproveClean  bool       // resolve Event=APPROVE when the PR is clean and all safety predicates hold
+	ApproveClean  bool       // resolve Event=APPROVE when the run has no findings and all safety predicates hold
 	Gate          string     // gate severity used by the caller to compute GateClean
 	GateClean     bool       // caller-computed !engine.GateFailed(findings, Gate)
 	ReviewedFiles int        // count of files actually reviewed; APPROVE requires >0
@@ -434,12 +434,11 @@ type PostedFinding struct {
 // already posted, caps the result at maxInlineComments (highest severity first so a
 // 422-triggering oversized review can't happen), then submits ONE review anchored to
 // the head SHA with comfort-fade inline comments (Side=RIGHT/Line only, never
-// Position). The Event is COMMENT unless opts.ApproveClean and every safety
-// predicate holds (resolveEvent), in which case it is APPROVE. A failed APPROVE
-// degrades to COMMENT when the cause is a 422 precondition miss: self_approve_forbidden
-// (the bot is the author) or approve_rejected (any other 422: stale head, branch
-// protection, ...), never an error. A non-422 API failure surfaces as an error and
-// never reports a phantom approval.
+// Position). The Event is COMMENT unless opts.ApproveClean and all approval
+// predicates hold (including zero findings), in which case it is APPROVE.
+// A failed APPROVE degrades to COMMENT on a 422 precondition miss:
+// self_approve_forbidden (bot is the author) or approve_rejected (any other 422).
+// A non-422 API failure surfaces as an error and never reports a phantom approval.
 // summaryFn is an optional review-body hook given the inline-omitted set (known only
 // after the cap is applied). In the current model the summary is a separate upserted
 // issue comment (UpsertSummaryComment), so the production caller passes nil and the
@@ -513,7 +512,7 @@ func PostReview(ctx stdctx.Context, client Client, info *PRInfo, findings []engi
 		submitted = append(submitted, PostedFinding{Fingerprint: fp, Path: f.File})
 	}
 
-	event, reason := resolveApproveEvent(ctx, client, info, opts)
+	event, reason := resolveApproveEvent(ctx, client, info, opts, len(findings))
 	result := PostReviewResult{Posted: len(comments), Omitted: omitted, OmittedFindings: omittedFindings, Ranges: ranges, Suggestions: suggestions, Event: event, Reason: reason}
 
 	// Nothing to say AND not approving: don't create an empty review.
@@ -583,7 +582,7 @@ func PostReview(ctx stdctx.Context, client Client, info *PRInfo, findings []engi
 // resolveEvent. It performs no writes; it returns the Event/reason PostReview
 // submits. Any read error degrades to COMMENT (never an error) so a precondition
 // check can't fail a run; the self-approve 422 is handled reactively in PostReview.
-func resolveApproveEvent(ctx stdctx.Context, client Client, info *PRInfo, opts PostReviewOptions) (event, reason string) {
+func resolveApproveEvent(ctx stdctx.Context, client Client, info *PRInfo, opts PostReviewOptions, findingsCount int) (event, reason string) {
 	if !opts.ApproveClean {
 		return "COMMENT", approveReasonNotRequested
 	}
@@ -605,7 +604,7 @@ func resolveApproveEvent(ctx stdctx.Context, client Client, info *PRInfo, opts P
 		headUnchanged = fresh.GetHead().GetSHA() == info.HeadSHA
 	}
 
-	return resolveEvent(opts, *info, opts.GateClean, opts.ReviewedFiles, headUnchanged)
+	return resolveEvent(opts, *info, opts.GateClean, findingsCount, opts.ReviewedFiles, headUnchanged)
 }
 
 // isSelfApprove422 reports whether err is a GitHub 422 specifically from approving

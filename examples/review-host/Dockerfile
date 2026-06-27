@@ -1,15 +1,15 @@
-# Multi-stage pure-Go build — CGO_ENABLED=0, static binary, distroless final image.
-# Result: ~20 MB image with no shell, no package manager, and minimal attack surface.
+# Multi-stage pure-Go build — CGO_ENABLED=0, static binary, minimal runtime image.
+# The runtime image includes git because PR review needs local git operations.
 #
 # Build:
-#   docker build -t miucr-server -f examples/docker/Dockerfile .
+#   docker build -t miucr-server -f examples/review-host/Dockerfile .
 #
 # Run (webhook mode):
 #   docker run --rm \
 #     -p 8080:8080 \
 #     -e WEBHOOK_SECRET="$(openssl rand -hex 32)" \
-#     -e GITHUB_TOKEN="ghp_..." \
-#     -e ANTHROPIC_API_KEY="sk-ant-..." \
+#     -e GITHUB_TOKEN="your-github-token" \
+#     -e ANTHROPIC_API_KEY="your-provider-key" \
 #     miucr-server serve \
 #       --repos owner/repo \
 #       --addr :8080 \
@@ -17,8 +17,8 @@
 #
 # Run (poll-only, no webhook secret required):
 #   docker run --rm \
-#     -e GITHUB_TOKEN="ghp_..." \
-#     -e ANTHROPIC_API_KEY="sk-ant-..." \
+#     -e GITHUB_TOKEN="your-github-token" \
+#     -e ANTHROPIC_API_KEY="your-provider-key" \
 #     miucr-server serve \
 #       --repos owner/repo \
 #       --poll \
@@ -43,16 +43,20 @@ RUN CGO_ENABLED=0 GOOS=linux GOARCH=${TARGETARCH} \
       ./cmd/miucr
 
 # ── Stage 2: run ─────────────────────────────────────────────────────────────
-# gcr.io/distroless/static-debian12 includes CA certs and timezone data but
-# no shell, no apt, no package manager. The binary must be fully static (CGO=0).
-FROM gcr.io/distroless/static-debian12:nonroot
+FROM alpine:3.22@sha256:14358309a308569c32bdc37e2e0e9694be33a9d99e68afb0f5ff33cc1f695dce
+
+RUN apk add --no-cache ca-certificates git openssh-client \
+    && addgroup -S -g 65532 nonroot \
+    && adduser -S -D -H -u 65532 -G nonroot -h /home/nonroot -s /sbin/nologin nonroot \
+    && mkdir -p /home/nonroot/.config/miu/cr \
+    && chown -R 65532:65532 /home/nonroot
 
 COPY --from=build /out/miucr /usr/local/bin/miucr
 
 # Expose the default webhook port; override with --addr at runtime.
 EXPOSE 8080
 
-# Run as the non-root user provided by the distroless image (uid 65532).
-USER nonroot:nonroot
+ENV HOME=/home/nonroot
+USER 65532:65532
 
 ENTRYPOINT ["/usr/local/bin/miucr"]

@@ -243,11 +243,12 @@ type AgentContext struct {
 	Instruction string
 	// Conversation is the optional fetched PR conversation (Untrusted, fenced,
 	// byte-capped, context-only). LOCKSTEP: mirror Instruction at every hop.
-	Conversation string
-	RepoDir      string
-	Rev          string
-	Runner       *gitcmd.Runner
-	Progress     func(string) // nil = silent; milestone strings only, never secrets
+	Conversation   string
+	OperatorPrompt string
+	RepoDir        string
+	Rev            string
+	Runner         *gitcmd.Runner
+	Progress       func(string) // nil = silent; milestone strings only, never secrets
 	// Trace, when non-nil, captures the raw prompt, per-turn tool calls, and raw
 	// final response for persistence. nil = no capture (mirrors Progress).
 	Trace *ReviewTrace
@@ -332,6 +333,8 @@ type Request struct {
 	// drops it on fork PRs. Threaded onto AgentContext so it rides the USER turn; empty
 	// is byte-identical. LOCKSTEP: mirror Instruction at every hop.
 	Conversation string
+	// OperatorPrompt is trusted host policy. LOCKSTEP: mirror Conversation at every hop.
+	OperatorPrompt string
 
 	// Progress is the optional milestone sink (stderr); nil = silent. The wire/cli
 	// layer builds it from --verbose/--quiet + a TTY check. Only milestone strings
@@ -515,6 +518,7 @@ func (e *Engine) Review(ctx stdctx.Context, req Request) (ReviewResult, error) {
 		WantDiagram:     req.WantDiagram,
 		Instruction:     req.Instruction,
 		Conversation:    req.Conversation,
+		OperatorPrompt:  req.OperatorPrompt,
 		RepoDir:         req.RepoDir,
 		Rev:             rev,
 		Runner:          e.Runner,

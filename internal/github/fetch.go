@@ -167,12 +167,10 @@ const maxConvPages = 10 // bound conversation pagination (~1000 comments) so a h
 
 const conversationTruncated = "\n…(conversation truncated)"
 
-// FetchConversation paginates the PR's prior miucr review summaries, inline
-// finding threads, and developer issue replies into one labeled, byte-capped
-// advisory string for the USER turn. It is best-effort: any list error is logged
-// (redacted) and returns "": a conversation fetch never fails the review (mirrors
-// skipUnchanged's degrade-to-default). The caller drops it on fork PRs; this
-// helper does no trust decision. Returns "" when there is nothing to inject.
+// FetchConversation paginates prior PR conversation into one labeled,
+// byte-capped advisory string for the USER turn. It is best-effort: any list
+// error is logged (redacted) and returns "" for that source. The caller drops it
+// on fork PRs; this helper does no trust decision.
 func FetchConversation(ctx stdctx.Context, client Client, info *PRInfo) string {
 	var b strings.Builder
 
@@ -183,6 +181,13 @@ func FetchConversation(ctx stdctx.Context, client Client, info *PRInfo) string {
 	}
 	// Early-exit: once the byte budget is reached the rest is truncated anyway, so skip
 	// the remaining (paginated) fetches.
+	if b.Len() < maxConversationBytes {
+		if reviews := fetchReviewOverviews(ctx, client, info); reviews != "" {
+			b.WriteString("PR review overviews:\n")
+			b.WriteString(reviews)
+			b.WriteString("\n")
+		}
+	}
 	if b.Len() < maxConversationBytes {
 		if threads := fetchInlineThreads(ctx, client, info); threads != "" {
 			b.WriteString("Inline finding threads:\n")
@@ -248,6 +253,38 @@ func fetchPriorSummaries(ctx stdctx.Context, client Client, info *PRInfo) string
 				b.WriteString(body)
 				b.WriteString("\n")
 			}
+		}
+		if resp == nil || resp.NextPage == 0 {
+			break
+		}
+		opts.Page = resp.NextPage
+	}
+	return strings.TrimSpace(b.String())
+}
+
+func fetchReviewOverviews(ctx stdctx.Context, client Client, info *PRInfo) string {
+	var b strings.Builder
+	opts := &gh.ListOptions{PerPage: 100}
+	for page := 0; page < maxConvPages; page++ {
+		reviews, resp, err := client.ListReviews(ctx, info.Owner, info.Repo, info.Number, opts)
+		if err != nil {
+			os.Stderr.WriteString(config.RedactString("miucr: conversation fetch (reviews) skipped: "+err.Error()) + "\n")
+			return ""
+		}
+		for _, r := range reviews {
+			body := strings.TrimSpace(r.GetBody())
+			if body == "" || strings.Contains(body, ReviewMarker) || strings.Contains(body, fpPrefix) {
+				continue
+			}
+			author := "unknown"
+			if r.User != nil && r.User.GetLogin() != "" {
+				author = r.User.GetLogin()
+			}
+			state := strings.ToLower(strings.TrimSpace(r.GetState()))
+			if state == "" {
+				state = "review"
+			}
+			fmt.Fprintf(&b, "- %s by %s: %s\n", state, author, body)
 		}
 		if resp == nil || resp.NextPage == 0 {
 			break

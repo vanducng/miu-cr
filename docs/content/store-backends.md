@@ -95,7 +95,7 @@ parity test are untouched by it. See
 - The default test suite (`go test ./...`) is **keyless and serverless**: it runs
   the shared backend-conformance suite against SQLite only.
 - CI additionally runs the **same conformance suite against real Postgres** via a
-  `pgvector/pgvector:pg16` service container (`MIUCR_TEST_PG_DSN` set in that job),
+  `pgvector/pgvector:pg17` service container (`MIUCR_TEST_PG_DSN` set in that job),
   so the Postgres path (including the opt-in `pgvector` EmbeddingStore) is
   exercised on every PR.
 - A manual, gated end-to-end smoke against your own Postgres:

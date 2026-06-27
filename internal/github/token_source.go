@@ -22,7 +22,7 @@ func ReadPrivateKeyFile(path string) (*rsa.PrivateKey, error) {
 	if err != nil {
 		return nil, fmt.Errorf("github: read private key: %w", err)
 	}
-	key, perr := parsePrivateKey(raw)
+	key, perr := ParsePrivateKeyPEM(raw)
 	for i := range raw {
 		raw[i] = 0
 	}
@@ -30,6 +30,10 @@ func ReadPrivateKeyFile(path string) (*rsa.PrivateKey, error) {
 		return nil, perr
 	}
 	return key, nil
+}
+
+func ParsePrivateKeyPEM(raw []byte) (*rsa.PrivateKey, error) {
+	return parsePrivateKey(raw)
 }
 
 // TokenSource yields the bearer token NewClient/WithAuthToken authenticates with.

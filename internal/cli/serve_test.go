@@ -3,11 +3,23 @@ package cli
 import (
 	"bytes"
 	stdctx "context"
+	"encoding/json"
+	"os"
+	"path/filepath"
+	"strings"
 	"testing"
 	"time"
+
+	"github.com/vanducng/miu-cr/internal/config"
 )
 
 func runServe(t *testing.T, args ...string) error {
+	t.Helper()
+	_, err := runServeOut(t, args...)
+	return err
+}
+
+func runServeOut(t *testing.T, args ...string) (string, error) {
 	t.Helper()
 	opts := &options{output: "json"}
 	cmd := serveCommand(opts)
@@ -17,7 +29,8 @@ func runServe(t *testing.T, args ...string) error {
 	cmd.SetArgs(args)
 	cmd.SilenceUsage = true
 	cmd.SilenceErrors = true
-	return cmd.Execute()
+	err := cmd.Execute()
+	return buf.String(), err
 }
 
 // runServeCtx runs serveCommand under ctx so a long-running mode (poll/webhook)
@@ -103,4 +116,252 @@ func TestServe_PollSourceInvalid(t *testing.T) {
 	if !asCLIError(err, &ce) || ce.Code != "serve.poll_source_invalid" || ce.Exit != 2 {
 		t.Fatalf("want serve.poll_source_invalid exit 2, got %+v", err)
 	}
+}
+
+func TestServeHostDryRunConfig(t *testing.T) {
+	path := writeServeHostConfig(t, `version: 1
+store:
+  backend: postgres
+  dsn: postgres://user:secret@localhost:5432/db
+github:
+  default_account: pat
+  accounts:
+    pat:
+      mode: pat
+      auth_env: GITHUB_TOKEN
+host:
+  poll_source: pulls
+repos:
+  - name: service-api
+    slug: example-org/service-api
+    git_url: https://github.com/example-org/service-api.git
+`)
+	t.Setenv("MIUCR_CONFIG", path)
+	t.Setenv("WEBHOOK_SECRET", "")
+	t.Setenv("GITHUB_TOKEN", "")
+
+	out, err := runServeOut(t, "--host", "--dry-run-config")
+	if err != nil {
+		t.Fatalf("dry-run config: %v\n%s", err, out)
+	}
+	if strings.Contains(out, "secret@") {
+		t.Fatalf("dsn secret leaked: %s", out)
+	}
+	var env Envelope
+	if err := json.Unmarshal([]byte(out), &env); err != nil {
+		t.Fatalf("decode envelope: %v\n%s", err, out)
+	}
+	if !env.OK || env.Kind != "serve.host_config" {
+		t.Fatalf("envelope = %+v", env)
+	}
+	if env.Summary["repos"].(float64) != 1 || env.Summary["accounts"].(float64) != 1 {
+		t.Fatalf("summary = %+v", env.Summary)
+	}
+}
+
+func TestServeHostDryRunRejectsUnsupportedPollSourceOverride(t *testing.T) {
+	path := writeServeHostConfig(t, `version: 1
+store:
+  backend: postgres
+github:
+  default_account: pat
+  accounts:
+    pat:
+      mode: pat
+      auth_env: GITHUB_TOKEN
+host:
+  poll_source: pulls
+repos:
+  - name: service-api
+    slug: example-org/service-api
+    git_url: https://github.com/example-org/service-api.git
+`)
+	t.Setenv("MIUCR_CONFIG", path)
+	err := runServe(t, "--host", "--dry-run-config", "--poll-source", "notifications")
+	var ce *CLIError
+	if !asCLIError(err, &ce) || ce.Code != "config.invalid" || ce.Exit != 2 {
+		t.Fatalf("want config.invalid exit 2, got %+v", err)
+	}
+}
+
+func TestServeDryRunConfigRequiresHost(t *testing.T) {
+	err := runServe(t, "--dry-run-config")
+	var ce *CLIError
+	if !asCLIError(err, &ce) || ce.Code != "serve.host_required" || ce.Exit != 2 {
+		t.Fatalf("want serve.host_required exit 2, got %+v", err)
+	}
+}
+
+func TestServeHostStoreUnwired(t *testing.T) {
+	path := writeServeHostConfig(t, `version: 1
+store:
+  backend: postgres
+github:
+  default_account: pat
+  accounts:
+    pat:
+      mode: pat
+      auth_env: GITHUB_TOKEN
+host:
+  poll_source: pulls
+repos:
+  - name: service-api
+    slug: example-org/service-api
+    git_url: https://github.com/example-org/service-api.git
+`)
+	t.Setenv("MIUCR_CONFIG", path)
+	err := runServe(t, "--host")
+	var ce *CLIError
+	if !asCLIError(err, &ce) || ce.Code != "serve.host_store_unwired" || ce.Exit != 1 {
+		t.Fatalf("want serve.host_store_unwired exit 1, got %+v", err)
+	}
+}
+
+func TestServeHostRuleDirectory(t *testing.T) {
+	base := t.TempDir()
+	ruleDir := filepath.Join(base, "rules")
+	if err := os.Mkdir(ruleDir, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(ruleDir, "b.md"), []byte("second"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(ruleDir, "a.md"), []byte("first"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(ruleDir, "skip.txt"), []byte("ignored"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	prompt, promptHash, rulesHash, err := hostOperatorPrompt(base, config.HostAgent{SystemPrompt: "Base prompt."}, config.HostAgent{}, []string{"rules"})
+	if err != nil {
+		t.Fatalf("hostOperatorPrompt: %v", err)
+	}
+	if !strings.Contains(prompt, "Base prompt.") || !strings.Contains(prompt, "Trusted host rules:") {
+		t.Fatalf("operator prompt missing sections: %q", prompt)
+	}
+	if strings.Index(prompt, "first") > strings.Index(prompt, "second") || strings.Contains(prompt, "ignored") {
+		t.Fatalf("rules not sorted/filtered: %q", prompt)
+	}
+	if promptHash == "" || rulesHash == "" {
+		t.Fatalf("hashes should be populated: prompt=%q rules=%q", promptHash, rulesHash)
+	}
+}
+
+func TestRunHostCommandOutputReportsMissingBinary(t *testing.T) {
+	_, err := runHostCommandOutput(stdctx.Background(), []string{"/definitely/missing/miucr-auth-command"})
+	var ce *CLIError
+	if !asCLIError(err, &ce) || ce.Code != "agent.auth_command_failed" || !strings.Contains(ce.Message, "binary not found") {
+		t.Fatalf("want binary not found auth_command error, got %+v", err)
+	}
+}
+
+func TestHostSecretFileReadsRegularFile(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "token")
+	if err := os.WriteFile(path, []byte(" token-value \n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	got, err := hostSecret(stdctx.Background(), "", path, nil)
+	if err != nil {
+		t.Fatalf("hostSecret: %v", err)
+	}
+	if got != "token-value" {
+		t.Fatalf("secret = %q, want token-value", got)
+	}
+}
+
+func TestHostSecretFileRejectsSymlink(t *testing.T) {
+	dir := t.TempDir()
+	target := filepath.Join(dir, "target")
+	if err := os.WriteFile(target, []byte("token"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	link := filepath.Join(dir, "link")
+	if err := os.Symlink(target, link); err != nil {
+		t.Fatal(err)
+	}
+	_, err := hostSecret(stdctx.Background(), "", link, nil)
+	var ce *CLIError
+	if !asCLIError(err, &ce) || ce.Code != "config.invalid" || !strings.Contains(ce.Message, "symlink") {
+		t.Fatalf("want config.invalid symlink error, got %+v", err)
+	}
+}
+
+func TestSecretBufferRejectsOverflow(t *testing.T) {
+	var b secretBuffer
+	b.limit = 3
+	n, err := b.Write([]byte("abcd"))
+	if err == nil || n != 0 {
+		t.Fatalf("want overflow error with n=0, got n=%d err=%v", n, err)
+	}
+	if b.String() != "" {
+		t.Fatalf("overflow should not retain partial secret output, got %q", b.String())
+	}
+}
+
+func TestBuildServeHostReposAppliesHostPollDefault(t *testing.T) {
+	hostPoll := false
+	cfg := config.HostConfig{
+		Host: config.HostRuntime{Poll: &hostPoll},
+		Repos: []config.HostRepo{{
+			Name:          "service-api",
+			Slug:          "example-org/service-api",
+			Owner:         "example-org",
+			Repo:          "service-api",
+			GitURL:        "https://github.com/example-org/service-api.git",
+			GithubAccount: "pat",
+		}},
+	}
+	repos, _, err := buildServeHostRepos(stdctx.Background(), cfg, filepath.Join(t.TempDir(), "host.yaml"))
+	if err != nil {
+		t.Fatalf("buildServeHostRepos: %v", err)
+	}
+	if repos[0].Poll {
+		t.Fatalf("repo poll should inherit host.poll=false: %+v", repos[0])
+	}
+}
+
+func TestBuildServeHostReposAllowsZeroReviewOverrides(t *testing.T) {
+	one := 1
+	twenty := 20
+	zero := 0
+	cfg := config.HostConfig{
+		Review: config.HostReview{Expand: &twenty, ContextHops: &one},
+		Host:   config.HostRuntime{Review: config.HostReview{Expand: &twenty, ContextHops: &one}},
+		Repos: []config.HostRepo{{
+			Name:          "service-api",
+			Slug:          "example-org/service-api",
+			Owner:         "example-org",
+			Repo:          "service-api",
+			GitURL:        "https://github.com/example-org/service-api.git",
+			GithubAccount: "pat",
+			Review:        config.HostReview{Expand: &zero, ContextHops: &zero},
+		}},
+	}
+	repos, _, err := buildServeHostRepos(stdctx.Background(), cfg, filepath.Join(t.TempDir(), "host.yaml"))
+	if err != nil {
+		t.Fatalf("buildServeHostRepos: %v", err)
+	}
+	if repos[0].Review.ExpandWindow != 0 || repos[0].Review.ContextHops != 0 {
+		t.Fatalf("zero overrides not applied: %+v", repos[0].Review)
+	}
+}
+
+func TestHostProviderDefaultFallbackDoesNotCopyAuthToken(t *testing.T) {
+	provider, err := hostProvider(config.HostConfig{DefaultProvider: string(config.KindAnthropic)})
+	if err != nil {
+		t.Fatalf("hostProvider: %v", err)
+	}
+	if provider.AuthToken != "" {
+		t.Fatalf("default fallback copied literal auth token")
+	}
+}
+
+func writeServeHostConfig(t *testing.T, body string) string {
+	t.Helper()
+	path := filepath.Join(t.TempDir(), "host.yaml")
+	if err := os.WriteFile(path, []byte(body), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	return path
 }

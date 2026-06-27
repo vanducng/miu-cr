@@ -39,6 +39,104 @@ CREATE TABLE IF NOT EXISTS pr_findings (
 );
 `
 
+const HostSchemaSQL = `
+CREATE TABLE IF NOT EXISTS host_repos (
+	id             BIGSERIAL PRIMARY KEY,
+	name           TEXT NOT NULL UNIQUE,
+	owner          TEXT NOT NULL,
+	repo           TEXT NOT NULL,
+	slug           TEXT NOT NULL UNIQUE,
+	git_url        TEXT NOT NULL,
+	default_branch TEXT NOT NULL,
+	github_account TEXT NOT NULL,
+	enabled        BOOLEAN NOT NULL DEFAULT true,
+	poll           BOOLEAN NOT NULL DEFAULT true,
+	config_hash    TEXT NOT NULL DEFAULT '',
+	created_at     TIMESTAMPTZ NOT NULL DEFAULT now(),
+	updated_at     TIMESTAMPTZ NOT NULL DEFAULT now(),
+	UNIQUE(owner, repo)
+);
+
+CREATE TABLE IF NOT EXISTS host_pr_sessions (
+	id         BIGSERIAL PRIMARY KEY,
+	repo_id    BIGINT NOT NULL REFERENCES host_repos(id) ON DELETE CASCADE,
+	number     BIGINT NOT NULL,
+	state      TEXT NOT NULL DEFAULT 'open' CHECK(state IN ('open','closed','merged')),
+	head_sha   TEXT NOT NULL DEFAULT '',
+	base_sha   TEXT NOT NULL DEFAULT '',
+	branch     TEXT NOT NULL DEFAULT '',
+	title      TEXT NOT NULL DEFAULT '',
+	review_id  TEXT NOT NULL DEFAULT '',
+	created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+	updated_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+	UNIQUE(repo_id, number)
+);
+
+CREATE TABLE IF NOT EXISTS host_jobs (
+	id           BIGSERIAL PRIMARY KEY,
+	repo_id      BIGINT NOT NULL REFERENCES host_repos(id) ON DELETE CASCADE,
+	session_id   BIGINT REFERENCES host_pr_sessions(id) ON DELETE SET NULL,
+	number       BIGINT NOT NULL,
+	head_sha     TEXT NOT NULL,
+	base_sha     TEXT NOT NULL DEFAULT '',
+	policy_hash  TEXT NOT NULL,
+	prompt_hash  TEXT NOT NULL,
+	rules_hash   TEXT NOT NULL,
+	dedupe_key   TEXT NOT NULL UNIQUE,
+	status       TEXT NOT NULL DEFAULT 'queued' CHECK(status IN ('queued','running','done','failed','canceled')),
+	priority     INTEGER NOT NULL DEFAULT 0,
+	attempts     INTEGER NOT NULL DEFAULT 0,
+	lease_owner  TEXT NOT NULL DEFAULT '',
+	lease_until  TIMESTAMPTZ,
+	review_id    TEXT NOT NULL DEFAULT '',
+	error        TEXT NOT NULL DEFAULT '',
+	available_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+	created_at   TIMESTAMPTZ NOT NULL DEFAULT now(),
+	updated_at   TIMESTAMPTZ NOT NULL DEFAULT now(),
+	completed_at TIMESTAMPTZ
+);
+
+CREATE TABLE IF NOT EXISTS host_job_attempts (
+	id          BIGSERIAL PRIMARY KEY,
+	job_id      BIGINT NOT NULL REFERENCES host_jobs(id) ON DELETE CASCADE,
+	attempt     INTEGER NOT NULL,
+	worker_id   TEXT NOT NULL,
+	status      TEXT NOT NULL DEFAULT 'running' CHECK(status IN ('running','done','failed','canceled')),
+	error       TEXT NOT NULL DEFAULT '',
+	started_at  TIMESTAMPTZ NOT NULL DEFAULT now(),
+	finished_at TIMESTAMPTZ
+);
+
+CREATE TABLE IF NOT EXISTS host_workspaces (
+	id           BIGSERIAL PRIMARY KEY,
+	repo_id      BIGINT NOT NULL REFERENCES host_repos(id) ON DELETE CASCADE,
+	session_id   BIGINT REFERENCES host_pr_sessions(id) ON DELETE SET NULL,
+	number       BIGINT NOT NULL,
+	path         TEXT NOT NULL UNIQUE,
+	state        TEXT NOT NULL DEFAULT 'active' CHECK(state IN ('active','inactive','deleted')),
+	head_sha     TEXT NOT NULL DEFAULT '',
+	size_bytes   BIGINT NOT NULL DEFAULT 0,
+	last_used_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+	created_at   TIMESTAMPTZ NOT NULL DEFAULT now(),
+	updated_at   TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+
+CREATE TABLE IF NOT EXISTS host_poll_cursors (
+	repo_id        BIGINT NOT NULL REFERENCES host_repos(id) ON DELETE CASCADE,
+	source         TEXT NOT NULL,
+	cursor_value   TEXT NOT NULL DEFAULT '',
+	last_polled_at TIMESTAMPTZ,
+	updated_at     TIMESTAMPTZ NOT NULL DEFAULT now(),
+	PRIMARY KEY(repo_id, source)
+);
+
+CREATE INDEX IF NOT EXISTS host_jobs_claim_idx ON host_jobs (status, available_at, priority DESC, created_at);
+CREATE INDEX IF NOT EXISTS host_jobs_lease_idx ON host_jobs (status, lease_until);
+CREATE UNIQUE INDEX IF NOT EXISTS host_job_attempts_job_attempt_idx ON host_job_attempts (job_id, attempt);
+CREATE INDEX IF NOT EXISTS host_sessions_state_idx ON host_pr_sessions (state, updated_at);
+CREATE INDEX IF NOT EXISTS host_workspaces_prune_idx ON host_workspaces (state, last_used_at);
+`
+
 // embeddingSchemaTemplate is the M7 finding-embeddings schema, run conditionally
 // (NOT part of SchemaSQL, so the schema-parity test stays untouched). The vector
 // dimension is templated from config at create time; it is immutable per DB. The

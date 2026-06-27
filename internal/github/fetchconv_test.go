@@ -11,8 +11,7 @@ import (
 )
 
 // convClient is a Client fake whose conversation list ops return canned synthetic
-// data (or an error). It embeds the shared fakeClient for the unused write/other
-// read methods, overriding only the three conversation reads.
+// data (or an error). It embeds the shared fakeClient for unused methods.
 type convClient struct {
 	fakeClient
 	reviews       []*gh.PullRequestReview
@@ -50,6 +49,14 @@ func convInfo() *PRInfo {
 
 func TestFetchConversationRendersSections(t *testing.T) {
 	c := &convClient{
+		reviews: []*gh.PullRequestReview{
+			{
+				State: gh.Ptr("COMMENTED"),
+				User:  &gh.User{Login: gh.Ptr("reviewer")},
+				Body:  gh.Ptr("Overall review note."),
+			},
+			{Body: gh.Ptr(ReviewMarker + "\nskip prior miucr review body")},
+		},
 		reviewComment: []*gh.PullRequestComment{
 			{Path: gh.Ptr("src/auth.go"), Body: gh.Ptr("Unchecked error on token parse")},
 		},
@@ -66,6 +73,8 @@ func TestFetchConversationRendersSections(t *testing.T) {
 	for _, want := range []string{
 		"Prior miucr review summaries:",
 		"Review summary: 2 findings.",
+		"PR review overviews:",
+		"commented by reviewer: Overall review note.",
 		"Inline finding threads:",
 		"[src/auth.go] Unchecked error on token parse",
 		"Developer replies:",
@@ -79,6 +88,9 @@ func TestFetchConversationRendersSections(t *testing.T) {
 	// loop-guard).
 	if strings.Count(out, "Review summary: 2 findings.") != 1 {
 		t.Fatalf("summary comment must appear once (as a prior summary, not a dev reply):\n%s", out)
+	}
+	if strings.Contains(out, "skip prior miucr review body") {
+		t.Fatalf("miucr review bodies must be skipped:\n%s", out)
 	}
 }
 

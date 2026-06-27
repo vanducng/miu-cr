@@ -106,7 +106,7 @@ immediately; existing rows remain until you delete them as above.
   deterministic fake embedder drives every embedder, wire, and engine test: no
   network, no key, no Postgres.
 - The Postgres `EmbeddingStore` round-trip + cosine top-K runs in CI against the
-  `pgvector/pgvector:pg16` service container, and locally against your own
+  `pgvector/pgvector:pg17` service container, and locally against your own
   Postgres via `MIUCR_TEST_PG_DSN` (skipped when unset).
 - A golden prompt-parity test asserts the empty-context build equals the
   non-semantic prompt, so the default path can never silently drift.
