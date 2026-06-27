@@ -334,8 +334,9 @@ the effective repo level: `post`, `force`, `suggest`, `patch_repair`,
 `approve_clean`. First host mode does not push code.
 
 Host poller state lives in Postgres: repos, PR sessions, queued jobs, attempts,
-workspaces, and poll cursors. Claims use row locks for concurrency, and
-`host.retention` prunes old jobs/attempts/sessions/workspace records/cursors.
+workspaces, and poll cursors. Startup applies versioned schema migrations under
+an advisory lock. Claims use row locks for concurrency, and `host.retention`
+prunes old jobs/attempts/sessions/workspace records/cursors.
 Workspace-size limits are validated but filesystem deletion waits for managed
 host workspaces. Public synthetic compose + config example: `examples/review-host/`.
 

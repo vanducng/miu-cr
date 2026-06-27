@@ -61,6 +61,31 @@ func TestHostSchemaMigrationIdempotent(t *testing.T) {
 	t.Cleanup(func() { _ = again.Close() })
 }
 
+func TestPostgresSchemaMigrationsRecorded(t *testing.T) {
+	s := openHost(t)
+	rows, err := s.db.QueryContext(context.Background(), `SELECT name FROM schema_migrations ORDER BY name`)
+	if err != nil {
+		t.Fatalf("query schema_migrations: %v", err)
+	}
+	defer func() { _ = rows.Close() }()
+	got := map[string]bool{}
+	for rows.Next() {
+		var name string
+		if err := rows.Scan(&name); err != nil {
+			t.Fatalf("scan migration: %v", err)
+		}
+		got[name] = true
+	}
+	if err := rows.Err(); err != nil {
+		t.Fatalf("schema migrations rows: %v", err)
+	}
+	for _, name := range []string{"0001_reviews_pr_findings", "0002_reviews_extended_columns", "0003_host_schema"} {
+		if !got[name] {
+			t.Fatalf("missing migration %s; got %v", name, got)
+		}
+	}
+}
+
 func TestHostRepoReconcileUpsert(t *testing.T) {
 	s := openHost(t)
 	ctx := context.Background()

@@ -10,7 +10,7 @@ without running PR code.
 | File | Purpose |
 |---|---|
 | `config.example.yaml` | Public YAML shape with three synthetic repos, YAML anchors, multiple GitHub accounts, prompt overrides, rules, and retention settings. |
-| `docker-compose.yml` | Postgres plus a `miucr serve --host` container using the existing example Dockerfile. |
+| `docker-compose.yml` | pgvector-enabled Postgres plus a `miucr serve --host` container using the existing example Dockerfile. |
 | `.env.example` | Environment names only. Copy to `.env` and fill locally. |
 | `prompts/` | Global and repo-specific operator prompts. |
 | `rules/` | Trusted host rules referenced by the YAML. |
@@ -57,6 +57,9 @@ MIUCR_PG_DSN='postgres://miucr:miucr@localhost:55432/miucr?sslmode=disable' \
 
 - Host mode is Postgres-focused. The YAML validates `store.backend: postgres`
   and `MIUCR_PG_DSN` should hold the DSN so passwords stay out of config.
+- Startup applies versioned Postgres migrations under an advisory lock and
+  records them in `schema_migrations`, so concurrent host instances do not race
+  schema bootstrap.
 - `poll_source: pulls` gives cold-start-complete coverage by listing open PRs
   per configured repo. Each distinct PR head SHA can trigger one review.
 - `github.accounts` may mix PAT and GitHub App installation accounts. PATs can

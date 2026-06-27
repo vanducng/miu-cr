@@ -309,6 +309,9 @@ Host mode stores repo/session/job/cursor state in Postgres. The runner claims
 jobs with row locks so multiple workers or instances do not review the same PR
 head concurrently. Completed jobs, old attempts, closed sessions, inactive
 workspace records, and stale poll cursors are pruned by `host.retention`.
+Startup applies versioned Postgres migrations under an advisory lock and records
+them in `schema_migrations`, so multiple host instances can boot without racing
+schema changes.
 
 The workspace-size fields are validated and reserved for the managed-workspace
 phase. V1 PR reviews still use the existing temp-clone path, so host mode does
