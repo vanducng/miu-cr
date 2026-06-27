@@ -967,6 +967,9 @@ func buildServeReviewFn(log *slog.Logger, gate string, st serve.ReviewStore) fun
 		}
 		jobCtx, cancel := stdctx.WithTimeout(stdctx.Background(), timeout)
 		defer cancel()
+		progress := func(stage string) {
+			log.Info("review progress", "ref", j.Ref, "stage", config.RedactString(stage))
+		}
 		out, err := ReviewPRForServe(jobCtx, PRReviewRequest{
 			Ref:            j.Ref,
 			Token:          j.Token,
@@ -991,6 +994,7 @@ func buildServeReviewFn(log *slog.Logger, gate string, st serve.ReviewStore) fun
 			Conversation:   review.Conversation,
 			Mode:           review.Mode,
 			Force:          review.Force,
+			Progress:       progress,
 		})
 		if err != nil {
 			log.Error("review failed", "ref", j.Ref, "err", config.RedactString(err.Error()))
