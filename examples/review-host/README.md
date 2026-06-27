@@ -2,8 +2,8 @@
 
 This directory is a synthetic, copyable starting point for `miucr serve --host`.
 It is meant for a long-running local or server instance that watches multiple
-GitHub repositories, keeps host state in Postgres, and dispatches PR reviews
-without running PR code.
+GitHub repositories, keeps host and review history state in Postgres, and
+dispatches PR reviews without running PR code.
 
 ## Files
 
@@ -55,14 +55,16 @@ docker compose --env-file examples/review-host/.env \
   -f examples/review-host/docker-compose.yml up -d postgres
 
 MIUCR_CONFIG=examples/review-host/config.local.yaml \
+MIUCR_STORE_BACKEND=postgres \
 MIUCR_PG_DSN='postgres://miucr:miucr@localhost:55432/miucr?sslmode=disable' \
   miucr serve --host
 ```
 
 ## Operating notes
 
-- Host mode is Postgres-focused. The YAML validates `store.backend: postgres`
-  and `MIUCR_PG_DSN` should hold the DSN so passwords stay out of config.
+- Host mode is Postgres-focused. The YAML validates `store.backend: postgres`,
+  `MIUCR_STORE_BACKEND=postgres` selects Postgres for review history, and
+  `MIUCR_PG_DSN` should hold the DSN so passwords stay out of config.
 - The compose example defaults `MIUCR_LOG_LEVEL=debug` for local development so
   review progress, tool-turn progress, and poll activity are visible. Set
   `MIUCR_TRACE_LOG=true` only when you want bounded live trace payloads in logs;

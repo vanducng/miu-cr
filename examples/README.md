@@ -61,5 +61,6 @@ with `git` installed for `miucr serve` (webhook, `--poll`, or `--host`). The
 
 `review-host/docker-compose.yml` brings up the full Postgres-backed multi-repo
 host: it builds from that Dockerfile and mounts a YAML host config, prompt/rule
-files, `/run/secrets`, and workspace storage. Replace the env block with a real
-secrets source in production.
+files, `/run/secrets`, and workspace storage. Keep `MIUCR_STORE_BACKEND=postgres`
+set for hosted deployments so review history does not fall back to SQLite.
+Replace the env block with a real secrets source in production.

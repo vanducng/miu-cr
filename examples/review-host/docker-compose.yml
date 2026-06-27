@@ -28,6 +28,7 @@ services:
         required: false
     environment:
       MIUCR_CONFIG: /etc/miu/cr/host.yaml
+      MIUCR_STORE_BACKEND: ${MIUCR_STORE_BACKEND:-postgres}
       MIUCR_PG_DSN: ${MIUCR_PG_DSN:-postgres://miucr:miucr@postgres:5432/miucr?sslmode=disable}
       MIUCR_LOG_LEVEL: ${MIUCR_LOG_LEVEL:-debug}
       MIUCR_TRACE_LOG: ${MIUCR_TRACE_LOG:-false}

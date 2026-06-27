@@ -29,6 +29,10 @@ never enter the prompt, the diff, or the record.
 | `raw_prompt`, `raw_response` | The verbatim LLM I/O (audit trail) |
 | `trace` | The full redacted trace (system prompt, diff meta, selected files, injected rules, prompts, response); view with `miucr trace <id>` |
 
+`stats` includes run-shape counters useful for review tuning: prompt and final
+response bytes, provider duration, selected context size, tool-call count,
+tool-turn count, and per-tool call counts.
+
 ## Opting out per run
 
 ```sh
