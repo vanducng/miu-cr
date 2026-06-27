@@ -256,6 +256,37 @@ func TestRunHostCommandOutputReportsMissingBinary(t *testing.T) {
 	}
 }
 
+func TestHostSecretFileReadsRegularFile(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "token")
+	if err := os.WriteFile(path, []byte(" token-value \n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	got, err := hostSecret(stdctx.Background(), "", path, nil)
+	if err != nil {
+		t.Fatalf("hostSecret: %v", err)
+	}
+	if got != "token-value" {
+		t.Fatalf("secret = %q, want token-value", got)
+	}
+}
+
+func TestHostSecretFileRejectsSymlink(t *testing.T) {
+	dir := t.TempDir()
+	target := filepath.Join(dir, "target")
+	if err := os.WriteFile(target, []byte("token"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	link := filepath.Join(dir, "link")
+	if err := os.Symlink(target, link); err != nil {
+		t.Fatal(err)
+	}
+	_, err := hostSecret(stdctx.Background(), "", link, nil)
+	var ce *CLIError
+	if !asCLIError(err, &ce) || ce.Code != "config.invalid" || !strings.Contains(ce.Message, "symlink") {
+		t.Fatalf("want config.invalid symlink error, got %+v", err)
+	}
+}
+
 func TestSecretBufferRejectsOverflow(t *testing.T) {
 	var b secretBuffer
 	b.limit = 3

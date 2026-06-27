@@ -752,20 +752,45 @@ func hostSecret(ctx stdctx.Context, envName, file string, command []string) (str
 		return "", &CLIError{Code: "config.invalid", Message: "configured env secret is empty: " + envName, Hint: "export " + envName, Exit: 2}
 	}
 	if strings.TrimSpace(file) != "" {
-		data, err := os.ReadFile(file)
-		if err != nil {
-			return "", &CLIError{Code: "config.invalid", Message: config.RedactString(err.Error()), Hint: "fix configured secret file path", Exit: 2}
-		}
-		secret := strings.TrimSpace(string(data))
-		if secret == "" {
-			return "", &CLIError{Code: "config.invalid", Message: "configured secret file is empty", Hint: "fix configured secret file path", Exit: 2}
-		}
-		return secret, nil
+		return readHostSecretFile(file)
 	}
 	if len(command) > 0 {
 		return runHostSecretCommand(ctx, command)
 	}
 	return "", nil
+}
+
+func readHostSecretFile(path string) (string, error) {
+	f, err := os.OpenFile(path, os.O_RDONLY|syscall.O_NOFOLLOW, 0)
+	if err != nil {
+		if errors.Is(err, syscall.ELOOP) {
+			return "", &CLIError{Code: "config.invalid", Message: "configured secret file is a symlink", Hint: "use a regular mounted secret file", Exit: 2}
+		}
+		return "", &CLIError{Code: "config.invalid", Message: config.RedactString(err.Error()), Hint: "fix configured secret file path", Exit: 2}
+	}
+	defer f.Close()
+	info, err := f.Stat()
+	if err != nil {
+		return "", &CLIError{Code: "config.invalid", Message: config.RedactString(err.Error()), Hint: "fix configured secret file path", Exit: 2}
+	}
+	if info.Mode()&os.ModeSymlink != 0 {
+		return "", &CLIError{Code: "config.invalid", Message: "configured secret file is a symlink", Hint: "use a regular mounted secret file", Exit: 2}
+	}
+	if info.IsDir() {
+		return "", &CLIError{Code: "config.invalid", Message: "configured secret file path must be a file", Hint: "use a regular mounted secret file", Exit: 2}
+	}
+	data, err := io.ReadAll(io.LimitReader(f, 64*1024+1))
+	if err != nil {
+		return "", &CLIError{Code: "config.invalid", Message: config.RedactString(err.Error()), Hint: "fix configured secret file path", Exit: 2}
+	}
+	if len(data) > 64*1024 {
+		return "", &CLIError{Code: "config.invalid", Message: "configured secret file is too large", Hint: "keep configured secret files under 64KiB", Exit: 2}
+	}
+	secret := strings.TrimSpace(string(data))
+	if secret == "" {
+		return "", &CLIError{Code: "config.invalid", Message: "configured secret file is empty", Hint: "fix configured secret file path", Exit: 2}
+	}
+	return secret, nil
 }
 
 func runHostSecretCommand(ctx stdctx.Context, argv []string) (string, error) {
