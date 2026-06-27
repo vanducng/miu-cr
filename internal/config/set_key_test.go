@@ -25,6 +25,11 @@ func TestSetKeyHappyPaths(t *testing.T) {
 	for _, tc := range []struct{ key, val string }{
 		{"default_provider", "zai"},
 		{"review.gate", "high"},
+		{"review.expand", "20"},
+		{"review.token_budget", "0"},
+		{"review.deep_context", "true"},
+		{"review.context_hops", "3"},
+		{"review.conversation", "true"},
 		{"store.backend", "postgres"},
 		{"github.mode", "app"},
 		{"embedding.enabled", "true"},
@@ -40,6 +45,9 @@ func TestSetKeyHappyPaths(t *testing.T) {
 	}
 	if cfg.DefaultProvider != "zai" || cfg.Review.Gate != "high" || cfg.Store.Backend != "postgres" {
 		t.Fatalf("scalars not set: %+v", cfg)
+	}
+	if cfg.Review.Expand == nil || *cfg.Review.Expand != 20 || cfg.Review.TokenBudget == nil || *cfg.Review.TokenBudget != 0 || cfg.Review.DeepContext == nil || !*cfg.Review.DeepContext || cfg.Review.ContextHops == nil || *cfg.Review.ContextHops != 3 || cfg.Review.Conversation == nil || !*cfg.Review.Conversation {
+		t.Fatalf("review context keys not set: %+v", cfg.Review)
 	}
 	if cfg.Providers["zai"].Model != "glm-5.2" || cfg.Providers["zai"].AuthEnv != "ZAI_API_KEY" || cfg.Providers["zai"].Auth != "bearer" {
 		t.Fatalf("provider not set: %+v", cfg.Providers["zai"])
@@ -73,6 +81,9 @@ func TestSetKeyValidatesEnums(t *testing.T) {
 	var cfg Config
 	for _, tc := range []struct{ key, val string }{
 		{"review.gate", "hihg"},
+		{"review.expand", "-1"},
+		{"review.token_budget", "-1"},
+		{"review.context_hops", "6"},
 		{"store.backend", "mysql"},
 		{"github.mode", "oauth"},
 		{"providers.x.kind", "claude"},
@@ -97,6 +108,9 @@ func TestSetKeyReviewPersistsThroughSave(t *testing.T) {
 	if err := SetKey(&cfg, "review.gate", "high"); err != nil {
 		t.Fatal(err)
 	}
+	if err := SetKey(&cfg, "review.token_budget", "0"); err != nil {
+		t.Fatal(err)
+	}
 	if err := SetKey(&cfg, "default_provider", "zai"); err != nil {
 		t.Fatal(err)
 	}
@@ -107,8 +121,8 @@ func TestSetKeyReviewPersistsThroughSave(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Load: %v", err)
 	}
-	if got.Review.Gate != "high" {
-		t.Fatalf("review.gate dropped on Save->Load: %+v", got.Review)
+	if got.Review.Gate != "high" || got.Review.TokenBudget == nil || *got.Review.TokenBudget != 0 {
+		t.Fatalf("review keys dropped on Save->Load: %+v", got.Review)
 	}
 	if got.DefaultProvider != "zai" {
 		t.Fatalf("default_provider dropped: %q", got.DefaultProvider)

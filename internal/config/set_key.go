@@ -37,6 +37,41 @@ func SetKey(cfg *Config, key, value string) error {
 	case key == "review.timeout":
 		cfg.Review.Timeout = value
 		return ValidateReview(cfg.Review)
+	case key == "review.expand":
+		n, err := strconv.Atoi(value)
+		if err != nil {
+			return invalidKey(key, value, "an integer >= 0")
+		}
+		cfg.Review.Expand = &n
+		return ValidateReview(cfg.Review)
+	case key == "review.token_budget":
+		n, err := strconv.Atoi(value)
+		if err != nil {
+			return invalidKey(key, value, "an integer >= 0")
+		}
+		cfg.Review.TokenBudget = &n
+		return ValidateReview(cfg.Review)
+	case key == "review.deep_context":
+		b, err := strconv.ParseBool(value)
+		if err != nil {
+			return invalidKey(key, value, "true|false")
+		}
+		cfg.Review.DeepContext = &b
+		return ValidateReview(cfg.Review)
+	case key == "review.context_hops":
+		n, err := strconv.Atoi(value)
+		if err != nil {
+			return invalidKey(key, value, fmt.Sprintf("an integer in [0,%d]", maxReviewContextHops))
+		}
+		cfg.Review.ContextHops = &n
+		return ValidateReview(cfg.Review)
+	case key == "review.conversation":
+		b, err := strconv.ParseBool(value)
+		if err != nil {
+			return invalidKey(key, value, "true|false")
+		}
+		cfg.Review.Conversation = &b
+		return ValidateReview(cfg.Review)
 	case key == "store.backend":
 		if value != "sqlite" && value != "postgres" {
 			return invalidKey(key, value, "sqlite|postgres")

@@ -7,6 +7,8 @@ import (
 	"github.com/vanducng/miu-cr/internal/cli/clierr"
 )
 
+const maxReviewContextHops = 5
+
 // gateValidator/filterModeValidator/minSeverityValidator are injected by the cli
 // layer (which owns the engine/github enums) so config stays a leaf and the enum
 // source of truth is not duplicated. Nil validators (e.g. a bare config test that
@@ -50,6 +52,15 @@ func ValidateReview(r Review) error {
 	case "", "auto", "off", "low", "medium", "high":
 	default:
 		return invalidReview("thinking", r.Thinking, "auto|off|low|medium|high")
+	}
+	if r.Expand != nil && *r.Expand < 0 {
+		return invalidReview("expand", fmt.Sprint(*r.Expand), "an integer >= 0")
+	}
+	if r.TokenBudget != nil && *r.TokenBudget < 0 {
+		return invalidReview("token_budget", fmt.Sprint(*r.TokenBudget), "an integer >= 0")
+	}
+	if r.ContextHops != nil && (*r.ContextHops < 0 || *r.ContextHops > maxReviewContextHops) {
+		return invalidReview("context_hops", fmt.Sprint(*r.ContextHops), fmt.Sprintf("an integer in [0,%d]", maxReviewContextHops))
 	}
 	return nil
 }

@@ -1,0 +1,45 @@
+{
+  "cases": [
+    {
+      "id": "metadata-propagation",
+      "fixture": "metadata-propagation",
+      "expected": [
+        {
+          "id": "descriptor-missing-hidden",
+          "file": "src/CommandDefinition.php",
+          "severity": "medium",
+          "category": "bug"
+        }
+      ]
+    },
+    {
+      "id": "api-contract",
+      "fixture": "api-contract",
+      "expected": [
+        {
+          "id": "caller-contract-break",
+          "file": "service.go",
+          "severity": "critical",
+          "category": "bug"
+        }
+      ]
+    },
+    {
+      "id": "ipv6-split",
+      "fixture": "ipv6-split",
+      "expected": [
+        {
+          "id": "ipv6-address-misclassified",
+          "file": "netutil.go",
+          "severity": "high",
+          "category": "bug"
+        }
+      ]
+    },
+    {
+      "id": "clean-small-change",
+      "fixture": "clean-small-change",
+      "expected": []
+    }
+  ]
+}

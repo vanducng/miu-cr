@@ -76,10 +76,8 @@ func TestAnthropicAgentParsesFindings(t *testing.T) {
 	body := "```json\n" +
 		`{"findings":[{"file":"a.go","existing_code":"x := y / 0","severity":"critical","category":"bug","rationale":"div by zero"}]}` +
 		"\n```"
-	a := &anthropicAgent{
-		client: &fakeAnthropic{responses: []string{textMessage(body)}},
-		model:  "claude-test",
-	}
+	fc := &fakeAnthropic{responses: []string{textMessage(body)}}
+	a := &anthropicAgent{client: fc, model: "claude-test"}
 	out, err := a.Review(stdctx.Background(), Context{Text: "ctx", RepoDir: t.TempDir()})
 	if err != nil {
 		t.Fatalf("Review: %v", err)
@@ -97,6 +95,9 @@ func TestAnthropicAgentParsesFindings(t *testing.T) {
 	}
 	if f.Line != 0 || f.EndLine != 0 {
 		t.Fatalf("agent must emit no line numbers: %+v", f)
+	}
+	if !fc.seen[0].Temperature.Valid() || fc.seen[0].Temperature.Value != 0 {
+		t.Fatalf("review temperature = %+v, want 0", fc.seen[0].Temperature)
 	}
 }
 
@@ -270,6 +271,9 @@ func TestAnthropicAgentRepairPatch(t *testing.T) {
 	}
 	if fc.seen[0].MaxTokens != repairMaxTokens {
 		t.Fatalf("repair must use low max tokens, got %d", fc.seen[0].MaxTokens)
+	}
+	if !fc.seen[0].Temperature.Valid() || fc.seen[0].Temperature.Value != 0 {
+		t.Fatalf("repair temperature = %+v, want 0", fc.seen[0].Temperature)
 	}
 	if len(fc.seen[0].Tools) != 0 {
 		t.Fatalf("repair must offer no tools, got %d", len(fc.seen[0].Tools))

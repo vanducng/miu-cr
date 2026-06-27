@@ -34,7 +34,7 @@ func classifyReviewErr(err error, timeout time.Duration) error {
 		return &CLIError{
 			Code:    "review.timeout",
 			Message: msg,
-			Hint:    "raise --timeout (e.g. 600s) or narrow the diff",
+			Hint:    "raise --timeout (e.g. 1800s) or narrow the diff",
 			Exit:    1,
 			Retry:   true,
 			Cause:   err,
@@ -286,13 +286,8 @@ func nudgeIfUnconfigured(apiKey, authToken string) error {
 	}
 }
 
-// defaultTokenBudget caps the review input so a large PR (hundreds of files)
-// fits typical model context windows out of the box; the adaptive diff
-// compression only degrades context when the diff exceeds it. Small diffs are
-// unaffected. Pass --token-budget 0 to disable, or a larger value for a
-// big-context model.
-const defaultTokenBudget = 100000
-const deepContextTimeout = 15 * time.Minute
+const defaultTokenBudget = 0
+const defaultReviewTimeout = 15 * time.Minute
 const maxContextHops = 5
 
 func reviewCommand(opts *options) *cobra.Command {
@@ -360,9 +355,7 @@ func reviewCommand(opts *options) *cobra.Command {
 			return validateReviewFlags(staged, from, to, commit, gate)
 		},
 		RunE: func(cmd *cobra.Command, args []string) error {
-			// [review] config defaults fill any flag the user did NOT set; an explicit
-			// flag always wins (cmd.Flags().Changed). Validated config-side (config.invalid).
-			rcfg, err := loadReviewDefaults(cmd, &gate, &filterMode, &minSeverity, &suggest, &patchRepair)
+			rcfg, err := loadReviewDefaults(cmd, &gate, &filterMode, &minSeverity, &expand, &tokenBudget, &deepContext, &contextHops, &conversation, &suggest, &patchRepair)
 			if err != nil {
 				return err
 			}
@@ -372,27 +365,25 @@ func reviewCommand(opts *options) *cobra.Command {
 			if patchRepair && !suggest {
 				return &CLIError{Code: "config.invalid", Message: "--patch-repair requires --suggest", Exit: 2}
 			}
-			// A real LLM review routinely exceeds the 30s root default; bump it for
-			// review unless the user set --timeout explicitly. A [review].timeout
-			// fills the unset flag (else 300s).
+			// Review uses a 15m default unless config or flags override it.
 			if !cmd.Flags().Changed("timeout") {
 				opts.timeout = reviewTimeoutDefault(rcfg)
 			}
 			if deepContext {
-				if !cmd.Flags().Changed("expand") {
+				if !cmd.Flags().Changed("expand") && rcfg.Expand == nil {
 					expand = 20
 				}
-				if !cmd.Flags().Changed("token-budget") {
+				if !cmd.Flags().Changed("token-budget") && rcfg.TokenBudget == nil {
 					tokenBudget = 0
 				}
 				if !cmd.Flags().Changed("timeout") && rcfg.Timeout == "" {
-					opts.timeout = deepContextTimeout
+					opts.timeout = defaultReviewTimeout
 				}
-				if !cmd.Flags().Changed("context-hops") {
+				if !cmd.Flags().Changed("context-hops") && rcfg.ContextHops == nil {
 					contextHops = 0
 				}
 			}
-			contextHopsAuto := deepContext && !cmd.Flags().Changed("context-hops")
+			contextHopsAuto := deepContext && !cmd.Flags().Changed("context-hops") && rcfg.ContextHops == nil
 			prog := newProgress(cmd.ErrOrStderr(), verbose, quiet)
 			var traceSink func(step string, payload any)
 			if traceLive {
@@ -706,7 +697,7 @@ func runPRReview(cmd *cobra.Command, a prRunArgs) error {
 // command line. An explicit flag always wins (cmd.Flags().Changed); a config
 // value only fills an unset flag. Returns the validated Review so the caller can
 // also derive the timeout default. A config-load error propagates (typed).
-func loadReviewDefaults(cmd *cobra.Command, gate, filterMode, minSeverity *string, suggest, patchRepair *bool) (config.Review, error) {
+func loadReviewDefaults(cmd *cobra.Command, gate, filterMode, minSeverity *string, expand, tokenBudget *int, deepContext *bool, contextHops *int, conversation, suggest, patchRepair *bool) (config.Review, error) {
 	cfg, err := config.Load()
 	if err != nil {
 		return config.Review{}, err
@@ -725,6 +716,21 @@ func loadReviewDefaults(cmd *cobra.Command, gate, filterMode, minSeverity *strin
 	if r.MinSeverity != "" && !f.Changed("min-severity") {
 		*minSeverity = r.MinSeverity
 	}
+	if r.Expand != nil && !f.Changed("expand") {
+		*expand = *r.Expand
+	}
+	if r.TokenBudget != nil && !f.Changed("token-budget") {
+		*tokenBudget = *r.TokenBudget
+	}
+	if r.DeepContext != nil && !f.Changed("deep-context") {
+		*deepContext = *r.DeepContext
+	}
+	if r.ContextHops != nil && !f.Changed("context-hops") {
+		*contextHops = *r.ContextHops
+	}
+	if r.Conversation != nil && !f.Changed("conversation") {
+		*conversation = *r.Conversation
+	}
 	if r.Suggest != nil && !f.Changed("suggest") {
 		*suggest = *r.Suggest
 	}
@@ -734,16 +740,13 @@ func loadReviewDefaults(cmd *cobra.Command, gate, filterMode, minSeverity *strin
 	return r, nil
 }
 
-// reviewTimeoutDefault returns the [review].timeout when set+parseable, else the
-// 300s review default. ValidateReview already rejected an unparsable value, so a
-// parse error here degrades silently to the default.
 func reviewTimeoutDefault(r config.Review) time.Duration {
 	if r.Timeout != "" {
 		if d, err := time.ParseDuration(r.Timeout); err == nil {
 			return d
 		}
 	}
-	return 300 * time.Second
+	return defaultReviewTimeout
 }
 
 // validatePRFlags rejects --post together with --no-post and (defense-in-depth)

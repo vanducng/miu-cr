@@ -169,6 +169,50 @@ timeout = "600s"
 	}
 }
 
+func TestReviewContextConfigDefaultsHonoredAndFlagsWin(t *testing.T) {
+	writeUserConfig(t, `[review]
+expand = 12
+token_budget = 0
+deep_context = true
+context_hops = 3
+conversation = true
+`)
+	r := &fakeReviewer{outcome: ReviewOutcome{Findings: []ReviewFinding{}}}
+	_, err := runReviewKeepHome(t, r, "--staged")
+	if err != nil {
+		t.Fatalf("review: %v", err)
+	}
+	if r.gotReq.ExpandWindow != 12 || r.gotReq.TokenBudget != 0 || !r.gotReq.DeepContext || r.gotReq.ContextHops != 3 || r.gotReq.ContextHopsAuto {
+		t.Fatalf("config context defaults not applied: %+v", r.gotReq)
+	}
+
+	writeUserConfig(t, `[review]
+expand = 12
+token_budget = 0
+deep_context = true
+context_hops = 3
+conversation = true
+`)
+	r2 := &fakeReviewer{outcome: ReviewOutcome{Findings: []ReviewFinding{}}}
+	_, err = runReviewKeepHome(t, r2, "--staged", "--expand", "7", "--token-budget", "123", "--deep-context=false", "--context-hops", "1")
+	if err != nil {
+		t.Fatalf("review: %v", err)
+	}
+	if r2.gotReq.ExpandWindow != 7 || r2.gotReq.TokenBudget != 123 || r2.gotReq.DeepContext || r2.gotReq.ContextHops != 1 || r2.gotReq.ContextHopsAuto {
+		t.Fatalf("explicit flags should win: %+v", r2.gotReq)
+	}
+}
+
+func TestConfigShowKeepsExplicitZeroReviewBudget(t *testing.T) {
+	writeUserConfig(t, `[review]
+token_budget = 0
+`)
+	out := runConfigShow(t, true)
+	if !strings.Contains(out, "token_budget = 0") {
+		t.Fatalf("config show should keep explicit token_budget=0, got %s", out)
+	}
+}
+
 // TestReviewBadConfigGateIsTypedConfigInvalid: a bad [review] enum → config.invalid.
 func TestReviewBadConfigFilterModeIsTypedConfigInvalid(t *testing.T) {
 	writeUserConfig(t, `[review]

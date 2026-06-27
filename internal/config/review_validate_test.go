@@ -8,6 +8,7 @@ import (
 )
 
 func boolPtr(b bool) *bool { return &b }
+func intPtr(n int) *int    { return &n }
 
 // stubReviewValidators wires permissive/closed enum predicates for the test and
 // restores them after.
@@ -38,11 +39,14 @@ func TestValidateReview(t *testing.T) {
 		wantErr bool
 	}{
 		{"empty ok", Review{}, false},
-		{"all valid", Review{Gate: "high", FilterMode: "file", MinSeverity: "low", Timeout: "5m", Suggest: boolPtr(true)}, false},
+		{"all valid", Review{Gate: "high", FilterMode: "file", MinSeverity: "low", Timeout: "5m", Expand: intPtr(20), TokenBudget: intPtr(0), DeepContext: boolPtr(true), ContextHops: intPtr(5), Conversation: boolPtr(true), Suggest: boolPtr(true)}, false},
 		{"bad gate", Review{Gate: "huge"}, true},
 		{"bad filter_mode", Review{FilterMode: "bogus"}, true},
 		{"bad min_severity", Review{MinSeverity: "meh"}, true},
 		{"bad timeout", Review{Timeout: "5 fortnights"}, true},
+		{"bad expand", Review{Expand: intPtr(-1)}, true},
+		{"bad token budget", Review{TokenBudget: intPtr(-1)}, true},
+		{"bad context hops", Review{ContextHops: intPtr(6)}, true},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -62,10 +66,13 @@ func TestValidateReview(t *testing.T) {
 
 func TestMergeReviewMergesNewFields(t *testing.T) {
 	base := Review{}
-	file := Review{Gate: "low", FilterMode: "file", MinSeverity: "medium", Timeout: "120s", Suggest: boolPtr(false)}
+	file := Review{Gate: "low", FilterMode: "file", MinSeverity: "medium", Timeout: "120s", Expand: intPtr(12), TokenBudget: intPtr(0), DeepContext: boolPtr(true), ContextHops: intPtr(3), Conversation: boolPtr(true), Suggest: boolPtr(false)}
 	out := mergeReview(base, file)
 	if out.Gate != "low" || out.FilterMode != "file" || out.MinSeverity != "medium" || out.Timeout != "120s" {
 		t.Fatalf("scalar review fields not merged: %+v", out)
+	}
+	if out.Expand == nil || *out.Expand != 12 || out.TokenBudget == nil || *out.TokenBudget != 0 || out.DeepContext == nil || !*out.DeepContext || out.ContextHops == nil || *out.ContextHops != 3 || out.Conversation == nil || !*out.Conversation {
+		t.Fatalf("context review fields not merged: %+v", out)
 	}
 	if out.Suggest == nil || *out.Suggest != false {
 		t.Fatalf("Suggest not merged: %+v", out.Suggest)

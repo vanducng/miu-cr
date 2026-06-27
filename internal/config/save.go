@@ -117,6 +117,21 @@ func reviewEqual(a, b Review) bool {
 	if a.Gate != b.Gate || a.FilterMode != b.FilterMode || a.MinSeverity != b.MinSeverity || a.Timeout != b.Timeout {
 		return false
 	}
+	if (a.Expand == nil) != (b.Expand == nil) || (a.Expand != nil && *a.Expand != *b.Expand) {
+		return false
+	}
+	if (a.TokenBudget == nil) != (b.TokenBudget == nil) || (a.TokenBudget != nil && *a.TokenBudget != *b.TokenBudget) {
+		return false
+	}
+	if (a.DeepContext == nil) != (b.DeepContext == nil) || (a.DeepContext != nil && *a.DeepContext != *b.DeepContext) {
+		return false
+	}
+	if (a.ContextHops == nil) != (b.ContextHops == nil) || (a.ContextHops != nil && *a.ContextHops != *b.ContextHops) {
+		return false
+	}
+	if (a.Conversation == nil) != (b.Conversation == nil) || (a.Conversation != nil && *a.Conversation != *b.Conversation) {
+		return false
+	}
 	if (a.Suggest == nil) != (b.Suggest == nil) || (a.Suggest != nil && *a.Suggest != *b.Suggest) {
 		return false
 	}

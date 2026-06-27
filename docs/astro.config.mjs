@@ -42,7 +42,7 @@ export default defineConfig({
       sidebar: [
         { label: 'Getting started', link: '/onboarding/' },
         { label: 'Introduction', link: '/' },
-        { label: 'Guides', items: ['install', 'usage', 'use-cases', 'rules'] },
+        { label: 'Guides', items: ['install', 'usage', 'use-cases', 'rules', 'evaluation'] },
         { label: 'Providers', items: ['providers', 'credentials'] },
         { label: 'Integration', items: ['mcp', 'github-pr', 'serve-and-action', 'rest-api-and-github-app'] },
         { label: 'Internals', items: ['architecture', 'how-it-works', 'store-backends', 'semantic-recall'] },

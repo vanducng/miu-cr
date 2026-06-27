@@ -101,6 +101,12 @@ func TestLoadRulesDefaults(t *testing.T) {
 			t.Errorf("%s default should be alwaysApply", stem)
 		}
 	}
+	if !strings.Contains(got["correctness"].Body, "descriptor fields") {
+		t.Errorf("correctness rule should cover metadata propagation")
+	}
+	if !strings.Contains(got["correctness"].Body, "structured parsers or validators") {
+		t.Errorf("correctness rule should cover parser-to-string-check regressions")
+	}
 }
 
 func TestBuiltinStackRules(t *testing.T) {

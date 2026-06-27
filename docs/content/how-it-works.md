@@ -5,6 +5,13 @@ description: The deterministic engine and drift-reject line-anchoring behind eve
 
 miu-cr splits a review into a **deterministic shell** and a **single LLM pass**. The shell handles everything where correctness matters: selecting files, assembling context, anchoring findings to real line numbers, gating, and dedupe. The LLM is used only for judgment: spotting bugs and proposing fixes.
 
+For the same repo/ref and config, miu-cr gives the model the same selected files,
+same assembled context, same rules, and same anchoring/gating path. SDK-backed
+Anthropic/OpenAI calls use `temperature: 0` to reduce repeat-run variation. The
+LLM pass can still vary by provider/model behavior, so PR posting is idempotent:
+same-head re-runs edit one summary and dedupe inline comments by stable
+fingerprints instead of stacking duplicates.
+
 ## The pipeline
 
 ```text

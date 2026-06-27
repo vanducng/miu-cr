@@ -19,7 +19,7 @@ func TestRedactConfigMasksEverySecretField(t *testing.T) {
 	cfg := Config{
 		DefaultProvider: "a",
 		Providers: map[string]Provider{
-			"a": {Kind: KindAnthropic, AuthToken: tokA, AuthEnv: "KEEP_ENV_NAME", Model: "keep-model"},
+			"a": {Kind: KindAnthropic, AuthToken: tokA, AuthEnv: "KEEP_ENV_NAME", AuthCommand: []string{"gopass", "show", "sk-command-secret"}, Model: "keep-model"},
 			"b": {Kind: KindOpenAI, AuthToken: tokB},
 		},
 		Store: Store{Backend: "postgres", DSN: dsn},
@@ -37,6 +37,9 @@ func TestRedactConfigMasksEverySecretField(t *testing.T) {
 	if safe.Providers["a"].AuthEnv != "KEEP_ENV_NAME" || safe.Providers["a"].Model != "keep-model" {
 		t.Fatal("non-secret fields must be preserved")
 	}
+	if got := safe.Providers["a"].AuthCommand[2]; strings.Contains(got, "sk-command-secret") {
+		t.Fatalf("auth_command token-shaped arg not redacted: %q", got)
+	}
 	if safe.Store.Backend != "postgres" {
 		t.Fatal("non-secret backend must be preserved")
 	}
@@ -45,7 +48,7 @@ func TestRedactConfigMasksEverySecretField(t *testing.T) {
 	if err != nil {
 		t.Fatalf("marshal: %v", err)
 	}
-	for _, secret := range []string{tokA, tokB, "STORESECRETPW", dsn} {
+	for _, secret := range []string{tokA, tokB, "STORESECRETPW", dsn, "sk-command-secret"} {
 		if strings.Contains(string(raw), secret) {
 			t.Fatalf("secret %q leaked into redacted config text: %s", secret, raw)
 		}

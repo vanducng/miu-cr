@@ -131,9 +131,7 @@ runs:
         if [ -n "$MODEL" ]; then export ANTHROPIC_MODEL="$MODEL"; fi
         if [ -z "$PR_NUMBER" ]; then echo "::error::miucr: pr-number is empty"; exit 1; fi
         REF="${GITHUB_REPOSITORY}#${PR_NUMBER}"
-        # A real LLM PR review exceeds the 30s default; a large diff on a slower model
-        # can exceed 300s, so give it 600s (review.timeout is retryable + actionable anyway).
-        ARGS=(review --pr "$REF" --post --gate "$GATE" --filter-mode "$FILTER_MODE" --timeout 600s)
+        ARGS=(review --pr "$REF" --post --gate "$GATE" --filter-mode "$FILTER_MODE" --deep-context --timeout 900s --conversation)
         if [ -n "$SARIF_FILE" ]; then ARGS+=(--sarif-out "$SARIF_FILE"); fi
         if [ "${SUGGEST:-}" = "true" ]; then ARGS+=(--suggest); fi
         if [ "${PATCH_REPAIR:-}" = "true" ]; then ARGS+=(--patch-repair); fi

@@ -5,6 +5,7 @@ import (
 	"errors"
 	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"testing"
 
@@ -195,6 +196,62 @@ func TestResolveProfileLiteralAuthToken(t *testing.T) {
 	}
 }
 
+func TestResolveProfileAuthCommand(t *testing.T) {
+	clearProviderEnv(t)
+	dir := t.TempDir()
+	cmdPath := filepath.Join(dir, "token.sh")
+	body := "#!/bin/sh\nprintf command-token\n"
+	if runtime.GOOS == "windows" {
+		cmdPath = filepath.Join(dir, "token.bat")
+		body = "@echo off\r\n<nul set /p=command-token\r\n"
+	}
+	if err := os.WriteFile(cmdPath, []byte(body), 0o700); err != nil {
+		t.Fatalf("write helper: %v", err)
+	}
+	cfg := config.Merge(config.Defaults(), config.Config{
+		Providers: map[string]config.Provider{
+			"gw": {Kind: config.KindAnthropic, BaseURL: "https://gw.example/anthropic", AuthCommand: []string{cmdPath}},
+		},
+	})
+	creds, err := resolveWith(cfg, ResolveInput{Provider: "gw"})
+	if err != nil {
+		t.Fatalf("resolve: %v", err)
+	}
+	if creds.AuthToken != "command-token" || creds.AuthSource != "auth_command" || creds.AuthSourceName != cmdPath {
+		t.Fatalf("auth_command not resolved with source: %+v", creds)
+	}
+}
+
+func TestResolveProfileAuthCommandFailureOmitsStderr(t *testing.T) {
+	clearProviderEnv(t)
+	dir := t.TempDir()
+	cmdPath := filepath.Join(dir, "fail.sh")
+	body := "#!/bin/sh\necho secret-stderr >&2\nexit 7\n"
+	if runtime.GOOS == "windows" {
+		cmdPath = filepath.Join(dir, "fail.bat")
+		body = "@echo secret-stderr 1>&2\r\nexit /b 7\r\n"
+	}
+	if err := os.WriteFile(cmdPath, []byte(body), 0o700); err != nil {
+		t.Fatalf("write helper: %v", err)
+	}
+	cfg := config.Merge(config.Defaults(), config.Config{
+		Providers: map[string]config.Provider{
+			"gw": {Kind: config.KindAnthropic, BaseURL: "https://gw.example/anthropic", AuthCommand: []string{cmdPath}},
+		},
+	})
+	_, err := resolveWith(cfg, ResolveInput{Provider: "gw"})
+	var cerr *clierr.CLIError
+	if !errors.As(err, &cerr) || cerr.Code != "agent.auth_command_failed" {
+		t.Fatalf("expected auth_command_failed, got %v", err)
+	}
+	if strings.Contains(cerr.Message, "secret-stderr") || strings.Contains(cerr.Hint, "secret-stderr") {
+		t.Fatalf("stderr leaked: %+v", cerr)
+	}
+	if cerr.Details["auth_source"] != "auth_command" || cerr.Details["auth_command"] != cmdPath {
+		t.Fatalf("details missing source: %+v", cerr.Details)
+	}
+}
+
 // env overrides a profile credential (layering: flags > env > file > defaults).
 func TestResolveEnvBeatsProfile(t *testing.T) {
 	clearProviderEnv(t)
@@ -210,6 +267,9 @@ func TestResolveEnvBeatsProfile(t *testing.T) {
 	}
 	if creds.AuthToken != "env-token" {
 		t.Fatalf("env must override file profile token, got %q", creds.AuthToken)
+	}
+	if creds.AuthSource != "env" || creds.AuthSourceName != "ANTHROPIC_AUTH_TOKEN" {
+		t.Fatalf("env source not captured: %+v", creds)
 	}
 }
 

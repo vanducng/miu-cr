@@ -103,7 +103,7 @@ func (h History) On() bool { return h.Enabled == nil || *h.Enabled }
 // explicit flag always wins (review.go checks cmd.Flags().Changed); an unset flag
 // falls back to these. An empty/nil value means "no config default" (use the
 // flag default). Suggest is a *bool so an absent key is distinct from an explicit
-// false (mirrors History.Enabled). Timeout is a Go duration string ("300s").
+// false (mirrors History.Enabled). Timeout is a Go duration string ("900s").
 // CategoryURLs maps a finding Category (matched case-insensitively) to a docs URL
 // so a mapped category renders as a clickable link in PR comments/summary and
 // sets the SARIF helpUri. This struct is TRUSTED config only (user file +
@@ -116,6 +116,11 @@ type Review struct {
 	Timeout      string            `toml:"timeout,omitempty"`
 	Temperature  *float64          `toml:"temperature,omitempty"` // nil → 0 (deterministic); see [review].temperature in providers.md
 	Thinking     string            `toml:"thinking,omitempty"`    // auto|off|low|medium|high; "" → auto (on when the model supports it). Thinking omits temperature.
+	Expand       *int              `toml:"expand,omitempty"`
+	TokenBudget  *int              `toml:"token_budget,omitempty"`
+	DeepContext  *bool             `toml:"deep_context,omitempty"`
+	ContextHops  *int              `toml:"context_hops,omitempty"`
+	Conversation *bool             `toml:"conversation,omitempty"`
 	Suggest      *bool             `toml:"suggest,omitempty"`
 	PatchRepair  *bool             `toml:"patch_repair,omitempty"`
 	CategoryURLs map[string]string `toml:"category_urls,omitempty"`

@@ -1,0 +1,24 @@
+{
+  "cases": [
+    {"id":"cli__cli__13739","repo":"cli/cli","number":13739,"language":"Go","from":"954ffc37e5931a9621868a50f05c8fb17e288f19","to":"d1e15c37afe62189a28864a1c79b45ce71ee41bb"},
+    {"id":"prometheus__prometheus__19026","repo":"prometheus/prometheus","number":19026,"language":"Go","from":"722334c6cd169d76d785a1bba05712bcf1cbb3de","to":"eb78f09b005793039019cee8fcb6e4263f05a0f3"},
+    {"id":"vitejs__vite__22789","repo":"vitejs/vite","number":22789,"language":"TypeScript","from":"869e8ead2eab03190435855ac39aa63de3d05526","to":"025c6903d914b97c699f9ec2e9de4adff298225e"},
+    {"id":"storybookjs__storybook__35309","repo":"storybookjs/storybook","number":35309,"language":"TypeScript","from":"bf34cdbfb326181d5f8093a51989e849f0277d20","to":"49f4ac5445f23471dcecb4f9abba15f12ea02a19"},
+    {"id":"pydantic__pydantic__13334","repo":"pydantic/pydantic","number":13334,"language":"Python","from":"5d4a3c8cb356fcdad925b7276b5338c24e6cf653","to":"87614f55ce36c8cc1c6446c6ad5674093aaba6ee"},
+    {"id":"pytest-dev__pytest__14652","repo":"pytest-dev/pytest","number":14652,"language":"Python","from":"9db664649af9b24d496fb7ad482b66c0c341a28c","to":"3da7181452b8c13ebe4f68807025e45a5ddbc845"},
+    {"id":"spring-projects__spring-boot__50869","repo":"spring-projects/spring-boot","number":50869,"language":"Java","from":"fd2e1d221921998647c2527ecf4d273751f6ffb3","to":"e7cfe6b8405ed651654f0c8866b42ace780f913b"},
+    {"id":"apache__dubbo__16358","repo":"apache/dubbo","number":16358,"language":"Java","from":"2626e28c16193a099b9cf89e133cd9d55b7d9add","to":"35ad362e10bea03502f46473ff10853fc8dd6b9b"},
+    {"id":"tokio-rs__tokio__8233","repo":"tokio-rs/tokio","number":8233,"language":"Rust","from":"46c830117b82fb806f6a164fcda25050846cf5f9","to":"c9445807b78e2f5c6c748bdcae1d34dc055c5c84"},
+    {"id":"rust-lang__cargo__17135","repo":"rust-lang/cargo","number":17135,"language":"Rust","from":"a4277b2e9dc9f886746b2935243bb805a87fe534","to":"2a150f8542c0f013726f02bc68eed24d25cea0cd"},
+    {"id":"nodejs__node__64161","repo":"nodejs/node","number":64161,"language":"JavaScript","from":"62a3b1b137baff91186e37017e35e338b1b40bb0","to":"fa05a8e080e28246a89731a81f1120b5bb4cd494"},
+    {"id":"expressjs__express__7333","repo":"expressjs/express","number":7333,"language":"JavaScript","from":"18e5985b8a9d5e8423db0a9121f22bdaecd5b120","to":"9b94b834a90b0551dd6191bceb40eac3ee630dcc"},
+    {"id":"laravel__framework__60607","repo":"laravel/framework","number":60607,"language":"PHP","from":"eb473d3c370369ea8702908c133ec6aae5868c7a","to":"803531f1e6e9dead317bbac7a71879801b1929c0"},
+    {"id":"symfony__symfony__64723","repo":"symfony/symfony","number":64723,"language":"PHP","from":"d0e391402bfe6849b1c659d4effb4c928a93ad68","to":"e3332355c7d38d249f741ca7e4eb17b84db117d6"},
+    {"id":"rails__rails__57887","repo":"rails/rails","number":57887,"language":"Ruby","from":"8e9c920f828e3222aa6acd4c3b023c61fa79da4e","to":"9975d10442454e4836e3732d72863a7e2e507609"},
+    {"id":"rubocop__rubocop__15354","repo":"rubocop/rubocop","number":15354,"language":"Ruby","from":"1925c07ceea74cd4851a7924406ad1390634dbdb","to":"b79d04c589fa2555b30bd200d0378848f9e6d3fb"},
+    {"id":"godotengine__godot__120679","repo":"godotengine/godot","number":120679,"language":"C++","from":"d7c45b19ccf6ddadc73d1c8423cd2848f59de437","to":"54fd1b55d8e6a432cedd16ae7b7221f833c2686a"},
+    {"id":"opencv__opencv__29401","repo":"opencv/opencv","number":29401,"language":"C++","from":"da4a417b2a2f0de4e761f3328bcd7f040e6da345","to":"95864a5fdb4631c0bfe672882194da004bf700f2"},
+    {"id":"curl__curl__22172","repo":"curl/curl","number":22172,"language":"C","from":"26c6a4d89875e6652b47e32a36d0fb00d85fae4e","to":"6ef0e58ac83151e523193c99eff109f4b1b4d38f"},
+    {"id":"redis__redis__15377","repo":"redis/redis","number":15377,"language":"C","from":"08b465e4f4891bef9f08d7049dd670627b86f7a4","to":"b6e65479175baca204807c9cfa0da8af9b219b76"}
+  ]
+}

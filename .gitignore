@@ -10,6 +10,7 @@ oauth.json
 
 # internal planning artifacts — kept private (public repo)
 .workbench/
+.vd.json
 
 # built binaries
 /miucr

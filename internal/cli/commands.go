@@ -119,6 +119,7 @@ func rootCommand(opts *options) *cobra.Command {
 	root.AddCommand(historyCommand(opts))
 	root.AddCommand(traceCommand(opts))
 	root.AddCommand(configCommand(opts))
+	root.AddCommand(evalCommand(opts))
 	return root
 }
 

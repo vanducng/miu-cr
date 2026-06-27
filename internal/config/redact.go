@@ -39,6 +39,12 @@ func RedactConfig(cfg Config) Config {
 		if p.AuthToken != "" {
 			p.AuthToken = redactedMask
 		}
+		if p.AuthCommand != nil {
+			p.AuthCommand = append([]string(nil), p.AuthCommand...)
+			for i := range p.AuthCommand {
+				p.AuthCommand[i] = RedactString(p.AuthCommand[i])
+			}
+		}
 		out.Providers[name] = p
 	}
 	// Clone the only other nested reference field so the returned config never shares

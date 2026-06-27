@@ -194,10 +194,11 @@ func (a *anthropicAgent) Review(ctx stdctx.Context, rc Context) (engine.ReviewOu
 	rc.Trace.SetModel("anthropic", a.model)
 	rc.Trace.SetPrompt(userPrompt)
 	params := anthropic.MessageNewParams{
-		MaxTokens: maxTokens,
-		Model:     anthropic.Model(a.model),
-		System:    []anthropic.TextBlockParam{{Text: systemPrompt}},
-		Tools:     reviewTools(),
+		MaxTokens:   maxTokens,
+		Model:       anthropic.Model(a.model),
+		System:      []anthropic.TextBlockParam{{Text: systemPrompt}},
+		Tools:       reviewTools(),
+		Temperature: anthropic.Float(0),
 		Messages: []anthropic.MessageParam{
 			anthropic.NewUserMessage(anthropic.NewTextBlock(userPrompt)),
 		},

@@ -198,6 +198,32 @@ func TestPRDeepContextThreaded(t *testing.T) {
 	}
 }
 
+func TestPRReviewConfigContextDefaults(t *testing.T) {
+	writeUserConfig(t, `[review]
+deep_context = true
+context_hops = 2
+conversation = true
+`)
+	pr := &fakePRReviewer{outcome: ReviewOutcome{PR: &PRResult{Owner: "o", Repo: "r", Number: 1}}}
+	if _, err := runPR(t, pr, &fakeReviewer{}, "--pr", "o/r#1", "--no-post"); err != nil {
+		t.Fatalf("run: %v", err)
+	}
+	if !pr.gotReq.DeepContext || pr.gotReq.ContextHops != 2 || pr.gotReq.ContextHopsAuto || !pr.gotReq.Conversation {
+		t.Fatalf("config PR defaults not threaded: %+v", pr.gotReq)
+	}
+
+	writeUserConfig(t, `[review]
+conversation = true
+`)
+	pr = &fakePRReviewer{outcome: ReviewOutcome{PR: &PRResult{Owner: "o", Repo: "r", Number: 1}}}
+	if _, err := runPR(t, pr, &fakeReviewer{}, "--pr", "o/r#1", "--no-post", "--conversation=false"); err != nil {
+		t.Fatalf("run explicit: %v", err)
+	}
+	if pr.gotReq.Conversation {
+		t.Fatal("explicit --conversation=false must override config")
+	}
+}
+
 func TestPRGateUsesPRReviewerNotLocalReviewer(t *testing.T) {
 	pr := &fakePRReviewer{outcome: ReviewOutcome{
 		Findings: []ReviewFinding{{File: "a.go", Line: 1, Severity: "critical"}},
