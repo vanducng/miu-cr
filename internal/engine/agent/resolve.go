@@ -295,33 +295,35 @@ func resolveOpenAI(in ResolveInput, prof config.Provider) (Credentials, error) {
 		return apiKeyCreds(credential{Value: k, Source: "flag", Name: "--api-key"})
 	}
 
-	switch authMode := normalizeAuthMode(prof.Auth); authMode {
-	case "oauth":
-		if hasProfileCredentialSource(prof) {
-			return Credentials{}, invalidAuthMode(authMode, "remove auth_env/auth_command/auth_token when auth = \"oauth\"")
+	authMode := normalizeAuthMode(prof.Auth)
+	if authMode != "" {
+		switch authMode {
+		case "oauth":
+			if hasProfileCredentialSource(prof) {
+				return Credentials{}, invalidAuthMode(authMode, "remove auth_env/auth_command/auth_token when auth = \"oauth\"")
+			}
+			creds, ok, err := tryOAuth()
+			if err != nil {
+				return Credentials{}, err
+			}
+			if ok {
+				return creds, nil
+			}
+			return noCred("provider auth = \"oauth\" but no `miucr login` session — run `miucr login --provider openai`")
+		case "api_key", "apikey", "key":
+			profile, err := profileCredential(resolveContext(in), prof)
+			if err != nil {
+				return Credentials{}, err
+			}
+			if k := firstCredential(profile, envCredential("OPENAI_API_KEY")); k.Value != "" {
+				return apiKeyCreds(k)
+			}
+			return noCred("provider auth = \"api_key\" but no key — set OPENAI_API_KEY, a profile auth_env, or pass --api-key")
+		case "bearer":
+			return Credentials{}, invalidAuthMode(authMode, "bearer is only valid for kind = \"anthropic\"")
+		default:
+			return Credentials{}, invalidAuthMode(authMode, "use \"oauth\", \"api_key\", or omit for auto")
 		}
-		creds, ok, err := tryOAuth()
-		if err != nil {
-			return Credentials{}, err
-		}
-		if ok {
-			return creds, nil
-		}
-		return noCred("provider auth = \"oauth\" but no `miucr login` session — run `miucr login --provider openai`")
-	case "api_key", "apikey", "key":
-		profile, err := profileCredential(resolveContext(in), prof)
-		if err != nil {
-			return Credentials{}, err
-		}
-		if k := firstCredential(profile, envCredential("OPENAI_API_KEY")); k.Value != "" {
-			return apiKeyCreds(k)
-		}
-		return noCred("provider auth = \"api_key\" but no key — set OPENAI_API_KEY, a profile auth_env, or pass --api-key")
-	case "bearer":
-		return Credentials{}, invalidAuthMode(authMode, "bearer is only valid for kind = \"anthropic\"")
-	case "":
-	default:
-		return Credentials{}, invalidAuthMode(authMode, "use \"oauth\", \"api_key\", or omit for auto")
 	}
 
 	// Unset auth tries profile, OAuth, then OPENAI_API_KEY.

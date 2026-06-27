@@ -32,14 +32,15 @@ func evalCommand(opts *options) *cobra.Command {
 			if err != nil {
 				return &CLIError{Code: "eval.cases_invalid", Message: err.Error(), Hint: "check the --cases JSON file", Exit: 2}
 			}
+			timeout := opts.timeout
 			if !cmd.Flags().Changed("timeout") {
-				opts.timeout = defaultEvalTimeout
+				timeout = defaultEvalTimeout
 			}
 			ctx := cmd.Context()
 			if ctx == nil {
 				ctx = context.Background()
 			}
-			result := eval.Run(ctx, suite, tools, opts.timeout)
+			result := eval.Run(ctx, suite, tools, timeout)
 			return writeSuccess(cmd.OutOrStdout(), "eval", "eval.result", result, evalSummary(result))
 		},
 	}

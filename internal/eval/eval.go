@@ -307,13 +307,17 @@ func ScoreCase(expected, findings []Finding) (Score, []Finding) {
 			missed = append(missed, exp)
 		}
 	}
+	falsePositive := len(findings) - matched
+	if falsePositive < 0 {
+		falsePositive = 0
+	}
 	score := Score{
 		Expected:      len(expected),
 		Found:         len(findings),
 		LabeledCases:  1,
 		Matched:       matched,
 		Missed:        len(missed),
-		FalsePositive: len(findings) - matched,
+		FalsePositive: falsePositive,
 		scoredFound:   len(findings),
 	}
 	return finalizeScore(score), missed

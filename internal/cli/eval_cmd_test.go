@@ -48,7 +48,7 @@ func TestEvalCommandRunsToolAndScores(t *testing.T) {
 	if summary.Matched != 1 || summary.Recall != 1 || summary.F1 != 1 {
 		t.Fatalf("summary = %+v", summary)
 	}
-	if opts.timeout != defaultEvalTimeout {
-		t.Fatalf("timeout = %s, want %s", opts.timeout, defaultEvalTimeout)
+	if opts.timeout != time.Second {
+		t.Fatalf("eval command should not mutate shared opts.timeout, got %s", opts.timeout)
 	}
 }
