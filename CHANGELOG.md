@@ -55,6 +55,13 @@ comment with a new marker); subsequent re-runs dedupe normally. On a
 first M5 review **manually** (or off-hours) to absorb the one-time re-post before
 the next scheduled run.
 
+## [0.56.2](https://github.com/vanducng/miu-cr/compare/v0.56.1...v0.56.2) (2026-06-27)
+
+
+### Bug Fixes
+
+* **agent:** prefer profile credentials for gateway providers ([#162](https://github.com/vanducng/miu-cr/issues/162)) ([7f7196b](https://github.com/vanducng/miu-cr/commit/7f7196b564091581027c19ea5bb4bd8249886972))
+
 ## [0.56.1](https://github.com/vanducng/miu-cr/compare/v0.56.0...v0.56.1) (2026-06-27)
 
 
