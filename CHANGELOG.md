@@ -55,6 +55,13 @@ comment with a new marker); subsequent re-runs dedupe normally. On a
 first M5 review **manually** (or off-hours) to absorb the one-time re-post before
 the next scheduled run.
 
+## [0.50.0](https://github.com/vanducng/miu-cr/compare/v0.49.0...v0.50.0) (2026-06-27)
+
+
+### Features
+
+* review at temperature 0 by default, configurable via [review].temperature ([#143](https://github.com/vanducng/miu-cr/issues/143)) ([ce32902](https://github.com/vanducng/miu-cr/commit/ce32902599c8025c514f60a6095edfc90867c8b8))
+
 ## [0.49.0](https://github.com/vanducng/miu-cr/compare/v0.48.1...v0.49.0) (2026-06-27)
 
 
