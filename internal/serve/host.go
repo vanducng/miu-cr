@@ -437,6 +437,8 @@ func (h *HostRunner) pollRepo(ctx stdctx.Context, snap hostRunnerSnapshot, repo 
 		if number <= 0 {
 			continue
 		}
+		// Still "open" even with an empty head, so reconcile doesn't close it;
+		// we just can't enqueue a review without a head SHA.
 		openNumbers = append(openNumbers, number)
 		if head == "" {
 			continue

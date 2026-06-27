@@ -327,6 +327,13 @@ func (s *Store) ReconcileHostClosedPRs(ctx context.Context, in store.HostClosedP
 	if open == nil {
 		open = []int64{}
 	}
+	// An empty open set closes every open session / cancels every queued job
+	// for the repo (`<> ALL('{}')` is vacuously true). That is intentional and
+	// required: when a repo's last open PR closes, OpenNumbers is empty and the
+	// stale queued job MUST still be canceled (issue #157). The REST pulls-list
+	// is strongly consistent, so an empty result means genuinely zero open PRs,
+	// not a transient gap; a failed page makes listOpenPRs error out before we
+	// reach here, and any spurious close self-heals on the next poll.
 	var out store.HostClosedPRsResult
 	tx, err := s.db.BeginTx(ctx, nil)
 	if err != nil {
