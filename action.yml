@@ -94,7 +94,7 @@ runs:
           # not the last release (Go must be set up by the caller).
           CGO_ENABLED=0 go build -o "$MIUCR_INSTALL_DIR/miucr" ./cmd/miucr
         else
-          curl -fsSL https://raw.githubusercontent.com/vanducng/miu-cr/main/install.sh | sh
+          curl -fsSL https://cr.miu.sh/install.sh | sh
         fi
         echo "$MIUCR_INSTALL_DIR" >> "$GITHUB_PATH"
         export PATH="$MIUCR_INSTALL_DIR:$PATH"

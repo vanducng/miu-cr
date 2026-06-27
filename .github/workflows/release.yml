@@ -118,7 +118,7 @@ jobs:
           ### Install
 
           ```sh
-          curl -fsSL https://raw.githubusercontent.com/vanducng/miu-cr/main/install.sh | sh -s -- __TAG__
+          curl -fsSL https://cr.miu.sh/install.sh | sh -s -- __TAG__
           brew install vanducng/tap/miucr
           go install github.com/vanducng/miu-cr/cmd/miucr@__TAG__
           ```

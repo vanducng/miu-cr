@@ -100,8 +100,8 @@ The **codex** backend retries `429`/`502`/`503`/`504` (and a `response.failed` s
 ## Install
 
 ```sh
-curl -fsSL https://raw.githubusercontent.com/vanducng/miu-cr/main/install.sh | sh   # asset-aware latest
-curl -fsSL https://raw.githubusercontent.com/vanducng/miu-cr/main/install.sh | sh -s -- v0.11.0   # pin
+curl -fsSL https://cr.miu.sh/install.sh | sh   # asset-aware latest
+curl -fsSL https://cr.miu.sh/install.sh | sh -s -- v0.11.0   # pin
 brew install vanducng/tap/miucr                                                     # Homebrew
 go install github.com/vanducng/miu-cr/cmd/miucr@latest                              # Go 1.25+
 ```

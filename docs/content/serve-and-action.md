@@ -423,7 +423,7 @@ permissions:
   contents: read
   checks: write            # required to create the Check Run
 steps:
-  - run: curl -fsSL https://raw.githubusercontent.com/vanducng/miu-cr/main/install.sh | sh
+  - run: curl -fsSL https://cr.miu.sh/install.sh | sh
   - run: |
       miucr review --pr "${GITHUB_REPOSITORY}#${PR_NUMBER}" --post --mode checks --gate high
     env:
