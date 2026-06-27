@@ -89,6 +89,7 @@ func TestResolveMissingKeyTypedError(t *testing.T) {
 func TestResolveZAIViaConfigProfile(t *testing.T) {
 	clearProviderEnv(t)
 	t.Setenv("ZAI_API_KEY", "zai-secret")
+	t.Setenv("ANTHROPIC_API_KEY", "wrong-provider-secret")
 	cfg := config.Merge(config.Defaults(), config.Config{
 		Providers: map[string]config.Provider{
 			"zai": {Kind: config.KindAnthropic, BaseURL: "https://api.z.ai/api/anthropic", Model: "glm-4.6", AuthEnv: "ZAI_API_KEY"},
