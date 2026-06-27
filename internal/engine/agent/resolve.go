@@ -82,7 +82,7 @@ type OAuthCredential struct {
 }
 
 // Resolve loads the layered config and resolves credentials for the selected
-// provider profile. Flags > env > config-file profile > built-in defaults.
+// provider profile. Flags win; profile auth_env/auth_command beats generic env.
 // Missing credentials return a typed *clierr.CLIError. Nothing is persisted.
 func Resolve(in ResolveInput) (Credentials, error) {
 	cfg, err := config.Load()
@@ -176,18 +176,17 @@ func resolveAnthropic(in ResolveInput, prof config.Provider) (Credentials, error
 
 	authToken := firstCredential(
 		credential{Value: in.AuthToken, Source: "flag", Name: "--auth-token"},
-		envCredential("ANTHROPIC_AUTH_TOKEN"),
 	)
 	apiKey := firstCredential(
 		credential{Value: in.APIKey, Source: "flag", Name: "--api-key"},
-		envCredential("ANTHROPIC_API_KEY"),
 	)
 	var profile credential
-	if apiKey.Value == "" && authToken.Value == "" {
+	profileEnvOrCommandFirst := strings.TrimSpace(prof.AuthEnv) != "" || len(prof.AuthCommand) != 0
+	applyProfile := func() error {
 		var err error
 		profile, err = profileCredential(resolveContext(in), prof)
 		if err != nil {
-			return Credentials{}, err
+			return err
 		}
 		if profile.Value != "" {
 			if authMode == "api_key" {
@@ -195,6 +194,21 @@ func resolveAnthropic(in ResolveInput, prof config.Provider) (Credentials, error
 			} else {
 				authToken = profile
 			}
+		}
+		return nil
+	}
+	if apiKey.Value == "" && authToken.Value == "" && profileEnvOrCommandFirst {
+		if err := applyProfile(); err != nil {
+			return Credentials{}, err
+		}
+	}
+	if apiKey.Value == "" && authToken.Value == "" {
+		authToken = envCredential("ANTHROPIC_AUTH_TOKEN")
+		apiKey = envCredential("ANTHROPIC_API_KEY")
+	}
+	if apiKey.Value == "" && authToken.Value == "" && !profileEnvOrCommandFirst {
+		if err := applyProfile(); err != nil {
+			return Credentials{}, err
 		}
 	}
 	baseURL := firstNonEmpty(in.BaseURL, os.Getenv("ANTHROPIC_BASE_URL"), prof.BaseURL)

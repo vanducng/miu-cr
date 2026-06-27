@@ -89,6 +89,7 @@ func TestResolveMissingKeyTypedError(t *testing.T) {
 func TestResolveZAIViaConfigProfile(t *testing.T) {
 	clearProviderEnv(t)
 	t.Setenv("ZAI_API_KEY", "zai-secret")
+	t.Setenv("ANTHROPIC_API_KEY", "wrong-provider-secret")
 	cfg := config.Merge(config.Defaults(), config.Config{
 		Providers: map[string]config.Provider{
 			"zai": {Kind: config.KindAnthropic, BaseURL: "https://api.z.ai/api/anthropic", Model: "glm-4.6", AuthEnv: "ZAI_API_KEY"},
@@ -103,6 +104,9 @@ func TestResolveZAIViaConfigProfile(t *testing.T) {
 	}
 	if creds.AuthToken != "zai-secret" {
 		t.Fatalf("profile key must become Bearer AuthToken, got %q", creds.AuthToken)
+	}
+	if creds.AuthSource != "auth_env" || creds.AuthSourceName != "ZAI_API_KEY" {
+		t.Fatalf("profile auth_env source not captured: %+v", creds)
 	}
 	if creds.APIKey != "" {
 		t.Fatalf("APIKey must be empty on the bearer path, got %q", creds.APIKey)
