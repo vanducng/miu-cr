@@ -35,6 +35,7 @@ services:
       MIUCR_EXAMPLE_GITHUB_APP_PRIVATE_KEY_PATH: /run/secrets/github-app-private-key.pem
     volumes:
       - ${MIUCR_HOST_CONFIG:-./config.example.yaml}:/etc/miu/cr/host.yaml:ro
+      - ${MIUCR_CONFIG_DIR:-./secrets/miucr-config}:/home/nonroot/.config/miu/cr
       - ./prompts:/etc/miu/cr/prompts:ro
       - ./rules:/etc/miu/cr/rules:ro
       - ./secrets:/run/secrets:ro

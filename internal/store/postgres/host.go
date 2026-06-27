@@ -269,7 +269,6 @@ SET status='queued',
     lease_until=NULL,
     error=$3,
     available_at=$4,
-    attempts=CASE WHEN $2::bigint = 0 THEN attempts ELSE GREATEST(attempts - 1, 0) END,
     updated_at=$5,
     completed_at=NULL
 WHERE id=$1

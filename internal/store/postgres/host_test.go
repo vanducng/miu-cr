@@ -334,14 +334,21 @@ func TestHostReleaseJobRequeuesWithoutFailedAttempt(t *testing.T) {
 	if err := s.db.QueryRowContext(ctx, `SELECT status, attempts FROM host_jobs WHERE id=$1`, job.ID).Scan(&status, &attempts); err != nil {
 		t.Fatalf("query job: %v", err)
 	}
-	if status != "queued" || attempts != 0 {
-		t.Fatalf("released job status=%s attempts=%d, want queued/0", status, attempts)
+	if status != "queued" || attempts != 1 {
+		t.Fatalf("released job status=%s attempts=%d, want queued/1", status, attempts)
 	}
 	if err := s.db.QueryRowContext(ctx, `SELECT status FROM host_job_attempts WHERE id=$1`, claim.AttemptID).Scan(&attemptStatus); err != nil {
 		t.Fatalf("query attempt: %v", err)
 	}
 	if attemptStatus != "canceled" {
 		t.Fatalf("attempt status = %s, want canceled", attemptStatus)
+	}
+	next, ok, err := s.ClaimHostJob(ctx, store.HostJobClaimInput{WorkerID: "worker-2", Now: now.Add(2 * time.Second), LeaseDuration: time.Hour})
+	if err != nil || !ok {
+		t.Fatalf("second claim ok=%v err=%v", ok, err)
+	}
+	if next.Job.Attempts != 2 {
+		t.Fatalf("second claim attempt = %d, want 2", next.Job.Attempts)
 	}
 }
 
