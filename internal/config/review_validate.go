@@ -62,6 +62,53 @@ func ValidateReview(r Review) error {
 	if r.ContextHops != nil && (*r.ContextHops < 0 || *r.ContextHops > maxReviewContextHops) {
 		return invalidReview("context_hops", fmt.Sprint(*r.ContextHops), fmt.Sprintf("an integer in [0,%d]", maxReviewContextHops))
 	}
+	if err := validateReviewSubagents(r.Subagents); err != nil {
+		return err
+	}
+	return nil
+}
+
+func validateReviewSubagents(s ReviewSubagents) error {
+	switch s.Mode {
+	case "", "off", "auto", "always":
+	default:
+		return invalidReview("subagents.mode", s.Mode, "off|auto|always")
+	}
+	if s.MaxParallel < 0 {
+		return invalidReview("subagents.max_parallel", fmt.Sprint(s.MaxParallel), "an integer >= 0")
+	}
+	if s.MinFiles < 0 {
+		return invalidReview("subagents.min_files", fmt.Sprint(s.MinFiles), "an integer >= 0")
+	}
+	if s.MinContextBytes < 0 {
+		return invalidReview("subagents.min_context_bytes", fmt.Sprint(s.MinContextBytes), "an integer >= 0")
+	}
+	if len(s.Agents) > 8 {
+		return invalidReview("subagents.agents", fmt.Sprint(len(s.Agents)), "at most 8 agents")
+	}
+	seen := make(map[string]bool, len(s.Agents))
+	for i, a := range s.Agents {
+		if a.Name == "" {
+			return invalidReview(fmt.Sprintf("subagents.agents[%d].name", i), "", "a non-empty name")
+		}
+		if seen[a.Name] {
+			return invalidReview(fmt.Sprintf("subagents.agents[%d].name", i), a.Name, "unique names")
+		}
+		seen[a.Name] = true
+		if len(a.Include) == 0 {
+			return invalidReview(fmt.Sprintf("subagents.agents[%d].include", i), "", "at least one glob")
+		}
+		for j, g := range a.Include {
+			if g == "" {
+				return invalidReview(fmt.Sprintf("subagents.agents[%d].include[%d]", i, j), "", "a non-empty glob")
+			}
+		}
+		for j, g := range a.Exclude {
+			if g == "" {
+				return invalidReview(fmt.Sprintf("subagents.agents[%d].exclude[%d]", i, j), "", "a non-empty glob")
+			}
+		}
+	}
 	return nil
 }
 

@@ -30,6 +30,12 @@ x:
   host_review: &host_review
     suggest: true
     patch_repair: true
+    subagents:
+      mode: auto
+      max_parallel: 2
+      agents:
+        - name: go
+          include: ["**/*.go"]
   service_rules: &service_rules
     - rules/service.md
 review:
@@ -82,6 +88,9 @@ repos:
 	}
 	if cfg.Host.Review.PatchRepair == nil || !*cfg.Host.Review.PatchRepair {
 		t.Fatalf("merged host review not loaded: %+v", cfg.Host.Review)
+	}
+	if cfg.Host.Review.Subagents.Mode != "auto" || len(cfg.Host.Review.Subagents.Agents) != 1 {
+		t.Fatalf("host subagents not loaded: %+v", cfg.Host.Review.Subagents)
 	}
 	if len(repo.Rules) != 1 || repo.Rules[0] != "rules/service.md" {
 		t.Fatalf("sequence anchor not loaded: %+v", repo.Rules)

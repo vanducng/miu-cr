@@ -166,8 +166,32 @@ func mergeReview(base, file Review) Review {
 	if file.PatchRepair != nil {
 		out.PatchRepair = file.PatchRepair
 	}
+	out.Subagents = mergeReviewSubagents(base.Subagents, file.Subagents)
 	if len(file.CategoryURLs) > 0 {
 		out.CategoryURLs = file.CategoryURLs
+	}
+	return out
+}
+
+func mergeReviewSubagents(base, file ReviewSubagents) ReviewSubagents {
+	out := base
+	if file.Mode != "" {
+		out.Mode = file.Mode
+	}
+	if file.MaxParallel != 0 {
+		out.MaxParallel = file.MaxParallel
+	}
+	if file.MinFiles != 0 {
+		out.MinFiles = file.MinFiles
+	}
+	if file.MinContextBytes != 0 {
+		out.MinContextBytes = file.MinContextBytes
+	}
+	if file.RequireAll != nil {
+		out.RequireAll = file.RequireAll
+	}
+	if len(file.Agents) > 0 {
+		out.Agents = append([]ReviewSubagent(nil), file.Agents...)
 	}
 	return out
 }

@@ -254,6 +254,22 @@ type AgentContext struct {
 	Trace *ReviewTrace
 }
 
+type SubagentConfig struct {
+	Mode            string
+	MaxParallel     int
+	MinFiles        int
+	MinContextBytes int
+	RequireAll      bool
+	Agents          []SubagentSpec
+}
+
+type SubagentSpec struct {
+	Name           string
+	IncludeGlobs   []string
+	ExcludeGlobs   []string
+	OperatorPrompt string
+}
+
 // Retriever is the engine-local seam for M7 semantic recall: wire injects an
 // implementation that scrubs+embeds the current changed code and returns prior
 // cosine-near findings. The engine does NO embedding/DB/network itself (it
@@ -322,6 +338,7 @@ type Request struct {
 	ProjectContext  bool
 	ContextHops     int
 	ContextHopsAuto bool
+	Subagents       SubagentConfig
 
 	// Instruction is the optional per-review developer steer (--instruction). Threaded
 	// onto AgentContext so it rides the USER turn; empty is byte-identical. LOCKSTEP:
@@ -508,24 +525,14 @@ func (e *Engine) Review(ctx stdctx.Context, req Request) (ReviewResult, error) {
 
 	trace.SetModel(req.Provider, req.Model)
 
-	agentStart := time.Now()
-	out, err := e.Agent.Review(ctx, AgentContext{
-		Text:            assembled.Text,
-		Rules:           rulesText,
-		SemanticContext: semanticContext,
-		ProjectContext:  projectContext,
-		RelatedContext:  related.Text,
-		WantDiagram:     req.WantDiagram,
-		Instruction:     req.Instruction,
-		Conversation:    req.Conversation,
-		OperatorPrompt:  req.OperatorPrompt,
-		RepoDir:         req.RepoDir,
-		Rev:             rev,
-		Runner:          e.Runner,
-		Progress:        req.Progress,
-		Trace:           trace,
+	out, agentMS, passStats, err := e.reviewPasses(ctx, req, selected, assembled, reviewSharedContext{
+		rulesText:       rulesText,
+		semanticContext: semanticContext,
+		projectContext:  projectContext,
+		relatedContext:  related.Text,
+		rev:             rev,
+		trace:           trace,
 	})
-	agentMS := time.Since(agentStart).Milliseconds()
 	if err != nil {
 		return ReviewResult{}, err
 	}
@@ -566,6 +573,9 @@ func (e *Engine) Review(ctx stdctx.Context, req Request) (ReviewResult, error) {
 		stats["related_context_hops"] = float64(related.Hops)
 		stats["related_context_truncated"] = related.Truncated
 		stats["related_context_ms"] = float64(relatedMS)
+	}
+	for k, v := range passStats {
+		stats[k] = v
 	}
 	addTraceStats(stats, trace)
 

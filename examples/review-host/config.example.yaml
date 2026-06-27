@@ -48,6 +48,18 @@ x:
 
 review:
   <<: *review_defaults
+  subagents:
+    mode: auto
+    max_parallel: 2
+    min_files: 8
+    require_all: true
+    agents:
+      - name: go
+        include: ["**/*.go"]
+        system_prompt: "Focus on correctness, concurrency, error handling, and API compatibility."
+      - name: web
+        include: ["**/*.ts", "**/*.tsx", "**/*.js", "**/*.jsx"]
+        system_prompt: "Focus on user-facing behavior, state flow, accessibility, and API contracts."
 
 agent:
   system_prompt_file: prompts/default-reviewer.md

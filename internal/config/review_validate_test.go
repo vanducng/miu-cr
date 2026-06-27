@@ -49,6 +49,10 @@ func TestValidateReview(t *testing.T) {
 		{"context hops zero ok", Review{ContextHops: intPtr(0)}, false},
 		{"context hops negative", Review{ContextHops: intPtr(-1)}, true},
 		{"bad context hops", Review{ContextHops: intPtr(6)}, true},
+		{"subagents valid", Review{Subagents: ReviewSubagents{Mode: "auto", MaxParallel: 2, MinFiles: 4, Agents: []ReviewSubagent{{Name: "go", Include: []string{"**/*.go"}}}}}, false},
+		{"subagents bad mode", Review{Subagents: ReviewSubagents{Mode: "sometimes", Agents: []ReviewSubagent{{Name: "go", Include: []string{"**/*.go"}}}}}, true},
+		{"subagents empty include", Review{Subagents: ReviewSubagents{Mode: "always", Agents: []ReviewSubagent{{Name: "go"}}}}, true},
+		{"subagents duplicate name", Review{Subagents: ReviewSubagents{Mode: "always", Agents: []ReviewSubagent{{Name: "go", Include: []string{"**/*.go"}}, {Name: "go", Include: []string{"**/*.ts"}}}}}, true},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -68,7 +72,7 @@ func TestValidateReview(t *testing.T) {
 
 func TestMergeReviewMergesNewFields(t *testing.T) {
 	base := Review{}
-	file := Review{Gate: "low", FilterMode: "file", MinSeverity: "medium", Timeout: "120s", Expand: intPtr(12), TokenBudget: intPtr(0), DeepContext: boolPtr(true), ContextHops: intPtr(3), Conversation: boolPtr(true), Suggest: boolPtr(false)}
+	file := Review{Gate: "low", FilterMode: "file", MinSeverity: "medium", Timeout: "120s", Expand: intPtr(12), TokenBudget: intPtr(0), DeepContext: boolPtr(true), ContextHops: intPtr(3), Conversation: boolPtr(true), Suggest: boolPtr(false), Subagents: ReviewSubagents{Mode: "auto", Agents: []ReviewSubagent{{Name: "go", Include: []string{"**/*.go"}}}}}
 	out := mergeReview(base, file)
 	if out.Gate != "low" || out.FilterMode != "file" || out.MinSeverity != "medium" || out.Timeout != "120s" {
 		t.Fatalf("scalar review fields not merged: %+v", out)
@@ -78,6 +82,9 @@ func TestMergeReviewMergesNewFields(t *testing.T) {
 	}
 	if out.Suggest == nil || *out.Suggest != false {
 		t.Fatalf("Suggest not merged: %+v", out.Suggest)
+	}
+	if out.Subagents.Mode != "auto" || len(out.Subagents.Agents) != 1 {
+		t.Fatalf("Subagents not merged: %+v", out.Subagents)
 	}
 	pr := mergeReview(Review{}, Review{PatchRepair: boolPtr(true)})
 	if pr.PatchRepair == nil || *pr.PatchRepair != true {

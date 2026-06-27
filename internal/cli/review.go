@@ -75,6 +75,7 @@ type ReviewRequest struct {
 	DeepContext     bool
 	ContextHops     int
 	ContextHopsAuto bool
+	Subagents       config.ReviewSubagents
 	FilterMode      string // added|diff_context|file|nofilter (default diff_context)
 	WantDiagram     bool   // opt into the mermaid change diagram (default off)
 	Instruction     string // optional per-review developer steer; injected fenced/context-only into the USER turn
@@ -199,6 +200,7 @@ type PRReviewRequest struct {
 	DeepContext     bool
 	ContextHops     int
 	ContextHopsAuto bool
+	Subagents       config.ReviewSubagents
 	FilterMode      string // added|diff_context|file|nofilter (default diff_context)
 	MinSeverity     string // inline-posting floor: none|info|low|medium|high|critical (default keeps current behavior)
 	WantDiagram     bool   // opt into the mermaid change diagram (default off)
@@ -414,6 +416,7 @@ func reviewCommand(opts *options) *cobra.Command {
 					deepContext:     deepContext,
 					contextHops:     contextHops,
 					contextHopsAuto: contextHopsAuto,
+					subagents:       rcfg.Subagents,
 					filterMode:      filterMode,
 					minSeverity:     minSeverity,
 					wantDiagram:     wantDiagram,
@@ -454,6 +457,7 @@ func reviewCommand(opts *options) *cobra.Command {
 				DeepContext:     deepContext,
 				ContextHops:     contextHops,
 				ContextHopsAuto: contextHopsAuto,
+				Subagents:       rcfg.Subagents,
 				FilterMode:      filterMode,
 				WantDiagram:     wantDiagram,
 				Instruction:     instruction,
@@ -569,6 +573,7 @@ type prRunArgs struct {
 	deepContext     bool
 	contextHops     int
 	contextHopsAuto bool
+	subagents       config.ReviewSubagents
 	filterMode      string
 	minSeverity     string
 	wantDiagram     bool
@@ -628,6 +633,7 @@ func runPRReview(cmd *cobra.Command, a prRunArgs) error {
 		DeepContext:     a.deepContext,
 		ContextHops:     a.contextHops,
 		ContextHopsAuto: a.contextHopsAuto,
+		Subagents:       a.subagents,
 		FilterMode:      a.filterMode,
 		MinSeverity:     a.minSeverity,
 		WantDiagram:     a.wantDiagram,

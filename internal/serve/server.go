@@ -12,6 +12,8 @@ import (
 	"sort"
 	"strings"
 	"time"
+
+	"github.com/vanducng/miu-cr/internal/config"
 )
 
 // maxBodyBytes caps the webhook request body before HMAC validation to bound
@@ -70,6 +72,7 @@ type JobReviewOptions struct {
 	TokenBudget    int
 	DeepContext    bool
 	ContextHops    int
+	Subagents      config.ReviewSubagents
 }
 
 // SubmitResult tells callers why a job was not enqueued.

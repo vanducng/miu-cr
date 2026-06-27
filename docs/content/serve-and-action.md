@@ -289,6 +289,11 @@ settings are where risky write behavior belongs (`post`, `force`, `suggest`,
 `patch_repair`, `approve_clean`) because they decide what the host may do for
 that repository.
 
+`review.subagents` follows the same layering. Configure broad defaults at the
+top level, then override the scoped agents per repo when a project benefits from
+different prompts or globs. A required subagent failure marks the run degraded,
+so host `approve_clean` will not approve and checks-mode will not report success.
+
 ### Accounts, prompts, and rules
 
 - `github.accounts` can mix PATs and GitHub App installations. PATs support

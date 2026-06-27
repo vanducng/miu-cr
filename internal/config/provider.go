@@ -123,7 +123,24 @@ type Review struct {
 	Conversation *bool             `toml:"conversation,omitempty"`
 	Suggest      *bool             `toml:"suggest,omitempty"`
 	PatchRepair  *bool             `toml:"patch_repair,omitempty"`
+	Subagents    ReviewSubagents   `toml:"subagents,omitempty"`
 	CategoryURLs map[string]string `toml:"category_urls,omitempty"`
+}
+
+type ReviewSubagents struct {
+	Mode            string           `toml:"mode,omitempty" yaml:"mode,omitempty" json:"mode,omitempty"`
+	MaxParallel     int              `toml:"max_parallel,omitempty" yaml:"max_parallel,omitempty" json:"max_parallel,omitempty"`
+	MinFiles        int              `toml:"min_files,omitempty" yaml:"min_files,omitempty" json:"min_files,omitempty"`
+	MinContextBytes int              `toml:"min_context_bytes,omitempty" yaml:"min_context_bytes,omitempty" json:"min_context_bytes,omitempty"`
+	RequireAll      *bool            `toml:"require_all,omitempty" yaml:"require_all,omitempty" json:"require_all,omitempty"`
+	Agents          []ReviewSubagent `toml:"agents,omitempty" yaml:"agents,omitempty" json:"agents,omitempty"`
+}
+
+type ReviewSubagent struct {
+	Name         string   `toml:"name,omitempty" yaml:"name,omitempty" json:"name,omitempty"`
+	Include      []string `toml:"include,omitempty" yaml:"include,omitempty" json:"include,omitempty"`
+	Exclude      []string `toml:"exclude,omitempty" yaml:"exclude,omitempty" json:"exclude,omitempty"`
+	SystemPrompt string   `toml:"system_prompt,omitempty" yaml:"system_prompt,omitempty" json:"system_prompt,omitempty"`
 }
 
 // Config is the layered configuration: a set of named provider profiles plus

@@ -64,7 +64,14 @@ After file selection (where the changed paths are known in memory) the engine se
 
 ## 4. The LLM pass
 
-A single structured pass reviews the assembled context. The model has two read-only tools to gather more context before deciding:
+A single structured pass reviews the assembled context by default. When
+`[review.subagents]` is enabled, large reviews can fan out into scoped passes by
+glob. Each pass sees only its assigned diff slice plus the same rules, project
+context, related context, conversation, and read-only tools. Candidate findings
+from all passes are merged before the deterministic stages below, so line
+anchoring, drift drop, dedupe, gate, history, and posting stay centralized.
+
+The model has two read-only tools to gather more context before deciding:
 
 - **`file_read`**: read a line range of a file at the reviewed revision.
 - **`grep`**: search the reviewed revision for a fixed string.
