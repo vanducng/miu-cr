@@ -165,6 +165,37 @@ func TestHostRunnerFailedReviewRetriesSameHead(t *testing.T) {
 	}
 }
 
+func TestHostRunnerTokenFailureBacksOffSameHead(t *testing.T) {
+	cfg := hostRunnerConfig(t)
+	now := time.Date(2026, 6, 27, 10, 45, 0, 0, time.UTC)
+	cfg.Now = func() time.Time { return now }
+	cfg.TokenSources["main"] = &sequenceTokenSource{results: []tokenResult{
+		{token: "tok"},
+		{err: errors.New("quota")},
+	}}
+	st := cfg.Store.(*fakeHostStore)
+	r, err := NewHostRunner(cfg)
+	if err != nil {
+		t.Fatalf("NewHostRunner: %v", err)
+	}
+	if err := r.Tick(stdctx.Background()); err != nil {
+		t.Fatalf("Tick: %v", err)
+	}
+	var failed store.HostJob
+	for _, job := range st.jobs {
+		if job.Status == "failed" {
+			failed = job
+			break
+		}
+	}
+	if failed.ID == 0 {
+		t.Fatal("expected failed job")
+	}
+	if want := now.Add(hostFailedRetryDelay(1)); failed.AvailableAt.Before(want) {
+		t.Fatalf("failed token retry available_at = %v, want >= %v", failed.AvailableAt, want)
+	}
+}
+
 func TestHostRunnerRejectedSubmitContinuesClaimBatch(t *testing.T) {
 	for _, result := range []SubmitResult{SubmitDuplicate, SubmitCoalesced, SubmitFull} {
 		t.Run(result.String(), func(t *testing.T) {
@@ -386,6 +417,27 @@ func (s *countTokenSource) calls() int {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	return s.n
+}
+
+type tokenResult struct {
+	token string
+	err   error
+}
+
+type sequenceTokenSource struct {
+	mu      sync.Mutex
+	results []tokenResult
+}
+
+func (s *sequenceTokenSource) Token(stdctx.Context) (string, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if len(s.results) == 0 {
+		return "", errors.New("no token result")
+	}
+	r := s.results[0]
+	s.results = s.results[1:]
+	return r.token, r.err
 }
 
 type fakeHostStore struct {

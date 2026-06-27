@@ -374,7 +374,8 @@ func (h *HostRunner) claimReady(ctx stdctx.Context, repos map[int64]HostRepoConf
 		}
 		token, err := h.tokens[repo.GithubAccount].Token(ctx)
 		if err != nil {
-			_ = h.store.CompleteHostJob(ctx, store.HostJobCompleteInput{JobID: claim.Job.ID, AttemptID: claim.AttemptID, Status: "failed", Error: config.RedactString(err.Error()), Now: h.now().UTC()})
+			now := h.now().UTC()
+			_ = h.store.CompleteHostJob(ctx, store.HostJobCompleteInput{JobID: claim.Job.ID, AttemptID: claim.AttemptID, Status: "failed", Error: config.RedactString(err.Error()), Now: now, AvailableAt: now.Add(hostFailedRetryDelay(claim.Job.Attempts))})
 			continue
 		}
 		review := repo.Review
