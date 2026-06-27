@@ -118,18 +118,22 @@ func (c sdkAnthropicClient) newMessage(ctx stdctx.Context, params anthropic.Mess
 
 // anthropicAgent is the production Agent backed by the Anthropic Messages API.
 type anthropicAgent struct {
-	client  anthropicClient
-	model   string
-	timeout time.Duration
+	client      anthropicClient
+	model       string
+	timeout     time.Duration
+	temperature float64
+	thinking    string
 }
 
 // newAnthropicAgent builds the Anthropic-backed Agent (registered for
 // config.KindAnthropic; see registry.go for the dispatch).
 func newAnthropicAgent(creds Credentials, timeout time.Duration) *anthropicAgent {
 	return &anthropicAgent{
-		client:  sdkAnthropicClient{sdk: anthropic.NewClient(anthropicOptions(creds)...)},
-		model:   creds.Model,
-		timeout: timeout,
+		client:      sdkAnthropicClient{sdk: anthropic.NewClient(anthropicOptions(creds)...)},
+		model:       creds.Model,
+		timeout:     timeout,
+		temperature: creds.Temperature,
+		thinking:    creds.Thinking,
 	}
 }
 
@@ -198,6 +202,16 @@ func (a *anthropicAgent) Review(ctx stdctx.Context, rc Context) (engine.ReviewOu
 			anthropic.NewUserMessage(anthropic.NewTextBlock(userPrompt)),
 		},
 	}
+	// Extended thinking (when the model supports it) deepens analysis but REQUIRES
+	// temperature unset (Claude rejects temperature with thinking), and max_tokens
+	// must exceed the thinking budget. Otherwise apply the configured temperature.
+	if wantOn, effort := thinkingSetting(a.thinking); wantOn && supportsAnthropicThinking(a.model) {
+		budget := anthropicThinkingBudget(effort)
+		params.Thinking = anthropic.ThinkingConfigParamOfEnabled(budget)
+		params.MaxTokens = budget + maxTokens
+	} else {
+		params.Temperature = anthropic.Float(a.temperature)
+	}
 
 	emptyRounds := 0
 	for turn := 0; turn < maxToolTurns; turn++ {
@@ -253,9 +267,10 @@ func (a *anthropicAgent) RepairPatch(ctx stdctx.Context, rr RepairRequest) (stri
 		defer cancel()
 	}
 	msg, err := a.client.newMessage(ctx, anthropic.MessageNewParams{
-		MaxTokens: repairMaxTokens,
-		Model:     anthropic.Model(a.model),
-		System:    []anthropic.TextBlockParam{{Text: repairSystemPrompt}},
+		MaxTokens:   repairMaxTokens,
+		Temperature: anthropic.Float(a.temperature),
+		Model:       anthropic.Model(a.model),
+		System:      []anthropic.TextBlockParam{{Text: repairSystemPrompt}},
 		Messages: []anthropic.MessageParam{
 			anthropic.NewUserMessage(anthropic.NewTextBlock(BuildRepairPrompt(rr))),
 		},

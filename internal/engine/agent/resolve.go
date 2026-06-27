@@ -21,6 +21,14 @@ type Credentials struct {
 	Kind   config.Kind
 	APIKey string
 	Model  string
+	// Temperature is the LLM sampling temperature for the review pass (from
+	// [review].temperature; 0 by default for deterministic, stable findings).
+	// Applied only when thinking is OFF for this model — thinking forces temp 1.
+	Temperature float64
+	// Thinking is the [review].thinking setting (auto|off|low|medium|high; ""→auto).
+	// Each backend decides if its model SUPPORTS thinking; when on it sends the
+	// provider's extended-thinking/reasoning params and omits temperature.
+	Thinking string
 	// BaseURL overrides the provider endpoint. For Anthropic this routes the
 	// official SDK at an Anthropic-compatible gateway. Empty means the
 	// SDK/provider default.
@@ -94,11 +102,15 @@ func resolveWith(cfg config.Config, in ResolveInput) (Credentials, error) {
 			Exit:    1,
 		}
 	}
+	var (
+		creds Credentials
+		err   error
+	)
 	switch prof.Kind {
 	case config.KindOpenAI:
-		return resolveOpenAI(in, prof)
+		creds, err = resolveOpenAI(in, prof)
 	case config.KindAnthropic:
-		return resolveAnthropic(in, prof)
+		creds, err = resolveAnthropic(in, prof)
 	default:
 		return Credentials{}, &clierr.CLIError{
 			Code:    "agent.unknown_kind",
@@ -107,6 +119,16 @@ func resolveWith(cfg config.Config, in ResolveInput) (Credentials, error) {
 			Exit:    1,
 		}
 	}
+	if err != nil {
+		return Credentials{}, err
+	}
+	// [review].temperature (nil → 0, the deterministic default) applies when
+	// thinking is off; [review].thinking ("" → auto) drives extended thinking.
+	if cfg.Review.Temperature != nil {
+		creds.Temperature = *cfg.Review.Temperature
+	}
+	creds.Thinking = cfg.Review.Thinking
+	return creds, nil
 }
 
 // pickProviderName selects the profile: an explicit --provider name wins;

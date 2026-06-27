@@ -45,9 +45,11 @@ func (c sdkOpenAIClient) create(ctx stdctx.Context, params openai.ChatCompletion
 
 // openaiAgent is an OpenAI-compatible (chat-completions + tool-use) Agent.
 type openaiAgent struct {
-	client  openaiClient
-	model   string
-	timeout time.Duration
+	client      openaiClient
+	model       string
+	timeout     time.Duration
+	temperature float64
+	thinking    string
 }
 
 func newOpenAIAgent(creds Credentials, timeout time.Duration) *openaiAgent {
@@ -64,7 +66,19 @@ func newOpenAIAgent(creds Credentials, timeout time.Duration) *openaiAgent {
 		openaiopt.WithMaxRetries(3),
 	}
 	sdk := openai.NewClient(opts...)
-	return &openaiAgent{client: sdkOpenAIClient{sdk: sdk}, model: creds.Model, timeout: timeout}
+	return &openaiAgent{client: sdkOpenAIClient{sdk: sdk}, model: creds.Model, timeout: timeout, temperature: creds.Temperature, thinking: creds.Thinking}
+}
+
+// openAIReasoningEffort maps an effort level to the SDK constant (default medium).
+func openAIReasoningEffort(effort string) shared.ReasoningEffort {
+	switch effort {
+	case "low":
+		return shared.ReasoningEffortLow
+	case "high":
+		return shared.ReasoningEffortHigh
+	default:
+		return shared.ReasoningEffortMedium
+	}
 }
 
 func openAITools() []openai.ChatCompletionToolUnionParam {
@@ -107,14 +121,20 @@ func (a *openaiAgent) RepairPatch(ctx stdctx.Context, rr RepairRequest) (string,
 		ctx, cancel = stdctx.WithTimeout(ctx, a.timeout)
 		defer cancel()
 	}
-	resp, err := a.client.create(ctx, openai.ChatCompletionNewParams{
+	repairParams := openai.ChatCompletionNewParams{
 		Model: shared.ChatModel(a.model),
 		Messages: []openai.ChatCompletionMessageParamUnion{
 			openai.SystemMessage(repairSystemPrompt),
 			openai.UserMessage(BuildRepairPrompt(rr)),
 		},
-		MaxTokens: openai.Int(int64(repairMaxTokens)),
-	})
+	}
+	if isOpenAIReasoningModel(a.model) {
+		repairParams.MaxCompletionTokens = openai.Int(int64(repairMaxTokens))
+	} else {
+		repairParams.Temperature = openai.Float(a.temperature)
+		repairParams.MaxTokens = openai.Int(int64(repairMaxTokens))
+	}
+	resp, err := a.client.create(ctx, repairParams)
 	if err != nil {
 		return "", classifyOpenAIErr(err)
 	}
@@ -148,9 +168,19 @@ func (a *openaiAgent) Review(ctx stdctx.Context, rc Context) (engine.ReviewOutpu
 		Model:    shared.ChatModel(a.model),
 		Messages: messages,
 		Tools:    openAITools(),
-		// max_tokens (not max_completion_tokens) for the broadest compatibility
-		// with OpenAI-compatible gateways, many of which lag the newer field.
-		MaxTokens: openai.Int(int64(maxTokens)),
+	}
+	// Reasoning models (o-series/gpt-5) reject temperature != 1 AND max_tokens (they
+	// require max_completion_tokens) on Chat Completions; drive depth via
+	// reasoning_effort. Plain chat models take the configured temperature (0 by
+	// default) and max_tokens (the newer field lags on some OpenAI-compatible gateways).
+	if isOpenAIReasoningModel(a.model) {
+		params.MaxCompletionTokens = openai.Int(int64(maxTokens))
+		if wantOn, effort := thinkingSetting(a.thinking); wantOn {
+			params.ReasoningEffort = openAIReasoningEffort(effort)
+		}
+	} else {
+		params.Temperature = openai.Float(a.temperature)
+		params.MaxTokens = openai.Int(int64(maxTokens))
 	}
 
 	emptyRounds := 0

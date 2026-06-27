@@ -114,6 +114,8 @@ type Review struct {
 	FilterMode   string            `toml:"filter_mode,omitempty"`
 	MinSeverity  string            `toml:"min_severity,omitempty"`
 	Timeout      string            `toml:"timeout,omitempty"`
+	Temperature  *float64          `toml:"temperature,omitempty"` // nil → 0 (deterministic); see [review].temperature in providers.md
+	Thinking     string            `toml:"thinking,omitempty"`    // auto|off|low|medium|high; "" → auto (on when the model supports it). Thinking omits temperature.
 	Suggest      *bool             `toml:"suggest,omitempty"`
 	PatchRepair  *bool             `toml:"patch_repair,omitempty"`
 	CategoryURLs map[string]string `toml:"category_urls,omitempty"`
