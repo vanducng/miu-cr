@@ -267,7 +267,8 @@ func TestServeHostReloaderReloadsPromptAndRules(t *testing.T) {
 	}
 	t.Setenv("TEST_PROVIDER_TOKEN", "provider-secret")
 	hostPath := filepath.Join(base, "host.yaml")
-	if err := os.WriteFile(hostPath, []byte(`
+	hostYAML := func(mode string, agents string) string {
+		return `
 version: 1
 default_provider: test
 providers:
@@ -294,7 +295,19 @@ repos:
     github_account: pat
     rules:
       - rules
-`), 0o600); err != nil {
+    review:
+      subagents:
+        mode: ` + mode + `
+        max_parallel: 3
+        agents:
+` + agents
+	}
+	agentsV1 := `          - name: airflow
+            include: ["dags/**"]
+          - name: dbt
+            include: ["dbt/**"]
+`
+	if err := os.WriteFile(hostPath, []byte(hostYAML("always", agentsV1)), 0o600); err != nil {
 		t.Fatal(err)
 	}
 
@@ -316,6 +329,16 @@ repos:
 	if err := os.WriteFile(rulePath, []byte("rule v2"), 0o600); err != nil {
 		t.Fatal(err)
 	}
+	agentsV2 := `          - name: airflow
+            include: ["dags/**", "plugins/**"]
+          - name: dbt
+            include: ["dbt/**", "models/**", "macros/**"]
+          - name: tobytime
+            include: ["services/sci/**"]
+`
+	if err := os.WriteFile(hostPath, []byte(hostYAML("auto", agentsV2)), 0o600); err != nil {
+		t.Fatal(err)
+	}
 	second, err := reload(stdctx.Background())
 	if err != nil {
 		t.Fatalf("second reload: %v", err)
@@ -328,6 +351,15 @@ repos:
 	}
 	if first.Repos[0].PromptHash == second.Repos[0].PromptHash || first.Repos[0].RulesHash == second.Repos[0].RulesHash {
 		t.Fatalf("prompt/rules hashes did not change: first=%+v second=%+v", first.Repos[0], second.Repos[0])
+	}
+	if first.Repos[0].Review.Subagents.Mode != "always" || len(first.Repos[0].Review.Subagents.Agents) != 2 {
+		t.Fatalf("first subagents not loaded: %+v", first.Repos[0].Review.Subagents)
+	}
+	if second.Repos[0].Review.Subagents.Mode != "auto" || len(second.Repos[0].Review.Subagents.Agents) != 3 {
+		t.Fatalf("second subagents not reloaded: %+v", second.Repos[0].Review.Subagents)
+	}
+	if second.Repos[0].Review.Subagents.Agents[2].Name != "tobytime" || second.Repos[0].Review.Subagents.Agents[2].Include[0] != "services/sci/**" {
+		t.Fatalf("tobytime subagent not reloaded: %+v", second.Repos[0].Review.Subagents.Agents[2])
 	}
 }
 
