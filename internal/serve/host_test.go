@@ -180,6 +180,52 @@ func TestHostRunnerReloadsBeforeEachTick(t *testing.T) {
 	}
 }
 
+func TestHostRunnerTickKeepsPreviousConfigAfterReloadError(t *testing.T) {
+	cfg := hostRunnerConfig(t)
+	gh := &fakeNotifGetter{prs: map[string][]*github.PullRequest{
+		"octo/hello": {prWithHead(1, "sha-A")},
+	}}
+	cfg.NewNotifGetter = func(string) notifGetter { return gh }
+	repo := cfg.Repos[0]
+	repo.PromptHash = "prompt-new"
+	repo.RulesHash = "rules-new"
+	repo.Review.OperatorPrompt = "new prompt"
+	reloads := []struct {
+		next HostReload
+		err  error
+	}{
+		{next: HostReload{Repos: []HostRepoConfig{repo}, TokenSources: cfg.TokenSources, Interval: cfg.Interval, ReviewTO: cfg.ReviewTO}},
+		{err: errors.New("reload failed")},
+	}
+	cfg.Reload = func(stdctx.Context) (HostReload, error) {
+		next := reloads[0]
+		if len(reloads) > 1 {
+			reloads = reloads[1:]
+		}
+		return next.next, next.err
+	}
+	disp := cfg.Dispatcher.(*pollDispatcher)
+	r, err := NewHostRunner(cfg)
+	if err != nil {
+		t.Fatalf("NewHostRunner: %v", err)
+	}
+	if err := r.Tick(stdctx.Background()); err != nil {
+		t.Fatalf("first tick: %v", err)
+	}
+	gh.prs["octo/hello"] = []*github.PullRequest{prWithHead(2, "sha-B")}
+	if err := r.Tick(stdctx.Background()); err != nil {
+		t.Fatalf("second tick: %v", err)
+	}
+	disp.mu.Lock()
+	defer disp.mu.Unlock()
+	if len(disp.jobs) != 2 {
+		t.Fatalf("submitted jobs = %d, want 2", len(disp.jobs))
+	}
+	if disp.jobs[1].Review.OperatorPrompt != "new prompt" {
+		t.Fatalf("operator prompt = %q, want previous reload config", disp.jobs[1].Review.OperatorPrompt)
+	}
+}
+
 func TestHostRunnerFailedReviewRetriesSameHead(t *testing.T) {
 	cfg := hostRunnerConfig(t)
 	now := time.Date(2026, 6, 27, 10, 30, 0, 0, time.UTC)
