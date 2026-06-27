@@ -110,6 +110,27 @@ default_provider = "anthropic"
 # suggest      = false           # emit GitHub one-click suggestions on --post (default off)
 # patch_repair = false           # 2nd-pass recovery of one-click suggestions; only effective with suggest=true (default off)
 #
+# # Optional in-process subagent fanout. Candidate findings from each scoped pass
+# # still flow through the same deterministic anchoring, dedupe, gate, and publish
+# # pipeline. Use "auto" for large reviews, "always" to force fanout, or "off".
+# [review.subagents]
+# mode = "auto"                  # off|auto|always
+# max_parallel = 2               # default 2, capped at 8
+# min_files = 8                  # auto threshold; 0 uses default
+# min_context_bytes = 60000      # auto threshold; 0 uses default
+# require_all = true             # failed subagent prevents approve_clean/check success
+#
+# [[review.subagents.agents]]
+# name = "go"
+# include = ["**/*.go"]
+# exclude = ["**/*_test.go"]
+# system_prompt = "Focus on correctness, concurrency, error handling, and API compatibility."
+#
+# [[review.subagents.agents]]
+# name = "frontend"
+# include = ["**/*.ts", "**/*.tsx", "**/*.js", "**/*.jsx"]
+# system_prompt = "Focus on user-facing behavior, state flow, accessibility, and data contracts."
+#
 # # category_urls maps a finding Category (case-insensitive) to a docs URL so the
 # # category renders as a clickable link in PR comments/summary + the SARIF helpUri.
 # [review.category_urls]

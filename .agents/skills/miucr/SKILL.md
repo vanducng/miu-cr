@@ -624,6 +624,20 @@ suggest      = false                    # default --suggest (one-click suggestio
 patch_repair = false                    # default --patch-repair (2nd-pass one-click recovery; only takes effect with suggest=true)
 category_urls = { security = "https://docs.example.com/security" }   # case-insensitive Category -> http(s) URL; PR-comment/summary link + SARIF helpUri
 # context_hops = 3                      # optional override; omit to let deep_context choose automatically
+
+[review.subagents]                      # optional scoped fanout; candidates still pass through normal anchoring/dedupe/gate
+mode = "auto"                           # off|auto|always
+max_parallel = 2                        # default 2, capped at 8
+min_files = 8                           # auto threshold; 0 uses default
+min_context_bytes = 60000               # auto threshold; 0 uses default
+require_all = true                      # failed subagent prevents approve_clean/check success
+
+[[review.subagents.agents]]
+name = "go"
+include = ["**/*.go"]
+exclude = ["**/*_test.go"]
+system_prompt = "Focus on correctness, concurrency, error handling, and API compatibility."
+
 # NB: no post/force/approve_clean config (write-action/repeat-spend defaults are footguns); a bad [review] value → config.invalid (exit 2)
 ```
 

@@ -100,21 +100,22 @@ type HostRetention struct {
 }
 
 type HostReview struct {
-	Gate         string `yaml:"gate" json:"gate,omitempty"`
-	FilterMode   string `yaml:"filter_mode" json:"filter_mode,omitempty"`
-	MinSeverity  string `yaml:"min_severity" json:"min_severity,omitempty"`
-	Timeout      string `yaml:"timeout" json:"timeout,omitempty"`
-	Expand       *int   `yaml:"expand" json:"expand,omitempty"`
-	TokenBudget  *int   `yaml:"token_budget" json:"token_budget,omitempty"`
-	ContextHops  *int   `yaml:"context_hops" json:"context_hops,omitempty"`
-	Mode         string `yaml:"mode" json:"mode,omitempty"`
-	DeepContext  *bool  `yaml:"deep_context" json:"deep_context,omitempty"`
-	Conversation *bool  `yaml:"conversation" json:"conversation,omitempty"`
-	Post         *bool  `yaml:"post" json:"post,omitempty"`
-	Force        *bool  `yaml:"force" json:"force,omitempty"`
-	Suggest      *bool  `yaml:"suggest" json:"suggest,omitempty"`
-	PatchRepair  *bool  `yaml:"patch_repair" json:"patch_repair,omitempty"`
-	ApproveClean *bool  `yaml:"approve_clean" json:"approve_clean,omitempty"`
+	Gate         string          `yaml:"gate" json:"gate,omitempty"`
+	FilterMode   string          `yaml:"filter_mode" json:"filter_mode,omitempty"`
+	MinSeverity  string          `yaml:"min_severity" json:"min_severity,omitempty"`
+	Timeout      string          `yaml:"timeout" json:"timeout,omitempty"`
+	Expand       *int            `yaml:"expand" json:"expand,omitempty"`
+	TokenBudget  *int            `yaml:"token_budget" json:"token_budget,omitempty"`
+	ContextHops  *int            `yaml:"context_hops" json:"context_hops,omitempty"`
+	Mode         string          `yaml:"mode" json:"mode,omitempty"`
+	DeepContext  *bool           `yaml:"deep_context" json:"deep_context,omitempty"`
+	Conversation *bool           `yaml:"conversation" json:"conversation,omitempty"`
+	Post         *bool           `yaml:"post" json:"post,omitempty"`
+	Force        *bool           `yaml:"force" json:"force,omitempty"`
+	Suggest      *bool           `yaml:"suggest" json:"suggest,omitempty"`
+	PatchRepair  *bool           `yaml:"patch_repair" json:"patch_repair,omitempty"`
+	ApproveClean *bool           `yaml:"approve_clean" json:"approve_clean,omitempty"`
+	Subagents    ReviewSubagents `yaml:"subagents" json:"subagents"`
 }
 
 type HostRepo struct {
@@ -408,6 +409,54 @@ func validateHostReview(path, field string, r HostReview) error {
 	}
 	if r.TokenBudget != nil && *r.TokenBudget < 0 {
 		return invalidHost(path, field+".token_budget", strconv.Itoa(*r.TokenBudget), ">= 0")
+	}
+	if err := validateHostSubagents(path, field+".subagents", r.Subagents); err != nil {
+		return err
+	}
+	return nil
+}
+
+func validateHostSubagents(path, field string, s ReviewSubagents) error {
+	switch s.Mode {
+	case "", "off", "auto", "always":
+	default:
+		return invalidHost(path, field+".mode", s.Mode, "off|auto|always")
+	}
+	if s.MaxParallel < 0 {
+		return invalidHost(path, field+".max_parallel", strconv.Itoa(s.MaxParallel), ">= 0")
+	}
+	if s.MinFiles < 0 {
+		return invalidHost(path, field+".min_files", strconv.Itoa(s.MinFiles), ">= 0")
+	}
+	if s.MinContextBytes < 0 {
+		return invalidHost(path, field+".min_context_bytes", strconv.Itoa(s.MinContextBytes), ">= 0")
+	}
+	if len(s.Agents) > 8 {
+		return invalidHost(path, field+".agents", strconv.Itoa(len(s.Agents)), "at most 8 agents")
+	}
+	seen := make(map[string]bool, len(s.Agents))
+	for i, a := range s.Agents {
+		prefix := fmt.Sprintf("%s.agents[%d]", field, i)
+		if a.Name == "" {
+			return invalidHost(path, prefix+".name", "", "non-empty")
+		}
+		if seen[a.Name] {
+			return invalidHost(path, prefix+".name", a.Name, "unique")
+		}
+		seen[a.Name] = true
+		if len(a.Include) == 0 {
+			return invalidHost(path, prefix+".include", "", "at least one glob")
+		}
+		for j, g := range a.Include {
+			if g == "" {
+				return invalidHost(path, fmt.Sprintf("%s.include[%d]", prefix, j), "", "non-empty glob")
+			}
+		}
+		for j, g := range a.Exclude {
+			if g == "" {
+				return invalidHost(path, fmt.Sprintf("%s.exclude[%d]", prefix, j), "", "non-empty glob")
+			}
+		}
 	}
 	return nil
 }

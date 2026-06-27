@@ -671,6 +671,7 @@ func hostReviewOptions(provider config.HostProvider, secret string, review confi
 		BaseURL:      provider.BaseURL,
 		Model:        provider.Model,
 		DeepContext:  boolValue(review.DeepContext),
+		Subagents:    review.Subagents,
 	}
 	if review.Expand != nil {
 		opts.ExpandWindow = *review.Expand
@@ -1084,6 +1085,7 @@ func mergeHostReview(base, over config.HostReview) config.HostReview {
 	if over.ApproveClean != nil {
 		out.ApproveClean = over.ApproveClean
 	}
+	out.Subagents = config.MergeReviewSubagents(base.Subagents, over.Subagents)
 	return out
 }
 
@@ -1213,6 +1215,7 @@ func buildServeReviewFn(log *slog.Logger, gate string, st serve.ReviewStore, tra
 			TokenBudget:    review.TokenBudget,
 			DeepContext:    review.DeepContext,
 			ContextHops:    review.ContextHops,
+			Subagents:      review.Subagents,
 			FilterMode:     review.FilterMode,
 			MinSeverity:    review.MinSeverity,
 			OperatorPrompt: review.OperatorPrompt,

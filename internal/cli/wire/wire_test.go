@@ -394,6 +394,33 @@ func TestPublishChecksWireFlow(t *testing.T) {
 	}
 }
 
+func TestPublishChecksSubagentDegradedFails(t *testing.T) {
+	runner := gitcmd.New()
+	dir, base, head := setupRepo(t, runner)
+
+	fake := &fakeGitHub{}
+	restore := newGitHubClient
+	newGitHubClient = func(string) mgithub.Client { return fake }
+	t.Cleanup(func() { newGitHubClient = restore })
+	client := newGitHubClient("")
+
+	info := &mgithub.PRInfo{Owner: "o", Repo: "r", Number: 7, HeadSHA: head, BaseSHA: base, BaseBranch: "main"}
+	res := engine.ReviewResult{
+		Stats: map[string]any{"truncation_level": "full", "files_reviewed": float64(1), "subagents_degraded": true},
+	}
+
+	pr := &cli.PRResult{SummaryAction: "none"}
+	if err := publishReview(stdctx.Background(), client, runner, dir, info, res, pr, cli.PRReviewRequest{Gate: "high", Mode: "checks"}, nil, embedWriter{}, nil, nil, ""); err != nil {
+		t.Fatalf("publishReview (checks): %v", err)
+	}
+	if pr.CheckConclusion != "failure" {
+		t.Fatalf("degraded subagent run must conclude failure, got %q", pr.CheckConclusion)
+	}
+	if pr.PostedInline != 0 {
+		t.Fatalf("want 0 annotations, got %d", pr.PostedInline)
+	}
+}
+
 // The checks reporter must feed semantic recall too: the annotated findings' code
 // anchors are embedded + upserted just like the inline path's posted findings.
 func TestPublishChecksFeedsEmbeddingWriter(t *testing.T) {
@@ -470,6 +497,28 @@ func TestPublishReviewApproveClean(t *testing.T) {
 	}
 	if pr.SummaryAction != "edited" || fake.createIssueN != 1 || fake.editN != 1 {
 		t.Fatalf("clean approve must still upsert the summary: action=%q create=%d edit=%d", pr.SummaryAction, fake.createIssueN, fake.editN)
+	}
+}
+
+func TestPublishReviewApproveDegradesSubagentFailure(t *testing.T) {
+	runner := gitcmd.New()
+	dir, base, head := setupRepo(t, runner)
+
+	fake := &fakeGitHub{headSHA: head}
+	restore := newGitHubClient
+	newGitHubClient = func(string) mgithub.Client { return fake }
+	t.Cleanup(func() { newGitHubClient = restore })
+	client := newGitHubClient("")
+
+	res := cleanReviewResult()
+	res.Stats["subagents_degraded"] = true
+	info := &mgithub.PRInfo{Owner: "o", Repo: "r", Number: 7, HeadSHA: head, BaseSHA: base, BaseBranch: "main", AuthorAssociation: "MEMBER"}
+	pr := &cli.PRResult{SummaryAction: "none"}
+	if err := publishReview(stdctx.Background(), client, runner, dir, info, res, pr, cli.PRReviewRequest{Gate: "high", ApproveClean: true}, nil, embedWriter{}, nil, nil, ""); err != nil {
+		t.Fatalf("publishReview: %v", err)
+	}
+	if pr.ApproveAction != "commented" || pr.ApproveReason != "gate_failed" {
+		t.Fatalf("degraded subagent run must not approve, got action=%q reason=%q", pr.ApproveAction, pr.ApproveReason)
 	}
 }
 

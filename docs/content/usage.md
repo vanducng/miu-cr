@@ -175,6 +175,30 @@ an explicit CLI flag still wins.
   related-file hop context are skipped.
 - `--instruction <text>`: extra free-text steer for THIS review (e.g. "focus on the auth changes"); injected fenced, context-only, and length-capped, so it never redefines the finding schema.
 
+## Configurable subagents
+
+`[review.subagents]` can split large reviews into scoped in-process LLM passes by
+glob. This is still one miu-cr review from the outside: each subagent returns
+candidate findings, then the normal engine re-anchors quoted code, drops drift,
+dedupes, gates, saves history, and posts. Use `mode = "auto"` to fan out only
+when a review crosses the configured file or context-byte threshold, or
+`mode = "always"` for repos where scoped prompts are always useful.
+
+```toml
+[review.subagents]
+mode = "auto"
+max_parallel = 2
+require_all = true
+
+[[review.subagents.agents]]
+name = "go"
+include = ["**/*.go"]
+system_prompt = "Focus on correctness, concurrency, error handling, and API compatibility."
+```
+
+When `require_all = true`, a failed subagent marks the run as degraded, so
+`--approve-clean` will not approve and checks-mode will not report success.
+
 ## Provider flags
 
 `review` resolves a provider from flags or the environment. See [Providers](/providers/) for the full matrix.

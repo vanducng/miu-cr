@@ -86,6 +86,19 @@ temperature  = 0               # LLM sampling temperature (0–2), used when thi
 suggest      = false           # default --suggest (GitHub one-click suggestions on --post)
 patch_repair = false           # default --patch-repair; requires suggest=true
 
+[review.subagents]             # optional scoped fanout inside one review
+mode = "auto"                  # off|auto|always
+max_parallel = 2               # default 2, capped at 8
+min_files = 8                  # auto threshold; 0 uses default
+min_context_bytes = 60000      # auto threshold; 0 uses default
+require_all = true             # failed subagent prevents approve_clean/check success
+
+[[review.subagents.agents]]
+name = "go"
+include = ["**/*.go"]
+exclude = ["**/*_test.go"]
+system_prompt = "Focus on correctness, concurrency, error handling, and API compatibility."
+
 [review.category_urls]         # map a finding Category → a docs URL (clickable link + SARIF helpUri)
 "security" = "https://example.com/docs/security"
 ```

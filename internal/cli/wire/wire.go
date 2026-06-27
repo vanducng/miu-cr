@@ -222,6 +222,7 @@ func (engineReviewer) Review(ctx stdctx.Context, req cli.ReviewRequest) (cli.Rev
 		ProjectContext:  req.DeepContext,
 		ContextHops:     req.ContextHops,
 		ContextHopsAuto: req.ContextHopsAuto,
+		Subagents:       engineSubagents(req.Subagents),
 		Provider:        string(creds.Kind),
 		Model:           creds.Model,
 
@@ -430,6 +431,7 @@ func (prReviewer) ReviewPR(ctx stdctx.Context, req cli.PRReviewRequest) (cli.Rev
 		ProjectContext:  wantProjectContext(req.DeepContext, info.IsFork),
 		ContextHops:     contextHopsForPR(req.ContextHops, info.IsFork),
 		ContextHopsAuto: contextHopsAutoForPR(req.ContextHopsAuto, info.IsFork),
+		Subagents:       engineSubagents(req.Subagents),
 		Provider:        string(creds.Kind),
 		Model:           creds.Model,
 		Owner:           info.Owner,
@@ -558,6 +560,7 @@ type reviewReuseShape struct {
 	DeepContext     bool
 	ContextHops     int
 	ContextHopsAuto bool
+	Subagents       config.ReviewSubagents
 	FilterMode      string
 	MinSeverity     string
 	WantDiagram     bool
@@ -636,6 +639,7 @@ func newReviewReuseShape(req cli.PRReviewRequest, cfg config.Config, providerNam
 		DeepContext:     req.DeepContext,
 		ContextHops:     req.ContextHops,
 		ContextHopsAuto: req.ContextHopsAuto,
+		Subagents:       req.Subagents,
 		FilterMode:      req.FilterMode,
 		MinSeverity:     req.MinSeverity,
 		WantDiagram:     req.WantDiagram,
@@ -743,7 +747,7 @@ func approveCleanReuseOK(ctx stdctx.Context, client mgithub.Client, info *mgithu
 
 func priorReviewShape(info *mgithub.PRInfo, rec store.ReviewRecord, haveRec bool, gate string) (findingsCount, reviewedFiles int, gateClean bool) {
 	if haveRec {
-		return len(rec.Findings), reviewedFilesFromStats(rec.Stats), !engine.GateFailed(rec.Findings, gate)
+		return len(rec.Findings), reviewedFilesFromStats(rec.Stats), !engine.GateFailed(rec.Findings, gate) && !engine.SubagentsDegraded(rec.Stats)
 	}
 	open := openLedgerCount(info.PriorLedger)
 	return open, len(info.Files), open == 0
@@ -823,7 +827,7 @@ func publishReview(ctx stdctx.Context, client mgithub.Client, runner *gitcmd.Run
 		Suggest:       req.Suggest,
 		ApproveClean:  req.ApproveClean,
 		Gate:          req.Gate,
-		GateClean:     !engine.GateFailed(res.Findings, req.Gate),
+		GateClean:     !engine.GateFailed(res.Findings, req.Gate) && !engine.SubagentsDegraded(res.Stats),
 		ReviewedFiles: reviewedFilesFromStats(res.Stats),
 		FilterMode:    filterModeOf(req.FilterMode),
 		MinSeverity:   req.MinSeverity,
@@ -926,7 +930,7 @@ func publishReview(ctx stdctx.Context, client mgithub.Client, runner *gitcmd.Run
 // of inline comments + a summary. No fingerprint dedupe / summary upsert: a CheckRun
 // is replaced wholesale each run by the same name, so re-runs are naturally idempotent.
 func publishChecks(ctx stdctx.Context, client mgithub.Client, info *mgithub.PRInfo, res engine.ReviewResult, diffs []diff.Diff, prResult *cli.PRResult, req cli.PRReviewRequest, ew embedWriter) error {
-	gateClean := !engine.GateFailed(res.Findings, req.Gate)
+	gateClean := !engine.GateFailed(res.Findings, req.Gate) && !engine.SubagentsDegraded(res.Stats)
 	cr, err := mgithub.PostChecks(ctx, client, info, res.Findings, diffs, res.Stats, gateClean, filterModeOf(req.FilterMode))
 	if err != nil {
 		return err
@@ -1004,6 +1008,29 @@ func filterModeOf(s string) mgithub.FilterMode {
 		return mgithub.FilterMode(s)
 	}
 	return mgithub.FilterDiffContext
+}
+
+func engineSubagents(in config.ReviewSubagents) engine.SubagentConfig {
+	out := engine.SubagentConfig{
+		Mode:            in.Mode,
+		MaxParallel:     in.MaxParallel,
+		MinFiles:        in.MinFiles,
+		MinContextBytes: in.MinContextBytes,
+		RequireAll:      true,
+	}
+	if in.RequireAll != nil {
+		out.RequireAll = *in.RequireAll
+	}
+	out.Agents = make([]engine.SubagentSpec, 0, len(in.Agents))
+	for _, a := range in.Agents {
+		out.Agents = append(out.Agents, engine.SubagentSpec{
+			Name:           a.Name,
+			IncludeGlobs:   append([]string(nil), a.Include...),
+			ExcludeGlobs:   append([]string(nil), a.Exclude...),
+			OperatorPrompt: a.SystemPrompt,
+		})
+	}
+	return out
 }
 
 // approveActionFor maps the resolved CreateReview Event to the PRResult action

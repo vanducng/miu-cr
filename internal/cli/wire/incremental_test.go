@@ -166,6 +166,11 @@ func TestReviewReuseKeyChangesForReviewShape(t *testing.T) {
 		t.Fatal("instruction change must change the reuse key")
 	}
 	req.Instruction = ""
+	req.Subagents = config.ReviewSubagents{Mode: "always", Agents: []config.ReviewSubagent{{Name: "go", Include: []string{"**/*.go"}}}}
+	if got := reviewReuseKey(req, cfg); got == base {
+		t.Fatal("subagent config change must change the reuse key")
+	}
+	req.Subagents = config.ReviewSubagents{}
 	cfg.Providers[string(config.KindAnthropic)] = config.Provider{Kind: config.KindAnthropic, Model: "other-model"}
 	if got := reviewReuseKey(req, cfg); got == base {
 		t.Fatal("provider model change must change the reuse key")
@@ -197,6 +202,16 @@ func TestApproveCleanReuseRequiresApprovalWhenEligible(t *testing.T) {
 	approved := &fakeGitHub{reviews: []*gh.PullRequestReview{{State: gh.Ptr("APPROVED"), CommitID: gh.Ptr("sha-1")}}}
 	if !approveCleanReuseOK(ctx, approved, info, rec, true, "high") {
 		t.Fatal("eligible clean approve-clean rerun may skip once approval exists at the head")
+	}
+}
+
+func TestApproveCleanReuseSkipsWhenPriorSubagentsDegraded(t *testing.T) {
+	ctx := stdctx.Background()
+	info := prInfo("sha-1")
+	info.AuthorAssociation = "MEMBER"
+	rec := store.ReviewRecord{Stats: map[string]any{"files_reviewed": float64(1), "subagents_degraded": true}}
+	if !approveCleanReuseOK(ctx, &fakeGitHub{}, info, rec, true, "high") {
+		t.Fatal("degraded prior subagent run should reuse; approval is not expected")
 	}
 }
 
