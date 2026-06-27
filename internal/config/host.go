@@ -120,8 +120,8 @@ type HostReview struct {
 type HostRepo struct {
 	Name          string     `yaml:"name" json:"name"`
 	Slug          string     `yaml:"slug" json:"slug"`
-	Owner         string     `yaml:"owner" json:"owner,omitempty"`
-	Repo          string     `yaml:"repo" json:"repo,omitempty"`
+	Owner         string     `yaml:"-" json:"owner,omitempty"` // derived from slug; not user-settable
+	Repo          string     `yaml:"-" json:"repo,omitempty"`  // derived from slug; not user-settable
 	GitURL        string     `yaml:"git_url" json:"git_url"`
 	DefaultBranch string     `yaml:"default_branch" json:"default_branch,omitempty"`
 	GithubAccount string     `yaml:"github_account" json:"github_account,omitempty"`

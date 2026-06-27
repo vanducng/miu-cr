@@ -217,6 +217,22 @@ repos:
 	}
 }
 
+func TestLoadHostRejectsRepoOwnerOverride(t *testing.T) {
+	// owner/repo are derived from slug; an explicit key must fail loud, not be
+	// silently overwritten by normalizeHost.
+	path := writeHostConfig(t, minimalHostYAML()+`
+repos:
+  - name: service-api
+    slug: example-org/service-api
+    owner: someone-else
+    git_url: https://github.com/example-org/service-api.git
+`)
+	err := loadHostErr(path)
+	if !isConfigInvalid(err) {
+		t.Fatalf("want config.invalid for owner override, got %v", err)
+	}
+}
+
 func TestLoadHostRejectsNonMatchingGitURL(t *testing.T) {
 	path := writeHostConfig(t, minimalHostYAML()+`
 repos:
