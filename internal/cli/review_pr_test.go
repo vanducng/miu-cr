@@ -42,6 +42,17 @@ func (s *stubGateReviewer) GateFailed([]ReviewFinding, string) bool { return s.g
 
 func runPR(t *testing.T, pr PRReviewer, rev Reviewer, args ...string) (string, error) {
 	t.Helper()
+	t.Setenv("HOME", t.TempDir())
+	return runPRCommand(t, pr, rev, args...)
+}
+
+func runPRKeepHome(t *testing.T, pr PRReviewer, rev Reviewer, args ...string) (string, error) {
+	t.Helper()
+	return runPRCommand(t, pr, rev, args...)
+}
+
+func runPRCommand(t *testing.T, pr PRReviewer, rev Reviewer, args ...string) (string, error) {
+	t.Helper()
 	prevPR, prevRev := prReviewer, reviewer
 	SetPRReviewer(pr)
 	SetReviewer(rev)
@@ -205,7 +216,7 @@ context_hops = 2
 conversation = true
 `)
 	pr := &fakePRReviewer{outcome: ReviewOutcome{PR: &PRResult{Owner: "o", Repo: "r", Number: 1}}}
-	if _, err := runPR(t, pr, &fakeReviewer{}, "--pr", "o/r#1", "--no-post"); err != nil {
+	if _, err := runPRKeepHome(t, pr, &fakeReviewer{}, "--pr", "o/r#1", "--no-post"); err != nil {
 		t.Fatalf("run: %v", err)
 	}
 	if !pr.gotReq.DeepContext || pr.gotReq.ContextHops != 2 || pr.gotReq.ContextHopsAuto || !pr.gotReq.Conversation {
@@ -214,9 +225,9 @@ conversation = true
 
 	writeUserConfig(t, `[review]
 conversation = true
-`)
+	`)
 	pr = &fakePRReviewer{outcome: ReviewOutcome{PR: &PRResult{Owner: "o", Repo: "r", Number: 1}}}
-	if _, err := runPR(t, pr, &fakeReviewer{}, "--pr", "o/r#1", "--no-post", "--conversation=false"); err != nil {
+	if _, err := runPRKeepHome(t, pr, &fakeReviewer{}, "--pr", "o/r#1", "--no-post", "--conversation=false"); err != nil {
 		t.Fatalf("run explicit: %v", err)
 	}
 	if pr.gotReq.Conversation {

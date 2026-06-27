@@ -68,7 +68,7 @@ func TestStoreCrossPush(t *testing.T) {
 	res := engine.ReviewResult{Findings: []engine.Finding{findingB()}, Stats: map[string]any{"truncation_level": "full", "files_reviewed": float64(1)}}
 
 	prA := &cli.PRResult{SummaryAction: "none"}
-	if err := publishReview(stdctx.Background(), client, runner, dir, info, res, prA, cli.PRReviewRequest{Gate: "high"}, st.PRThread(), embedWriter{}, nil, nil); err != nil {
+	if err := publishReview(stdctx.Background(), client, runner, dir, info, res, prA, cli.PRReviewRequest{Gate: "high"}, st.PRThread(), embedWriter{}, nil, nil, ""); err != nil {
 		t.Fatalf("run A: %v", err)
 	}
 	if prA.PostedInline != 1 {
@@ -80,7 +80,7 @@ func TestStoreCrossPush(t *testing.T) {
 	}
 
 	prB := &cli.PRResult{SummaryAction: "none"}
-	if err := publishReview(stdctx.Background(), client, runner, dir, info, res, prB, cli.PRReviewRequest{Gate: "high"}, st.PRThread(), embedWriter{}, nil, nil); err != nil {
+	if err := publishReview(stdctx.Background(), client, runner, dir, info, res, prB, cli.PRReviewRequest{Gate: "high"}, st.PRThread(), embedWriter{}, nil, nil, ""); err != nil {
 		t.Fatalf("run B: %v", err)
 	}
 	if prB.PostedInline != 0 {
@@ -95,7 +95,7 @@ func TestStoreCrossPush(t *testing.T) {
 	if prB.SummaryAction != "edited" {
 		t.Fatalf("run B must edit the summary comment, got %q", prB.SummaryAction)
 	}
-	if fake.editN != 1 || fake.createIssueN != 1 {
+	if fake.editN != 3 || fake.createIssueN != 1 {
 		t.Fatalf("run B must EDIT (not stack) the summary: create=%d edit=%d", fake.createIssueN, fake.editN)
 	}
 }
@@ -114,12 +114,12 @@ func TestStoreResolution(t *testing.T) {
 	noF := engine.ReviewResult{Findings: nil, Stats: map[string]any{"truncation_level": "full", "files_reviewed": float64(1)}}
 
 	prA := &cli.PRResult{SummaryAction: "none"}
-	if err := publishReview(stdctx.Background(), client, runner, dir, info, withF, prA, cli.PRReviewRequest{Gate: "high"}, st.PRThread(), embedWriter{}, nil, nil); err != nil {
+	if err := publishReview(stdctx.Background(), client, runner, dir, info, withF, prA, cli.PRReviewRequest{Gate: "high"}, st.PRThread(), embedWriter{}, nil, nil, ""); err != nil {
 		t.Fatalf("run A: %v", err)
 	}
 
 	prB := &cli.PRResult{SummaryAction: "none"}
-	if err := publishReview(stdctx.Background(), client, runner, dir, info, noF, prB, cli.PRReviewRequest{Gate: "high"}, st.PRThread(), embedWriter{}, nil, nil); err != nil {
+	if err := publishReview(stdctx.Background(), client, runner, dir, info, noF, prB, cli.PRReviewRequest{Gate: "high"}, st.PRThread(), embedWriter{}, nil, nil, ""); err != nil {
 		t.Fatalf("run B: %v", err)
 	}
 	got, _ := st.PRThread().ListFindings(stdctx.Background(), key)
@@ -128,7 +128,7 @@ func TestStoreResolution(t *testing.T) {
 	}
 
 	prC := &cli.PRResult{SummaryAction: "none"}
-	if err := publishReview(stdctx.Background(), client, runner, dir, info, noF, prC, cli.PRReviewRequest{Gate: "high"}, st.PRThread(), embedWriter{}, nil, nil); err != nil {
+	if err := publishReview(stdctx.Background(), client, runner, dir, info, noF, prC, cli.PRReviewRequest{Gate: "high"}, st.PRThread(), embedWriter{}, nil, nil, ""); err != nil {
 		t.Fatalf("run C: %v", err)
 	}
 	if prC.PostedInline != 0 {
@@ -155,7 +155,7 @@ func TestStoreReopen(t *testing.T) {
 
 	// A: post F.
 	prA := &cli.PRResult{SummaryAction: "none"}
-	if err := publishReview(stdctx.Background(), client, runner, dir, info, withF, prA, cli.PRReviewRequest{Gate: "high"}, st.PRThread(), embedWriter{}, nil, nil); err != nil {
+	if err := publishReview(stdctx.Background(), client, runner, dir, info, withF, prA, cli.PRReviewRequest{Gate: "high"}, st.PRThread(), embedWriter{}, nil, nil, ""); err != nil {
 		t.Fatalf("run A: %v", err)
 	}
 	if prA.PostedInline != 1 {
@@ -170,7 +170,7 @@ func TestStoreReopen(t *testing.T) {
 
 	// B: omit F → resolved.
 	prB := &cli.PRResult{SummaryAction: "none"}
-	if err := publishReview(stdctx.Background(), client, runner, dir, info, noF, prB, cli.PRReviewRequest{Gate: "high"}, st.PRThread(), embedWriter{}, nil, nil); err != nil {
+	if err := publishReview(stdctx.Background(), client, runner, dir, info, noF, prB, cli.PRReviewRequest{Gate: "high"}, st.PRThread(), embedWriter{}, nil, nil, ""); err != nil {
 		t.Fatalf("run B: %v", err)
 	}
 	got, _ := st.PRThread().ListFindings(stdctx.Background(), key)
@@ -181,7 +181,7 @@ func TestStoreReopen(t *testing.T) {
 	// C: re-emit F → must RE-RAISE (set-difference removes the lingering marker).
 	postedBefore := fake.createReviewN
 	prC := &cli.PRResult{SummaryAction: "none"}
-	if err := publishReview(stdctx.Background(), client, runner, dir, info, withF, prC, cli.PRReviewRequest{Gate: "high"}, st.PRThread(), embedWriter{}, nil, nil); err != nil {
+	if err := publishReview(stdctx.Background(), client, runner, dir, info, withF, prC, cli.PRReviewRequest{Gate: "high"}, st.PRThread(), embedWriter{}, nil, nil, ""); err != nil {
 		t.Fatalf("run C: %v", err)
 	}
 	if prC.PostedInline != 1 {
@@ -228,10 +228,9 @@ func TestPostedFindingsOnlySubmitted(t *testing.T) {
 	}
 }
 
-// TestPublishNoStoreUnchanged asserts the nil-store upsert flow: run 1 lists the
-// existing inline fingerprints, posts the inline review (no body), then CREATES the
-// summary issue comment. Run 2 dedupes the inline away (no CreateReview), then
-// EDITS the single summary comment in place.
+// TestPublishNoStoreUnchanged asserts the nil-store upsert flow: run 1 creates
+// the summary before inline review, then finalizes it after success. Run 2 dedupes
+// the inline away and edits the same summary comment in place.
 func TestPublishNoStoreUnchanged(t *testing.T) {
 	runner := gitcmd.New()
 	dir, base, head := setupRepo(t, runner)
@@ -240,31 +239,27 @@ func TestPublishNoStoreUnchanged(t *testing.T) {
 	res := engine.ReviewResult{Findings: []engine.Finding{findingB()}, Stats: map[string]any{"truncation_level": "full", "files_reviewed": float64(1)}}
 
 	pr := &cli.PRResult{SummaryAction: "none"}
-	if err := publishReview(stdctx.Background(), client, runner, dir, info, res, pr, cli.PRReviewRequest{Gate: "high"}, nil, embedWriter{}, nil, nil); err != nil {
+	if err := publishReview(stdctx.Background(), client, runner, dir, info, res, pr, cli.PRReviewRequest{Gate: "high"}, nil, embedWriter{}, nil, nil, ""); err != nil {
 		t.Fatalf("run 1: %v", err)
 	}
-	// list_review (ExistingFingerprints) → list_issue (upsert scan) → create_issue
-	// (summary, posted FIRST so it anchors above the review) → create_review (inline).
-	wantOrder1 := []string{"list_review", "list_issue", "create_issue", "create_review"}
+	wantOrder1 := []string{"list_review", "list_issue", "create_issue", "create_review", "list_issue", "edit_issue"}
 	if !equalStr(fake.order, wantOrder1) {
 		t.Fatalf("run 1 call order = %v, want %v", fake.order, wantOrder1)
 	}
-	if pr.SummaryAction != "created" {
-		t.Fatalf("run 1 must create the summary, got %q", pr.SummaryAction)
+	if pr.SummaryAction != "edited" {
+		t.Fatalf("run 1 must finalize the summary, got %q", pr.SummaryAction)
 	}
 
 	fake.order = nil
 	pr2 := &cli.PRResult{SummaryAction: "none"}
-	if err := publishReview(stdctx.Background(), client, runner, dir, info, res, pr2, cli.PRReviewRequest{Gate: "high"}, nil, embedWriter{}, nil, nil); err != nil {
+	if err := publishReview(stdctx.Background(), client, runner, dir, info, res, pr2, cli.PRReviewRequest{Gate: "high"}, nil, embedWriter{}, nil, nil, ""); err != nil {
 		t.Fatalf("run 2: %v", err)
 	}
-	// Inline dedupe drops the comment → empty-review guard skips CreateReview; the
-	// summary comment is found (list_issue) and EDITED.
-	wantOrder2 := []string{"list_review", "list_issue", "edit_issue"}
+	wantOrder2 := []string{"list_review", "list_issue", "edit_issue", "list_issue", "edit_issue"}
 	if !equalStr(fake.order, wantOrder2) {
 		t.Fatalf("run 2 call order = %v, want %v", fake.order, wantOrder2)
 	}
-	if fake.createReviewN != 1 || fake.createIssueN != 1 || fake.editN != 1 {
+	if fake.createReviewN != 1 || fake.createIssueN != 1 || fake.editN != 3 {
 		t.Fatalf("no-store counts: createReview=%d createIssue=%d edit=%d", fake.createReviewN, fake.createIssueN, fake.editN)
 	}
 }
@@ -280,7 +275,7 @@ func TestStoreListErrorDegrades(t *testing.T) {
 
 	pr := &cli.PRResult{SummaryAction: "none"}
 	st := &fakePRStore{listErr: errors.New("db locked")}
-	if err := publishReview(stdctx.Background(), client, runner, dir, info, res, pr, cli.PRReviewRequest{Gate: "high"}, st, embedWriter{}, nil, nil); err != nil {
+	if err := publishReview(stdctx.Background(), client, runner, dir, info, res, pr, cli.PRReviewRequest{Gate: "high"}, st, embedWriter{}, nil, nil, ""); err != nil {
 		t.Fatalf("ListFindings error must not abort the review: %v", err)
 	}
 	if !pr.Posted || pr.PostedInline != 1 {
@@ -310,7 +305,7 @@ func TestStoreWriteErrorKeepsOutcome(t *testing.T) {
 			res := engine.ReviewResult{Findings: []engine.Finding{findingB()}, Stats: map[string]any{"truncation_level": "full", "files_reviewed": float64(1)}}
 
 			pr := &cli.PRResult{SummaryAction: "none"}
-			if err := publishReview(stdctx.Background(), client, runner, dir, info, res, pr, cli.PRReviewRequest{Gate: "high"}, tc.st, embedWriter{}, nil, nil); err != nil {
+			if err := publishReview(stdctx.Background(), client, runner, dir, info, res, pr, cli.PRReviewRequest{Gate: "high"}, tc.st, embedWriter{}, nil, nil, ""); err != nil {
 				t.Fatalf("store write failure must not discard the successful review: %v", err)
 			}
 			if !pr.Posted || pr.PostedInline != 1 {

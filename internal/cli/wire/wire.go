@@ -5,6 +5,9 @@ package wire
 
 import (
 	stdctx "context"
+	"crypto/sha256"
+	"encoding/hex"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"log/slog"
@@ -329,28 +332,37 @@ func (prReviewer) ReviewPR(ctx stdctx.Context, req cli.PRReviewRequest) (cli.Rev
 	if closeHist != nil {
 		defer closeHist()
 	}
+	reuseKey := reviewReuseKey(req, cfg)
 
 	// Incremental re-review: short-circuit before the clone + LLM pass when the
-	// desired end-state already holds and --force was not passed. Only --no-post
-	// skips (an unchanged saved SHA, a pure LLM-pass perf optimization); --post
-	// always re-enters so the single summary issue comment gets EDITED in place. A
-	// store read failure degrades to always-review (skipUnchanged returns ok=false),
-	// never blocks. See skipUnchanged.
-	if prior, ok := skipUnchanged(ctx, hist, info, req.Force, req.Post); ok {
-		if req.Progress != nil {
-			req.Progress("skipped: head SHA " + info.HeadSHA + " already reviewed (use --force to re-review)")
+	// desired end-state already holds and --force was not passed. A store read
+	// failure degrades to always-review (skipUnchanged returns ok=false), never
+	// blocks. See skipUnchanged.
+	if prior, ok := skipUnchanged(ctx, hist, info, req.Force, req.Post, req.Mode, reuseKey); ok {
+		rec, haveRec := loadPriorReview(ctx, hist, prior.ID)
+		if req.Post && req.ApproveClean && !approveCleanReuseOK(ctx, client, info, rec, haveRec, req.Gate) {
+			if req.Progress != nil {
+				req.Progress("same-head review found, but approval is not confirmed; reviewing")
+			}
+		} else {
+			if req.Progress != nil {
+				req.Progress("skipped: head SHA " + info.HeadSHA + " already reviewed (use --force to re-review)")
+			}
+			out := cli.ReviewOutcome{
+				ReviewID:         prior.ID,
+				SkippedUnchanged: true,
+				PriorReviewID:    prior.ID,
+				PR: &cli.PRResult{
+					Owner: info.Owner, Repo: info.Repo, Number: info.Number,
+					HeadSHA: info.HeadSHA, IsFork: info.IsFork, SummaryAction: "none",
+				},
+			}
+			if haveRec {
+				out.Findings = toCLIFindings(rec.Findings)
+				out.Stats = rec.Stats
+			}
+			return out, nil
 		}
-		return cli.ReviewOutcome{
-			// review_id resolves to the prior review this run reuses (not "", which
-			// would wrongly read as --no-save); PriorReviewID keeps it explicit.
-			ReviewID:         prior.ID,
-			SkippedUnchanged: true,
-			PriorReviewID:    prior.ID,
-			PR: &cli.PRResult{
-				Owner: info.Owner, Repo: info.Repo, Number: info.Number,
-				HeadSHA: info.HeadSHA, IsFork: info.IsFork, SummaryAction: "none",
-			},
-		}, nil
 	}
 
 	creds, err := agent.Resolve(agent.ResolveInput{
@@ -469,7 +481,7 @@ func (prReviewer) ReviewPR(ctx stdctx.Context, req cli.PRReviewRequest) (cli.Rev
 			defer closeStore()
 		}
 		ew := embedWriter{emb: emb, store: embStore, repo: repo}
-		if err := publishReview(ctx, client, runner, dir, info, res, prResult, req, prStore, ew, cfg.Review.CategoryURLMap(), ruleCitations(loaded, dir)); err != nil {
+		if err := publishReview(ctx, client, runner, dir, info, res, prResult, req, prStore, ew, cfg.Review.CategoryURLMap(), ruleCitations(loaded, dir), reuseKey); err != nil {
 			return cli.ReviewOutcome{}, err
 		}
 		// Source of truth is the engine stat (repair ran in the engine, not github);
@@ -485,26 +497,16 @@ func (prReviewer) ReviewPR(ctx stdctx.Context, req cli.PRReviewRequest) (cli.Rev
 	}, nil
 }
 
-// skipUnchanged reports whether the --pr review can short-circuit because the
-// desired end-state already holds and --force was not passed. It is the --no-post
-// LLM-pass perf optimization ONLY: skip when a prior SAVED review of the same PR
-// key exists at the current head SHA. --post NEVER skips: a same-SHA re-run must
-// re-enter publishReview so the single summary issue comment gets EDITED in place.
-//
-// A nil store / any read failure degrades to ok=false (always review), never
-// blocks. The returned LatestReview carries the prior review id for the
-// skipped_unchanged envelope.
-func skipUnchanged(ctx stdctx.Context, hist store.Store, info *mgithub.PRInfo, force, post bool) (store.LatestReview, bool) {
+// skipUnchanged reports whether the desired PR review state already exists.
+func skipUnchanged(ctx stdctx.Context, hist store.Store, info *mgithub.PRInfo, force, post bool, mode, reuseKey string) (store.LatestReview, bool) {
 	if force {
 		return store.LatestReview{}, false
 	}
-	if post {
-		// --post upserts the summary every run; it never skips. (checks mode posts an
-		// idempotent CheckRun per commit and likewise never skips.)
+	if post && mode == "checks" {
 		return store.LatestReview{}, false
 	}
 	if hist == nil {
-		return store.LatestReview{}, false
+		return skipFromPublishedMarker(info, post, reuseKey)
 	}
 	key := store.PRKey{Owner: info.Owner, Repo: info.Repo, Number: info.Number}
 	prior, ok, err := hist.LatestReviewForPR(ctx, key)
@@ -513,9 +515,248 @@ func skipUnchanged(ctx stdctx.Context, hist store.Store, info *mgithub.PRInfo, f
 		return store.LatestReview{}, false
 	}
 	if !ok || prior.HeadSHA == "" || prior.HeadSHA != info.HeadSHA {
+		if marker, mok := skipFromPublishedMarker(info, post, reuseKey); mok {
+			return marker, true
+		}
+		return store.LatestReview{}, false
+	}
+	if post && !priorPublishedAtHead(info, reuseKey) {
 		return store.LatestReview{}, false
 	}
 	return prior, true
+}
+
+func skipFromPublishedMarker(info *mgithub.PRInfo, post bool, reuseKey string) (store.LatestReview, bool) {
+	if !post || !priorPublishedAtHead(info, reuseKey) {
+		return store.LatestReview{}, false
+	}
+	return store.LatestReview{HeadSHA: info.HeadSHA}, true
+}
+
+func priorPublishedAtHead(info *mgithub.PRInfo, reuseKey string) bool {
+	if info == nil || info.HeadSHA == "" || info.PriorPublishedHeadSHA == "" || reuseKey == "" || info.PriorPublishedKey != reuseKey {
+		return false
+	}
+	return strings.EqualFold(info.HeadSHA, info.PriorPublishedHeadSHA)
+}
+
+type reviewReuseShape struct {
+	Version         string
+	Post            bool
+	Suggest         bool
+	PatchRepair     bool
+	ApproveClean    bool
+	Gate            string
+	Provider        string
+	BaseURL         string
+	Model           string
+	IncludeGlobs    []string
+	ExcludeGlobs    []string
+	Extensions      []string
+	ExpandWindow    int
+	TokenBudget     int
+	DeepContext     bool
+	ContextHops     int
+	ContextHopsAuto bool
+	FilterMode      string
+	MinSeverity     string
+	WantDiagram     bool
+	Instruction     string
+	OperatorPrompt  string
+	Conversation    bool
+	Mode            string
+	Config          reviewReuseConfigShape
+}
+
+type reviewReuseConfigShape struct {
+	DefaultProvider                 string
+	ProviderName                    string
+	ProviderKind                    config.Kind
+	ProviderBaseURL                 string
+	ProviderModel                   string
+	ProviderAuth                    string
+	ProviderAuthEnv                 string
+	ProviderAuthCommand             []string
+	ProviderAuthTokenSet            bool
+	ProviderAuthTokenFingerprint    string
+	ProviderAuthEnvValueFingerprint string
+	ReviewTemperature               *float64
+	ReviewThinking                  string
+	CategoryURLs                    map[string]string
+	Env                             reviewReuseEnvShape
+	RequestSecretSet                reviewReuseRequestSecretShape
+}
+
+type reviewReuseEnvShape struct {
+	AnthropicBaseURL              string
+	AnthropicModel                string
+	OpenAIBaseURL                 string
+	OpenAIModel                   string
+	MiucrCodexModel               string
+	AnthropicAPIKeySet            bool
+	AnthropicAPIKeyFingerprint    string
+	AnthropicAuthTokenSet         bool
+	AnthropicAuthTokenFingerprint string
+	OpenAIAPIKeySet               bool
+	OpenAIAPIKeyFingerprint       string
+}
+
+type reviewReuseRequestSecretShape struct {
+	APIKey               bool
+	APIKeyFingerprint    string
+	AuthToken            bool
+	AuthTokenFingerprint string
+}
+
+func reviewReuseKey(req cli.PRReviewRequest, cfg config.Config) string {
+	providerName := reuseProviderName(req, cfg)
+	provider := cfg.Providers[providerName]
+	shape := newReviewReuseShape(req, cfg, providerName, provider)
+	data, _ := json.Marshal(shape)
+	sum := sha256.Sum256(data)
+	return hex.EncodeToString(sum[:])[:16]
+}
+
+func newReviewReuseShape(req cli.PRReviewRequest, cfg config.Config, providerName string, provider config.Provider) reviewReuseShape {
+	shape := reviewReuseShape{
+		Version:         cli.Version(),
+		Post:            req.Post,
+		Suggest:         req.Suggest,
+		PatchRepair:     req.PatchRepair,
+		ApproveClean:    req.ApproveClean,
+		Gate:            req.Gate,
+		Provider:        req.Provider,
+		BaseURL:         req.BaseURL,
+		Model:           req.Model,
+		IncludeGlobs:    append([]string(nil), req.IncludeGlobs...),
+		ExcludeGlobs:    append([]string(nil), req.ExcludeGlobs...),
+		Extensions:      append([]string(nil), req.Extensions...),
+		ExpandWindow:    req.ExpandWindow,
+		TokenBudget:     req.TokenBudget,
+		DeepContext:     req.DeepContext,
+		ContextHops:     req.ContextHops,
+		ContextHopsAuto: req.ContextHopsAuto,
+		FilterMode:      req.FilterMode,
+		MinSeverity:     req.MinSeverity,
+		WantDiagram:     req.WantDiagram,
+		Instruction:     req.Instruction,
+		OperatorPrompt:  req.OperatorPrompt,
+		Conversation:    req.Conversation,
+		Mode:            req.Mode,
+		Config: reviewReuseConfigShape{
+			DefaultProvider:                 cfg.DefaultProvider,
+			ProviderName:                    providerName,
+			ProviderKind:                    provider.Kind,
+			ProviderBaseURL:                 provider.BaseURL,
+			ProviderModel:                   provider.Model,
+			ProviderAuth:                    provider.Auth,
+			ProviderAuthEnv:                 provider.AuthEnv,
+			ProviderAuthCommand:             append([]string(nil), provider.AuthCommand...),
+			ProviderAuthTokenSet:            strings.TrimSpace(provider.AuthToken) != "",
+			ProviderAuthTokenFingerprint:    secretReuseFingerprint(provider.AuthToken),
+			ProviderAuthEnvValueFingerprint: secretReuseFingerprint(os.Getenv(provider.AuthEnv)),
+			ReviewTemperature:               cfg.Review.Temperature,
+			ReviewThinking:                  cfg.Review.Thinking,
+			CategoryURLs:                    cfg.Review.CategoryURLs,
+			Env:                             reviewReuseEnvShapeFromProcess(),
+			RequestSecretSet: reviewReuseRequestSecretShape{
+				APIKey:               strings.TrimSpace(req.APIKey) != "",
+				APIKeyFingerprint:    secretReuseFingerprint(req.APIKey),
+				AuthToken:            strings.TrimSpace(req.AuthToken) != "",
+				AuthTokenFingerprint: secretReuseFingerprint(req.AuthToken),
+			},
+		},
+	}
+	return shape
+}
+
+func reviewReuseEnvShapeFromProcess() reviewReuseEnvShape {
+	return reviewReuseEnvShape{
+		AnthropicBaseURL:              os.Getenv("ANTHROPIC_BASE_URL"),
+		AnthropicModel:                os.Getenv("ANTHROPIC_MODEL"),
+		OpenAIBaseURL:                 os.Getenv("OPENAI_BASE_URL"),
+		OpenAIModel:                   os.Getenv("OPENAI_MODEL"),
+		MiucrCodexModel:               os.Getenv("MIUCR_CODEX_MODEL"),
+		AnthropicAPIKeySet:            envPresentForReuse("ANTHROPIC_API_KEY"),
+		AnthropicAPIKeyFingerprint:    secretReuseFingerprint(os.Getenv("ANTHROPIC_API_KEY")),
+		AnthropicAuthTokenSet:         envPresentForReuse("ANTHROPIC_AUTH_TOKEN"),
+		AnthropicAuthTokenFingerprint: secretReuseFingerprint(os.Getenv("ANTHROPIC_AUTH_TOKEN")),
+		OpenAIAPIKeySet:               envPresentForReuse("OPENAI_API_KEY"),
+		OpenAIAPIKeyFingerprint:       secretReuseFingerprint(os.Getenv("OPENAI_API_KEY")),
+	}
+}
+
+func secretReuseFingerprint(value string) string {
+	value = strings.TrimSpace(value)
+	if value == "" {
+		return ""
+	}
+	sum := sha256.Sum256([]byte("miu-cr/reuse-secret\x00" + value))
+	return hex.EncodeToString(sum[:])[:16]
+}
+
+func reuseProviderName(req cli.PRReviewRequest, cfg config.Config) string {
+	if p := strings.ToLower(strings.TrimSpace(req.Provider)); p != "" && p != "auto" {
+		return p
+	}
+	hasAnthropic := strings.TrimSpace(req.APIKey) != "" ||
+		strings.TrimSpace(req.AuthToken) != "" ||
+		envPresentForReuse("ANTHROPIC_API_KEY") ||
+		envPresentForReuse("ANTHROPIC_AUTH_TOKEN")
+	if envPresentForReuse("OPENAI_API_KEY") && !hasAnthropic {
+		return string(config.KindOpenAI)
+	}
+	if d := strings.TrimSpace(cfg.DefaultProvider); d != "" && d != "auto" {
+		return d
+	}
+	return string(config.KindAnthropic)
+}
+
+func envPresentForReuse(name string) bool {
+	return strings.TrimSpace(os.Getenv(name)) != ""
+}
+
+func loadPriorReview(ctx stdctx.Context, hist store.Store, id string) (store.ReviewRecord, bool) {
+	if hist == nil || id == "" {
+		return store.ReviewRecord{}, false
+	}
+	rec, err := hist.GetReview(ctx, id)
+	if err != nil {
+		slog.Warn("incremental prior review load failed: " + config.RedactString(err.Error()))
+		return store.ReviewRecord{}, false
+	}
+	return rec, true
+}
+
+func approveCleanReuseOK(ctx stdctx.Context, client mgithub.Client, info *mgithub.PRInfo, rec store.ReviewRecord, haveRec bool, gate string) bool {
+	findingsCount, reviewedFiles, gateClean := priorReviewShape(info, rec, haveRec, gate)
+	if !mgithub.ApproveCleanWouldApprove(*info, gateClean, findingsCount, reviewedFiles) {
+		return true
+	}
+	approved, err := mgithub.HasApprovedReview(ctx, client, info)
+	if err != nil {
+		slog.Warn("approve-clean reuse check failed, reviewing: " + config.RedactString(err.Error()))
+		return false
+	}
+	return approved
+}
+
+func priorReviewShape(info *mgithub.PRInfo, rec store.ReviewRecord, haveRec bool, gate string) (findingsCount, reviewedFiles int, gateClean bool) {
+	if haveRec {
+		return len(rec.Findings), reviewedFilesFromStats(rec.Stats), !engine.GateFailed(rec.Findings, gate)
+	}
+	open := openLedgerCount(info.PriorLedger)
+	return open, len(info.Files), open == 0
+}
+
+func openLedgerCount(entries []mgithub.LedgerEntry) int {
+	n := 0
+	for _, e := range entries {
+		if e.Status == "open" || e.Status == "reopened" {
+			n++
+		}
+	}
+	return n
 }
 
 // publishReview posts the review THIS run: inline review comments first (skipping
@@ -526,7 +767,7 @@ func skipUnchanged(ctx stdctx.Context, hist store.Store, info *mgithub.PRInfo, f
 // summary still upserts. It computes gateClean via engine.GateFailed +
 // reviewedFiles from stats, threads both opt-in write-actions (default OFF) into
 // PostReviewOptions, and fills the outcome fields.
-func publishReview(ctx stdctx.Context, client mgithub.Client, runner *gitcmd.Runner, dir string, info *mgithub.PRInfo, res engine.ReviewResult, prResult *cli.PRResult, req cli.PRReviewRequest, prStore store.PRThreadStore, ew embedWriter, categoryURLs map[string]string, ruleCites map[string]mgithub.RuleCitation) error {
+func publishReview(ctx stdctx.Context, client mgithub.Client, runner *gitcmd.Runner, dir string, info *mgithub.PRInfo, res engine.ReviewResult, prResult *cli.PRResult, req cli.PRReviewRequest, prStore store.PRThreadStore, ew embedWriter, categoryURLs map[string]string, ruleCites map[string]mgithub.RuleCitation, publishKey string) error {
 	diffs, err := mgithub.DiffsForPR(ctx, runner, dir, info.BaseSHA, info.HeadSHA)
 	if err != nil {
 		return err
@@ -605,7 +846,7 @@ func publishReview(ctx stdctx.Context, client mgithub.Client, runner *gitcmd.Run
 	// renderSummary builds the summary body for a given omitted set. info.ReviewCount
 	// is already this run's number (FetchPR did the +1); the body's runs token seeds
 	// the next read.
-	renderSummary := func(omitted int, omittedFindings []engine.Finding) string {
+	renderSummary := func(omitted int, omittedFindings []engine.Finding, published bool) string {
 		return mgithub.RenderSummaryFull(info, res.Findings, res.Stats, omitted, omittedFindings, categoryURLs, mgithub.SummaryOptions{
 			Diffs:         diffs,
 			ReviewID:      res.ID,
@@ -617,6 +858,8 @@ func publishReview(ctx stdctx.Context, client mgithub.Client, runner *gitcmd.Run
 			Ledger:        ledger,
 			Now:           now,
 			InlineURLs:    existing,
+			Published:     published,
+			PublishKey:    publishKey,
 		})
 	}
 
@@ -624,14 +867,12 @@ func publishReview(ctx stdctx.Context, client mgithub.Client, runner *gitcmd.Run
 	// inline review in the timeline (overview, then details); finalized after PostReview.
 	// A fork PR defers to after PostReview (an issue comment would 403 like the review).
 	summaryFirst := !info.IsFork
-	preOK := false
 	if summaryFirst {
-		if action, uerr := mgithub.UpsertSummaryComment(ctx, client, info, renderSummary(0, nil)); uerr != nil {
+		if action, uerr := mgithub.UpsertSummaryComment(ctx, client, info, renderSummary(0, nil, false)); uerr != nil {
 			slog.Warn("summary upsert failed, continuing to inline review: " + config.RedactString(uerr.Error()))
 			prResult.SummaryAction = "failed"
 		} else {
 			prResult.SummaryAction = string(action)
-			preOK = true
 		}
 	}
 
@@ -651,18 +892,12 @@ func publishReview(ctx stdctx.Context, client mgithub.Client, runner *gitcmd.Run
 		return nil
 	}
 
-	// Finalize the summary with the accurate overflow set when needed: the body changed
-	// (pr.Omitted > 0), the summary-first upsert FAILED (retry it), or it was deferred
-	// (fork path that did not fall back, or pre-upsert skipped). The upsert is idempotent
-	// (create-or-edit), so this lands whether or not the first attempt did. The common
-	// non-fork, no-overflow case skips it (the pre-post upsert was already accurate).
-	if !preOK || pr.Omitted > 0 {
-		if action, uerr := mgithub.UpsertSummaryComment(ctx, client, info, renderSummary(pr.Omitted, pr.OmittedFindings)); uerr != nil {
-			slog.Warn("summary upsert failed (inline review still posted): " + config.RedactString(uerr.Error()))
-			prResult.SummaryAction = "failed"
-		} else {
-			prResult.SummaryAction = string(action)
-		}
+	// Only a successful PostReview earns the reusable publish marker.
+	if action, uerr := mgithub.UpsertSummaryComment(ctx, client, info, renderSummary(pr.Omitted, pr.OmittedFindings, true)); uerr != nil {
+		slog.Warn("summary upsert failed (inline review still posted): " + config.RedactString(uerr.Error()))
+		prResult.SummaryAction = "failed"
+	} else {
+		prResult.SummaryAction = string(action)
 	}
 
 	if prStore != nil {

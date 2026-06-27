@@ -136,6 +136,8 @@ type SummaryOptions struct {
 	// #discussion_r… thread anchor). When set, the ledger Location cell links to
 	// the inline review thread instead of the file blob. nil → blob links.
 	InlineURLs map[string]string
+	Published  bool
+	PublishKey string
 }
 
 // RenderSummaryFull is RenderSummaryWithOverflow plus the LLM-free reviewer-trust
@@ -153,6 +155,9 @@ func RenderSummaryFull(info *PRInfo, findings []engine.Finding, stats map[string
 	// (FetchPR did the +1), so write it straight back; max(,1) only guards a direct
 	// render with an unset ReviewCount (no FetchPR), which still seeds N=1.
 	b.WriteString(runsCountToken(max(info.ReviewCount, 1)) + "\n")
+	if opts.Published && strings.TrimSpace(info.HeadSHA) != "" {
+		b.WriteString(publishedToken(info.HeadSHA, opts.PublishKey) + "\n")
+	}
 
 	// Keep the H2 small; severity chips ride the compact Result line below, not the header.
 	b.WriteString("## Code Review Summary\n\n")

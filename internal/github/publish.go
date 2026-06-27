@@ -40,9 +40,17 @@ var fpMarkerRe = regexp.MustCompile(`<!-- miucr:fp=([0-9a-f]{16}) -->`)
 // runsCountRe extracts the storeless "Nth review" counter the upsert embeds in
 // the summary comment; the value is a trusted int we wrote, never model text.
 var runsCountRe = regexp.MustCompile(`<!-- miu-cr-runs:(\d+) -->`)
+var publishedRe = regexp.MustCompile(`<!-- miu-cr-published:([0-9a-fA-F]{7,40})(?::([0-9a-f]{16,64}))? -->`)
 
 // runsCountToken renders the hidden runs counter line for the summary comment.
 func runsCountToken(n int) string { return fmt.Sprintf("<!-- miu-cr-runs:%d -->", n) }
+func publishedToken(sha, key string) string {
+	key = strings.ToLower(strings.TrimSpace(key))
+	if key != "" {
+		return fmt.Sprintf("<!-- miu-cr-published:%s:%s -->", strings.ToLower(strings.TrimSpace(sha)), key)
+	}
+	return fmt.Sprintf("<!-- miu-cr-published:%s -->", strings.ToLower(strings.TrimSpace(sha)))
+}
 
 // parseRunsCount returns the first runs counter in body, or 0 when absent/garbled.
 func parseRunsCount(body string) int {
@@ -55,6 +63,22 @@ func parseRunsCount(body string) int {
 		return 0
 	}
 	return n
+}
+
+func parsePublishedCommit(body string) string {
+	m := publishedRe.FindStringSubmatch(body)
+	if m == nil {
+		return ""
+	}
+	return strings.ToLower(m[1])
+}
+
+func parsePublishedKey(body string) string {
+	m := publishedRe.FindStringSubmatch(body)
+	if m == nil || len(m) < 3 {
+		return ""
+	}
+	return strings.ToLower(m[2])
 }
 
 // DiffsForPR re-derives the PR diff by re-running the engine's own diff.GetDiff

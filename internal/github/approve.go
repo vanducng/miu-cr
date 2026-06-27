@@ -76,6 +76,12 @@ func resolveEvent(opts PostReviewOptions, info PRInfo, gateClean bool, findingsC
 	return "APPROVE", approveReasonApproved
 }
 
+// ApproveCleanWouldApprove exposes the dry approval decision for reuse checks.
+func ApproveCleanWouldApprove(info PRInfo, gateClean bool, findingsCount int, reviewedFiles int) bool {
+	event, _ := resolveEvent(PostReviewOptions{ApproveClean: true}, info, gateClean, findingsCount, reviewedFiles, true)
+	return event == "APPROVE"
+}
+
 // alreadyApproved reports whether an APPROVED review already exists at the current
 // head SHA, so a re-run at the same SHA posts no second APPROVE. First page only
 // (PerPage:100): a PR with >100 reviews may miss an existing APPROVE and post a
@@ -94,4 +100,9 @@ func alreadyApproved(ctx stdctx.Context, client Client, info *PRInfo) (bool, err
 		}
 	}
 	return false, nil
+}
+
+// HasApprovedReview exposes the approval idempotency check for reuse checks.
+func HasApprovedReview(ctx stdctx.Context, client Client, info *PRInfo) (bool, error) {
+	return alreadyApproved(ctx, client, info)
 }

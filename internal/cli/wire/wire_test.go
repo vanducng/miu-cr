@@ -182,19 +182,19 @@ func TestPublishReviewWireFlow(t *testing.T) {
 	}
 
 	// Upsert model: one inline posted via CreateReview with NO body; the summary is a
-	// separate issue comment CREATED on the first run.
+	// separate issue comment created before review, then finalized after it succeeds.
 	pr := &cli.PRResult{SummaryAction: "none"}
-	if err := publishReview(stdctx.Background(), client, runner, dir, info, res, pr, cli.PRReviewRequest{Gate: "high"}, nil, embedWriter{}, nil, nil); err != nil {
+	if err := publishReview(stdctx.Background(), client, runner, dir, info, res, pr, cli.PRReviewRequest{Gate: "high"}, nil, embedWriter{}, nil, nil, testReuseKey); err != nil {
 		t.Fatalf("publishReview: %v", err)
 	}
 	if pr.PostedInline != 1 {
 		t.Fatalf("first run: want 1 inline posted, got %d", pr.PostedInline)
 	}
-	if pr.SummaryAction != "created" {
-		t.Fatalf("first run: want summary action created, got %q", pr.SummaryAction)
+	if pr.SummaryAction != "edited" {
+		t.Fatalf("first run: want summary action edited, got %q", pr.SummaryAction)
 	}
-	if fake.createIssueN != 1 || fake.editN != 0 {
-		t.Fatalf("first run must CREATE the summary issue comment: create=%d edit=%d", fake.createIssueN, fake.editN)
+	if fake.createIssueN != 1 || fake.editN != 1 {
+		t.Fatalf("first run must create then finalize the summary issue comment: create=%d edit=%d", fake.createIssueN, fake.editN)
 	}
 	// The review body must be EMPTY, the summary leaves the body entirely.
 	if b := fake.lastReviewed.GetBody(); strings.TrimSpace(b) != "" {
@@ -210,6 +210,12 @@ func TestPublishReviewWireFlow(t *testing.T) {
 	}
 	if !strings.Contains(summary, "Review attempts: 1") {
 		t.Fatalf("first-run summary must show Review attempts: 1:\n%s", summary)
+	}
+	if !strings.Contains(summary, "<!-- miu-cr-published:") {
+		t.Fatalf("successful first-run summary must carry the published marker:\n%s", summary)
+	}
+	if !strings.Contains(summary, ":"+testReuseKey+" -->") {
+		t.Fatalf("successful first-run summary must carry the supplied publish key:\n%s", summary)
 	}
 	// Lifecycle mode: the Open table, the footer timestamp, and a parseable embedded
 	// ledger marker carrying this run's finding as open.
@@ -232,7 +238,7 @@ func TestPublishReviewWireFlow(t *testing.T) {
 	fake.order = nil
 	info.ReviewCount = 2 // FetchPR would read the prior token (1) and +1
 	pr2 := &cli.PRResult{SummaryAction: "none"}
-	if err := publishReview(stdctx.Background(), client, runner, dir, info, res, pr2, cli.PRReviewRequest{Gate: "high"}, nil, embedWriter{}, nil, nil); err != nil {
+	if err := publishReview(stdctx.Background(), client, runner, dir, info, res, pr2, cli.PRReviewRequest{Gate: "high"}, nil, embedWriter{}, nil, nil, testReuseKey); err != nil {
 		t.Fatalf("publishReview re-run: %v", err)
 	}
 	if pr2.PostedInline != 0 {
@@ -244,7 +250,7 @@ func TestPublishReviewWireFlow(t *testing.T) {
 	if len(fake.reviewComments) != 1 {
 		t.Errorf("re-run must not duplicate inline comments, have %d", len(fake.reviewComments))
 	}
-	if fake.createIssueN != 1 || fake.editN != 1 {
+	if fake.createIssueN != 1 || fake.editN != 3 {
 		t.Fatalf("re-run must EDIT (not stack) the summary: create=%d edit=%d", fake.createIssueN, fake.editN)
 	}
 	if len(fake.issueComments) != 1 {
@@ -277,7 +283,7 @@ func TestPublishReviewLedgerResolvesAcrossRuns(t *testing.T) {
 		Stats: map[string]any{"truncation_level": "full", "files_reviewed": float64(1)},
 	}
 	pr := &cli.PRResult{SummaryAction: "none"}
-	if err := publishReview(stdctx.Background(), client, runner, dir, info, res, pr, cli.PRReviewRequest{Gate: "high"}, nil, embedWriter{}, nil, nil); err != nil {
+	if err := publishReview(stdctx.Background(), client, runner, dir, info, res, pr, cli.PRReviewRequest{Gate: "high"}, nil, embedWriter{}, nil, nil, ""); err != nil {
 		t.Fatalf("run1: %v", err)
 	}
 	led1 := mgithub.ParseLedger(fake.issueComments[0].GetBody())
@@ -291,7 +297,7 @@ func TestPublishReviewLedgerResolvesAcrossRuns(t *testing.T) {
 	info.ReviewCount = 2
 	res2 := engine.ReviewResult{Findings: nil, Stats: map[string]any{"truncation_level": "full", "files_reviewed": float64(1)}}
 	pr2 := &cli.PRResult{SummaryAction: "none"}
-	if err := publishReview(stdctx.Background(), client, runner, dir, info, res2, pr2, cli.PRReviewRequest{Gate: "high"}, nil, embedWriter{}, nil, nil); err != nil {
+	if err := publishReview(stdctx.Background(), client, runner, dir, info, res2, pr2, cli.PRReviewRequest{Gate: "high"}, nil, embedWriter{}, nil, nil, ""); err != nil {
 		t.Fatalf("run2: %v", err)
 	}
 	body2 := fake.issueComments[0].GetBody()
@@ -331,7 +337,7 @@ func TestPublishReviewForkFallback(t *testing.T) {
 		Stats:    map[string]any{"truncation_level": "full", "files_reviewed": float64(1)},
 	}
 	pr := &cli.PRResult{SummaryAction: "none"}
-	if err := publishReview(stdctx.Background(), client, runner, dir, info, res, pr, cli.PRReviewRequest{Gate: "high", ActionsOut: &actionsOut}, nil, embedWriter{}, nil, nil); err != nil {
+	if err := publishReview(stdctx.Background(), client, runner, dir, info, res, pr, cli.PRReviewRequest{Gate: "high", ActionsOut: &actionsOut}, nil, embedWriter{}, nil, nil, ""); err != nil {
 		t.Fatalf("fork fallback must not hard-fail: %v", err)
 	}
 	if pr.SummaryAction != "fork_fallback" || pr.Posted {
@@ -364,7 +370,7 @@ func TestPublishChecksWireFlow(t *testing.T) {
 	}
 
 	pr := &cli.PRResult{SummaryAction: "none"}
-	if err := publishReview(stdctx.Background(), client, runner, dir, info, res, pr, cli.PRReviewRequest{Gate: "high", Mode: "checks"}, nil, embedWriter{}, nil, nil); err != nil {
+	if err := publishReview(stdctx.Background(), client, runner, dir, info, res, pr, cli.PRReviewRequest{Gate: "high", Mode: "checks"}, nil, embedWriter{}, nil, nil, ""); err != nil {
 		t.Fatalf("publishReview (checks): %v", err)
 	}
 	if pr.Mode != "checks" || !pr.Posted {
@@ -404,7 +410,7 @@ func TestPublishChecksFeedsEmbeddingWriter(t *testing.T) {
 	ew := embedWriter{emb: emb, store: st, repo: "o/r"}
 
 	pr := &cli.PRResult{SummaryAction: "none"}
-	if err := publishReview(stdctx.Background(), client, runner, dir, info, res, pr, cli.PRReviewRequest{Gate: "high", Mode: "checks"}, nil, ew, nil, nil); err != nil {
+	if err := publishReview(stdctx.Background(), client, runner, dir, info, res, pr, cli.PRReviewRequest{Gate: "high", Mode: "checks"}, nil, ew, nil, nil, ""); err != nil {
 		t.Fatalf("publishReview (checks): %v", err)
 	}
 	if pr.Mode != "checks" || pr.PostedInline != 1 {
@@ -449,7 +455,7 @@ func TestPublishReviewApproveClean(t *testing.T) {
 	// Clean, non-fork, trusted author → APPROVE.
 	info := &mgithub.PRInfo{Owner: "o", Repo: "r", Number: 7, HeadSHA: head, BaseSHA: base, BaseBranch: "main", AuthorAssociation: "MEMBER"}
 	pr := &cli.PRResult{SummaryAction: "none"}
-	if err := publishReview(stdctx.Background(), client, runner, dir, info, cleanReviewResult(), pr, cli.PRReviewRequest{Gate: "high", ApproveClean: true}, nil, embedWriter{}, nil, nil); err != nil {
+	if err := publishReview(stdctx.Background(), client, runner, dir, info, cleanReviewResult(), pr, cli.PRReviewRequest{Gate: "high", ApproveClean: true}, nil, embedWriter{}, nil, nil, ""); err != nil {
 		t.Fatalf("publishReview: %v", err)
 	}
 	if pr.ApproveAction != "approved" || pr.ApproveReason != "approved" {
@@ -462,8 +468,8 @@ func TestPublishReviewApproveClean(t *testing.T) {
 	if strings.TrimSpace(fake.lastReviewed.GetBody()) != "" {
 		t.Fatalf("APPROVE review body must be empty (summary lives in the issue comment), got:\n%s", fake.lastReviewed.GetBody())
 	}
-	if pr.SummaryAction != "created" || fake.createIssueN != 1 {
-		t.Fatalf("clean approve must still upsert the summary: action=%q create=%d", pr.SummaryAction, fake.createIssueN)
+	if pr.SummaryAction != "edited" || fake.createIssueN != 1 || fake.editN != 1 {
+		t.Fatalf("clean approve must still upsert the summary: action=%q create=%d edit=%d", pr.SummaryAction, fake.createIssueN, fake.editN)
 	}
 }
 
@@ -480,7 +486,7 @@ func TestPublishReviewApproveDegradesFork(t *testing.T) {
 	// Fork → COMMENT with reason "fork", never APPROVE.
 	info := &mgithub.PRInfo{Owner: "o", Repo: "r", Number: 7, HeadSHA: head, BaseSHA: base, BaseBranch: "main", AuthorAssociation: "MEMBER", IsFork: true}
 	pr := &cli.PRResult{SummaryAction: "none"}
-	if err := publishReview(stdctx.Background(), client, runner, dir, info, cleanReviewResult(), pr, cli.PRReviewRequest{Gate: "high", ApproveClean: true}, nil, embedWriter{}, nil, nil); err != nil {
+	if err := publishReview(stdctx.Background(), client, runner, dir, info, cleanReviewResult(), pr, cli.PRReviewRequest{Gate: "high", ApproveClean: true}, nil, embedWriter{}, nil, nil, ""); err != nil {
 		t.Fatalf("publishReview: %v", err)
 	}
 	if pr.ApproveAction != "commented" || pr.ApproveReason != "fork" {
@@ -503,7 +509,7 @@ func TestPublishReviewApproveDegradesUntrusted(t *testing.T) {
 
 	info := &mgithub.PRInfo{Owner: "o", Repo: "r", Number: 7, HeadSHA: head, BaseSHA: base, BaseBranch: "main", AuthorAssociation: "FIRST_TIME_CONTRIBUTOR"}
 	pr := &cli.PRResult{SummaryAction: "none"}
-	if err := publishReview(stdctx.Background(), client, runner, dir, info, cleanReviewResult(), pr, cli.PRReviewRequest{Gate: "high", ApproveClean: true}, nil, embedWriter{}, nil, nil); err != nil {
+	if err := publishReview(stdctx.Background(), client, runner, dir, info, cleanReviewResult(), pr, cli.PRReviewRequest{Gate: "high", ApproveClean: true}, nil, embedWriter{}, nil, nil, ""); err != nil {
 		t.Fatalf("publishReview: %v", err)
 	}
 	if pr.ApproveAction != "commented" || pr.ApproveReason != "untrusted_author" {
@@ -524,7 +530,7 @@ func TestPublishReviewApproveDefaultOff(t *testing.T) {
 	// Even a clean trusted non-fork PR is COMMENT when --approve-clean is OFF.
 	info := &mgithub.PRInfo{Owner: "o", Repo: "r", Number: 7, HeadSHA: head, BaseSHA: base, BaseBranch: "main", AuthorAssociation: "MEMBER"}
 	pr := &cli.PRResult{SummaryAction: "none"}
-	if err := publishReview(stdctx.Background(), client, runner, dir, info, cleanReviewResult(), pr, cli.PRReviewRequest{Gate: "high"}, nil, embedWriter{}, nil, nil); err != nil {
+	if err := publishReview(stdctx.Background(), client, runner, dir, info, cleanReviewResult(), pr, cli.PRReviewRequest{Gate: "high"}, nil, embedWriter{}, nil, nil, ""); err != nil {
 		t.Fatalf("publishReview: %v", err)
 	}
 	if pr.ApproveAction != "commented" || pr.ApproveReason != "not_requested" {
@@ -535,8 +541,8 @@ func TestPublishReviewApproveDefaultOff(t *testing.T) {
 	if fake.createReviewN != 0 {
 		t.Fatalf("a no-inline COMMENT review must not call CreateReview (empty-guard), got %d", fake.createReviewN)
 	}
-	if pr.SummaryAction != "created" || fake.createIssueN != 1 {
-		t.Fatalf("empty review must still upsert the summary: action=%q create=%d", pr.SummaryAction, fake.createIssueN)
+	if pr.SummaryAction != "edited" || fake.createIssueN != 1 || fake.editN != 1 {
+		t.Fatalf("empty review must still upsert the summary: action=%q create=%d edit=%d", pr.SummaryAction, fake.createIssueN, fake.editN)
 	}
 }
 
@@ -562,7 +568,7 @@ func TestPublishReviewSuggestCount(t *testing.T) {
 
 	// With --suggest OFF: a patch is shown as a plain hint, suggestions_posted=0.
 	prOff := &cli.PRResult{SummaryAction: "none"}
-	if err := publishReview(stdctx.Background(), client, runner, dir, info, res, prOff, cli.PRReviewRequest{Gate: "high"}, nil, embedWriter{}, nil, nil); err != nil {
+	if err := publishReview(stdctx.Background(), client, runner, dir, info, res, prOff, cli.PRReviewRequest{Gate: "high"}, nil, embedWriter{}, nil, nil, ""); err != nil {
 		t.Fatalf("publishReview suggest-off: %v", err)
 	}
 	if prOff.SuggestionsPosted != 0 {
@@ -574,7 +580,7 @@ func TestPublishReviewSuggestCount(t *testing.T) {
 	newGitHubClient = func(string) mgithub.Client { return fake2 }
 	client2 := newGitHubClient("")
 	prOn := &cli.PRResult{SummaryAction: "none"}
-	if err := publishReview(stdctx.Background(), client2, runner, dir, info, res, prOn, cli.PRReviewRequest{Gate: "high", Suggest: true}, nil, embedWriter{}, nil, nil); err != nil {
+	if err := publishReview(stdctx.Background(), client2, runner, dir, info, res, prOn, cli.PRReviewRequest{Gate: "high", Suggest: true}, nil, embedWriter{}, nil, nil, ""); err != nil {
 		t.Fatalf("publishReview suggest-on: %v", err)
 	}
 	if prOn.SuggestionsPosted != 1 {

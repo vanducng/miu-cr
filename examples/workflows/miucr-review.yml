@@ -103,6 +103,12 @@ jobs:
         with:
           ref: ${{ github.event_name == 'issue_comment' && steps.gate.outputs.head_sha || github.sha }}
 
+      - name: Cache miucr state
+        uses: actions/cache@v4
+        with:
+          path: ~/.config/miu/cr
+          key: miucr-${{ runner.os }}-${{ github.repository_id }}-${{ github.event.issue.number || github.event.pull_request.number }}
+
       - uses: vanducng/miu-cr@vX.Y.Z   # pin to a real release tag or an exact SHA
         with:
           api-key: ${{ secrets.ANTHROPIC_API_KEY }}

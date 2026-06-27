@@ -415,6 +415,54 @@ func TestParseRunsCount(t *testing.T) {
 	}
 }
 
+func TestParseReviewedCommit(t *testing.T) {
+	tests := []struct {
+		name string
+		body string
+		want string
+	}{
+		{"linked", "Reviewed commit [`abcdef1`](<https://github.com/o/r/commit/abcdef1234567890>)", "abcdef1"},
+		{"plain", "Reviewed commit `ABCDEF1234567890` · Posted by", "abcdef1234567890"},
+		{"missing", ReviewMarker + "\n## Code Review Summary", ""},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := parseReviewedCommit(tt.body); got != tt.want {
+				t.Fatalf("parseReviewedCommit(%q) = %q, want %q", tt.body, got, tt.want)
+			}
+		})
+	}
+}
+
+func TestParsePublishedCommit(t *testing.T) {
+	tests := []struct {
+		name string
+		body string
+		want string
+	}{
+		{"full", publishedToken("ABCDEF1234567890", "0123456789abcdef"), "abcdef1234567890"},
+		{"short", publishedToken("abcdef1", ""), "abcdef1"},
+		{"missing", ReviewMarker + "\n## Code Review Summary", ""},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := parsePublishedCommit(tt.body); got != tt.want {
+				t.Fatalf("parsePublishedCommit(%q) = %q, want %q", tt.body, got, tt.want)
+			}
+		})
+	}
+}
+
+func TestParsePublishedKey(t *testing.T) {
+	body := publishedToken("abcdef1234567890", "0123456789abcdef")
+	if got := parsePublishedKey(body); got != "0123456789abcdef" {
+		t.Fatalf("parsePublishedKey = %q, want 0123456789abcdef", got)
+	}
+	if got := parsePublishedKey(publishedToken("abcdef1", "")); got != "" {
+		t.Fatalf("legacy published marker must have empty key, got %q", got)
+	}
+}
+
 func TestPriorRunsCount(t *testing.T) {
 	marked := func(id int64, body string) *gh.IssueComment {
 		return &gh.IssueComment{ID: gh.Ptr(id), Body: gh.Ptr(body)}
@@ -461,7 +509,7 @@ func TestPriorRunsCount(t *testing.T) {
 // body (a higher-id duplicate is ignored).
 func TestFetchPRSeedsPriorLedger(t *testing.T) {
 	entries := []LedgerEntry{{FP: "aaaaaaaaaaaaaaaa", Path: "a.go", Title: "X", Status: statusOpen, Sev: "high", FirstSev: "high", OpenSHA: "aaaaaa1", FirstAt: "2026-06-26T22:00:00Z"}}
-	lowest := ReviewMarker + "\n" + runsCountToken(2) + "\n## Code Review Summary\n" + renderLedgerMarker(entries)
+	lowest := ReviewMarker + "\n" + runsCountToken(2) + "\n" + publishedToken("abcdef1234567890", "0123456789abcdef") + "\n## Code Review Summary\n" + renderLedgerMarker(entries) + "\n<sub>Reviewed commit [`abcdef1`](<https://github.com/vanducng/miu-cr/commit/abcdef1234567890>)</sub>"
 	higher := ReviewMarker + "\n" + runsCountToken(9) + "\n" + renderLedgerMarker(nil) // higher id, must be ignored
 
 	c := &convClient{
@@ -480,6 +528,15 @@ func TestFetchPRSeedsPriorLedger(t *testing.T) {
 	}
 	if len(info.PriorLedger) != 1 || info.PriorLedger[0].FP != "aaaaaaaaaaaaaaaa" || info.PriorLedger[0].Status != statusOpen {
 		t.Fatalf("PriorLedger must parse from the SAME lowest-id comment, got %+v", info.PriorLedger)
+	}
+	if info.PriorSummaryHeadSHA != "abcdef1" {
+		t.Fatalf("PriorSummaryHeadSHA = %q, want abcdef1", info.PriorSummaryHeadSHA)
+	}
+	if info.PriorPublishedHeadSHA != "abcdef1234567890" {
+		t.Fatalf("PriorPublishedHeadSHA = %q, want abcdef1234567890", info.PriorPublishedHeadSHA)
+	}
+	if info.PriorPublishedKey != "0123456789abcdef" {
+		t.Fatalf("PriorPublishedKey = %q, want 0123456789abcdef", info.PriorPublishedKey)
 	}
 }
 
