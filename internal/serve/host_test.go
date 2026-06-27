@@ -139,6 +139,8 @@ func TestHostRunnerRepeatedPollSameHeadDoesNotDuplicate(t *testing.T) {
 
 func TestHostRunnerFailedReviewRetriesSameHead(t *testing.T) {
 	cfg := hostRunnerConfig(t)
+	now := time.Date(2026, 6, 27, 10, 30, 0, 0, time.UTC)
+	cfg.Now = func() time.Time { return now }
 	disp := cfg.Dispatcher.(*pollDispatcher)
 	disp.failErr = errors.New("review failed")
 	r, err := NewHostRunner(cfg)
@@ -151,8 +153,15 @@ func TestHostRunnerFailedReviewRetriesSameHead(t *testing.T) {
 	if err := r.Tick(stdctx.Background()); err != nil {
 		t.Fatalf("second tick: %v", err)
 	}
+	if disp.count() != 1 {
+		t.Fatalf("submitted jobs = %d, want no retry before failed backoff", disp.count())
+	}
+	now = now.Add(hostFailedRetryDelay(1))
+	if err := r.Tick(stdctx.Background()); err != nil {
+		t.Fatalf("third tick: %v", err)
+	}
 	if disp.count() != 2 {
-		t.Fatalf("submitted jobs = %d, want retry", disp.count())
+		t.Fatalf("submitted jobs = %d, want retry after failed backoff", disp.count())
 	}
 }
 
@@ -431,6 +440,9 @@ func (s *fakeHostStore) EnqueueHostJob(_ stdctx.Context, in store.HostJobInput) 
 	in.DedupeKey = store.HostJobDedupeKey(in)
 	if j, ok := s.jobs[in.DedupeKey]; ok {
 		if j.Status == "failed" {
+			if j.AvailableAt.After(in.Now) {
+				return j, false, nil
+			}
 			j.Status = "queued"
 			j.Error = ""
 			s.jobs[in.DedupeKey] = j
@@ -473,6 +485,9 @@ func (s *fakeHostStore) CompleteHostJob(_ stdctx.Context, in store.HostJobComple
 	for key, job := range s.jobs {
 		if job.ID == in.JobID {
 			job.Status = in.Status
+			if !in.AvailableAt.IsZero() {
+				job.AvailableAt = in.AvailableAt
+			}
 			s.jobs[key] = job
 			return nil
 		}

@@ -103,12 +103,13 @@ type HostJobClaim struct {
 }
 
 type HostJobCompleteInput struct {
-	JobID     int64
-	AttemptID int64
-	Status    string
-	ReviewID  string
-	Error     string
-	Now       time.Time
+	JobID       int64
+	AttemptID   int64
+	Status      string
+	ReviewID    string
+	Error       string
+	Now         time.Time
+	AvailableAt time.Time
 }
 
 type HostJobReleaseInput struct {

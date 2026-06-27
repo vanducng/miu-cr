@@ -94,6 +94,9 @@ FOR UPDATE`, in.DedupeKey))
 		return store.HostJob{}, false, err
 	}
 	expiredRunning := job.Status == "running" && job.LeaseUntil != nil && !job.LeaseUntil.After(now)
+	if job.Status == "failed" && job.AvailableAt.After(now) {
+		return job, false, tx.Commit()
+	}
 	if job.Status != "failed" && !expiredRunning {
 		return job, false, tx.Commit()
 	}
@@ -199,6 +202,10 @@ func (s *Store) CompleteHostJob(ctx context.Context, in store.HostJobCompleteInp
 	if now.IsZero() {
 		now = time.Now().UTC()
 	}
+	availableAt := in.AvailableAt
+	if availableAt.IsZero() {
+		availableAt = now
+	}
 	tx, err := s.db.BeginTx(ctx, nil)
 	if err != nil {
 		return err
@@ -212,10 +219,11 @@ SET status=$2,
     review_id=$3,
     error=$4,
     updated_at=$5,
-    completed_at=$5
+    completed_at=$5,
+    available_at=$6
 WHERE id=$1
-  AND ($6::bigint = 0 OR attempts = (SELECT attempt FROM host_job_attempts WHERE id=$6 AND job_id=$1))`,
-		in.JobID, in.Status, in.ReviewID, in.Error, now, in.AttemptID)
+  AND ($7::bigint = 0 OR attempts = (SELECT attempt FROM host_job_attempts WHERE id=$7 AND job_id=$1))`,
+		in.JobID, in.Status, in.ReviewID, in.Error, now, availableAt, in.AttemptID)
 	if err != nil {
 		return err
 	}

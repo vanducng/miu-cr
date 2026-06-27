@@ -18,6 +18,8 @@ import (
 )
 
 const maxHostClaimsPerTick = 32
+const hostFailedRetryBase = 5 * time.Minute
+const hostFailedRetryCap = time.Hour
 
 var runHostDrainGrace = 10 * time.Second
 
@@ -384,7 +386,7 @@ func (h *HostRunner) claimReady(ctx stdctx.Context, repos map[int64]HostRepoConf
 			_ = h.store.CompleteHostJob(ctx, store.HostJobCompleteInput{JobID: claim.Job.ID, AttemptID: claim.AttemptID, Status: "failed", Error: "invalid PR number", Now: h.now().UTC()})
 			continue
 		}
-		jobID, attemptID := claim.Job.ID, claim.AttemptID
+		jobID, attemptID, attempts := claim.Job.ID, claim.AttemptID, claim.Job.Attempts
 		job := Job{
 			Key:     prKey{Owner: repo.Owner, Repo: repo.Repo, Number: int(claim.Job.Number)},
 			Ref:     fmt.Sprintf("%s/%s#%d", repo.Owner, repo.Repo, claim.Job.Number),
@@ -401,7 +403,12 @@ func (h *HostRunner) claimReady(ctx stdctx.Context, repos map[int64]HostRepoConf
 				}
 				cctx, cancel := stdctx.WithTimeout(stdctx.WithoutCancel(ctx), 10*time.Second)
 				defer cancel()
-				if err := h.store.CompleteHostJob(cctx, store.HostJobCompleteInput{JobID: jobID, AttemptID: attemptID, Status: status, Error: msg, Now: h.now().UTC()}); err != nil {
+				now := h.now().UTC()
+				availableAt := now
+				if runErr != nil {
+					availableAt = now.Add(hostFailedRetryDelay(attempts))
+				}
+				if err := h.store.CompleteHostJob(cctx, store.HostJobCompleteInput{JobID: jobID, AttemptID: attemptID, Status: status, Error: msg, Now: now, AvailableAt: availableAt}); err != nil {
 					h.log.Warn("host: failed to complete job", "job", jobID, "error", config.RedactString(err.Error()))
 				}
 			},
@@ -427,6 +434,21 @@ func (h *HostRunner) claimReady(ctx stdctx.Context, repos map[int64]HostRepoConf
 		}
 	}
 	return nil
+}
+
+func hostFailedRetryDelay(attempts int) time.Duration {
+	if attempts < 1 {
+		attempts = 1
+	}
+	shift := attempts - 1
+	if shift > 4 {
+		shift = 4
+	}
+	delay := hostFailedRetryBase << shift
+	if delay > hostFailedRetryCap {
+		return hostFailedRetryCap
+	}
+	return delay
 }
 
 func RunHost(ctx stdctx.Context, pool *Pool, runner *HostRunner) error {

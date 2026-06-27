@@ -199,6 +199,45 @@ func TestHostEnqueueRequeuesExpiredRunningJob(t *testing.T) {
 	}
 }
 
+func TestHostEnqueueRespectsFailedRetryAvailability(t *testing.T) {
+	s := openHost(t)
+	ctx := context.Background()
+	repo := mustHostRepo(t, s)
+	session := mustHostSession(t, s, repo.ID, 17, "open")
+	in := hostJobInput(repo.ID, session.ID, 17, uniqueName(t, "head"))
+	job, ok, err := s.EnqueueHostJob(ctx, in)
+	if err != nil || !ok {
+		t.Fatalf("enqueue ok=%v err=%v", ok, err)
+	}
+	now := time.Now().UTC()
+	claim, ok, err := s.ClaimHostJob(ctx, store.HostJobClaimInput{WorkerID: "worker-1", Now: now, LeaseDuration: time.Hour})
+	if err != nil || !ok {
+		t.Fatalf("claim ok=%v err=%v", ok, err)
+	}
+	retryAt := now.Add(15 * time.Minute).Truncate(time.Microsecond)
+	if err := s.CompleteHostJob(ctx, store.HostJobCompleteInput{JobID: job.ID, AttemptID: claim.AttemptID, Status: "failed", Error: "quota", Now: now.Add(time.Second), AvailableAt: retryAt}); err != nil {
+		t.Fatalf("complete failed: %v", err)
+	}
+	in.Now = now.Add(2 * time.Second)
+	in.AvailableAt = in.Now
+	blocked, ok, err := s.EnqueueHostJob(ctx, in)
+	if err != nil {
+		t.Fatalf("early requeue: %v", err)
+	}
+	if ok || blocked.Status != "failed" {
+		t.Fatalf("early requeue ok=%v status=%s, want blocked failed job", ok, blocked.Status)
+	}
+	in.Now = retryAt
+	in.AvailableAt = retryAt
+	requeued, ok, err := s.EnqueueHostJob(ctx, in)
+	if err != nil || !ok {
+		t.Fatalf("retry requeue ok=%v err=%v", ok, err)
+	}
+	if requeued.Status != "queued" || !requeued.AvailableAt.Equal(retryAt) {
+		t.Fatalf("retry job status=%s available=%v, want queued at %v", requeued.Status, requeued.AvailableAt, retryAt)
+	}
+}
+
 func TestHostEnqueueUsesInjectedNow(t *testing.T) {
 	s := openHost(t)
 	ctx := context.Background()
