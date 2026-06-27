@@ -105,6 +105,9 @@ func TestResolveZAIViaConfigProfile(t *testing.T) {
 	if creds.AuthToken != "zai-secret" {
 		t.Fatalf("profile key must become Bearer AuthToken, got %q", creds.AuthToken)
 	}
+	if creds.AuthSource != "auth_env" || creds.AuthSourceName != "ZAI_API_KEY" {
+		t.Fatalf("profile auth_env source not captured: %+v", creds)
+	}
 	if creds.APIKey != "" {
 		t.Fatalf("APIKey must be empty on the bearer path, got %q", creds.APIKey)
 	}

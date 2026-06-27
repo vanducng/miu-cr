@@ -181,7 +181,7 @@ func resolveAnthropic(in ResolveInput, prof config.Provider) (Credentials, error
 		credential{Value: in.APIKey, Source: "flag", Name: "--api-key"},
 	)
 	var profile credential
-	profileFirst := strings.TrimSpace(prof.AuthEnv) != "" || len(prof.AuthCommand) != 0
+	profileEnvOrCommandFirst := strings.TrimSpace(prof.AuthEnv) != "" || len(prof.AuthCommand) != 0
 	applyProfile := func() error {
 		var err error
 		profile, err = profileCredential(resolveContext(in), prof)
@@ -197,7 +197,7 @@ func resolveAnthropic(in ResolveInput, prof config.Provider) (Credentials, error
 		}
 		return nil
 	}
-	if apiKey.Value == "" && authToken.Value == "" && profileFirst {
+	if apiKey.Value == "" && authToken.Value == "" && profileEnvOrCommandFirst {
 		if err := applyProfile(); err != nil {
 			return Credentials{}, err
 		}
@@ -206,7 +206,7 @@ func resolveAnthropic(in ResolveInput, prof config.Provider) (Credentials, error
 		authToken = envCredential("ANTHROPIC_AUTH_TOKEN")
 		apiKey = envCredential("ANTHROPIC_API_KEY")
 	}
-	if apiKey.Value == "" && authToken.Value == "" && !profileFirst {
+	if apiKey.Value == "" && authToken.Value == "" && !profileEnvOrCommandFirst {
 		if err := applyProfile(); err != nil {
 			return Credentials{}, err
 		}
