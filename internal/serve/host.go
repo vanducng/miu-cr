@@ -9,6 +9,7 @@ import (
 	"fmt"
 	"log/slog"
 	"math"
+	"sync"
 	"time"
 
 	"github.com/google/go-github/v84/github"
@@ -76,6 +77,7 @@ type HostRepoConfig struct {
 }
 
 type HostRunner struct {
+	mu              sync.Mutex
 	store           store.HostStore
 	repos           []HostRepoConfig
 	tokens          map[string]HostTokenSource
@@ -169,6 +171,12 @@ func validateHostRunnerRepos(repos []HostRepoConfig, tokens map[string]HostToken
 }
 
 func (h *HostRunner) Reload(ctx stdctx.Context) error {
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	return h.reloadLocked(ctx)
+}
+
+func (h *HostRunner) reloadLocked(ctx stdctx.Context) error {
 	if h.reload == nil {
 		return nil
 	}
@@ -194,6 +202,8 @@ func (h *HostRunner) Reload(ctx stdctx.Context) error {
 }
 
 func (h *HostRunner) Groups() map[string][]string {
+	h.mu.Lock()
+	defer h.mu.Unlock()
 	out := map[string][]string{}
 	for _, r := range h.repos {
 		if !r.Enabled || !r.Poll {
@@ -208,14 +218,16 @@ func (h *HostRunner) Run(ctx stdctx.Context) {
 	nextJanitor := time.Time{}
 	for {
 		start := h.now()
-		if err := h.Reload(ctx); err != nil && ctx.Err() == nil {
+		h.mu.Lock()
+		if err := h.reloadLocked(ctx); err != nil && ctx.Err() == nil {
 			h.log.Warn("host: config reload failed; keeping previous config", "error", config.RedactString(err.Error()))
 		}
 		if !h.janitorIntervalIsOff() && !start.Before(nextJanitor) {
-			if err := h.RunJanitor(ctx); err != nil && ctx.Err() == nil {
+			if err := h.runJanitorLocked(ctx); err != nil && ctx.Err() == nil {
 				h.log.Warn("host: janitor failed", "error", config.RedactString(err.Error()))
 			}
 			if ctx.Err() != nil {
+				h.mu.Unlock()
 				return
 			}
 			nextJanitor = start.Add(h.janitorInterval)
@@ -225,6 +237,7 @@ func (h *HostRunner) Run(ctx stdctx.Context) {
 			h.log.Warn("host: tick failed", "error", config.RedactString(err.Error()))
 		}
 		if ctx.Err() != nil {
+			h.mu.Unlock()
 			return
 		}
 		eff := h.interval
@@ -235,6 +248,7 @@ func (h *HostRunner) Run(ctx stdctx.Context) {
 		if wait < 0 {
 			wait = 0
 		}
+		h.mu.Unlock()
 		if sleepCtx(ctx, wait) {
 			return
 		}
@@ -242,6 +256,12 @@ func (h *HostRunner) Run(ctx stdctx.Context) {
 }
 
 func (h *HostRunner) RunJanitor(ctx stdctx.Context) error {
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	return h.runJanitorLocked(ctx)
+}
+
+func (h *HostRunner) runJanitorLocked(ctx stdctx.Context) error {
 	p := h.prune.policy(h.now().UTC())
 	_, err := h.store.PruneHost(ctx, p)
 	return err
@@ -280,8 +300,13 @@ func (c HostPruneConfig) policy(now time.Time) store.HostPrunePolicy {
 }
 
 func (h *HostRunner) Tick(ctx stdctx.Context) error {
-	if err := h.Reload(ctx); err != nil {
-		return err
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	if err := h.reloadLocked(ctx); err != nil {
+		if ctx.Err() != nil {
+			return err
+		}
+		h.log.Warn("host: config reload failed; keeping previous config", "error", config.RedactString(err.Error()))
 	}
 	_, err := h.tick(ctx)
 	return err
