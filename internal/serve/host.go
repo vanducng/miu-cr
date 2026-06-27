@@ -33,6 +33,7 @@ type HostRunnerConfig struct {
 	Store           store.HostStore
 	Repos           []HostRepoConfig
 	TokenSources    map[string]HostTokenSource
+	Reload          HostReloadFunc
 	Source          pollSource
 	Interval        time.Duration
 	Dispatcher      Dispatcher
@@ -43,6 +44,17 @@ type HostRunnerConfig struct {
 	Prune           HostPruneConfig
 	JanitorInterval time.Duration
 	Now             func() time.Time
+}
+
+type HostReloadFunc func(stdctx.Context) (HostReload, error)
+
+type HostReload struct {
+	Repos           []HostRepoConfig
+	TokenSources    map[string]HostTokenSource
+	Interval        time.Duration
+	ReviewTO        time.Duration
+	Prune           HostPruneConfig
+	JanitorInterval time.Duration
 }
 
 type HostRepoConfig struct {
@@ -67,6 +79,7 @@ type HostRunner struct {
 	store           store.HostStore
 	repos           []HostRepoConfig
 	tokens          map[string]HostTokenSource
+	reload          HostReloadFunc
 	src             pollSource
 	interval        time.Duration
 	disp            Dispatcher
@@ -115,25 +128,14 @@ func NewHostRunner(cfg HostRunnerConfig) (*HostRunner, error) {
 	if cfg.Source != sourcePulls {
 		return nil, errors.New("host: only poll_source=pulls is supported in this milestone")
 	}
-	enabledRepos := 0
-	for _, r := range cfg.Repos {
-		if !r.Enabled {
-			continue
-		}
-		if cfg.TokenSources[r.GithubAccount] == nil {
-			return nil, fmt.Errorf("host: repo %s references unknown GitHub account %q", r.Slug, r.GithubAccount)
-		}
-		if r.Poll {
-			enabledRepos++
-		}
-	}
-	if enabledRepos == 0 {
-		return nil, errors.New("host: at least one enabled polling repo is required")
+	if err := validateHostRunnerRepos(cfg.Repos, cfg.TokenSources); err != nil {
+		return nil, err
 	}
 	return &HostRunner{
 		store:           cfg.Store,
 		repos:           cfg.Repos,
 		tokens:          cfg.TokenSources,
+		reload:          cfg.Reload,
 		src:             cfg.Source,
 		interval:        cfg.Interval,
 		disp:            cfg.Dispatcher,
@@ -145,6 +147,50 @@ func NewHostRunner(cfg HostRunnerConfig) (*HostRunner, error) {
 		janitorInterval: cfg.JanitorInterval,
 		now:             cfg.Now,
 	}, nil
+}
+
+func validateHostRunnerRepos(repos []HostRepoConfig, tokens map[string]HostTokenSource) error {
+	enabledRepos := 0
+	for _, r := range repos {
+		if !r.Enabled {
+			continue
+		}
+		if tokens[r.GithubAccount] == nil {
+			return fmt.Errorf("host: repo %s references unknown GitHub account %q", r.Slug, r.GithubAccount)
+		}
+		if r.Poll {
+			enabledRepos++
+		}
+	}
+	if enabledRepos == 0 {
+		return errors.New("host: at least one enabled polling repo is required")
+	}
+	return nil
+}
+
+func (h *HostRunner) Reload(ctx stdctx.Context) error {
+	if h.reload == nil {
+		return nil
+	}
+	next, err := h.reload(ctx)
+	if err != nil {
+		return err
+	}
+	if err := validateHostRunnerRepos(next.Repos, next.TokenSources); err != nil {
+		return err
+	}
+	h.repos = next.Repos
+	h.tokens = next.TokenSources
+	h.interval = next.Interval
+	if h.interval <= 0 {
+		h.interval = time.Minute
+	}
+	if next.ReviewTO > 0 {
+		h.reviewTO = next.ReviewTO
+	}
+	h.prune = next.Prune
+	h.janitorInterval = next.JanitorInterval
+	return nil
 }
 
 func (h *HostRunner) Groups() map[string][]string {
@@ -162,6 +208,9 @@ func (h *HostRunner) Run(ctx stdctx.Context) {
 	nextJanitor := time.Time{}
 	for {
 		start := h.now()
+		if err := h.Reload(ctx); err != nil && ctx.Err() == nil {
+			h.log.Warn("host: config reload failed; keeping previous config", "error", config.RedactString(err.Error()))
+		}
 		if !h.janitorIntervalIsOff() && !start.Before(nextJanitor) {
 			if err := h.RunJanitor(ctx); err != nil && ctx.Err() == nil {
 				h.log.Warn("host: janitor failed", "error", config.RedactString(err.Error()))
@@ -231,6 +280,9 @@ func (c HostPruneConfig) policy(now time.Time) store.HostPrunePolicy {
 }
 
 func (h *HostRunner) Tick(ctx stdctx.Context) error {
+	if err := h.Reload(ctx); err != nil {
+		return err
+	}
 	_, err := h.tick(ctx)
 	return err
 }

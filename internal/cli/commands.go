@@ -161,12 +161,10 @@ func serveCommand(opts *options) *cobra.Command {
 				if err != nil {
 					return err
 				}
-				src := hostPollSource(hostCfg.Host.PollSource)
-				if cmd.Flags().Changed("poll-source") {
-					src = serve.ParsePollSource(pollSource)
-				}
-				if src != serve.SourcePulls {
-					return &CLIError{Code: "config.invalid", Message: "serve --host currently supports poll_source pulls only", Hint: "set host.poll_source: pulls or pass --poll-source pulls", Exit: 2}
+				pollSourceChanged := cmd.Flags().Changed("poll-source")
+				src, err := serveHostPollSource(hostCfg, pollSource, pollSourceChanged)
+				if err != nil {
+					return err
 				}
 				if dryRunConfig {
 					safe := config.RedactHostConfig(hostCfg)
@@ -187,11 +185,8 @@ func serveCommand(opts *options) *cobra.Command {
 					return err
 				}
 				defer closeStore()
-				tokenSources, err := buildHostGitHubTokenSources(cmd.Context(), hostCfg)
-				if err != nil {
-					return err
-				}
-				hostRepos, reviewTO, err := buildServeHostRepos(cmd.Context(), hostCfg, hostPath)
+				pollIntervalChanged := cmd.Flags().Changed("poll-interval")
+				snapshot, err := buildServeHostSnapshot(cmd.Context(), hostCfg, hostPath, pollInterval, pollIntervalChanged)
 				if err != nil {
 					return err
 				}
@@ -208,21 +203,18 @@ func serveCommand(opts *options) *cobra.Command {
 					return err
 				}
 				pool := serve.NewPoolWithWorkers(buildServeReviewFn(log, "", reviewStore, traceSink), log, workers)
-				interval := durationOrDefault(hostCfg.Host.PollInterval, time.Minute)
-				if cmd.Flags().Changed("poll-interval") {
-					interval = pollInterval
-				}
 				runner, err := serve.NewHostRunner(serve.HostRunnerConfig{
 					Store:           hostStore,
-					Repos:           hostRepos,
-					TokenSources:    tokenSources,
+					Repos:           snapshot.Repos,
+					TokenSources:    snapshot.TokenSources,
+					Reload:          buildServeHostReloader(hostPath, pollInterval, pollIntervalChanged, pollSource, pollSourceChanged),
 					Source:          src,
-					Interval:        interval,
+					Interval:        snapshot.Interval,
 					Dispatcher:      pool,
 					Logger:          log,
-					ReviewTO:        reviewTO,
-					Prune:           hostPruneConfig(hostCfg.Host),
-					JanitorInterval: durationOrDefault(hostCfg.Host.Retention.JanitorInterval, 15*time.Minute),
+					ReviewTO:        snapshot.ReviewTO,
+					Prune:           snapshot.Prune,
+					JanitorInterval: snapshot.JanitorInterval,
 				})
 				if err != nil {
 					return &CLIError{Code: "serve.host_invalid", Message: config.RedactString(err.Error()), Hint: "check host config repos, accounts, and poll_source", Exit: 2}
@@ -403,6 +395,53 @@ func hostPollSource(raw string) serve.PollSource {
 		return serve.SourcePulls
 	}
 	return serve.ParsePollSource(raw)
+}
+
+func serveHostPollSource(cfg config.HostConfig, flagValue string, flagChanged bool) (serve.PollSource, error) {
+	src := hostPollSource(cfg.Host.PollSource)
+	if flagChanged {
+		src = serve.ParsePollSource(flagValue)
+	}
+	if src != serve.SourcePulls {
+		return "", &CLIError{Code: "config.invalid", Message: "serve --host currently supports poll_source pulls only", Hint: "set host.poll_source: pulls or pass --poll-source pulls", Exit: 2}
+	}
+	return src, nil
+}
+
+func buildServeHostSnapshot(ctx stdctx.Context, cfg config.HostConfig, path string, pollInterval time.Duration, pollIntervalChanged bool) (serve.HostReload, error) {
+	tokenSources, err := buildHostGitHubTokenSources(ctx, cfg)
+	if err != nil {
+		return serve.HostReload{}, err
+	}
+	hostRepos, reviewTO, err := buildServeHostRepos(ctx, cfg, path)
+	if err != nil {
+		return serve.HostReload{}, err
+	}
+	interval := durationOrDefault(cfg.Host.PollInterval, time.Minute)
+	if pollIntervalChanged {
+		interval = pollInterval
+	}
+	return serve.HostReload{
+		Repos:           hostRepos,
+		TokenSources:    tokenSources,
+		Interval:        interval,
+		ReviewTO:        reviewTO,
+		Prune:           hostPruneConfig(cfg.Host),
+		JanitorInterval: durationOrDefault(cfg.Host.Retention.JanitorInterval, 15*time.Minute),
+	}, nil
+}
+
+func buildServeHostReloader(path string, pollInterval time.Duration, pollIntervalChanged bool, pollSource string, pollSourceChanged bool) serve.HostReloadFunc {
+	return func(ctx stdctx.Context) (serve.HostReload, error) {
+		cfg, err := config.LoadHost(path)
+		if err != nil {
+			return serve.HostReload{}, err
+		}
+		if _, err := serveHostPollSource(cfg, pollSource, pollSourceChanged); err != nil {
+			return serve.HostReload{}, err
+		}
+		return buildServeHostSnapshot(ctx, cfg, path, pollInterval, pollIntervalChanged)
+	}
 }
 
 func buildServeHostRepos(ctx stdctx.Context, cfg config.HostConfig, path string) ([]serve.HostRepoConfig, time.Duration, error) {
