@@ -177,7 +177,7 @@ a hidden marker that identifies the comment as miucr-authored:
 
 **✅ Resolved (3)**
 
-| Priority | Issue | Location | Opened → Resolved |
+| Priority | Issue | Location | Resolved |
 |----------|-------|----------|-------------------|
 | 🟠→✅ P1 | Path traversal | fs/read.go:12 | `a1b2c3d` → `e4f5a6b` |
 

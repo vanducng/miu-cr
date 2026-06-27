@@ -264,7 +264,7 @@ func renderLedger(b *strings.Builder, info *PRInfo, entries []LedgerEntry) {
 	if len(resolved) > 0 {
 		sort.SliceStable(resolved, func(i, j int) bool { return resolved[i].ResAt > resolved[j].ResAt })
 		fmt.Fprintf(b, "**✅ Resolved (%d)**\n\n", len(resolved))
-		b.WriteString("| Priority | Issue | Location | Opened → Resolved |\n|----------|-------|----------|-------------------|\n")
+		b.WriteString("| Priority | Issue | Location | Resolved |\n|----------|-------|----------|----------|\n")
 		shown, extra := resolved, 0
 		if len(shown) > maxResolvedRows {
 			extra = len(shown) - maxResolvedRows

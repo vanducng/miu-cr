@@ -214,10 +214,14 @@ func TestRenderSummaryLedgerGroupedTables(t *testing.T) {
 			t.Fatalf("rendered ledger summary missing %q:\n%s", want, out)
 		}
 	}
+	if !strings.Contains(out, "| Resolved |") {
+		t.Fatalf("resolved table header should be just 'Resolved':\n%s", out)
+	}
 	for _, absent := range []string{
 		"### 🔴 Open",          // no oversized H3 / alarming red marker
 		"<summary>✅ Resolved", // resolved table is no longer collapsed
 		"| Sev |",             // old column header
+		"Opened → Resolved",   // resolved column header simplified to "Resolved"
 		"Review the",          // inline-comment pointer removed in ledger mode
 	} {
 		if strings.Contains(out, absent) {
