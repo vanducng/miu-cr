@@ -18,6 +18,7 @@ type HostStore interface {
 	ClaimHostJob(context.Context, HostJobClaimInput) (HostJobClaim, bool, error)
 	CompleteHostJob(context.Context, HostJobCompleteInput) error
 	ReleaseHostJob(context.Context, HostJobReleaseInput) error
+	ReconcileHostClosedPRs(context.Context, HostClosedPRsInput) (HostClosedPRsResult, error)
 	UpsertHostWorkspace(context.Context, HostWorkspaceInput) (HostWorkspace, error)
 	UpsertHostPollCursor(context.Context, HostPollCursorInput) error
 	GetHostPollCursor(context.Context, int64, string) (HostPollCursor, bool, error)
@@ -118,6 +119,20 @@ type HostJobReleaseInput struct {
 	Error       string
 	Now         time.Time
 	AvailableAt time.Time
+}
+
+// HostClosedPRsInput reconciles durable state against the authoritative set of
+// currently-open PR numbers from a poll. OpenNumbers must come from a complete,
+// successful listing; a partial list would wrongly close live PRs.
+type HostClosedPRsInput struct {
+	RepoID      int64
+	OpenNumbers []int64
+	Now         time.Time
+}
+
+type HostClosedPRsResult struct {
+	SessionsClosed int
+	JobsCanceled   int
 }
 
 type HostWorkspaceInput struct {

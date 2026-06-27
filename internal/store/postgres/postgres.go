@@ -75,7 +75,14 @@ var postgresMigrations = []schemaMigration{
 	{Name: "0001_reviews_pr_findings", SQL: SchemaSQL},
 	{Name: "0002_reviews_extended_columns", SQL: alterAddReviewColumnsSQL},
 	{Name: "0003_host_schema", SQL: HostSchemaSQL},
+	{Name: "0005_host_jobs_repo_status_idx", SQL: hostJobsRepoStatusIdxSQL},
 }
+
+// hostJobsRepoStatusIdxSQL backs the per-repo status filter in
+// ReconcileHostClosedPRs; the (status, ...) claim index doesn't lead with
+// repo_id, so a multi-repo host would scan all queued jobs each poll.
+const hostJobsRepoStatusIdxSQL = `
+CREATE INDEX IF NOT EXISTS host_jobs_repo_status_idx ON host_jobs (repo_id, status);`
 
 // alterAddReviewColumnsSQL idempotently adds the post-ship reviews columns to a
 // pre-migration DB. Each is ADD COLUMN IF NOT EXISTS so re-open is a no-op.
