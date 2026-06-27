@@ -43,6 +43,9 @@ func ValidateReview(r Review) error {
 			return invalidReview("timeout", r.Timeout, "a Go duration like 300s or 5m")
 		}
 	}
+	if r.Temperature != nil && (*r.Temperature < 0 || *r.Temperature > 2) {
+		return invalidReview("temperature", fmt.Sprintf("%v", *r.Temperature), "a number between 0 and 2")
+	}
 	return nil
 }
 

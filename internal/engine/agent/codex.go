@@ -59,6 +59,9 @@ func newCodexAgent(creds Credentials, timeout time.Duration) *codexAgent {
 
 // codexReq is the Responses API request body. store:false keeps the call
 // stateless (no server-side session); tools mirror the Anthropic/OpenAI loop.
+// Note: NO temperature field — gpt-5.x reasoning models on the Responses API
+// reject/ignore temperature (determinism is governed by reasoning, not
+// sampling), so [review].temperature deliberately does not apply to codex.
 type codexReq struct {
 	Model           string      `json:"model"`
 	Instructions    string      `json:"instructions"`

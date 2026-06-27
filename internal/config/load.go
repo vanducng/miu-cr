@@ -139,6 +139,9 @@ func mergeReview(base, file Review) Review {
 	if file.Timeout != "" {
 		out.Timeout = file.Timeout
 	}
+	if file.Temperature != nil {
+		out.Temperature = file.Temperature
+	}
 	if file.Suggest != nil {
 		out.Suggest = file.Suggest
 	}

@@ -118,18 +118,20 @@ func (c sdkAnthropicClient) newMessage(ctx stdctx.Context, params anthropic.Mess
 
 // anthropicAgent is the production Agent backed by the Anthropic Messages API.
 type anthropicAgent struct {
-	client  anthropicClient
-	model   string
-	timeout time.Duration
+	client      anthropicClient
+	model       string
+	timeout     time.Duration
+	temperature float64
 }
 
 // newAnthropicAgent builds the Anthropic-backed Agent (registered for
 // config.KindAnthropic; see registry.go for the dispatch).
 func newAnthropicAgent(creds Credentials, timeout time.Duration) *anthropicAgent {
 	return &anthropicAgent{
-		client:  sdkAnthropicClient{sdk: anthropic.NewClient(anthropicOptions(creds)...)},
-		model:   creds.Model,
-		timeout: timeout,
+		client:      sdkAnthropicClient{sdk: anthropic.NewClient(anthropicOptions(creds)...)},
+		model:       creds.Model,
+		timeout:     timeout,
+		temperature: creds.Temperature,
 	}
 }
 
@@ -190,10 +192,11 @@ func (a *anthropicAgent) Review(ctx stdctx.Context, rc Context) (engine.ReviewOu
 	rc.Trace.SetModel("anthropic", a.model)
 	rc.Trace.SetPrompt(userPrompt)
 	params := anthropic.MessageNewParams{
-		MaxTokens: maxTokens,
-		Model:     anthropic.Model(a.model),
-		System:    []anthropic.TextBlockParam{{Text: systemPrompt}},
-		Tools:     reviewTools(),
+		MaxTokens:   maxTokens,
+		Temperature: anthropic.Float(a.temperature),
+		Model:       anthropic.Model(a.model),
+		System:      []anthropic.TextBlockParam{{Text: systemPrompt}},
+		Tools:       reviewTools(),
 		Messages: []anthropic.MessageParam{
 			anthropic.NewUserMessage(anthropic.NewTextBlock(userPrompt)),
 		},
@@ -253,9 +256,10 @@ func (a *anthropicAgent) RepairPatch(ctx stdctx.Context, rr RepairRequest) (stri
 		defer cancel()
 	}
 	msg, err := a.client.newMessage(ctx, anthropic.MessageNewParams{
-		MaxTokens: repairMaxTokens,
-		Model:     anthropic.Model(a.model),
-		System:    []anthropic.TextBlockParam{{Text: repairSystemPrompt}},
+		MaxTokens:   repairMaxTokens,
+		Temperature: anthropic.Float(a.temperature),
+		Model:       anthropic.Model(a.model),
+		System:      []anthropic.TextBlockParam{{Text: repairSystemPrompt}},
 		Messages: []anthropic.MessageParam{
 			anthropic.NewUserMessage(anthropic.NewTextBlock(BuildRepairPrompt(rr))),
 		},

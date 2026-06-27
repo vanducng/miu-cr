@@ -45,9 +45,10 @@ func (c sdkOpenAIClient) create(ctx stdctx.Context, params openai.ChatCompletion
 
 // openaiAgent is an OpenAI-compatible (chat-completions + tool-use) Agent.
 type openaiAgent struct {
-	client  openaiClient
-	model   string
-	timeout time.Duration
+	client      openaiClient
+	model       string
+	timeout     time.Duration
+	temperature float64
 }
 
 func newOpenAIAgent(creds Credentials, timeout time.Duration) *openaiAgent {
@@ -64,7 +65,7 @@ func newOpenAIAgent(creds Credentials, timeout time.Duration) *openaiAgent {
 		openaiopt.WithMaxRetries(3),
 	}
 	sdk := openai.NewClient(opts...)
-	return &openaiAgent{client: sdkOpenAIClient{sdk: sdk}, model: creds.Model, timeout: timeout}
+	return &openaiAgent{client: sdkOpenAIClient{sdk: sdk}, model: creds.Model, timeout: timeout, temperature: creds.Temperature}
 }
 
 func openAITools() []openai.ChatCompletionToolUnionParam {
@@ -113,7 +114,8 @@ func (a *openaiAgent) RepairPatch(ctx stdctx.Context, rr RepairRequest) (string,
 			openai.SystemMessage(repairSystemPrompt),
 			openai.UserMessage(BuildRepairPrompt(rr)),
 		},
-		MaxTokens: openai.Int(int64(repairMaxTokens)),
+		Temperature: openai.Float(a.temperature),
+		MaxTokens:   openai.Int(int64(repairMaxTokens)),
 	})
 	if err != nil {
 		return "", classifyOpenAIErr(err)
@@ -145,9 +147,10 @@ func (a *openaiAgent) Review(ctx stdctx.Context, rc Context) (engine.ReviewOutpu
 		openai.UserMessage(userPrompt),
 	}
 	params := openai.ChatCompletionNewParams{
-		Model:    shared.ChatModel(a.model),
-		Messages: messages,
-		Tools:    openAITools(),
+		Model:       shared.ChatModel(a.model),
+		Messages:    messages,
+		Tools:       openAITools(),
+		Temperature: openai.Float(a.temperature),
 		// max_tokens (not max_completion_tokens) for the broadest compatibility
 		// with OpenAI-compatible gateways, many of which lag the newer field.
 		MaxTokens: openai.Int(int64(maxTokens)),
