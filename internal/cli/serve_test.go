@@ -248,6 +248,89 @@ func TestServeHostRuleDirectory(t *testing.T) {
 	}
 }
 
+func TestServeHostReloaderReloadsPromptAndRules(t *testing.T) {
+	base := t.TempDir()
+	if err := os.Mkdir(filepath.Join(base, "prompts"), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	ruleDir := filepath.Join(base, "rules")
+	if err := os.Mkdir(ruleDir, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	promptPath := filepath.Join(base, "prompts", "default.md")
+	rulePath := filepath.Join(ruleDir, "project.md")
+	if err := os.WriteFile(promptPath, []byte("prompt v1"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(rulePath, []byte("rule v1"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("TEST_PROVIDER_TOKEN", "provider-secret")
+	hostPath := filepath.Join(base, "host.yaml")
+	if err := os.WriteFile(hostPath, []byte(`
+version: 1
+default_provider: test
+providers:
+  test:
+    kind: anthropic
+    auth: api_key
+    auth_env: TEST_PROVIDER_TOKEN
+store:
+  backend: postgres
+github:
+  default_account: pat
+  accounts:
+    pat:
+      mode: pat
+      auth_env: GITHUB_TOKEN
+agent:
+  system_prompt_file: prompts/default.md
+host:
+  poll_source: pulls
+repos:
+  - name: service-api
+    slug: example-org/service-api
+    git_url: https://github.com/example-org/service-api.git
+    github_account: pat
+    rules:
+      - rules
+`), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	reload := buildServeHostReloader(hostPath, 0, false, "", false)
+	first, err := reload(stdctx.Background())
+	if err != nil {
+		t.Fatalf("first reload: %v", err)
+	}
+	unchanged, err := reload(stdctx.Background())
+	if err != nil {
+		t.Fatalf("unchanged reload: %v", err)
+	}
+	if unchanged.Repos != nil || unchanged.TokenSources != nil {
+		t.Fatalf("unchanged reload returned snapshot: %+v", unchanged)
+	}
+	if err := os.WriteFile(promptPath, []byte("prompt v2"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(rulePath, []byte("rule v2"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	second, err := reload(stdctx.Background())
+	if err != nil {
+		t.Fatalf("second reload: %v", err)
+	}
+	if !strings.Contains(first.Repos[0].Review.OperatorPrompt, "prompt v1") || !strings.Contains(first.Repos[0].Review.OperatorPrompt, "rule v1") {
+		t.Fatalf("first operator prompt did not include v1 files: %q", first.Repos[0].Review.OperatorPrompt)
+	}
+	if !strings.Contains(second.Repos[0].Review.OperatorPrompt, "prompt v2") || !strings.Contains(second.Repos[0].Review.OperatorPrompt, "rule v2") {
+		t.Fatalf("second operator prompt did not include v2 files: %q", second.Repos[0].Review.OperatorPrompt)
+	}
+	if first.Repos[0].PromptHash == second.Repos[0].PromptHash || first.Repos[0].RulesHash == second.Repos[0].RulesHash {
+		t.Fatalf("prompt/rules hashes did not change: first=%+v second=%+v", first.Repos[0], second.Repos[0])
+	}
+}
+
 func TestRunHostCommandOutputReportsMissingBinary(t *testing.T) {
 	_, err := runHostCommandOutput(stdctx.Background(), []string{"/definitely/missing/miucr-auth-command"})
 	var ce *CLIError

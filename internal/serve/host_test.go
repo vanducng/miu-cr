@@ -110,7 +110,7 @@ func TestHostRunnerTickReturnsPollIntervalFloor(t *testing.T) {
 	if err != nil {
 		t.Fatalf("NewHostRunner: %v", err)
 	}
-	wait, err := r.tick(stdctx.Background())
+	wait, err := r.tick(stdctx.Background(), r.snapshot())
 	if err != nil {
 		t.Fatalf("tick: %v", err)
 	}
@@ -134,6 +134,95 @@ func TestHostRunnerRepeatedPollSameHeadDoesNotDuplicate(t *testing.T) {
 	}
 	if disp.count() != 1 {
 		t.Fatalf("submitted jobs = %d, want 1", disp.count())
+	}
+}
+
+func TestHostRunnerReloadsBeforeEachTick(t *testing.T) {
+	cfg := hostRunnerConfig(t)
+	oldRepo := cfg.Repos[0]
+	oldRepo.PromptHash = "prompt-old"
+	oldRepo.RulesHash = "rules-old"
+	oldRepo.Review.OperatorPrompt = "old prompt"
+	newRepo := oldRepo
+	newRepo.PromptHash = "prompt-new"
+	newRepo.RulesHash = "rules-new"
+	newRepo.Review.OperatorPrompt = "new prompt"
+	cfg.Repos = []HostRepoConfig{oldRepo}
+	reloads := []HostReload{
+		{Repos: []HostRepoConfig{oldRepo}, TokenSources: cfg.TokenSources, Interval: cfg.Interval, ReviewTO: cfg.ReviewTO},
+		{Repos: []HostRepoConfig{newRepo}, TokenSources: cfg.TokenSources, Interval: cfg.Interval, ReviewTO: cfg.ReviewTO},
+	}
+	cfg.Reload = func(stdctx.Context) (HostReload, error) {
+		next := reloads[0]
+		if len(reloads) > 1 {
+			reloads = reloads[1:]
+		}
+		return next, nil
+	}
+	disp := cfg.Dispatcher.(*pollDispatcher)
+	r, err := NewHostRunner(cfg)
+	if err != nil {
+		t.Fatalf("NewHostRunner: %v", err)
+	}
+	if err := r.Tick(stdctx.Background()); err != nil {
+		t.Fatalf("first tick: %v", err)
+	}
+	if err := r.Tick(stdctx.Background()); err != nil {
+		t.Fatalf("second tick: %v", err)
+	}
+	disp.mu.Lock()
+	defer disp.mu.Unlock()
+	if len(disp.jobs) != 2 {
+		t.Fatalf("submitted jobs = %d, want 2", len(disp.jobs))
+	}
+	if disp.jobs[0].Review.OperatorPrompt != "old prompt" || disp.jobs[1].Review.OperatorPrompt != "new prompt" {
+		t.Fatalf("operator prompts = %q, %q", disp.jobs[0].Review.OperatorPrompt, disp.jobs[1].Review.OperatorPrompt)
+	}
+}
+
+func TestHostRunnerTickKeepsPreviousConfigAfterReloadError(t *testing.T) {
+	cfg := hostRunnerConfig(t)
+	gh := &fakeNotifGetter{prs: map[string][]*github.PullRequest{
+		"octo/hello": {prWithHead(1, "sha-A")},
+	}}
+	cfg.NewNotifGetter = func(string) notifGetter { return gh }
+	repo := cfg.Repos[0]
+	repo.PromptHash = "prompt-new"
+	repo.RulesHash = "rules-new"
+	repo.Review.OperatorPrompt = "new prompt"
+	reloads := []struct {
+		next HostReload
+		err  error
+	}{
+		{next: HostReload{Repos: []HostRepoConfig{repo}, TokenSources: cfg.TokenSources, Interval: cfg.Interval, ReviewTO: cfg.ReviewTO}},
+		{err: errors.New("reload failed")},
+	}
+	cfg.Reload = func(stdctx.Context) (HostReload, error) {
+		next := reloads[0]
+		if len(reloads) > 1 {
+			reloads = reloads[1:]
+		}
+		return next.next, next.err
+	}
+	disp := cfg.Dispatcher.(*pollDispatcher)
+	r, err := NewHostRunner(cfg)
+	if err != nil {
+		t.Fatalf("NewHostRunner: %v", err)
+	}
+	if err := r.Tick(stdctx.Background()); err != nil {
+		t.Fatalf("first tick: %v", err)
+	}
+	gh.prs["octo/hello"] = []*github.PullRequest{prWithHead(2, "sha-B")}
+	if err := r.Tick(stdctx.Background()); err != nil {
+		t.Fatalf("second tick: %v", err)
+	}
+	disp.mu.Lock()
+	defer disp.mu.Unlock()
+	if len(disp.jobs) != 2 {
+		t.Fatalf("submitted jobs = %d, want 2", len(disp.jobs))
+	}
+	if disp.jobs[1].Review.OperatorPrompt != "new prompt" {
+		t.Fatalf("operator prompt = %q, want previous reload config", disp.jobs[1].Review.OperatorPrompt)
 	}
 }
 
