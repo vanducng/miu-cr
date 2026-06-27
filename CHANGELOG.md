@@ -55,6 +55,13 @@ comment with a new marker); subsequent re-runs dedupe normally. On a
 first M5 review **manually** (or off-hours) to absorb the one-time re-post before
 the next scheduled run.
 
+## [0.48.1](https://github.com/vanducng/miu-cr/compare/v0.48.0...v0.48.1) (2026-06-27)
+
+
+### Bug Fixes
+
+* render walkthrough code spans + drop redundant open count ([#138](https://github.com/vanducng/miu-cr/issues/138)) ([1985ba3](https://github.com/vanducng/miu-cr/commit/1985ba373897944e84fea4357ed3b27feb3a8562))
+
 ## [0.48.0](https://github.com/vanducng/miu-cr/compare/v0.47.1...v0.48.0) (2026-06-26)
 
 

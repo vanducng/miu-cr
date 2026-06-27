@@ -52,7 +52,7 @@ func SetHistoryStoreFactory(f func(ctx stdctx.Context) (store.Store, func(), err
 	historyStoreFactory = f
 }
 
-var version = "v0.48.0" // x-release-please-version
+var version = "v0.48.1" // x-release-please-version
 
 // Version returns the current miucr version. The literal is bumped by
 // release-please; goreleaser ldflags-overrides it with the release tag in
