@@ -420,6 +420,28 @@ func ruleCitation(info *PRInfo, ruleStem string, cites map[string]RuleCitation) 
 // inject markup or break out of the <details> block), and backslash-escape the
 // Markdown breakout chars. '#' is escaped too: collapsed text placed at the start
 // of a line (e.g. after "## Walkthrough\n\n") would otherwise inject a heading.
+// RenderError renders the summary-comment body for a review that FAILED before
+// producing findings (provider/network error after miucr's internal retries, bad
+// key). It carries ReviewMarker + the runs token so UpsertSummaryComment edits the
+// SAME comment in place — a later successful run replaces this error with findings,
+// and re-runs don't stack. msg is untrusted (provider-originated), escaped via
+// mdInline; the caller redacts secrets first.
+func RenderError(info *PRInfo, msg, version string) string {
+	var b strings.Builder
+	b.WriteString(ReviewMarker + "\n")
+	b.WriteString(runsCountToken(max(info.ReviewCount, 1)) + "\n")
+	b.WriteString("## Code Review Summary\n\n")
+	b.WriteString("⚠️ **miucr could not complete the review.**\n\n")
+	if m := mdInline(msg); m != "" {
+		b.WriteString("> " + m + "\n\n")
+	}
+	b.WriteString("This is usually a transient provider/network error or a misconfigured API key — not a problem with your changes. Re-run the job to retry; the summary updates with findings once a review completes.")
+	if strings.TrimSpace(version) != "" {
+		b.WriteString("\n\n<sub>miucr " + mdInline(version) + "</sub>")
+	}
+	return b.String()
+}
+
 func mdInline(s string) string {
 	s = strings.Join(strings.Fields(s), " ")
 	return strings.NewReplacer(

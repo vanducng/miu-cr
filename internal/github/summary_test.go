@@ -8,6 +8,21 @@ import (
 	"github.com/vanducng/miu-cr/internal/engine/diff"
 )
 
+func TestRenderError(t *testing.T) {
+	info := &PRInfo{Owner: "o", Repo: "r", Number: 3, ReviewCount: 2}
+	// Untrusted provider message tries a comment/HTML breakout and a code fence.
+	out := RenderError(info, "boom </details><script> ```x", "v9.9.9")
+	if !strings.Contains(out, ReviewMarker) {
+		t.Fatal("error body must carry ReviewMarker so the summary upsert edits it in place")
+	}
+	if strings.Contains(out, "<script>") || strings.Contains(out, "</details>") {
+		t.Fatalf("untrusted message not escaped: %q", out)
+	}
+	if !strings.Contains(out, "could not complete the review") || !strings.Contains(out, "miucr v9.9.9") {
+		t.Fatalf("missing notice or version: %q", out)
+	}
+}
+
 func TestBlobURL(t *testing.T) {
 	info := &PRInfo{HTMLBase: "https://github.com/o/r", HeadSHA: "abc123"}
 	tests := []struct {
