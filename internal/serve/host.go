@@ -220,15 +220,9 @@ func (h *HostRunner) applyReloadLocked(next HostReload) {
 	if h.interval <= 0 {
 		h.interval = time.Minute
 	}
-	if next.ReviewTO > 0 {
-		h.reviewTO = next.ReviewTO
-	}
-	if !next.Prune.isZero() {
-		h.prune = next.Prune
-	}
-	if next.JanitorInterval > 0 {
-		h.janitorInterval = next.JanitorInterval
-	}
+	h.reviewTO = next.ReviewTO
+	h.prune = next.Prune
+	h.janitorInterval = next.JanitorInterval
 }
 
 func (h *HostRunner) snapshotLocked() hostRunnerSnapshot {
