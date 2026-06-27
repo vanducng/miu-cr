@@ -172,6 +172,9 @@ repos:
 	if !isConfigInvalid(err) || !strings.Contains(err.Error(), "providers.local.auth_token") {
 		t.Fatalf("want provider auth_token config.invalid, got %v", err)
 	}
+	if strings.Contains(err.Error(), "literal-provider-secret") {
+		t.Fatalf("literal provider secret leaked in error: %v", err)
+	}
 }
 
 func TestLoadHostUnknownAccountFails(t *testing.T) {

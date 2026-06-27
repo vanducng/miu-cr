@@ -290,6 +290,16 @@ func TestBuildServeHostReposAppliesHostPollDefault(t *testing.T) {
 	}
 }
 
+func TestHostProviderDefaultFallbackDoesNotCopyAuthToken(t *testing.T) {
+	provider, err := hostProvider(config.HostConfig{DefaultProvider: string(config.KindAnthropic)})
+	if err != nil {
+		t.Fatalf("hostProvider: %v", err)
+	}
+	if provider.AuthToken != "" {
+		t.Fatalf("default fallback copied literal auth token")
+	}
+}
+
 func writeServeHostConfig(t *testing.T, body string) string {
 	t.Helper()
 	path := filepath.Join(t.TempDir(), "host.yaml")

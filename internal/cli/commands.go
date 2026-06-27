@@ -510,7 +510,7 @@ func hostProvider(cfg config.HostConfig) (config.HostProvider, error) {
 		return p, nil
 	}
 	if p, ok := defaults.Providers[name]; ok {
-		return config.HostProvider{Kind: p.Kind, BaseURL: p.BaseURL, Model: p.Model, AuthToken: p.AuthToken, AuthEnv: p.AuthEnv, AuthCommand: p.AuthCommand, Auth: p.Auth}, nil
+		return config.HostProvider{Kind: p.Kind, BaseURL: p.BaseURL, Model: p.Model, AuthEnv: p.AuthEnv, AuthCommand: p.AuthCommand, Auth: p.Auth}, nil
 	}
 	return config.HostProvider{}, &CLIError{Code: "agent.unknown_provider", Message: fmt.Sprintf("unknown host provider %q", name), Hint: "define it under providers in the host YAML", Exit: 2}
 }

@@ -219,7 +219,7 @@ func validateHostProviders(path string, providers map[string]HostProvider) error
 			return invalidHost(path, "providers", "", "non-empty provider names")
 		}
 		if strings.TrimSpace(provider.AuthToken) != "" {
-			return invalidHost(path, "providers."+name+".auth_token", provider.AuthToken, "auth_env or auth_command")
+			return invalidHost(path, "providers."+name+".auth_token", "<set>", "auth_env or auth_command")
 		}
 	}
 	return nil
