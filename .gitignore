@@ -23,6 +23,7 @@ docs/dist/
 
 # misc
 .DS_Store
+__pycache__/
 *.test
 *.out
 
