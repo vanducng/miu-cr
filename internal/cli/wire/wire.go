@@ -438,6 +438,15 @@ func (prReviewer) ReviewPR(ctx stdctx.Context, req cli.PRReviewRequest) (cli.Rev
 		TraceSink:        req.TraceSink,
 	})
 	if err != nil {
+		// Review failed AFTER miucr's internal retries (provider/network/auth). On a
+		// --post run, leave a visible error on the PR (upserting miucr's summary
+		// comment so a later good run replaces it) instead of failing silently. Fork
+		// PRs skip it: the token can't write an issue comment (403). Best-effort.
+		if req.Post && !info.IsFork {
+			if _, uerr := mgithub.UpsertSummaryComment(ctx, client, info, mgithub.RenderError(info, config.RedactString(err.Error()), cli.Version())); uerr != nil {
+				slog.Warn("review-error summary upsert failed: " + config.RedactString(uerr.Error()))
+			}
+		}
 		return cli.ReviewOutcome{}, err
 	}
 	pruneHistory(ctx, hist, cfg)
