@@ -223,8 +223,12 @@ func (h *HostRunner) applyReloadLocked(next HostReload) {
 	if next.ReviewTO > 0 {
 		h.reviewTO = next.ReviewTO
 	}
-	h.prune = next.Prune
-	h.janitorInterval = next.JanitorInterval
+	if !next.Prune.isZero() {
+		h.prune = next.Prune
+	}
+	if next.JanitorInterval > 0 {
+		h.janitorInterval = next.JanitorInterval
+	}
 }
 
 func (h *HostRunner) snapshotLocked() hostRunnerSnapshot {
@@ -552,11 +556,11 @@ func (h *HostRunner) claimReady(ctx stdctx.Context, snap hostRunnerSnapshot, rep
 			continue
 		case SubmitCoalesced:
 			now := h.now().UTC()
-			_ = h.store.ReleaseHostJob(ctx, store.HostJobReleaseInput{JobID: jobID, AttemptID: attemptID, Error: "review already in flight for PR", Now: now, AvailableAt: now.Add(h.interval)})
+			_ = h.store.ReleaseHostJob(ctx, store.HostJobReleaseInput{JobID: jobID, AttemptID: attemptID, Error: "review already in flight for PR", Now: now, AvailableAt: now.Add(snap.interval)})
 			continue
 		case SubmitFull:
 			now := h.now().UTC()
-			_ = h.store.ReleaseHostJob(ctx, store.HostJobReleaseInput{JobID: jobID, AttemptID: attemptID, Error: "dispatcher rejected job", Now: now, AvailableAt: now.Add(h.interval)})
+			_ = h.store.ReleaseHostJob(ctx, store.HostJobReleaseInput{JobID: jobID, AttemptID: attemptID, Error: "dispatcher rejected job", Now: now, AvailableAt: now.Add(snap.interval)})
 			continue
 		default:
 			now := h.now().UTC()

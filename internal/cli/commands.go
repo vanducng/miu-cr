@@ -14,6 +14,7 @@ import (
 	"sort"
 	"strconv"
 	"strings"
+	"sync"
 	"syscall"
 	"time"
 
@@ -437,6 +438,7 @@ type serveHostReloader struct {
 	pollIntervalChanged bool
 	pollSource          string
 	pollSourceChanged   bool
+	mu                  sync.Mutex
 	fingerprint         string
 }
 
@@ -457,6 +459,8 @@ func (r *serveHostReloader) reload(ctx stdctx.Context) (serve.HostReload, error)
 	if err != nil {
 		return serve.HostReload{}, err
 	}
+	r.mu.Lock()
+	defer r.mu.Unlock()
 	if cacheable && fingerprint == r.fingerprint {
 		return serve.HostReload{}, nil
 	}
