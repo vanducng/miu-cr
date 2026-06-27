@@ -166,6 +166,39 @@ func TestHostConcurrentEnqueueDedupe(t *testing.T) {
 	}
 }
 
+func TestHostEnqueueRequeuesExpiredRunningJob(t *testing.T) {
+	s := openHost(t)
+	ctx := context.Background()
+	repo := mustHostRepo(t, s)
+	session := mustHostSession(t, s, repo.ID, 16, "open")
+	in := hostJobInput(repo.ID, session.ID, 16, uniqueName(t, "head"))
+	job, ok, err := s.EnqueueHostJob(ctx, in)
+	if err != nil || !ok {
+		t.Fatalf("enqueue ok=%v err=%v", ok, err)
+	}
+	now := time.Now().UTC()
+	claim, ok, err := s.ClaimHostJob(ctx, store.HostJobClaimInput{WorkerID: "worker-1", Now: now, LeaseDuration: time.Second})
+	if err != nil || !ok {
+		t.Fatalf("claim ok=%v err=%v", ok, err)
+	}
+	in.Now = now.Add(2 * time.Second)
+	in.AvailableAt = in.Now
+	requeued, ok, err := s.EnqueueHostJob(ctx, in)
+	if err != nil || !ok {
+		t.Fatalf("requeue ok=%v err=%v", ok, err)
+	}
+	if requeued.ID != job.ID || requeued.Status != "queued" || requeued.LeaseOwner != "" || requeued.LeaseUntil != nil {
+		t.Fatalf("expired running job not requeued cleanly: %+v", requeued)
+	}
+	var attemptStatus, attemptError string
+	if err := s.db.QueryRowContext(ctx, `SELECT status, error FROM host_job_attempts WHERE id=$1`, claim.AttemptID).Scan(&attemptStatus, &attemptError); err != nil {
+		t.Fatalf("query stale attempt: %v", err)
+	}
+	if attemptStatus != "canceled" || !strings.Contains(attemptError, "stale running") {
+		t.Fatalf("stale attempt status=%q error=%q, want canceled stale running", attemptStatus, attemptError)
+	}
+}
+
 func TestHostEnqueueUsesInjectedNow(t *testing.T) {
 	s := openHost(t)
 	ctx := context.Background()

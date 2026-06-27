@@ -186,19 +186,17 @@ func serveCommand(opts *options) *cobra.Command {
 				if err != nil {
 					return err
 				}
+				defer closeStore()
 				tokenSources, err := buildHostGitHubTokenSources(cmd.Context(), hostCfg)
 				if err != nil {
-					closeStore()
 					return err
 				}
 				hostRepos, reviewTO, err := buildServeHostRepos(cmd.Context(), hostCfg, hostPath)
 				if err != nil {
-					closeStore()
 					return err
 				}
 				reviewStore, ok := hostStore.(serve.ReviewStore)
 				if !ok {
-					closeStore()
 					return &CLIError{Code: "serve.host_store_invalid", Message: "host store does not implement review persistence", Exit: 1}
 				}
 				workers := hostCfg.Host.Workers
@@ -207,7 +205,6 @@ func serveCommand(opts *options) *cobra.Command {
 				}
 				traceSink, err := serveTraceSinkFromEnv(log)
 				if err != nil {
-					closeStore()
 					return err
 				}
 				pool := serve.NewPoolWithWorkers(buildServeReviewFn(log, "", reviewStore, traceSink), log, workers)
@@ -228,14 +225,9 @@ func serveCommand(opts *options) *cobra.Command {
 					JanitorInterval: durationOrDefault(hostCfg.Host.Retention.JanitorInterval, 15*time.Minute),
 				})
 				if err != nil {
-					closeStore()
-					return &CLIError{Code: "serve.host_invalid", Message: err.Error(), Hint: "check host config repos, accounts, and poll_source", Exit: 2}
+					return &CLIError{Code: "serve.host_invalid", Message: config.RedactString(err.Error()), Hint: "check host config repos, accounts, and poll_source", Exit: 2}
 				}
-				err = serve.RunHost(cmd.Context(), pool, runner)
-				if !errors.Is(err, serve.ErrHostRunnerStopTimeout) {
-					closeStore()
-				}
-				return err
+				return serve.RunHost(cmd.Context(), pool, runner)
 			}
 			secret := strings.TrimSpace(os.Getenv("WEBHOOK_SECRET"))
 			// Webhook is the default; --poll without a secret runs poll-only,
@@ -430,6 +422,8 @@ func buildServeHostRepos(ctx stdctx.Context, cfg config.HostConfig, path string)
 		Force:        boolSetting(false),
 		Conversation: boolSetting(false),
 		DeepContext:  boolSetting(false),
+		Expand:       intSetting(5),
+		ContextHops:  intSetting(0),
 	}, cfg.Review)
 	hostReview := mergeHostReview(baseReview, cfg.Host.Review)
 	reviewTO := durationOrDefault(hostReview.Timeout, 15*time.Minute)
@@ -491,9 +485,13 @@ func hostReviewOptions(provider config.HostProvider, secret string, review confi
 		Mode:         review.Mode,
 		BaseURL:      provider.BaseURL,
 		Model:        provider.Model,
-		ExpandWindow: review.Expand,
-		ContextHops:  review.ContextHops,
 		DeepContext:  boolValue(review.DeepContext),
+	}
+	if review.Expand != nil {
+		opts.ExpandWindow = *review.Expand
+	}
+	if review.ContextHops != nil {
+		opts.ContextHops = *review.ContextHops
 	}
 	if review.TokenBudget != nil {
 		opts.TokenBudget = *review.TokenBudget
@@ -843,13 +841,13 @@ func mergeHostReview(base, over config.HostReview) config.HostReview {
 	if over.Timeout != "" {
 		out.Timeout = over.Timeout
 	}
-	if over.Expand != 0 {
+	if over.Expand != nil {
 		out.Expand = over.Expand
 	}
 	if over.TokenBudget != nil {
 		out.TokenBudget = over.TokenBudget
 	}
-	if over.ContextHops != 0 {
+	if over.ContextHops != nil {
 		out.ContextHops = over.ContextHops
 	}
 	if over.Mode != "" {
@@ -882,6 +880,8 @@ func mergeHostReview(base, over config.HostReview) config.HostReview {
 func boolValue(v *bool) bool { return v != nil && *v }
 
 func boolSetting(v bool) *bool { return &v }
+
+func intSetting(v int) *int { return &v }
 
 func durationOrDefault(raw string, fallback time.Duration) time.Duration {
 	if d, err := time.ParseDuration(raw); err == nil && d > 0 {

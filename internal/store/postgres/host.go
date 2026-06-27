@@ -67,29 +67,63 @@ func (s *Store) EnqueueHostJob(ctx context.Context, in store.HostJobInput) (stor
 	}
 	in.DedupeKey = store.HostJobDedupeKey(in)
 	sessionID := nullInt64(in.SessionID)
-	row := s.db.QueryRowContext(ctx, `
+	tx, err := s.db.BeginTx(ctx, nil)
+	if err != nil {
+		return store.HostJob{}, false, err
+	}
+	defer func() { _ = tx.Rollback() }()
+	row := tx.QueryRowContext(ctx, `
 INSERT INTO host_jobs (repo_id, session_id, number, head_sha, base_sha, policy_hash, prompt_hash, rules_hash, dedupe_key, priority, available_at, updated_at)
 VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12)
-ON CONFLICT(dedupe_key) DO UPDATE SET
-	status='queued',
-	lease_owner='',
-	lease_until=NULL,
-	error='',
-	available_at=excluded.available_at,
-	updated_at=$12,
-	completed_at=NULL
-WHERE host_jobs.status = 'failed'
+ON CONFLICT(dedupe_key) DO NOTHING
 RETURNING id, repo_id, session_id, number, head_sha, base_sha, policy_hash, prompt_hash, rules_hash, dedupe_key, priority, available_at, status, attempts, lease_owner, lease_until, review_id, error, created_at, updated_at, completed_at`,
 		in.RepoID, sessionID, in.Number, in.HeadSHA, in.BaseSHA, in.PolicyHash, in.PromptHash, in.RulesHash, in.DedupeKey, in.Priority, in.AvailableAt, now)
 	job, err := scanHostJob(row)
 	if err == nil {
-		return job, true, nil
+		return job, true, tx.Commit()
 	}
 	if !errors.Is(err, sql.ErrNoRows) {
 		return store.HostJob{}, false, err
 	}
-	job, err = s.hostJobByDedupeKey(ctx, in.DedupeKey)
-	return job, false, err
+	job, err = scanHostJob(tx.QueryRowContext(ctx, `
+SELECT id, repo_id, session_id, number, head_sha, base_sha, policy_hash, prompt_hash, rules_hash, dedupe_key, priority, available_at, status, attempts, lease_owner, lease_until, review_id, error, created_at, updated_at, completed_at
+FROM host_jobs
+WHERE dedupe_key=$1
+FOR UPDATE`, in.DedupeKey))
+	if err != nil {
+		return store.HostJob{}, false, err
+	}
+	expiredRunning := job.Status == "running" && job.LeaseUntil != nil && !job.LeaseUntil.After(now)
+	if job.Status != "failed" && !expiredRunning {
+		return job, false, tx.Commit()
+	}
+	if expiredRunning && job.Attempts > 0 {
+		if _, err := tx.ExecContext(ctx, `
+UPDATE host_job_attempts
+SET status='canceled',
+    error='stale running job requeued',
+    finished_at=$3
+WHERE job_id=$1
+  AND attempt=$2
+  AND status='running'`, job.ID, job.Attempts, now); err != nil {
+			return store.HostJob{}, false, err
+		}
+	}
+	job, err = scanHostJob(tx.QueryRowContext(ctx, `
+UPDATE host_jobs
+SET status='queued',
+    lease_owner='',
+    lease_until=NULL,
+    error='',
+    available_at=$2,
+    updated_at=$3,
+    completed_at=NULL
+WHERE id=$1
+RETURNING id, repo_id, session_id, number, head_sha, base_sha, policy_hash, prompt_hash, rules_hash, dedupe_key, priority, available_at, status, attempts, lease_owner, lease_until, review_id, error, created_at, updated_at, completed_at`, job.ID, in.AvailableAt, now))
+	if err != nil {
+		return store.HostJob{}, false, err
+	}
+	return job, true, tx.Commit()
 }
 
 func (s *Store) ClaimHostJob(ctx context.Context, in store.HostJobClaimInput) (store.HostJobClaim, bool, error) {

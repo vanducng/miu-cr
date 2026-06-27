@@ -290,6 +290,32 @@ func TestBuildServeHostReposAppliesHostPollDefault(t *testing.T) {
 	}
 }
 
+func TestBuildServeHostReposAllowsZeroReviewOverrides(t *testing.T) {
+	one := 1
+	twenty := 20
+	zero := 0
+	cfg := config.HostConfig{
+		Review: config.HostReview{Expand: &twenty, ContextHops: &one},
+		Host:   config.HostRuntime{Review: config.HostReview{Expand: &twenty, ContextHops: &one}},
+		Repos: []config.HostRepo{{
+			Name:          "service-api",
+			Slug:          "example-org/service-api",
+			Owner:         "example-org",
+			Repo:          "service-api",
+			GitURL:        "https://github.com/example-org/service-api.git",
+			GithubAccount: "pat",
+			Review:        config.HostReview{Expand: &zero, ContextHops: &zero},
+		}},
+	}
+	repos, _, err := buildServeHostRepos(stdctx.Background(), cfg, filepath.Join(t.TempDir(), "host.yaml"))
+	if err != nil {
+		t.Fatalf("buildServeHostRepos: %v", err)
+	}
+	if repos[0].Review.ExpandWindow != 0 || repos[0].Review.ContextHops != 0 {
+		t.Fatalf("zero overrides not applied: %+v", repos[0].Review)
+	}
+}
+
 func TestHostProviderDefaultFallbackDoesNotCopyAuthToken(t *testing.T) {
 	provider, err := hostProvider(config.HostConfig{DefaultProvider: string(config.KindAnthropic)})
 	if err != nil {

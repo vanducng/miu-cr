@@ -104,9 +104,9 @@ type HostReview struct {
 	FilterMode   string `yaml:"filter_mode" json:"filter_mode,omitempty"`
 	MinSeverity  string `yaml:"min_severity" json:"min_severity,omitempty"`
 	Timeout      string `yaml:"timeout" json:"timeout,omitempty"`
-	Expand       int    `yaml:"expand" json:"expand,omitempty"`
+	Expand       *int   `yaml:"expand" json:"expand,omitempty"`
 	TokenBudget  *int   `yaml:"token_budget" json:"token_budget,omitempty"`
-	ContextHops  int    `yaml:"context_hops" json:"context_hops,omitempty"`
+	ContextHops  *int   `yaml:"context_hops" json:"context_hops,omitempty"`
 	Mode         string `yaml:"mode" json:"mode,omitempty"`
 	DeepContext  *bool  `yaml:"deep_context" json:"deep_context,omitempty"`
 	Conversation *bool  `yaml:"conversation" json:"conversation,omitempty"`
@@ -400,11 +400,11 @@ func validateHostReview(path, field string, r HostReview) error {
 	if r.Mode != "" && r.Mode != "review" && r.Mode != "checks" {
 		return invalidHost(path, field+".mode", r.Mode, "review|checks")
 	}
-	if r.Expand < 0 {
-		return invalidHost(path, field+".expand", strconv.Itoa(r.Expand), ">= 0")
+	if r.Expand != nil && *r.Expand < 0 {
+		return invalidHost(path, field+".expand", strconv.Itoa(*r.Expand), ">= 0")
 	}
-	if r.ContextHops < 0 {
-		return invalidHost(path, field+".context_hops", strconv.Itoa(r.ContextHops), ">= 0")
+	if r.ContextHops != nil && *r.ContextHops < 0 {
+		return invalidHost(path, field+".context_hops", strconv.Itoa(*r.ContextHops), ">= 0")
 	}
 	if r.TokenBudget != nil && *r.TokenBudget < 0 {
 		return invalidHost(path, field+".token_budget", strconv.Itoa(*r.TokenBudget), ">= 0")

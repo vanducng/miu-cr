@@ -164,11 +164,17 @@ func (h *HostRunner) Run(ctx stdctx.Context) {
 			if err := h.RunJanitor(ctx); err != nil && ctx.Err() == nil {
 				h.log.Warn("host: janitor failed", "error", config.RedactString(err.Error()))
 			}
+			if ctx.Err() != nil {
+				return
+			}
 			nextJanitor = start.Add(h.janitorInterval)
 		}
 		pollFloor, err := h.tick(ctx)
 		if err != nil && ctx.Err() == nil {
 			h.log.Warn("host: tick failed", "error", config.RedactString(err.Error()))
+		}
+		if ctx.Err() != nil {
+			return
 		}
 		eff := h.interval
 		if pollFloor > eff {
@@ -393,7 +399,7 @@ func (h *HostRunner) claimReady(ctx stdctx.Context, repos map[int64]HostRepoConf
 					status = "failed"
 					msg = config.RedactString(runErr.Error())
 				}
-				cctx, cancel := stdctx.WithTimeout(stdctx.Background(), 10*time.Second)
+				cctx, cancel := stdctx.WithTimeout(stdctx.WithoutCancel(ctx), 10*time.Second)
 				defer cancel()
 				if err := h.store.CompleteHostJob(cctx, store.HostJobCompleteInput{JobID: jobID, AttemptID: attemptID, Status: status, Error: msg, Now: h.now().UTC()}); err != nil {
 					h.log.Warn("host: failed to complete job", "job", jobID, "error", config.RedactString(err.Error()))
@@ -404,7 +410,7 @@ func (h *HostRunner) claimReady(ctx stdctx.Context, repos map[int64]HostRepoConf
 		case SubmitQueued:
 		case SubmitDuplicate:
 			now := h.now().UTC()
-			_ = h.store.ReleaseHostJob(ctx, store.HostJobReleaseInput{JobID: jobID, AttemptID: attemptID, Error: "duplicate review already in flight", Now: now, AvailableAt: now.Add(h.interval)})
+			_ = h.store.ReleaseHostJob(ctx, store.HostJobReleaseInput{JobID: jobID, AttemptID: attemptID, Error: "duplicate review already in flight", Now: now, AvailableAt: now.Add(timeout + time.Minute)})
 			continue
 		case SubmitCoalesced:
 			now := h.now().UTC()

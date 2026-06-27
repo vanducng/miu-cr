@@ -185,6 +185,28 @@ func TestHostRunnerRejectedSubmitContinuesClaimBatch(t *testing.T) {
 	}
 }
 
+func TestHostRunnerDuplicateSubmitDelaysRetryUntilReviewTimeout(t *testing.T) {
+	now := time.Date(2026, 6, 27, 10, 0, 0, 0, time.UTC)
+	cfg := hostRunnerConfig(t)
+	cfg.Now = func() time.Time { return now }
+	cfg.Interval = 30 * time.Second
+	cfg.ReviewTO = 5 * time.Minute
+	disp := cfg.Dispatcher.(*pollDispatcher)
+	disp.results = []SubmitResult{SubmitDuplicate}
+	st := cfg.Store.(*fakeHostStore)
+	r, err := NewHostRunner(cfg)
+	if err != nil {
+		t.Fatalf("NewHostRunner: %v", err)
+	}
+	if err := r.Tick(stdctx.Background()); err != nil {
+		t.Fatalf("Tick: %v", err)
+	}
+	wantMin := now.Add(6 * time.Minute)
+	if st.lastRelease.AvailableAt.Before(wantMin) {
+		t.Fatalf("duplicate retry available_at = %v, want >= %v", st.lastRelease.AvailableAt, wantMin)
+	}
+}
+
 func TestHostRunnerDispatcherRejectReleasesJob(t *testing.T) {
 	cfg := hostRunnerConfig(t)
 	disp := cfg.Dispatcher.(*pollDispatcher)
@@ -368,6 +390,7 @@ type fakeHostStore struct {
 	queued        []string
 	cursorWrites  int
 	releaseCount  int
+	lastRelease   store.HostJobReleaseInput
 	lastPrune     store.HostPrunePolicy
 	pruneBlock    <-chan struct{}
 	sessionErrFor map[int64]error
@@ -474,6 +497,7 @@ func (s *fakeHostStore) ReleaseHostJob(_ stdctx.Context, in store.HostJobRelease
 				s.queued = append(s.queued, key)
 			}
 			s.releaseCount++
+			s.lastRelease = in
 			return nil
 		}
 	}
