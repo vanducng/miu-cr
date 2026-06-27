@@ -13,7 +13,7 @@ self-contained — read its header comment, copy it into your repo, and adjust.
 | [`github-action/code-review-sarif.yml`](github-action/code-review-sarif.yml) | Inline review **plus** a SARIF 2.1.0 upload to the code-scanning Security tab. |
 | [`workflows/miucr-review.yml`](workflows/miucr-review.yml) | Dual-trigger workflow: reviews every PR **and** lets a write-collaborator post `/miucr review <prompt>` to steer a re-review (gated, ack'd, injection-safe). |
 | [`mcp-setup/`](mcp-setup/README-mcp.md) | Wire `miucr mcp` into Claude Code, Cursor, or Codex CLI. |
-| [`docker/Dockerfile`](docker/Dockerfile) | Multi-stage, pure-Go (`CGO_ENABLED=0`) distroless image for `miucr serve`. |
+| [`docker/Dockerfile`](docker/Dockerfile) | Multi-stage, pure-Go (`CGO_ENABLED=0`) image with a nonroot runtime and `git` for `miucr serve`. |
 | [`docker/docker-compose.yml`](docker/docker-compose.yml) | Local stand-in for a server deploy (webhook or poll mode). |
 | [`review-host/`](review-host/README.md) | Postgres-backed `miucr serve --host` example for multi-repo polling with YAML config, prompts, rules, and retention. |
 
@@ -57,8 +57,8 @@ for Codex) plus setup notes.
 
 ## Docker / server deploy
 
-`docker/Dockerfile` builds a static binary into a distroless nonroot image for
-`miucr serve` (webhook or `--poll`). `docker-compose.yml` is a local
+`docker/Dockerfile` builds a static binary into a nonroot runtime image with
+`git` installed for `miucr serve` (webhook or `--poll`). `docker-compose.yml` is a local
 stand-in; replace the env block with a real secrets source in production.
 
 For a Postgres-backed multi-repo host, see `review-host/`. It uses the same

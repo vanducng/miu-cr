@@ -64,7 +64,7 @@ MIUCR_PG_DSN='postgres://miucr:miucr@localhost:55432/miucr?sslmode=disable' \
   come from a mounted file or `private_key_command`.
 - If you use `auth_command` inside Docker, the secret helper must exist in the
   image. The runnable compose path uses env-based PATs because the example image
-  is distroless.
+  includes `git` but not external secret-manager CLIs.
 - Global `agent.system_prompt_file` overrides the built-in operator prompt.
   `repos[].agent` can override it per repo. Rules are appended as trusted host
   context and can reference individual Markdown files or a non-recursive

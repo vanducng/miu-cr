@@ -1,5 +1,5 @@
-# Multi-stage pure-Go build — CGO_ENABLED=0, static binary, distroless final image.
-# Result: ~20 MB image with no shell, no package manager, and minimal attack surface.
+# Multi-stage pure-Go build — CGO_ENABLED=0, static binary, slim runtime image.
+# The runtime image includes git because PR review needs local git operations.
 #
 # Build:
 #   docker build -t miucr-server -f examples/docker/Dockerfile .
@@ -8,8 +8,8 @@
 #   docker run --rm \
 #     -p 8080:8080 \
 #     -e WEBHOOK_SECRET="$(openssl rand -hex 32)" \
-#     -e GITHUB_TOKEN="ghp_..." \
-#     -e ANTHROPIC_API_KEY="sk-ant-..." \
+#     -e GITHUB_TOKEN="your-github-token" \
+#     -e ANTHROPIC_API_KEY="your-provider-key" \
 #     miucr-server serve \
 #       --repos owner/repo \
 #       --addr :8080 \
@@ -17,8 +17,8 @@
 #
 # Run (poll-only, no webhook secret required):
 #   docker run --rm \
-#     -e GITHUB_TOKEN="ghp_..." \
-#     -e ANTHROPIC_API_KEY="sk-ant-..." \
+#     -e GITHUB_TOKEN="your-github-token" \
+#     -e ANTHROPIC_API_KEY="your-provider-key" \
 #     miucr-server serve \
 #       --repos owner/repo \
 #       --poll \
@@ -43,16 +43,20 @@ RUN CGO_ENABLED=0 GOOS=linux GOARCH=${TARGETARCH} \
       ./cmd/miucr
 
 # ── Stage 2: run ─────────────────────────────────────────────────────────────
-# gcr.io/distroless/static-debian12 includes CA certs and timezone data but
-# no shell, no apt, no package manager. The binary must be fully static (CGO=0).
-FROM gcr.io/distroless/static-debian12:nonroot
+FROM debian:bookworm-slim
+
+RUN apt-get update \
+    && apt-get install -y --no-install-recommends ca-certificates git openssh-client \
+    && rm -rf /var/lib/apt/lists/* \
+    && groupadd --system --gid 65532 nonroot \
+    && useradd --system --uid 65532 --gid 65532 --create-home --home-dir /home/nonroot --shell /usr/sbin/nologin nonroot
 
 COPY --from=build /out/miucr /usr/local/bin/miucr
 
 # Expose the default webhook port; override with --addr at runtime.
 EXPOSE 8080
 
-# Run as the non-root user provided by the distroless image (uid 65532).
-USER nonroot:nonroot
+ENV HOME=/home/nonroot
+USER 65532:65532
 
 ENTRYPOINT ["/usr/local/bin/miucr"]

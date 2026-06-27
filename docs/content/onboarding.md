@@ -156,7 +156,7 @@ idempotent summary:
   (the reusable composite action; fork-safe via `pull_request_target`; it
   fetches the diff via the API and never runs fork code).
 - [`examples/docker/`](https://github.com/vanducng/miu-cr/tree/main/examples/docker):
-  a distroless image + compose file for running
+  a nonroot image with `git` + compose file for running
   `miucr serve` as a self-hosted webhook/poll daemon.
 
 For the full automation story, see [Serve & Action](/serve-and-action/) and
