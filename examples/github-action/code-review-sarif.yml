@@ -35,6 +35,12 @@ jobs:
       !contains(github.event.pull_request.title, '[skip review]')
 
     steps:
+      - name: Cache miucr state
+        uses: actions/cache@v4
+        with:
+          path: ~/.config/miu/cr
+          key: miucr-${{ runner.os }}-${{ github.repository_id }}-${{ github.event.pull_request.number }}
+
       - name: Run miucr PR review
         uses: vanducng/miu-cr@v0          # pin to a major tag or an exact SHA in production
         with:

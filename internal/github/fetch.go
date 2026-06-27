@@ -7,6 +7,7 @@ import (
 	"net"
 	"net/url"
 	"os"
+	"regexp"
 	"strings"
 	"unicode/utf8"
 
@@ -44,6 +45,12 @@ type PRInfo struct {
 	// comment (the storeless source of truth). nil on the first review. The wire
 	// layer merges this run's findings into it (MergeLedger) before rendering.
 	PriorLedger []LedgerEntry
+	// PriorSummaryHeadSHA is the commit shown in the existing miucr summary.
+	PriorSummaryHeadSHA string
+	// PriorPublishedHeadSHA is set only after a prior publish reached its final step.
+	PriorPublishedHeadSHA string
+	// PriorPublishedKey is the review-shape hash attached to the completed publish.
+	PriorPublishedKey string
 }
 
 // blobURL builds a repo-relative blob permalink at info.HeadSHA for path/line.
@@ -117,6 +124,9 @@ func FetchPR(ctx stdctx.Context, client Client, ref PRRef) (*PRInfo, error) {
 	priorBody := lowestMarkedCommentBody(ctx, client, info)
 	info.ReviewCount = parseRunsCount(priorBody) + 1 // include this in-flight run; first review = 1
 	info.PriorLedger = ParseLedger(priorBody)
+	info.PriorSummaryHeadSHA = parseReviewedCommit(priorBody)
+	info.PriorPublishedHeadSHA = parsePublishedCommit(priorBody)
+	info.PriorPublishedKey = parsePublishedKey(priorBody)
 	return info, nil
 }
 
@@ -157,6 +167,16 @@ func lowestMarkedCommentBody(ctx stdctx.Context, client Client, info *PRInfo) st
 // FetchPR path reads the body once via lowestMarkedCommentBody.
 func priorRunsCount(ctx stdctx.Context, client Client, info *PRInfo) int {
 	return parseRunsCount(lowestMarkedCommentBody(ctx, client, info))
+}
+
+var reviewedCommitRe = regexp.MustCompile("Reviewed commit (?:\\[`|`)?([0-9a-fA-F]{7,40})")
+
+func parseReviewedCommit(body string) string {
+	m := reviewedCommitRe.FindStringSubmatch(body)
+	if m == nil {
+		return ""
+	}
+	return strings.ToLower(m[1])
 }
 
 // maxConversationBytes caps the rendered conversation block. Mirrors the rules

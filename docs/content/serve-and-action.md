@@ -359,11 +359,21 @@ jobs:
     if: ${{ github.event.pull_request.head.repo.fork != true }}
     steps:
       - uses: actions/checkout@v4
+      - uses: actions/cache@v4
+        with:
+          path: ~/.config/miu/cr
+          key: miucr-${{ runner.os }}-${{ github.repository_id }}-${{ github.event.pull_request.number }}
       - uses: vanducng/miu-cr@vX.Y.Z   # pin a released tag; see github.com/vanducng/miu-cr/releases
         with:
           api-key: ${{ secrets.ANTHROPIC_API_KEY }}
           gate: high
 ```
+
+The cache step is optional. It preserves the local `state.db` review history and
+trace records between workflow runs for the same PR. Same-head `--post` rerun
+skipping does not depend on the cache: miucr also writes a hidden completed-publish
+marker into the PR summary comment, and only reuses it when the head SHA and
+review-shape hash match.
 
 ### Inputs
 

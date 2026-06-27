@@ -204,6 +204,17 @@ func TestRenderSummaryFooterReviewedCommit(t *testing.T) {
 	}
 }
 
+func TestRenderSummaryPublishedMarker(t *testing.T) {
+	plain := RenderSummaryFull(&PRInfo{HeadSHA: "deadbeef"}, nil, nil, 0, nil, nil, SummaryOptions{})
+	if strings.Contains(plain, "miu-cr-published:") {
+		t.Fatalf("non-final summary must not carry the published marker:\n%s", plain)
+	}
+	published := RenderSummaryFull(&PRInfo{HeadSHA: "deadbeef"}, nil, nil, 0, nil, nil, SummaryOptions{Published: true, PublishKey: "0123456789abcdef"})
+	if !strings.Contains(published, "<!-- miu-cr-published:deadbeef:0123456789abcdef -->") {
+		t.Fatalf("published summary must carry the head marker:\n%s", published)
+	}
+}
+
 // indexAfter returns the index of needle at/after from, or -1 (with from=len so a
 // later lookup also fails). Used to assert strict top-to-bottom render ordering.
 func mustOrder(t *testing.T, body string, seq []string) {

@@ -194,30 +194,44 @@ re-run:
 
 - The **summary is ONE upserted issue comment**. miucr lists the PR's issue comments, finds
   the lowest-id one carrying the `<!-- miu-cr-review -->` marker, and **edits it in place**;
-  if none exists it creates one. So a re-run **updates the single summary** rather than
-  stacking a review per commit. `summary_action` is `created` the first time and `edited`
-  on every re-run.
+  if none exists it creates one. A successful publish finalizes that same comment with a
+  hidden completed-publish marker, so the reported `summary_action` can be `edited` even
+  on the first run. Re-runs update the single summary rather than stacking a review per
+  commit.
 - Inline findings post as a PR **review** with an **empty body** (the summary moved out),
   so a no-inline-comment run never trips an empty-review 422 while the summary comment still
   upserts (and `--approve-clean` still submits APPROVE).
-- A **same-commit `--post` re-run edits** the summary in place (no longer skipped - that was
-  the old per-commit model). The history-store dry-run (`--no-post`) perf skip and `--force`
-  bypass are unchanged.
+- A **same-commit `--post` re-run short-circuits** after the summary has a completed-publish
+  marker for that head. It skips the clone and model call; pass `--force` to review anyway.
 - Each **inline** comment carries a hidden fingerprint (`<!-- miucr:fp=... -->`), so a
   finding already commented in a prior run is not duplicated inline across commits.
 
 ## Incremental re-review (unchanged head SHA)
 
-When the local history store has a prior review of the **same PR** at the **same
-head SHA**, a re-review **short-circuits before the LLM pass**: the envelope
-carries `data.skipped_unchanged: true` and `data.prior_review_id`, and exits `0`
-without a second model call. Any **new commit** (a changed head SHA) always
-re-reviews. Pass `--force` to re-review an unchanged head SHA anyway.
+An unchanged-head re-review **short-circuits before the clone and LLM pass** when
+the same PR head already reached the desired state:
 
-This is keyed strictly on the head SHA, so a rare content change with no new
-commit is not detected; use `--force` for that. If the history store is off
-(`--no-save` or disabled) or unreadable, the check degrades to always-review and
-never blocks.
+- dry-run (`--no-post`) can reuse a local history-store record for the same PR +
+  head SHA; and
+- `--post` requires miucr's completed-publish marker in the GitHub summary comment
+  for that head SHA **and** the same review-shape hash.
+
+The envelope carries `data.skipped_unchanged: true`; when a history record is
+available it also carries `data.prior_review_id`, findings, and stats from that
+record. Storeless GitHub Action reruns can still skip from the summary marker,
+but they may not have a prior local record to echo in the envelope.
+
+The review-shape hash includes the review settings that affect model context or
+published output, including prompts/instructions, model/profile knobs, context
+settings, filters, suggestions, patch repair, diagrams, and approve-clean. A
+same-head `/miucr review <prompt>` rerun therefore reviews again instead of
+reusing a prior automatic run.
+
+Any **new commit** (a changed head SHA) always re-reviews. This is keyed strictly
+on the head SHA, so a rare content change with no new commit is not detected; use
+`--force` for that. If the history store is unreadable and the PR summary has no
+matching completed-publish marker, the check degrades to always-review and never
+blocks.
 
 ## Cross-push dedupe
 
