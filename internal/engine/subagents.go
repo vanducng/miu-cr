@@ -169,7 +169,7 @@ func runSubagentPlans(ctx stdctx.Context, e *Engine, req Request, plans []subage
 			}
 			defer func() { <-sem }()
 			assembled := enginectx.AssembleContext(plan.files, enginectx.AssembleOptions{
-				TokenBudget:  diffBudget(req.TokenBudget, req.RulesTokenBudget),
+				TokenBudget:  subagentDiffBudget(req, shared),
 				ExpandWindow: req.ExpandWindow,
 			})
 			var trace *ReviewTrace
@@ -190,6 +190,29 @@ func runSubagentPlans(ctx stdctx.Context, e *Engine, req Request, plans []subage
 	}
 	wg.Wait()
 	return results
+}
+
+func subagentDiffBudget(req Request, shared reviewSharedContext) int {
+	budget := diffBudget(req.TokenBudget, req.RulesTokenBudget)
+	if budget <= 0 {
+		return budget
+	}
+	overhead := estContextTokens(shared.projectContext) + estContextTokens(shared.semanticContext) + estContextTokens(shared.relatedContext)
+	if overhead <= 0 {
+		return budget
+	}
+	if overhead >= budget {
+		return 1
+	}
+	return budget - overhead
+}
+
+func estContextTokens(s string) int {
+	s = strings.TrimSpace(s)
+	if s == "" {
+		return 0
+	}
+	return len(s) / 4
 }
 
 func mergeSubagentTraces(dst *ReviewTrace, results []subagentRunResult) {

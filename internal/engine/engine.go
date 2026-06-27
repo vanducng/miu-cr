@@ -283,7 +283,8 @@ type Retriever interface {
 
 // Agent runs one review pass over the assembled context and returns findings
 // WITHOUT line numbers (the engine re-anchors from QuotedCode) plus the optional
-// walkthrough/per-file digest the same pass may emit.
+// walkthrough/per-file digest the same pass may emit. Review must be safe for
+// concurrent calls; subagent fanout shares one Agent instance across workers.
 type Agent interface {
 	Review(ctx stdctx.Context, rc AgentContext) (ReviewOutput, error)
 	// RepairPatch runs the conditional second pass: ONE span + ONE problem in,
