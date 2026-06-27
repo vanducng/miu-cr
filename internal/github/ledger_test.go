@@ -410,6 +410,16 @@ func TestRenderLedgerSameCommitNoArrow(t *testing.T) {
 	if !strings.Contains(out, "/commit/0519d5d") {
 		t.Fatalf("want the single resolved commit link:\n%s", out)
 	}
+
+	// A resolved entry with an empty ResSHA (tampered/corrupt ledger) must not
+	// render "<openSHA> → —"; with no resolved commit it shows just the dash.
+	noRes := RenderSummaryFull(info, nil, nil, 0, nil, nil, SummaryOptions{
+		Ledger: []LedgerEntry{{FP: fpStr(2), Path: "a.go", Title: "x", Status: statusResolved, Sev: "low", OpenSHA: "0519d5d", ResSHA: "", ResAt: now.Format(time.RFC3339)}},
+		Now:    now,
+	})
+	if strings.Contains(noRes, " → ") {
+		t.Fatalf("empty ResSHA must not render an arrow to a dash:\n%s", noRes)
+	}
 }
 
 func TestRenderLedgerReopenPrefix(t *testing.T) {

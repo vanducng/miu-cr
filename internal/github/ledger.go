@@ -276,7 +276,7 @@ func renderLedger(b *strings.Builder, info *PRInfo, entries []LedgerEntry, inlin
 			// cross-commit fix); when a finding opened and resolved at the same commit
 			// (e.g. a re-review of the same SHA) the transition is noise — show one SHA.
 			resolvedCell := shaLink(info, e.ResSHA)
-			if e.OpenSHA != "" && e.OpenSHA != e.ResSHA {
+			if e.OpenSHA != "" && e.ResSHA != "" && e.OpenSHA != e.ResSHA {
 				resolvedCell = shaLink(info, e.OpenSHA) + " → " + resolvedCell
 			}
 			fmt.Fprintf(b, "| %s | %s | %s | %s |\n", ledgerSevCell(e, true), ledgerIssue(e), ledgerLocation(info, e, inlineURLs), resolvedCell)
