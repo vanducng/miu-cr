@@ -52,3 +52,43 @@ func TestEvalCommandRunsToolAndScores(t *testing.T) {
 		t.Fatalf("eval command should not mutate shared opts.timeout, got %s", opts.timeout)
 	}
 }
+
+func TestEvalCommandHonorsRootTimeoutFlag(t *testing.T) {
+	dir := t.TempDir()
+	cases := filepath.Join(dir, "cases.json")
+	body := `{"cases":[{"id":"synthetic","repo":"` + filepath.ToSlash(dir) + `","from":"base","to":"head","expected":[]}]}`
+	if err := os.WriteFile(cases, []byte(body), 0o600); err != nil {
+		t.Fatalf("write cases: %v", err)
+	}
+
+	opts := &options{output: "json", timeout: 30 * time.Second}
+	cmd := rootCommand(opts)
+	var buf bytes.Buffer
+	cmd.SetOut(&buf)
+	cmd.SetErr(&buf)
+	cmd.SetArgs([]string{"--timeout", "1ms", "eval", "--cases", cases, "--tool", `slow=sh -c 'sleep 0.05; printf "{\"findings\":[]}"'`})
+	cmd.SilenceUsage = true
+	cmd.SilenceErrors = true
+	if err := cmd.Execute(); err != nil {
+		t.Fatalf("eval command: %v\n%s", err, buf.String())
+	}
+
+	env := decodeEnvelope(t, buf.Bytes())
+	raw, err := json.Marshal(env.Data)
+	if err != nil {
+		t.Fatalf("marshal data: %v", err)
+	}
+	var result struct {
+		Tools []struct {
+			Cases []struct {
+				Error string `json:"error"`
+			} `json:"cases"`
+		} `json:"tools"`
+	}
+	if err := json.Unmarshal(raw, &result); err != nil {
+		t.Fatalf("unmarshal data: %v", err)
+	}
+	if len(result.Tools) != 1 || len(result.Tools[0].Cases) != 1 || result.Tools[0].Cases[0].Error == "" {
+		t.Fatalf("expected eval case to time out, got %+v", result)
+	}
+}

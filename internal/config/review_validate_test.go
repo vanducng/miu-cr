@@ -46,6 +46,8 @@ func TestValidateReview(t *testing.T) {
 		{"bad timeout", Review{Timeout: "5 fortnights"}, true},
 		{"bad expand", Review{Expand: intPtr(-1)}, true},
 		{"bad token budget", Review{TokenBudget: intPtr(-1)}, true},
+		{"context hops zero ok", Review{ContextHops: intPtr(0)}, false},
+		{"context hops negative", Review{ContextHops: intPtr(-1)}, true},
 		{"bad context hops", Review{ContextHops: intPtr(6)}, true},
 	}
 	for _, tt := range tests {
