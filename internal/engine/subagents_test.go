@@ -174,6 +174,47 @@ func TestReviewSubagentsMergesTrace(t *testing.T) {
 	}
 }
 
+func TestReviewSubagentsStreamsTraceSink(t *testing.T) {
+	dir := initRepo(t)
+	writeFile(t, dir, "backend.go", "package app\n\nfunc Existing() {}\n")
+	writeFile(t, dir, "frontend.ts", "export function existing() {}\n")
+	git(t, dir, "add", ".")
+	git(t, dir, "commit", "-q", "-m", "base")
+	writeFile(t, dir, "backend.go", "package app\n\nfunc Existing() {}\n\nfunc BackendRisk() {}\n")
+	writeFile(t, dir, "frontend.ts", "export function existing() {}\n\nexport function frontendRisk() {}\n")
+	git(t, dir, "add", ".")
+
+	var mu sync.Mutex
+	var steps []string
+	eng := engine.New(&subagentFake{}, gitcmd.New())
+	if _, err := eng.Review(stdctx.Background(), engine.Request{
+		Mode:    0,
+		RepoDir: dir,
+		Gate:    "high",
+		TraceSink: func(step string, _ any) {
+			mu.Lock()
+			defer mu.Unlock()
+			steps = append(steps, step)
+		},
+		Subagents: engine.SubagentConfig{
+			Mode:       "always",
+			RequireAll: true,
+			Agents: []engine.SubagentSpec{
+				{Name: "backend", IncludeGlobs: []string{"**/*.go"}},
+				{Name: "frontend", IncludeGlobs: []string{"**/*.ts"}},
+			},
+		},
+	}); err != nil {
+		t.Fatalf("Review: %v", err)
+	}
+	mu.Lock()
+	got := countSteps(steps, "user_prompt")
+	mu.Unlock()
+	if got < 2 {
+		t.Fatalf("user_prompt trace steps = %d, want at least 2: %#v", got, steps)
+	}
+}
+
 func TestReviewSubagentsAlwaysRunsSingleMatchingAgent(t *testing.T) {
 	dir := initRepo(t)
 	writeFile(t, dir, "backend.go", "package app\n\nfunc Existing() {}\n")
@@ -223,4 +264,14 @@ func containsInstruction(seen map[string]bool, needle string) bool {
 		}
 	}
 	return false
+}
+
+func countSteps(steps []string, want string) int {
+	n := 0
+	for _, step := range steps {
+		if step == want {
+			n++
+		}
+	}
+	return n
 }

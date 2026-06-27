@@ -174,7 +174,7 @@ func runSubagentPlans(ctx stdctx.Context, e *Engine, req Request, plans []subage
 			})
 			var trace *ReviewTrace
 			if shared.trace != nil {
-				trace = &ReviewTrace{}
+				trace = &ReviewTrace{Sink: shared.trace.Sink}
 			}
 			out, ms, err := e.reviewOnce(ctx, req, assembled.Text, shared, joinPrompt(req.OperatorPrompt, plan.operatorPrompt), subagentInstruction(req.Instruction, plan), trace)
 			results[i] = subagentRunResult{
