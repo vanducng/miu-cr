@@ -55,6 +55,13 @@ comment with a new marker); subsequent re-runs dedupe normally. On a
 first M5 review **manually** (or off-hours) to absorb the one-time re-post before
 the next scheduled run.
 
+## [0.52.0](https://github.com/vanducng/miu-cr/compare/v0.51.0...v0.52.0) (2026-06-27)
+
+
+### Features
+
+* **host:** added review host poller ([#137](https://github.com/vanducng/miu-cr/issues/137)) ([1f2278b](https://github.com/vanducng/miu-cr/commit/1f2278bee99cf787a18cd3e47cfaeb4736ed49ed))
+
 ## [0.51.0](https://github.com/vanducng/miu-cr/compare/v0.50.0...v0.51.0) (2026-06-27)
 
 
