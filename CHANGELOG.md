@@ -55,6 +55,13 @@ comment with a new marker); subsequent re-runs dedupe normally. On a
 first M5 review **manually** (or off-hours) to absorb the one-time re-post before
 the next scheduled run.
 
+## [0.57.0](https://github.com/vanducng/miu-cr/compare/v0.56.3...v0.57.0) (2026-06-27)
+
+
+### Features
+
+* **review:** added configurable subagent fanout ([#167](https://github.com/vanducng/miu-cr/issues/167)) ([584807b](https://github.com/vanducng/miu-cr/commit/584807bc4cf0d9c802b07636750bb243e18cad82))
+
 ## [0.56.3](https://github.com/vanducng/miu-cr/compare/v0.56.2...v0.56.3) (2026-06-27)
 
 
