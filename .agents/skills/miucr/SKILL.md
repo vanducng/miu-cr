@@ -147,9 +147,11 @@ tree: `rules/{go-api,typescript-node,python-data}.md`,
 `github-action/code-review.yml` (fork-safe `pull_request_target`),
 `workflows/miucr-review.yml` (the **dual-trigger** default: `pull_request` + a
 `/miucr review <prompt>` comment trigger),
-`mcp-setup/{claude-code,cursor,codex}` + `README-mcp.md`, and
-`docker/{Dockerfile,docker-compose.yml}` (pure-Go `CGO_ENABLED=0` distroless image
-for `miucr serve`). Onboarding walkthrough lives at the docs
+`mcp-setup/{claude-code,cursor,codex}` + `README-mcp.md`,
+`review-local/{pre-commit,Makefile,agent-review.sh}` (review-your-own-changes
+recipes), and `review-host/{Dockerfile,docker-compose.yml,config.example.yaml}`
+(pure-Go `CGO_ENABLED=0` Alpine image + Postgres host stack for `miucr serve`).
+Onboarding walkthrough lives at the docs
 [Getting started](https://cr.miu.sh/onboarding/) page.
 
 **Comment-triggered review (`/miucr review <prompt>`).** With the dual-trigger workflow

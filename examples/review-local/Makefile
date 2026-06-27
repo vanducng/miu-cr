@@ -1,5 +1,5 @@
-# miucr local-review targets — drop these into your project's Makefile (or keep
-# this file and run `make -f examples/local-review/Makefile review`).
+# miucr review-local targets — drop these into your project's Makefile (or keep
+# this file and run `make -f examples/review-local/Makefile review`).
 #
 # Requires: miucr on PATH and a provider key in the environment
 # (ANTHROPIC_API_KEY, or `miucr login`). See https://cr.miu.sh/usage/

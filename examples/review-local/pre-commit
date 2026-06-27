@@ -3,7 +3,7 @@
 # finding.
 #
 # Install:
-#   cp examples/local-review/pre-commit .git/hooks/pre-commit
+#   cp examples/review-local/pre-commit .git/hooks/pre-commit
 #   chmod +x .git/hooks/pre-commit
 #
 # Bypass for one commit (skips ALL pre-commit hooks):

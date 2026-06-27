@@ -21,7 +21,7 @@ A git pre-commit hook that reviews the staged blobs and aborts the commit when a
 finding reaches the gate (default `high`).
 
 ```sh
-cp examples/local-review/pre-commit .git/hooks/pre-commit
+cp examples/review-local/pre-commit .git/hooks/pre-commit
 chmod +x .git/hooks/pre-commit
 ```
 
@@ -37,9 +37,9 @@ Two targets so the review command is the same everywhere — a local check, a
 pre-push hook, or a CI step.
 
 ```sh
-make -f examples/local-review/Makefile review                  # staged gate
-make -f examples/local-review/Makefile review-range BASE=main  # branch vs BASE
-make -f examples/local-review/Makefile review GATE=medium      # override the gate
+make -f examples/review-local/Makefile review                  # staged gate
+make -f examples/review-local/Makefile review-range BASE=main  # branch vs BASE
+make -f examples/review-local/Makefile review GATE=medium      # override the gate
 ```
 
 Copy the two targets into your project's top-level `Makefile` to run plain
@@ -56,8 +56,8 @@ It runs a staged review, prints the machine-readable findings an agent would act
 on (one JSON object per line via `jq`), and exits on the gate.
 
 ```sh
-chmod +x examples/local-review/agent-review.sh
-./examples/local-review/agent-review.sh
+chmod +x examples/review-local/agent-review.sh
+./examples/review-local/agent-review.sh
 ```
 
 - Needs `jq` in addition to `miucr`.

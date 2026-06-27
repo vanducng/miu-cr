@@ -155,9 +155,9 @@ idempotent summary:
 - [`examples/github-action/code-review.yml`](https://github.com/vanducng/miu-cr/tree/main/examples/github-action/code-review.yml)
   (the reusable composite action; fork-safe via `pull_request_target`; it
   fetches the diff via the API and never runs fork code).
-- [`examples/docker/`](https://github.com/vanducng/miu-cr/tree/main/examples/docker):
+- [`examples/review-host/`](https://github.com/vanducng/miu-cr/tree/main/examples/review-host):
   a nonroot image with `git` + compose file for running
-  `miucr serve` as a self-hosted webhook/poll daemon.
+  `miucr serve` as a self-hosted webhook/poll/host daemon.
 
 For the full automation story, see [Serve & Action](/serve-and-action/) and
 [GitHub PR review](/github-pr/).

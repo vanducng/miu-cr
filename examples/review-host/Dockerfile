@@ -2,7 +2,7 @@
 # The runtime image includes git because PR review needs local git operations.
 #
 # Build:
-#   docker build -t miucr-server -f examples/docker/Dockerfile .
+#   docker build -t miucr-server -f examples/review-host/Dockerfile .
 #
 # Run (webhook mode):
 #   docker run --rm \

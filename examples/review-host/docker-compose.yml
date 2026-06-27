@@ -18,7 +18,7 @@ services:
   miucr-host:
     build:
       context: ../..
-      dockerfile: examples/docker/Dockerfile
+      dockerfile: examples/review-host/Dockerfile
     image: miucr-host:local
     depends_on:
       postgres:
