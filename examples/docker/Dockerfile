@@ -1,4 +1,4 @@
-# Multi-stage pure-Go build — CGO_ENABLED=0, static binary, slim runtime image.
+# Multi-stage pure-Go build — CGO_ENABLED=0, static binary, minimal runtime image.
 # The runtime image includes git because PR review needs local git operations.
 #
 # Build:
@@ -43,13 +43,13 @@ RUN CGO_ENABLED=0 GOOS=linux GOARCH=${TARGETARCH} \
       ./cmd/miucr
 
 # ── Stage 2: run ─────────────────────────────────────────────────────────────
-FROM debian:bookworm-slim
+FROM alpine:3.22
 
-RUN apt-get update \
-    && apt-get install -y --no-install-recommends ca-certificates git openssh-client \
-    && rm -rf /var/lib/apt/lists/* \
-    && groupadd --system --gid 65532 nonroot \
-    && useradd --system --uid 65532 --gid 65532 --create-home --home-dir /home/nonroot --shell /usr/sbin/nologin nonroot
+RUN apk add --no-cache ca-certificates git openssh-client \
+    && addgroup -S -g 65532 nonroot \
+    && adduser -S -D -H -u 65532 -G nonroot -h /home/nonroot -s /sbin/nologin nonroot \
+    && mkdir -p /home/nonroot \
+    && chown 65532:65532 /home/nonroot
 
 COPY --from=build /out/miucr /usr/local/bin/miucr
 

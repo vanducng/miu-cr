@@ -21,6 +21,8 @@ const maxHostClaimsPerTick = 32
 
 var runHostDrainGrace = 10 * time.Second
 
+var ErrHostRunnerStopTimeout = errors.New("host runner did not stop before drain deadline")
+
 type HostTokenSource interface {
 	Token(stdctx.Context) (string, error)
 }
@@ -189,7 +191,15 @@ func (h *HostRunner) RunJanitor(ctx stdctx.Context) error {
 }
 
 func (h *HostRunner) janitorIntervalIsOff() bool {
-	return h.janitorInterval <= 0 || (h.prune == HostPruneConfig{})
+	return h.janitorInterval <= 0 || h.prune.isZero()
+}
+
+func (c HostPruneConfig) isZero() bool {
+	return c.ClosedSessionTTL <= 0 &&
+		c.CompletedJobTTL <= 0 &&
+		c.FinishedAttemptTTL <= 0 &&
+		c.InactiveWorkspaceTTL <= 0 &&
+		c.PollCursorTTL <= 0
 }
 
 func (c HostPruneConfig) policy(now time.Time) store.HostPrunePolicy {
@@ -393,7 +403,9 @@ func (h *HostRunner) claimReady(ctx stdctx.Context, repos map[int64]HostRepoConf
 		switch h.disp.Submit(job) {
 		case SubmitQueued:
 		case SubmitDuplicate:
-			_ = h.store.CompleteHostJob(ctx, store.HostJobCompleteInput{JobID: jobID, AttemptID: attemptID, Status: "canceled", Error: "duplicate review already in flight", Now: h.now().UTC()})
+			now := h.now().UTC()
+			_ = h.store.ReleaseHostJob(ctx, store.HostJobReleaseInput{JobID: jobID, AttemptID: attemptID, Error: "duplicate review already in flight", Now: now, AvailableAt: now.Add(h.interval)})
+			continue
 		case SubmitCoalesced:
 			now := h.now().UTC()
 			_ = h.store.ReleaseHostJob(ctx, store.HostJobReleaseInput{JobID: jobID, AttemptID: attemptID, Error: "review already in flight for PR", Now: now, AvailableAt: now.Add(h.interval)})
@@ -428,7 +440,7 @@ func RunHost(ctx stdctx.Context, pool *Pool, runner *HostRunner) error {
 		case <-done:
 			return nil
 		case <-time.After(runHostDrainGrace):
-			return errors.New("host runner did not stop before drain deadline")
+			return ErrHostRunnerStopTimeout
 		}
 	}
 	if pool != nil {

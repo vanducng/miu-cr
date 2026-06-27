@@ -157,7 +157,7 @@ func TestHostRunnerFailedReviewRetriesSameHead(t *testing.T) {
 }
 
 func TestHostRunnerRejectedSubmitContinuesClaimBatch(t *testing.T) {
-	for _, result := range []SubmitResult{SubmitCoalesced, SubmitFull} {
+	for _, result := range []SubmitResult{SubmitDuplicate, SubmitCoalesced, SubmitFull} {
 		t.Run(result.String(), func(t *testing.T) {
 			cfg := hostRunnerConfig(t)
 			cfg.NewNotifGetter = func(string) notifGetter {
@@ -308,7 +308,7 @@ func TestRunHostReturnsWhenRunnerDoesNotStop(t *testing.T) {
 	cancel()
 	err = RunHost(ctx, nil, r)
 	close(block)
-	if err == nil || !strings.Contains(err.Error(), "did not stop") {
+	if !errors.Is(err, ErrHostRunnerStopTimeout) || !strings.Contains(err.Error(), "did not stop") {
 		t.Fatalf("RunHost error = %v, want stop deadline", err)
 	}
 }

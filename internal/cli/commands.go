@@ -183,17 +183,19 @@ func serveCommand(opts *options) *cobra.Command {
 				if err != nil {
 					return err
 				}
-				defer closeStore()
 				tokenSources, err := buildHostGitHubTokenSources(cmd.Context(), hostCfg)
 				if err != nil {
+					closeStore()
 					return err
 				}
 				hostRepos, reviewTO, err := buildServeHostRepos(cmd.Context(), hostCfg, hostPath)
 				if err != nil {
+					closeStore()
 					return err
 				}
 				reviewStore, ok := hostStore.(serve.ReviewStore)
 				if !ok {
+					closeStore()
 					return &CLIError{Code: "serve.host_store_invalid", Message: "host store does not implement review persistence", Exit: 1}
 				}
 				workers := hostCfg.Host.Workers
@@ -218,9 +220,14 @@ func serveCommand(opts *options) *cobra.Command {
 					JanitorInterval: durationOrDefault(hostCfg.Host.Retention.JanitorInterval, 15*time.Minute),
 				})
 				if err != nil {
+					closeStore()
 					return &CLIError{Code: "serve.host_invalid", Message: err.Error(), Hint: "check host config repos, accounts, and poll_source", Exit: 2}
 				}
-				return serve.RunHost(cmd.Context(), pool, runner)
+				err = serve.RunHost(cmd.Context(), pool, runner)
+				if !errors.Is(err, serve.ErrHostRunnerStopTimeout) {
+					closeStore()
+				}
+				return err
 			}
 			secret := strings.TrimSpace(os.Getenv("WEBHOOK_SECRET"))
 			// Webhook is the default; --poll without a secret runs poll-only,
@@ -954,12 +961,12 @@ func buildServeReviewFn(log *slog.Logger, gate string, st serve.ReviewStore) fun
 				review.Gate = gate
 			}
 		}
-		jobCtx := stdctx.Background()
-		if j.Timeout > 0 {
-			var cancel stdctx.CancelFunc
-			jobCtx, cancel = stdctx.WithTimeout(jobCtx, j.Timeout)
-			defer cancel()
+		timeout := j.Timeout
+		if timeout <= 0 {
+			timeout = 15 * time.Minute
 		}
+		jobCtx, cancel := stdctx.WithTimeout(stdctx.Background(), timeout)
+		defer cancel()
 		out, err := ReviewPRForServe(jobCtx, PRReviewRequest{
 			Ref:            j.Ref,
 			Token:          j.Token,
@@ -973,7 +980,7 @@ func buildServeReviewFn(log *slog.Logger, gate string, st serve.ReviewStore) fun
 			BaseURL:        review.BaseURL,
 			AuthToken:      review.AuthToken,
 			Model:          review.Model,
-			Timeout:        j.Timeout,
+			Timeout:        timeout,
 			ExpandWindow:   review.ExpandWindow,
 			TokenBudget:    review.TokenBudget,
 			DeepContext:    review.DeepContext,
