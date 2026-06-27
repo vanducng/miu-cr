@@ -166,14 +166,15 @@ func mergeReview(base, file Review) Review {
 	if file.PatchRepair != nil {
 		out.PatchRepair = file.PatchRepair
 	}
-	out.Subagents = mergeReviewSubagents(base.Subagents, file.Subagents)
+	out.Subagents = MergeReviewSubagents(base.Subagents, file.Subagents)
 	if len(file.CategoryURLs) > 0 {
 		out.CategoryURLs = file.CategoryURLs
 	}
 	return out
 }
 
-func mergeReviewSubagents(base, file ReviewSubagents) ReviewSubagents {
+// MergeReviewSubagents keeps host and user config layering in lockstep.
+func MergeReviewSubagents(base, file ReviewSubagents) ReviewSubagents {
 	out := base
 	if file.Mode != "" {
 		out.Mode = file.Mode

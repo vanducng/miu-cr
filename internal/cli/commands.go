@@ -1085,30 +1085,7 @@ func mergeHostReview(base, over config.HostReview) config.HostReview {
 	if over.ApproveClean != nil {
 		out.ApproveClean = over.ApproveClean
 	}
-	out.Subagents = mergeHostSubagents(base.Subagents, over.Subagents)
-	return out
-}
-
-func mergeHostSubagents(base, over config.ReviewSubagents) config.ReviewSubagents {
-	out := base
-	if over.Mode != "" {
-		out.Mode = over.Mode
-	}
-	if over.MaxParallel != 0 {
-		out.MaxParallel = over.MaxParallel
-	}
-	if over.MinFiles != 0 {
-		out.MinFiles = over.MinFiles
-	}
-	if over.MinContextBytes != 0 {
-		out.MinContextBytes = over.MinContextBytes
-	}
-	if over.RequireAll != nil {
-		out.RequireAll = over.RequireAll
-	}
-	if len(over.Agents) > 0 {
-		out.Agents = append([]config.ReviewSubagent(nil), over.Agents...)
-	}
+	out.Subagents = config.MergeReviewSubagents(base.Subagents, over.Subagents)
 	return out
 }
 

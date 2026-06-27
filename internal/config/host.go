@@ -115,7 +115,7 @@ type HostReview struct {
 	Suggest      *bool           `yaml:"suggest" json:"suggest,omitempty"`
 	PatchRepair  *bool           `yaml:"patch_repair" json:"patch_repair,omitempty"`
 	ApproveClean *bool           `yaml:"approve_clean" json:"approve_clean,omitempty"`
-	Subagents    ReviewSubagents `yaml:"subagents" json:"subagents,omitempty"`
+	Subagents    ReviewSubagents `yaml:"subagents" json:"subagents"`
 }
 
 type HostRepo struct {

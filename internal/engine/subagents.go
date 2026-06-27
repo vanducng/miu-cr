@@ -2,6 +2,7 @@ package engine
 
 import (
 	stdctx "context"
+	"errors"
 	"fmt"
 	"strings"
 	"sync"
@@ -60,15 +61,16 @@ func (e *Engine) reviewPasses(ctx stdctx.Context, req Request, selected []diff.D
 	start := time.Now()
 	results := runSubagentPlans(ctx, e, req, plans, shared)
 	mergeSubagentTraces(shared.trace, results)
-	stats := subagentStats(results, time.Since(start).Milliseconds(), req.Subagents.RequireAll)
+	elapsedMS := time.Since(start).Milliseconds()
+	stats := subagentStats(results, elapsedMS, req.Subagents.RequireAll)
 	out, firstErr, okCount := mergeSubagentOutputs(results)
 	if okCount == 0 && firstErr != nil {
-		return ReviewOutput{}, time.Since(start).Milliseconds(), stats, firstErr
+		return ReviewOutput{}, elapsedMS, stats, firstErr
 	}
 	if firstErr != nil {
 		stats["subagents_error"] = config.RedactString(firstErr.Error())
 	}
-	return out, time.Since(start).Milliseconds(), stats, nil
+	return out, elapsedMS, stats, nil
 }
 
 func (e *Engine) reviewOnce(ctx stdctx.Context, req Request, text string, shared reviewSharedContext, operatorPrompt, instruction string, trace *ReviewTrace) (ReviewOutput, int64, error) {
@@ -109,6 +111,8 @@ func useSubagents(cfg SubagentConfig, fileCount, contextBytes int) bool {
 			minBytes = defaultSubagentMinContextBytes
 		}
 		return fileCount >= minFiles || contextBytes >= minBytes
+	case "", "off":
+		return false
 	default:
 		return false
 	}
@@ -157,7 +161,12 @@ func runSubagentPlans(ctx stdctx.Context, e *Engine, req Request, plans []subage
 		wg.Add(1)
 		go func(i int, plan subagentPlan) {
 			defer wg.Done()
-			sem <- struct{}{}
+			select {
+			case <-ctx.Done():
+				results[i] = subagentRunResult{name: plan.name, files: len(plan.files), err: ctx.Err()}
+				return
+			case sem <- struct{}{}:
+			}
 			defer func() { <-sem }()
 			assembled := enginectx.AssembleContext(plan.files, enginectx.AssembleOptions{
 				TokenBudget:  diffBudget(req.TokenBudget, req.RulesTokenBudget),
@@ -202,11 +211,17 @@ func mergeSubagentTraces(dst *ReviewTrace, results []subagentRunResult) {
 		if strings.TrimSpace(r.trace.FinalResponse) != "" {
 			responses = append(responses, fmt.Sprintf("Subagent %q:\n%s", r.name, r.trace.FinalResponse))
 		}
-		maxTurn := -1
+		minTurn, maxTurn := -1, -1
 		for _, tr := range r.trace.Turns {
-			dst.RecordTool(tr.Turn+turnOffset, tr.Tool, tr.Args)
-			if tr.Turn > maxTurn {
-				maxTurn = tr.Turn
+			if minTurn == -1 || tr.Turn < minTurn {
+				minTurn = tr.Turn
+			}
+		}
+		for _, tr := range r.trace.Turns {
+			turn := tr.Turn - minTurn
+			dst.RecordTool(turn+turnOffset, tr.Tool, tr.Args)
+			if turn > maxTurn {
+				maxTurn = turn
 			}
 		}
 		if maxTurn >= 0 {
@@ -221,12 +236,12 @@ func mergeSubagentTraces(dst *ReviewTrace, results []subagentRunResult) {
 
 func subagentStats(results []subagentRunResult, totalMS int64, requireAll bool) map[string]any {
 	items := make([]any, 0, len(results))
-	failed := false
+	failedCount := 0
 	for _, r := range results {
 		status := "done"
 		if r.err != nil {
 			status = "failed"
-			failed = true
+			failedCount++
 		}
 		items = append(items, map[string]any{
 			"name":             r.name,
@@ -241,8 +256,8 @@ func subagentStats(results []subagentRunResult, totalMS int64, requireAll bool) 
 	return map[string]any{
 		"subagents_enabled":     true,
 		"subagent_count":        float64(len(results)),
-		"subagents_failed":      failed,
-		"subagents_degraded":    failed && requireAll,
+		"subagents_failed":      float64(failedCount),
+		"subagents_degraded":    failedCount > 0 && requireAll,
 		"subagents_require_all": requireAll,
 		"subagents":             items,
 		"subagents_ms":          float64(totalMS),
@@ -253,13 +268,11 @@ func mergeSubagentOutputs(results []subagentRunResult) (ReviewOutput, error, int
 	var out ReviewOutput
 	var parts []string
 	out.FileSummaries = map[string]string{}
-	var firstErr error
+	var errs []error
 	okCount := 0
 	for _, r := range results {
 		if r.err != nil {
-			if firstErr == nil {
-				firstErr = r.err
-			}
+			errs = append(errs, r.err)
 			continue
 		}
 		okCount++
@@ -284,7 +297,7 @@ func mergeSubagentOutputs(results []subagentRunResult) (ReviewOutput, error, int
 	if len(out.FileSummaries) == 0 {
 		out.FileSummaries = nil
 	}
-	return out, firstErr, okCount
+	return out, errors.Join(errs...), okCount
 }
 
 func joinPrompt(base, extra string) string {
