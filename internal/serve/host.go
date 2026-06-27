@@ -94,6 +94,15 @@ type HostRunner struct {
 	now             func() time.Time
 }
 
+type hostRunnerSnapshot struct {
+	repos           []HostRepoConfig
+	tokens          map[string]HostTokenSource
+	interval        time.Duration
+	reviewTO        time.Duration
+	prune           HostPruneConfig
+	janitorInterval time.Duration
+}
+
 type HostPruneConfig struct {
 	ClosedSessionTTL     time.Duration
 	CompletedJobTTL      time.Duration
@@ -171,21 +180,36 @@ func validateHostRunnerRepos(repos []HostRepoConfig, tokens map[string]HostToken
 }
 
 func (h *HostRunner) Reload(ctx stdctx.Context) error {
-	h.mu.Lock()
-	defer h.mu.Unlock()
-	return h.reloadLocked(ctx)
-}
-
-func (h *HostRunner) reloadLocked(ctx stdctx.Context) error {
-	if h.reload == nil {
-		return nil
-	}
-	next, err := h.reload(ctx)
+	next, err := h.loadReload(ctx)
 	if err != nil {
 		return err
 	}
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	h.applyReloadLocked(next)
+	return nil
+}
+
+func (h *HostRunner) loadReload(ctx stdctx.Context) (HostReload, error) {
+	h.mu.Lock()
+	reload := h.reload
+	h.mu.Unlock()
+	if reload == nil {
+		return HostReload{}, nil
+	}
+	next, err := reload(ctx)
+	if err != nil {
+		return HostReload{}, err
+	}
 	if err := validateHostRunnerRepos(next.Repos, next.TokenSources); err != nil {
-		return err
+		return HostReload{}, err
+	}
+	return next, nil
+}
+
+func (h *HostRunner) applyReloadLocked(next HostReload) {
+	if next.Repos == nil && next.TokenSources == nil {
+		return
 	}
 	h.repos = next.Repos
 	h.tokens = next.TokenSources
@@ -198,7 +222,23 @@ func (h *HostRunner) reloadLocked(ctx stdctx.Context) error {
 	}
 	h.prune = next.Prune
 	h.janitorInterval = next.JanitorInterval
-	return nil
+}
+
+func (h *HostRunner) snapshotLocked() hostRunnerSnapshot {
+	return hostRunnerSnapshot{
+		repos:           h.repos,
+		tokens:          h.tokens,
+		interval:        h.interval,
+		reviewTO:        h.reviewTO,
+		prune:           h.prune,
+		janitorInterval: h.janitorInterval,
+	}
+}
+
+func (h *HostRunner) snapshot() hostRunnerSnapshot {
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	return h.snapshotLocked()
 }
 
 func (h *HostRunner) Groups() map[string][]string {
@@ -218,29 +258,37 @@ func (h *HostRunner) Run(ctx stdctx.Context) {
 	nextJanitor := time.Time{}
 	for {
 		start := h.now()
-		h.mu.Lock()
-		if err := h.reloadLocked(ctx); err != nil && ctx.Err() == nil {
+		oldJanitor := h.snapshot().janitorInterval
+		next, err := h.loadReload(ctx)
+		if err != nil && ctx.Err() == nil {
 			h.log.Warn("host: config reload failed; keeping previous config", "error", config.RedactString(err.Error()))
 		}
-		if !h.janitorIntervalIsOff() && !start.Before(nextJanitor) {
-			if err := h.runJanitorLocked(ctx); err != nil && ctx.Err() == nil {
+		h.mu.Lock()
+		if err == nil {
+			h.applyReloadLocked(next)
+		}
+		snap := h.snapshotLocked()
+		h.mu.Unlock()
+		if oldJanitor != snap.janitorInterval {
+			nextJanitor = time.Time{}
+		}
+		if !snap.janitorIntervalIsOff() && !start.Before(nextJanitor) {
+			if err := h.runJanitor(ctx, snap); err != nil && ctx.Err() == nil {
 				h.log.Warn("host: janitor failed", "error", config.RedactString(err.Error()))
 			}
 			if ctx.Err() != nil {
-				h.mu.Unlock()
 				return
 			}
-			nextJanitor = start.Add(h.janitorInterval)
+			nextJanitor = start.Add(snap.janitorInterval)
 		}
-		pollFloor, err := h.tick(ctx)
+		pollFloor, err := h.tick(ctx, snap)
 		if err != nil && ctx.Err() == nil {
 			h.log.Warn("host: tick failed", "error", config.RedactString(err.Error()))
 		}
 		if ctx.Err() != nil {
-			h.mu.Unlock()
 			return
 		}
-		eff := h.interval
+		eff := snap.interval
 		if pollFloor > eff {
 			eff = pollFloor
 		}
@@ -248,7 +296,6 @@ func (h *HostRunner) Run(ctx stdctx.Context) {
 		if wait < 0 {
 			wait = 0
 		}
-		h.mu.Unlock()
 		if sleepCtx(ctx, wait) {
 			return
 		}
@@ -256,19 +303,17 @@ func (h *HostRunner) Run(ctx stdctx.Context) {
 }
 
 func (h *HostRunner) RunJanitor(ctx stdctx.Context) error {
-	h.mu.Lock()
-	defer h.mu.Unlock()
-	return h.runJanitorLocked(ctx)
+	return h.runJanitor(ctx, h.snapshot())
 }
 
-func (h *HostRunner) runJanitorLocked(ctx stdctx.Context) error {
-	p := h.prune.policy(h.now().UTC())
+func (h *HostRunner) runJanitor(ctx stdctx.Context, snap hostRunnerSnapshot) error {
+	p := snap.prune.policy(h.now().UTC())
 	_, err := h.store.PruneHost(ctx, p)
 	return err
 }
 
-func (h *HostRunner) janitorIntervalIsOff() bool {
-	return h.janitorInterval <= 0 || h.prune.isZero()
+func (s hostRunnerSnapshot) janitorIntervalIsOff() bool {
+	return s.janitorInterval <= 0 || s.prune.isZero()
 }
 
 func (c HostPruneConfig) isZero() bool {
@@ -300,25 +345,30 @@ func (c HostPruneConfig) policy(now time.Time) store.HostPrunePolicy {
 }
 
 func (h *HostRunner) Tick(ctx stdctx.Context) error {
-	h.mu.Lock()
-	defer h.mu.Unlock()
-	if err := h.reloadLocked(ctx); err != nil {
+	next, err := h.loadReload(ctx)
+	if err != nil {
 		if ctx.Err() != nil {
 			return err
 		}
 		h.log.Warn("host: config reload failed; keeping previous config", "error", config.RedactString(err.Error()))
 	}
-	_, err := h.tick(ctx)
+	h.mu.Lock()
+	if err == nil {
+		h.applyReloadLocked(next)
+	}
+	snap := h.snapshotLocked()
+	h.mu.Unlock()
+	_, err = h.tick(ctx, snap)
 	return err
 }
 
-func (h *HostRunner) tick(ctx stdctx.Context) (time.Duration, error) {
-	reposByID, reposBySlug, err := h.reconcileRepos(ctx)
+func (h *HostRunner) tick(ctx stdctx.Context, snap hostRunnerSnapshot) (time.Duration, error) {
+	reposByID, reposBySlug, err := h.reconcileRepos(ctx, snap.repos)
 	if err != nil {
 		return 0, err
 	}
 	var pollFloor time.Duration
-	for _, repo := range h.repos {
+	for _, repo := range snap.repos {
 		if !repo.Enabled || !repo.Poll {
 			continue
 		}
@@ -326,7 +376,7 @@ func (h *HostRunner) tick(ctx stdctx.Context) (time.Duration, error) {
 		if !ok {
 			continue
 		}
-		wait, err := h.pollRepo(ctx, repo, rec.ID)
+		wait, err := h.pollRepo(ctx, snap, repo, rec.ID)
 		if wait > pollFloor {
 			pollFloor = wait
 		}
@@ -334,13 +384,13 @@ func (h *HostRunner) tick(ctx stdctx.Context) (time.Duration, error) {
 			h.log.Warn("host: repo poll failed", "repo", repo.Slug, "error", config.RedactString(err.Error()))
 		}
 	}
-	return pollFloor, h.claimReady(ctx, reposByID)
+	return pollFloor, h.claimReady(ctx, snap, reposByID)
 }
 
-func (h *HostRunner) reconcileRepos(ctx stdctx.Context) (map[int64]HostRepoConfig, map[string]store.HostRepo, error) {
+func (h *HostRunner) reconcileRepos(ctx stdctx.Context, repos []HostRepoConfig) (map[int64]HostRepoConfig, map[string]store.HostRepo, error) {
 	byID := map[int64]HostRepoConfig{}
 	bySlug := map[string]store.HostRepo{}
-	for _, r := range h.repos {
+	for _, r := range repos {
 		if !r.Enabled {
 			continue
 		}
@@ -365,8 +415,8 @@ func (h *HostRunner) reconcileRepos(ctx stdctx.Context) (map[int64]HostRepoConfi
 	return byID, bySlug, nil
 }
 
-func (h *HostRunner) pollRepo(ctx stdctx.Context, repo HostRepoConfig, repoID int64) (time.Duration, error) {
-	token, err := h.tokens[repo.GithubAccount].Token(ctx)
+func (h *HostRunner) pollRepo(ctx stdctx.Context, snap hostRunnerSnapshot, repo HostRepoConfig, repoID int64) (time.Duration, error) {
+	token, err := snap.tokens[repo.GithubAccount].Token(ctx)
 	if err != nil {
 		return 0, err
 	}
@@ -438,9 +488,9 @@ func (h *HostRunner) listOpenPRs(ctx stdctx.Context, getter notifGetter, repo Ho
 	}
 }
 
-func (h *HostRunner) claimReady(ctx stdctx.Context, repos map[int64]HostRepoConfig) error {
+func (h *HostRunner) claimReady(ctx stdctx.Context, snap hostRunnerSnapshot, repos map[int64]HostRepoConfig) error {
 	for claims := 0; claims < maxHostClaimsPerTick; claims++ {
-		claim, ok, err := h.store.ClaimHostJob(ctx, store.HostJobClaimInput{WorkerID: h.workerID, Now: h.now().UTC(), LeaseDuration: h.reviewTO + time.Minute})
+		claim, ok, err := h.store.ClaimHostJob(ctx, store.HostJobClaimInput{WorkerID: h.workerID, Now: h.now().UTC(), LeaseDuration: snap.reviewTO + time.Minute})
 		if err != nil || !ok {
 			return err
 		}
@@ -449,7 +499,7 @@ func (h *HostRunner) claimReady(ctx stdctx.Context, repos map[int64]HostRepoConf
 			_ = h.store.CompleteHostJob(ctx, store.HostJobCompleteInput{JobID: claim.Job.ID, AttemptID: claim.AttemptID, Status: "failed", Error: "repo config not loaded", Now: h.now().UTC()})
 			continue
 		}
-		token, err := h.tokens[repo.GithubAccount].Token(ctx)
+		token, err := snap.tokens[repo.GithubAccount].Token(ctx)
 		if err != nil {
 			now := h.now().UTC()
 			_ = h.store.CompleteHostJob(ctx, store.HostJobCompleteInput{JobID: claim.Job.ID, AttemptID: claim.AttemptID, Status: "failed", Error: config.RedactString(err.Error()), Now: now, AvailableAt: now.Add(hostFailedRetryDelay(claim.Job.Attempts))})
@@ -458,7 +508,7 @@ func (h *HostRunner) claimReady(ctx stdctx.Context, repos map[int64]HostRepoConf
 		review := repo.Review
 		timeout := repo.ReviewTimeout
 		if timeout <= 0 {
-			timeout = h.reviewTO
+			timeout = snap.reviewTO
 		}
 		if claim.Job.Number <= 0 || claim.Job.Number > int64(math.MaxInt) {
 			_ = h.store.CompleteHostJob(ctx, store.HostJobCompleteInput{JobID: claim.Job.ID, AttemptID: claim.AttemptID, Status: "failed", Error: "invalid PR number", Now: h.now().UTC()})

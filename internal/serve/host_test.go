@@ -110,7 +110,7 @@ func TestHostRunnerTickReturnsPollIntervalFloor(t *testing.T) {
 	if err != nil {
 		t.Fatalf("NewHostRunner: %v", err)
 	}
-	wait, err := r.tick(stdctx.Background())
+	wait, err := r.tick(stdctx.Background(), r.snapshot())
 	if err != nil {
 		t.Fatalf("tick: %v", err)
 	}
