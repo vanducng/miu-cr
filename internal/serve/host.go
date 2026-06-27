@@ -265,12 +265,12 @@ func (h *HostRunner) Run(ctx stdctx.Context) {
 	nextJanitor := time.Time{}
 	for {
 		start := h.now()
-		oldJanitor := h.snapshot().janitorInterval
 		next, err := h.loadReload(ctx)
 		if err != nil && ctx.Err() == nil {
 			h.log.Warn("host: config reload failed; keeping previous config", "error", config.RedactString(err.Error()))
 		}
 		h.mu.Lock()
+		oldJanitor := h.janitorInterval
 		if err == nil {
 			h.applyReloadLocked(next)
 		}
