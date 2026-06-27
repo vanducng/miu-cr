@@ -1,0 +1,87 @@
+package cli
+
+import (
+	"bytes"
+	"log/slog"
+	"strings"
+	"testing"
+)
+
+func TestParseCLILogLevel(t *testing.T) {
+	tests := []struct {
+		raw  string
+		want slog.Level
+	}{
+		{"", slog.LevelInfo},
+		{"debug", slog.LevelDebug},
+		{"INFO", slog.LevelInfo},
+		{"warn", slog.LevelWarn},
+		{"warning", slog.LevelWarn},
+		{"error", slog.LevelError},
+	}
+	for _, tt := range tests {
+		got, err := parseCLILogLevel(tt.raw)
+		if err != nil {
+			t.Fatalf("parseCLILogLevel(%q): %v", tt.raw, err)
+		}
+		if got != tt.want {
+			t.Fatalf("parseCLILogLevel(%q) = %v, want %v", tt.raw, got, tt.want)
+		}
+	}
+	if _, err := parseCLILogLevel("verbose"); err == nil {
+		t.Fatal("expected invalid log level to fail")
+	}
+}
+
+func TestServeTraceSinkFromEnv(t *testing.T) {
+	var buf bytes.Buffer
+	log := slog.New(slog.NewTextHandler(&buf, &slog.HandlerOptions{Level: slog.LevelDebug}))
+
+	t.Setenv("MIUCR_TRACE_LOG", "")
+	sink, err := serveTraceSinkFromEnv(log)
+	if err != nil {
+		t.Fatalf("default trace env: %v", err)
+	}
+	if sink != nil {
+		t.Fatal("trace sink should be disabled by default")
+	}
+
+	t.Setenv("MIUCR_TRACE_LOG", "true")
+	t.Setenv("MIUCR_TRACE_LOG_MAX_BYTES", "512")
+	sink, err = serveTraceSinkFromEnv(log)
+	if err != nil {
+		t.Fatalf("enabled trace env: %v", err)
+	}
+	if sink == nil {
+		t.Fatal("trace sink should be enabled")
+	}
+
+	t.Setenv("MIUCR_TRACE_LOG_MAX_BYTES", "small")
+	if _, err := serveTraceSinkFromEnv(log); err == nil {
+		t.Fatal("invalid max bytes should fail")
+	}
+}
+
+func TestTraceLogSinkRedactsAndTruncates(t *testing.T) {
+	var buf bytes.Buffer
+	log := slog.New(slog.NewTextHandler(&buf, &slog.HandlerOptions{Level: slog.LevelDebug}))
+	sink := newTraceLogSink(log, 128)
+
+	sink("user_prompt", map[string]string{
+		"text": "password=synthetic-secret-value " + strings.Repeat("x", 300),
+	})
+
+	out := buf.String()
+	if !strings.Contains(out, "review trace") || !strings.Contains(out, "step=user_prompt") {
+		t.Fatalf("missing trace log fields: %s", out)
+	}
+	if strings.Contains(out, "synthetic-secret-value") {
+		t.Fatalf("secret leaked through trace log: %s", out)
+	}
+	if !strings.Contains(out, "password=[redacted]") {
+		t.Fatalf("redacted marker missing: %s", out)
+	}
+	if !strings.Contains(out, "truncated=true") || !strings.Contains(out, "...[truncated]") {
+		t.Fatalf("trace payload was not truncated: %s", out)
+	}
+}

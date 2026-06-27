@@ -29,6 +29,9 @@ services:
     environment:
       MIUCR_CONFIG: /etc/miu/cr/host.yaml
       MIUCR_PG_DSN: ${MIUCR_PG_DSN:-postgres://miucr:miucr@postgres:5432/miucr?sslmode=disable}
+      MIUCR_LOG_LEVEL: ${MIUCR_LOG_LEVEL:-debug}
+      MIUCR_TRACE_LOG: ${MIUCR_TRACE_LOG:-false}
+      MIUCR_TRACE_LOG_MAX_BYTES: ${MIUCR_TRACE_LOG_MAX_BYTES:-4096}
       MIUCR_EXAMPLE_GITHUB_APP_PRIVATE_KEY_PATH: /run/secrets/github-app-private-key.pem
     volumes:
       - ${MIUCR_HOST_CONFIG:-./config.example.yaml}:/etc/miu/cr/host.yaml:ro

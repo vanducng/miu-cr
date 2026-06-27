@@ -113,7 +113,7 @@ func rootCommand(opts *options) *cobra.Command {
 		default:
 			return &CLIError{Code: "output.invalid_format", Message: fmt.Sprintf("unknown output format %q", opts.output), Hint: "use json, pretty, or sarif", Exit: 2}
 		}
-		return nil
+		return configureDefaultLogger(cmd.ErrOrStderr())
 	}
 	root.AddCommand(initCommand(opts))
 	root.AddCommand(loginCommand(opts))
@@ -178,7 +178,10 @@ func serveCommand(opts *options) *cobra.Command {
 				if hostStoreFactory == nil {
 					return &CLIError{Code: "serve.host_store_unwired", Message: "serve --host store is not wired", Exit: 1}
 				}
-				log := slog.New(slog.NewTextHandler(cmd.ErrOrStderr(), &slog.HandlerOptions{Level: slog.LevelInfo}))
+				log, err := newCLITextLogger(cmd.ErrOrStderr())
+				if err != nil {
+					return err
+				}
 				hostStore, closeStore, err := hostStoreFactory(cmd.Context(), hostCfg)
 				if err != nil {
 					return err
@@ -202,7 +205,12 @@ func serveCommand(opts *options) *cobra.Command {
 				if workers <= 0 {
 					workers = 1
 				}
-				pool := serve.NewPoolWithWorkers(buildServeReviewFn(log, "", reviewStore), log, workers)
+				traceSink, err := serveTraceSinkFromEnv(log)
+				if err != nil {
+					closeStore()
+					return err
+				}
+				pool := serve.NewPoolWithWorkers(buildServeReviewFn(log, "", reviewStore, traceSink), log, workers)
 				interval := durationOrDefault(hostCfg.Host.PollInterval, time.Minute)
 				if cmd.Flags().Changed("poll-interval") {
 					interval = pollInterval
@@ -279,7 +287,10 @@ func serveCommand(opts *options) *cobra.Command {
 				}
 			}
 
-			log := slog.New(slog.NewTextHandler(cmd.ErrOrStderr(), &slog.HandlerOptions{Level: slog.LevelInfo}))
+			log, err := newCLITextLogger(cmd.ErrOrStderr())
+			if err != nil {
+				return err
+			}
 			reviewTO := 15 * time.Minute
 
 			tokenSource, err := buildTokenSource(cfg.Github)
@@ -314,7 +325,11 @@ func serveCommand(opts *options) *cobra.Command {
 				defer closeStore()
 				reviewStore = st
 			}
-			reviewFn := buildServeReviewFn(log, gate, reviewStore)
+			traceSink, err := serveTraceSinkFromEnv(log)
+			if err != nil {
+				return err
+			}
+			reviewFn := buildServeReviewFn(log, gate, reviewStore, traceSink)
 
 			pollCfg := func(disp serve.Dispatcher) serve.PollConfig {
 				return serve.PollConfig{
@@ -952,7 +967,7 @@ func buildTokenSource(g config.Github) (ghub.TokenSource, error) {
 // RETURNED cli.ReviewOutcome (not in Job.OnDone(error)), so the upsert rides here,
 // inside reviewFn, not in OnDone. The webhook/poll paths leave ReviewID empty and
 // skip the upsert (byte-for-byte unchanged).
-func buildServeReviewFn(log *slog.Logger, gate string, st serve.ReviewStore) func(serve.Job) error {
+func buildServeReviewFn(log *slog.Logger, gate string, st serve.ReviewStore, traceSink func(step string, payload any)) func(serve.Job) error {
 	return func(j serve.Job) error {
 		review := serve.JobReviewOptions{Post: true, Gate: gate}
 		if j.Review != nil {
@@ -968,7 +983,7 @@ func buildServeReviewFn(log *slog.Logger, gate string, st serve.ReviewStore) fun
 		jobCtx, cancel := stdctx.WithTimeout(stdctx.Background(), timeout)
 		defer cancel()
 		progress := func(stage string) {
-			log.Info("review progress", "ref", j.Ref, "stage", config.RedactString(stage))
+			log.Debug("review progress", "ref", j.Ref, "stage", config.RedactString(stage))
 		}
 		out, err := ReviewPRForServe(jobCtx, PRReviewRequest{
 			Ref:            j.Ref,
@@ -995,6 +1010,7 @@ func buildServeReviewFn(log *slog.Logger, gate string, st serve.ReviewStore) fun
 			Mode:           review.Mode,
 			Force:          review.Force,
 			Progress:       progress,
+			TraceSink:      traceSink,
 		})
 		if err != nil {
 			log.Error("review failed", "ref", j.Ref, "err", config.RedactString(err.Error()))

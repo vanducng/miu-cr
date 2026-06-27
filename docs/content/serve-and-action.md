@@ -317,6 +317,20 @@ The workspace-size fields are validated and reserved for the managed-workspace
 phase. V1 PR reviews still use the existing temp-clone path, so host mode does
 not delete arbitrary filesystem children under `workspace_dir`.
 
+### Host logging and trace payloads
+
+`MIUCR_LOG_LEVEL` controls process logs (`debug`, `info`, `warn`, `error`;
+default `info`). The review-host compose example defaults it to `debug` so local
+dogfood shows poll activity, review progress, tool turns, and lifecycle events.
+
+Live trace payload logging is separate and off by default. Set
+`MIUCR_TRACE_LOG=true` to stream captured review trace steps into debug logs:
+system prompt, user prompt, selected files, injected rules, resolved model,
+tool calls, and final response. Each payload is redacted with the same free-text
+redactor used elsewhere and then truncated to `MIUCR_TRACE_LOG_MAX_BYTES`
+(default `4096`, minimum `256`). Treat it as a local/debug switch because
+payloads can include prompt and diff context.
+
 A complete runnable example is in
 [`examples/review-host/`](https://github.com/vanducng/miu-cr/tree/main/examples/review-host).
 The Docker publish workflow builds the same runtime image and pushes it as

@@ -289,7 +289,9 @@ WEBHOOK_SECRET=… GITHUB_TOKEN=… ANTHROPIC_API_KEY=… \
 | `--poll-source notifications\|pulls` | `notifications` | Candidate source. `pulls` = full coverage / cold-start-complete. |
 
 Env: `WEBHOOK_SECRET` (required unless poll-only), `GITHUB_TOKEN`/`GH_TOKEN` (required unless `[github] mode=app`),
-`ANTHROPIC_API_KEY` (or compatible). Endpoints: `POST /webhook` (HMAC), `GET /healthz`. Each new head SHA = one full
+`ANTHROPIC_API_KEY` (or compatible). `MIUCR_LOG_LEVEL=debug` enables progress/tool-turn logs; `MIUCR_TRACE_LOG=true`
+adds bounded debug trace payloads (`MIUCR_TRACE_LOG_MAX_BYTES`, default `4096`) that are redacted/truncated but may
+include prompt/diff context. Endpoints: `POST /webhook` (HMAC), `GET /healthz`. Each new head SHA = one full
 LLM review; allowlist + per-head dedup are the only spend guards. serve inherits `--suggest`/`--approve-clean` **OFF**.
 
 **Opt-in REST API**: set `MIUCR_API_TOKEN` (env-only, no flag) to register `/v1`:
@@ -338,7 +340,9 @@ workspaces, and poll cursors. Startup applies versioned schema migrations under
 an advisory lock. Claims use row locks for concurrency, and `host.retention`
 prunes old jobs/attempts/sessions/workspace records/cursors.
 Workspace-size limits are validated but filesystem deletion waits for managed
-host workspaces. Public synthetic compose + config example: `examples/review-host/`.
+host workspaces. The review-host compose example defaults `MIUCR_LOG_LEVEL=debug`
+for local dogfood while leaving `MIUCR_TRACE_LOG=false`. Public synthetic compose
+and config example: `examples/review-host/`.
 
 ### `rules`: project review context
 
