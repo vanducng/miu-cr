@@ -32,21 +32,30 @@ func estTokens(s string) int { return len(s) / 4 }
 // allowContextFiles is false (fork PRs). The whole section is held under cap
 // tokens by dropping the least-important rules last (input order is the
 // truncation order); truncated is set when any selected rule is dropped. A cap
-// of <=0 disables the token cap.
-func BuildRulesSection(selected []Rule, allowContextFiles bool, cap int) (text string, applied int, truncated bool) {
+// of <=0 disables the token cap. When useXML is true, rules are emitted in
+// XML-tagged form with all bodies XML-escaped; when false, the legacy fence form
+// is used (default, byte-identical).
+func BuildRulesSection(selected []Rule, allowContextFiles bool, cap int, useXML bool) (text string, applied int, truncated bool) {
 	if len(selected) == 0 {
 		return "", 0, false
+	}
+
+	renderFn := renderRule
+	assembleFn := assembleSection
+	if useXML {
+		renderFn = renderRuleXML
+		assembleFn = assembleSectionXML
 	}
 
 	var totalContext int
 	blocks := make([]string, 0, len(selected))
 	for _, r := range selected {
-		blocks = append(blocks, renderRule(r, allowContextFiles, &totalContext))
+		blocks = append(blocks, renderFn(r, allowContextFiles, &totalContext))
 	}
 
 	kept := len(blocks)
 	for {
-		section := assembleSection(blocks[:kept])
+		section := assembleFn(blocks[:kept])
 		if cap <= 0 || estTokens(section) <= cap || kept <= 1 {
 			truncated = kept < len(blocks)
 			if cap > 0 && estTokens(section) > cap && kept == 1 {
@@ -68,6 +77,52 @@ func assembleSection(blocks []string) string {
 	sb.WriteString("=== Project review rules (context) ===\n")
 	sb.WriteString(strings.Join(blocks, "\n"))
 	sb.WriteString("\n")
+	return sb.String()
+}
+
+// xmlEsc escapes text for XML element body content.
+func xmlEsc(s string) string {
+	s = strings.ReplaceAll(s, "&", "&amp;")
+	s = strings.ReplaceAll(s, "<", "&lt;")
+	s = strings.ReplaceAll(s, ">", "&gt;")
+	return s
+}
+
+// xmlEscAttr escapes text for an XML attribute value (additionally escapes ").
+func xmlEscAttr(s string) string {
+	s = xmlEsc(s)
+	s = strings.ReplaceAll(s, `"`, "&quot;")
+	return s
+}
+
+func assembleSectionXML(blocks []string) string {
+	if len(blocks) == 0 {
+		return ""
+	}
+	var sb strings.Builder
+	sb.WriteString("<rules>\n")
+	sb.WriteString(strings.Join(blocks, ""))
+	sb.WriteString("</rules>\n")
+	return sb.String()
+}
+
+func renderRuleXML(r Rule, allowContextFiles bool, totalContext *int) string {
+	var sb strings.Builder
+	sb.WriteString(fmt.Sprintf("<rule stem=%q provenance=%q>\n", xmlEscAttr(r.Stem), xmlEscAttr(r.Provenance.String())))
+	if r.FM.Description != "" {
+		sb.WriteString(xmlEsc(r.FM.Description))
+		sb.WriteString("\n")
+	}
+	if r.Body != "" {
+		sb.WriteString(xmlEsc(r.Body))
+		sb.WriteString("\n")
+	}
+	if allowContextFiles {
+		for _, cf := range r.FM.ContextFiles {
+			sb.WriteString(inlineContextFile(r, cf, totalContext))
+		}
+	}
+	sb.WriteString("</rule>\n")
 	return sb.String()
 }
 

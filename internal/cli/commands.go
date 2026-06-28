@@ -662,6 +662,7 @@ type hostReviewAnalysisFields struct {
 	Gate         string
 	FilterMode   string
 	MinSeverity  string
+	PromptFormat string
 	Timeout      string
 	Expand       *int
 	TokenBudget  *int
@@ -704,6 +705,7 @@ func hostReviewOptions(providerName string, provider config.HostProvider, secret
 		FilterMode:    review.FilterMode,
 		MinSeverity:   review.MinSeverity,
 		Format:        review.Format,
+		PromptFormat:  review.PromptFormat,
 		Mode:          review.Mode,
 		BaseURL:       provider.BaseURL,
 		Model:         provider.Model,
@@ -1099,6 +1101,9 @@ func mergeHostReview(base, over config.HostReview) config.HostReview {
 	if over.Format != "" {
 		out.Format = over.Format
 	}
+	if over.PromptFormat != "" {
+		out.PromptFormat = over.PromptFormat
+	}
 	if over.Timeout != "" {
 		out.Timeout = over.Timeout
 	}
@@ -1270,6 +1275,7 @@ func buildServeReviewFn(log *slog.Logger, gate string, st serve.ReviewStore, tra
 			FilterMode:     review.FilterMode,
 			MinSeverity:    review.MinSeverity,
 			Format:         review.Format,
+			PromptFormat:   review.PromptFormat,
 			OperatorPrompt: review.OperatorPrompt,
 			Conversation:   review.Conversation,
 			Mode:           review.Mode,
@@ -1458,5 +1464,5 @@ func commandPath(args []string) string {
 
 func init() {
 	cobra.EnableCommandSorting = false
-	config.SetReviewValidators(engine.ValidGate, ghub.ValidFilterMode, ghub.ValidMinSeverity, ghub.ValidFormat)
+	config.SetReviewValidators(engine.ValidGate, ghub.ValidFilterMode, ghub.ValidMinSeverity, ghub.ValidFormat, engine.ValidPromptFormat)
 }

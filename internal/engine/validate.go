@@ -16,6 +16,11 @@ var validGates = map[string]bool{
 // ValidGate reports whether gate is in the closed gate set.
 func ValidGate(gate string) bool { return validGates[gate] }
 
+var validPromptFormats = map[string]bool{"legacy": true, "xml": true}
+
+// ValidPromptFormat reports whether f is a known prompt format.
+func ValidPromptFormat(f string) bool { return validPromptFormats[f] }
+
 // ValidateInvocation rejects an invalid gate and any mode combination that is
 // not exactly one of staged / from+to / commit. It is the single contract both
 // external boundaries (CLI flags, MCP review_run) enforce, so a host can never

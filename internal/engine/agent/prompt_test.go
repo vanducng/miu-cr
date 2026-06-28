@@ -423,6 +423,84 @@ func TestReviewSystemPromptUnchangedByRepair(t *testing.T) {
 	}
 }
 
+// TestBuildUserPromptLegacyByteIdentical verifies that Format="" and
+// Format="legacy" produce byte-identical output — the legacy path must not
+// diverge from the pre-xml baseline.
+func TestBuildUserPromptLegacyByteIdentical(t *testing.T) {
+	parts := PromptParts{
+		Rules:           "## Rule: sec (user)\nbody",
+		SemanticContext: "- [bug] off-by-one",
+		ProjectContext:  "proj ctx",
+		RelatedContext:  "related ctx",
+		Instruction:     "focus on auth",
+		Conversation:    "PR thread",
+		Diff:            "=== File: a.go ===\n+func boom() {}\n",
+	}
+	empty := BuildUserPrompt(parts)
+	parts.Format = "legacy"
+	explicit := BuildUserPrompt(parts)
+	if empty != explicit {
+		t.Fatalf("Format=\"\" and Format=\"legacy\" must be byte-identical\n empty=%q\nexplicit=%q", empty, explicit)
+	}
+}
+
+// TestBuildUserPromptXMLShape verifies that Format="xml" wraps sections in XML
+// tags instead of fenced blocks, and that body text is properly escaped.
+func TestBuildUserPromptXMLShape(t *testing.T) {
+	diff := "=== File: a.go ===\n+func boom() {}\n"
+	got := BuildUserPrompt(PromptParts{
+		Rules:        "RULES",
+		Instruction:  "focus on auth",
+		Conversation: "PR <thread> & notes",
+		Diff:         diff,
+		Format:       "xml",
+	})
+	// XML tags present
+	if !contains(got, "<instruction>") {
+		t.Fatalf("xml: <instruction> tag missing:\n%s", got)
+	}
+	if !contains(got, "<conversation>") {
+		t.Fatalf("xml: <conversation> tag missing:\n%s", got)
+	}
+	// Body text is XML-escaped
+	if !contains(got, "PR &lt;thread&gt; &amp; notes") {
+		t.Fatalf("xml: conversation body not escaped:\n%s", got)
+	}
+	// Diff still present
+	if !contains(got, diff) {
+		t.Fatalf("xml: diff missing:\n%s", got)
+	}
+}
+
+// TestXMLEscapeAttr verifies that attribute values are fully escaped.
+func TestXMLEscapeAttr(t *testing.T) {
+	// The xmlEscAttr func must escape <, >, &, and "
+	cases := []struct{ in, want string }{
+		{`a"b`, `a&quot;b`},
+		{`<tag>`, `&lt;tag&gt;`},
+		{`a & b`, `a &amp; b`},
+	}
+	for _, c := range cases {
+		got := xmlEscAttr(c.in)
+		if got != c.want {
+			t.Errorf("xmlEscAttr(%q) = %q, want %q", c.in, got, c.want)
+		}
+	}
+}
+
+// TestReviewSystemPromptXMLVariant ensures the xml systemPrompt differs from
+// legacy and references XML file delimiters.
+func TestReviewSystemPromptXMLVariant(t *testing.T) {
+	legacy := reviewSystemPrompt("", "")
+	xml := reviewSystemPrompt("xml", "")
+	if legacy == xml {
+		t.Fatal("xml systemPrompt must differ from legacy")
+	}
+	if !contains(xml, `<file path=`) {
+		t.Fatalf("xml systemPrompt must reference <file path=...> delimiter:\n%s", xml)
+	}
+}
+
 func TestParseRepairReplyStripsFencesAndTrims(t *testing.T) {
 	for _, tc := range []struct {
 		name, in, want string

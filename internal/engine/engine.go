@@ -243,7 +243,11 @@ type AgentContext struct {
 	Instruction string
 	// Conversation is the optional fetched PR conversation (Untrusted, fenced,
 	// byte-capped, context-only). LOCKSTEP: mirror Instruction at every hop.
-	Conversation   string
+	Conversation string
+	// PromptFormat selects the prompt serialization: "" or "legacy" → legacy fenced
+	// format (default, byte-identical); "xml" → XML-tagged format. LOCKSTEP: mirror
+	// Conversation at every hop or xml is silently dropped.
+	PromptFormat   string
 	OperatorPrompt string
 	RepoDir        string
 	Rev            string
@@ -351,6 +355,9 @@ type Request struct {
 	// drops it on fork PRs. Threaded onto AgentContext so it rides the USER turn; empty
 	// is byte-identical. LOCKSTEP: mirror Instruction at every hop.
 	Conversation string
+	// PromptFormat selects the prompt serialization: "" or "legacy" → legacy (default,
+	// byte-identical); "xml" → XML-tagged. LOCKSTEP: mirror Conversation at every hop.
+	PromptFormat string
 	// OperatorPrompt is trusted host policy. LOCKSTEP: mirror Conversation at every hop.
 	OperatorPrompt string
 
@@ -516,6 +523,7 @@ func (e *Engine) Review(ctx stdctx.Context, req Request) (ReviewResult, error) {
 	assembled := enginectx.AssembleContext(selected, enginectx.AssembleOptions{
 		TokenBudget:  diffBudget(req.TokenBudget, req.RulesTokenBudget),
 		ExpandWindow: req.ExpandWindow,
+		UseXML:       req.PromptFormat == "xml",
 	})
 	assembleMS := time.Since(assembleStart).Milliseconds()
 
@@ -724,7 +732,7 @@ func (e *Engine) buildRules(req Request, selected []diff.Diff, trace *ReviewTrac
 		refs = append(refs, RuleRef{Stem: r.Stem, Provenance: r.Provenance.String()})
 	}
 	trace.SetInjectedRules(refs)
-	return rules.BuildRulesSection(picked, !req.RulesFork, req.RulesTokenBudget)
+	return rules.BuildRulesSection(picked, !req.RulesFork, req.RulesTokenBudget, req.PromptFormat == "xml")
 }
 
 // trustedOnly drops Untrusted (repo) rules, used on fork PRs where repo rules

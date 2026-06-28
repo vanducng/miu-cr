@@ -84,6 +84,7 @@ func (e *Engine) reviewOnce(ctx stdctx.Context, req Request, text string, shared
 		WantDiagram:     req.WantDiagram,
 		Instruction:     instruction,
 		Conversation:    req.Conversation,
+		PromptFormat:    req.PromptFormat,
 		OperatorPrompt:  operatorPrompt,
 		RepoDir:         req.RepoDir,
 		Rev:             shared.rev,
@@ -171,6 +172,7 @@ func runSubagentPlans(ctx stdctx.Context, e *Engine, req Request, plans []subage
 			assembled := enginectx.AssembleContext(plan.files, enginectx.AssembleOptions{
 				TokenBudget:  subagentDiffBudget(req, shared),
 				ExpandWindow: req.ExpandWindow,
+				UseXML:       req.PromptFormat == "xml",
 			})
 			var trace *ReviewTrace
 			if shared.trace != nil {

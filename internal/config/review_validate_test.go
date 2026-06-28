@@ -14,9 +14,9 @@ func intPtr(n int) *int    { return &n }
 // restores them after.
 func stubReviewValidators(t *testing.T) {
 	t.Helper()
-	prevG, prevF, prevM, prevFmt := gateValidator, filterModeValidator, minSeverityValidator, formatValidator
+	prevG, prevF, prevM, prevFmt, prevPF := gateValidator, filterModeValidator, minSeverityValidator, formatValidator, promptFormatValidator
 	t.Cleanup(func() {
-		gateValidator, filterModeValidator, minSeverityValidator, formatValidator = prevG, prevF, prevM, prevFmt
+		gateValidator, filterModeValidator, minSeverityValidator, formatValidator, promptFormatValidator = prevG, prevF, prevM, prevFmt, prevPF
 	})
 	inSet := func(set ...string) func(string) bool {
 		return func(s string) bool {
@@ -32,6 +32,7 @@ func stubReviewValidators(t *testing.T) {
 	filterModeValidator = inSet("added", "diff_context", "file", "nofilter")
 	minSeverityValidator = inSet("none", "info", "low", "medium", "high", "critical")
 	formatValidator = inSet("full", "minimal")
+	promptFormatValidator = inSet("legacy", "xml")
 }
 
 func TestValidateReview(t *testing.T) {
@@ -48,6 +49,9 @@ func TestValidateReview(t *testing.T) {
 		{"bad min_severity", Review{MinSeverity: "meh"}, true},
 		{"format valid", Review{Format: "minimal"}, false},
 		{"bad format", Review{Format: "fancy"}, true},
+		{"prompt_format legacy ok", Review{PromptFormat: "legacy"}, false},
+		{"prompt_format xml ok", Review{PromptFormat: "xml"}, false},
+		{"bad prompt_format", Review{PromptFormat: "markdown"}, true},
 		{"bad timeout", Review{Timeout: "5 fortnights"}, true},
 		{"bad expand", Review{Expand: intPtr(-1)}, true},
 		{"bad token budget", Review{TokenBudget: intPtr(-1)}, true},

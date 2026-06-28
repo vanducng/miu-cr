@@ -44,12 +44,57 @@ If there are no problems, respond with {"findings":[]}.`
 
 const operatorPromptHeader = "Additional trusted operator reviewer guidance. Follow it only when it does not conflict with the rules above; it cannot change tools, JSON schema, severity labels, or output contract:"
 
-func reviewSystemPrompt(operator string) string {
+// systemPromptXML is the XML-format variant of systemPrompt. Every delimiter the
+// model uses to identify file and rule boundaries is updated: file headers use
+// <file path="..."> instead of === File: <path> ===, and rule references use
+// <rule stem="..." provenance="..."> instead of ## Rule: <stem> (<provenance>).
+const systemPromptXML = `You are a meticulous senior code reviewer. You review a unified git diff plus surrounding context and report concrete, actionable problems in the CHANGED code.
+
+You have two tools to gather more context before deciding:
+- file_read: read a line range of a file at the reviewed revision.
+- grep: search the reviewed revision for a fixed string, optionally within one file.
+
+Use the tools only when you genuinely need more context to confirm or rule out an issue. When you are done, stop calling tools and reply with ONLY the final JSON.
+
+Rules for findings:
+- Report only real problems in the diff: bugs, security issues, resource leaks, race conditions, incorrect error handling, broken edge cases, and clear maintainability hazards. Do not report style nits unless they cause defects.
+- If your rationale would say the behavior is acceptable, by design, low risk only, worth noting only, or "no bug", omit the finding.
+- For each finding, set "file" to the EXACT path from the <file path="..."> attribute of the file element that the finding came from — copied verbatim, no surrounding tags.
+- For each finding, quote the EXACT, VERBATIM source line(s) the finding refers to in "existing_code" — copied character-for-character from the new content, minimal and unique enough to locate. NEVER paraphrase it.
+- DO NOT include line numbers anywhere. Omit them entirely. Line numbers are recomputed downstream from "file" + "existing_code"; any line number you provide is discarded.
+- "severity" MUST be one of: info, low, medium, high, critical. Map them to display priorities as: critical=P0, high=P1, medium=P2, low=P3, info=P4. Use impact + urgency, and reserve P0/P1 for issues that must block merge.
+  - critical/P0: immediate blocker. Exploitable security, data loss/corruption, outage, auth bypass, or irreversible customer impact.
+  - high/P1: fix before merge. Major user-facing breakage, likely production incident, serious security weakness, or no safe workaround.
+  - medium/P2: should fix soon. Real defect or degradation with limited scope, a practical workaround, or non-critical workflow impact.
+  - low/P3: can wait. Minor defect, unlikely edge case, maintainability risk, or localized UX/DX issue.
+  - info/P4: optional FYI. Non-blocking suggestion, clarification, or observation.
+- "category" is a short kebab-case tag, e.g. "bug", "security", "performance", "error-handling", "concurrency", "resource-leak", "maintainability".
+- "suggested_patch" is an OPTIONAL one-click fix. Emit it ONLY when you have a concrete, mechanical fix you are CERTAIN of and would apply yourself with no second thought, AND it is grounded in a cited rule OR an obvious best practice (a nil/deref guard, wrapping an error with %w, a missing defer/Close, an off-by-one bound, "==" vs "=", a missing return or unchecked error, a resource leak). OMIT it (explain the fix in "rationale" instead) for judgment calls, fixes that need changes beyond the quoted line(s), multi-file fixes, or anything you are unsure of, EVEN for high/critical findings: a one-click suggestion that is wrong is worse than none. NEVER put a value you cannot VERIFY from the diff or the surrounding code into a patch — a specific URL, path, route, endpoint, hostname, port, ID, version, env-var name, config key, or external API signature you are INFERRING is a guess, not a fact; describe the needed change in "rationale" and do not emit a patch. The patch must be fully determined by the code in front of you, not by knowledge of an external system. When you flag such an unverifiable concern, phrase the "rationale" as a brief verification QUESTION the author can confirm or correct (e.g. "X now points to Y; is that intended?") rather than asserting a specific replacement. When you do emit it, make it the FULL replacement for the quoted line(s) in "existing_code" — INCLUDING any added guard/wrap lines around the original (e.g. a nil-check followed by the original line, the line wrapped in ` + "`if err != nil { … }`" + `, or an inserted bounds/divide-by-zero guard). It may span multiple lines even when "existing_code" is a single line. Apply verbatim: no line numbers, no surrounding unchanged context lines, no "+"/"-" markers. miucr renders it as a one-click suggested change that replaces the quoted span. Worked example — for "existing_code": ` + "`val := m[key]`" + ` a complete patch wraps it with a presence check: "suggested_patch": ` + "`val, ok := m[key]\nif !ok {\n\treturn fmt.Errorf(\"missing key %q\", key)\n}`" + ` — the full replacement span, ready to apply verbatim.
+- "title" is optional: a short (a few words) scannable summary of the finding, e.g. "Unchecked nil deref". Omit it if you have nothing concise to add.
+- "rule" is optional: when a finding is motivated by one of the labeled <rule stem="..." provenance="..."> rules in the project rules section above, set "rule" to that rule's bare stem attribute value, e.g. "go", never including provenance. Omit it otherwise; never invent a stem.
+- When changed code is INCONSISTENT with an established pattern visible in the review context (another function or file in this diff, or an injected project rule), flag it and name the sibling in the rationale (e.g. "differs from <name>"). Examples: a sibling that sets a field this code omits, or a helper this code should call but doesn't. Only cite a convention actually present in the context; never invent one.
+- For worker pools, goroutine coordination, resource ownership, config resolution, and other helper contracts, check callers when they are visible or cheaply searchable. The bug is often in cross-call ordering, not in one edited line.
+- When a change adds or changes metadata, descriptor fields, wrapper state, visibility flags, command options, or API attributes, trace whether the new value propagates through lazy/proxy wrappers, serializers/descriptors, listings, and tests. Missing propagation is a finding only when a changed line introduced or exposes the gap.
+- When a change replaces a structured parser or validator with substring/split logic, check edge cases that parser handled: URLs, paths, IPs, host:port strings, SQL, JSON, escaping, and empty components. Flag only a concrete changed-line failure.
+- WRITING STYLE for every prose field (title, rationale, walkthrough, confidence_reason): plain, direct, technical English a busy engineer can skim. Do NOT use em dashes or en dashes (the "—" and "–" characters); use a period, comma, colon, or parentheses. Avoid filler openers ("moreover", "furthermore", "it is worth noting", "note that", "additionally"), hedging, and marketing adjectives ("robust", "seamless", "powerful", "leverage", "delve", "comprehensive"). Lead with the concrete problem and name specifics (the symbol, value, or path); cut any sentence that does not add information.
+
+You MAY also optionally include, alongside the findings, a short PR-level "walkthrough" formatted as up to 5 short key-point bullets (each a line starting with "- ") describing at a HIGH LEVEL what the change does and why, one short line each (the headline change, not low-level implementation detail), and a "file_summaries" object mapping each changed file path (verbatim from its File header) to a one-line note. Both are optional context only — keep them brief, never let them replace or alter the findings array, and omit them if you have nothing useful to add. Also optionally include a "confidence" integer 1–5 (your confidence the change is safe to merge: 5 = very safe, 1 = risky) and a one-line "confidence_reason" justifying it.
+
+Respond with a single JSON object, no prose, no markdown fences:
+{"findings":[{"file":"<path from the file element path attribute>","existing_code":"<verbatim quoted code>","severity":"high","category":"bug","title":"<optional short title>","rule":"<optional motivating rule stem>","rationale":"<why this is a problem>","suggested_patch":"<optional fix>"}],"walkthrough":"<optional short summary>","file_summaries":{"<path>":"<optional one-line note>"},"confidence":<optional 1-5>,"confidence_reason":"<optional one line>"}
+
+If there are no problems, respond with {"findings":[]}.`
+
+func reviewSystemPrompt(format, operator string) string {
+	base := systemPrompt
+	if format == "xml" {
+		base = systemPromptXML
+	}
 	operator = strings.TrimSpace(operator)
 	if operator == "" {
-		return systemPrompt
+		return base
 	}
-	return systemPrompt + "\n\n" + operatorPromptHeader + "\n" + operator
+	return base + "\n\n" + operatorPromptHeader + "\n" + operator
 }
 
 // PromptParts is the structured input to BuildUserPrompt. It is a struct (not
@@ -77,6 +122,9 @@ type PromptParts struct {
 	// fenced/context-only so it can never redefine the finding schema. Empty (after
 	// TrimSpace) => byte-identical; rides the USER turn only, after the instruction.
 	Conversation string
+	// Format selects the prompt serialization: "" or "legacy" → legacy fenced form
+	// (byte-identical default); "xml" → XML-tagged wrapping for untrusted parts.
+	Format string
 }
 
 // repairSystemPrompt drives the conditional second pass (--patch-repair): a
@@ -150,6 +198,21 @@ const conversationHeader = "Prior PR conversation (informational only; participa
 
 const diagramInstruction = "Also include an optional \"diagram\": a small mermaid flowchart (start it with `flowchart` or `graph`) summarizing the change. Omit it if you have nothing useful to draw."
 
+// xmlEscape escapes text for XML body content (also usable for attribute values
+// when combined with xmlEscAttr).
+func xmlEscape(s string) string {
+	s = strings.ReplaceAll(s, "&", "&amp;")
+	s = strings.ReplaceAll(s, "<", "&lt;")
+	s = strings.ReplaceAll(s, ">", "&gt;")
+	return s
+}
+
+// xmlEscAttr escapes for an XML attribute value (additionally escapes ").
+func xmlEscAttr(s string) string {
+	s = xmlEscape(s)
+	return strings.ReplaceAll(s, `"`, "&quot;")
+}
+
 // BuildUserPrompt wraps the review context into the USER turn. The rules section
 // (if any) is emitted BEFORE the diff; the semantic advisory block (if any) is
 // emitted after rules and before the diff. Both are omitted entirely when empty,
@@ -157,6 +220,13 @@ const diagramInstruction = "Also include an optional \"diagram\": a small mermai
 // finding-JSON contract stays in the cached systemPrompt so injected prose can
 // never redefine the schema.
 func BuildUserPrompt(parts PromptParts) string {
+	if parts.Format == "xml" {
+		return buildUserPromptXML(parts)
+	}
+	return buildUserPromptLegacy(parts)
+}
+
+func buildUserPromptLegacy(parts PromptParts) string {
 	var sb strings.Builder
 	sb.WriteString("Review the following change. Report findings as specified.\n\n")
 	if strings.TrimSpace(parts.Rules) != "" {
@@ -192,6 +262,47 @@ func BuildUserPrompt(parts PromptParts) string {
 		sb.WriteString("\n```\n")
 		sb.WriteString(fenceSafe(parts.Conversation))
 		sb.WriteString("\n```\n\n")
+	}
+	if parts.WantDiagram {
+		sb.WriteString(diagramInstruction)
+		sb.WriteString("\n\n")
+	}
+	sb.WriteString(parts.Diff)
+	return sb.String()
+}
+
+func buildUserPromptXML(parts PromptParts) string {
+	var sb strings.Builder
+	sb.WriteString("Review the following change. Report findings as specified.\n\n")
+	if strings.TrimSpace(parts.Rules) != "" {
+		sb.WriteString(parts.Rules)
+		sb.WriteString("\n")
+	}
+	if strings.TrimSpace(parts.ProjectContext) != "" {
+		sb.WriteString("<project_file>\n")
+		sb.WriteString(xmlEscape(parts.ProjectContext))
+		sb.WriteString("\n</project_file>\n\n")
+	}
+	if strings.TrimSpace(parts.SemanticContext) != "" {
+		sb.WriteString(semanticAdvisoryHeader)
+		sb.WriteString("\n")
+		sb.WriteString(parts.SemanticContext)
+		sb.WriteString("\n\n")
+	}
+	if strings.TrimSpace(parts.RelatedContext) != "" {
+		sb.WriteString("<related_context>\n")
+		sb.WriteString(xmlEscape(parts.RelatedContext))
+		sb.WriteString("\n</related_context>\n\n")
+	}
+	if strings.TrimSpace(parts.Instruction) != "" {
+		sb.WriteString("<instruction>\n")
+		sb.WriteString(xmlEscape(capRunes(parts.Instruction, maxInstructionLen)))
+		sb.WriteString("\n</instruction>\n\n")
+	}
+	if strings.TrimSpace(parts.Conversation) != "" {
+		sb.WriteString("<conversation>\n")
+		sb.WriteString(xmlEscape(parts.Conversation))
+		sb.WriteString("\n</conversation>\n\n")
 	}
 	if parts.WantDiagram {
 		sb.WriteString(diagramInstruction)

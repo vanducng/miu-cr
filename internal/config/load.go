@@ -145,6 +145,9 @@ func mergeReview(base, file Review) Review {
 	if file.Thinking != "" {
 		out.Thinking = file.Thinking
 	}
+	if file.PromptFormat != "" {
+		out.PromptFormat = file.PromptFormat
+	}
 	if file.Expand != nil {
 		out.Expand = file.Expand
 	}

@@ -14,17 +14,18 @@ const maxReviewContextHops = 5
 // source of truth is not duplicated. Nil validators (e.g. a bare config test that
 // never wires them) accept any value; the cli always wires them before use.
 var (
-	gateValidator        func(string) bool
-	filterModeValidator  func(string) bool
-	minSeverityValidator func(string) bool
-	formatValidator      func(string) bool
+	gateValidator         func(string) bool
+	filterModeValidator   func(string) bool
+	minSeverityValidator  func(string) bool
+	formatValidator       func(string) bool
+	promptFormatValidator func(string) bool
 )
 
 // SetReviewValidators wires the enum predicates used by ValidateReview. Called
 // once from the cli package init so config can validate [review] values without
 // importing engine/github.
-func SetReviewValidators(gate, filterMode, minSeverity, format func(string) bool) {
-	gateValidator, filterModeValidator, minSeverityValidator, formatValidator = gate, filterMode, minSeverity, format
+func SetReviewValidators(gate, filterMode, minSeverity, format, promptFormat func(string) bool) {
+	gateValidator, filterModeValidator, minSeverityValidator, formatValidator, promptFormatValidator = gate, filterMode, minSeverity, format, promptFormat
 }
 
 // ValidateReview rejects an out-of-set [review] enum or an unparsable timeout,
@@ -43,6 +44,9 @@ func ValidateReview(r Review) error {
 	}
 	if r.Format != "" && formatValidator != nil && !formatValidator(r.Format) {
 		return invalidReview("format", r.Format, "full|minimal")
+	}
+	if r.PromptFormat != "" && promptFormatValidator != nil && !promptFormatValidator(r.PromptFormat) {
+		return invalidReview("prompt_format", r.PromptFormat, "legacy|xml")
 	}
 	if r.Timeout != "" {
 		if _, err := time.ParseDuration(r.Timeout); err != nil {

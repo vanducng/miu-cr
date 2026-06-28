@@ -37,6 +37,9 @@ func SetKey(cfg *Config, key, value string) error {
 	case key == "review.format":
 		cfg.Review.Format = value
 		return ValidateReview(cfg.Review)
+	case key == "review.prompt_format":
+		cfg.Review.PromptFormat = value
+		return ValidateReview(cfg.Review)
 	case key == "review.timeout":
 		cfg.Review.Timeout = value
 		return ValidateReview(cfg.Review)

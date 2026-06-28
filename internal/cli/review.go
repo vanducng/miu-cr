@@ -80,6 +80,7 @@ type ReviewRequest struct {
 	WantDiagram     bool   // opt into the mermaid change diagram (default off)
 	Instruction     string // optional per-review developer steer; injected fenced/context-only into the USER turn
 	OperatorPrompt  string
+	PromptFormat    string       // "legacy" (default) | "xml"
 	NoSave          bool         // opt out of persisting this run to the local history store
 	Progress        func(string) // nil = silent; stderr milestones, never the stdout envelope
 	// TraceSink, when non-nil, streams each captured trace step (system prompt, diff
@@ -215,6 +216,7 @@ type PRReviewRequest struct {
 	WantDiagram     bool   // opt into the mermaid change diagram (default off)
 	Instruction     string // optional per-review developer steer; injected fenced/context-only into the USER turn
 	OperatorPrompt  string
+	PromptFormat    string       // "legacy" (default) | "xml"
 	Conversation    bool         // opt into fetching the prior PR conversation; injected fenced/context-only, Untrusted, dropped on fork PRs
 	Mode            string       // review (default: inline+summary) | checks (GitHub Checks-API reporter)
 	NoSave          bool         // opt out of persisting this run to the local history store
@@ -326,6 +328,7 @@ func reviewCommand(opts *options) *cobra.Command {
 		filterMode   string
 		minSeverity  string
 		format       string
+		promptFormat string
 		wantDiagram  bool
 		instruction  string
 		conversation bool
@@ -358,6 +361,9 @@ func reviewCommand(opts *options) *cobra.Command {
 			if err := validateFormat(format); err != nil {
 				return err
 			}
+			if err := validatePromptFormat(promptFormat); err != nil {
+				return err
+			}
 			if contextHops < 0 || contextHops > maxContextHops {
 				return &CLIError{Code: "config.invalid", Message: fmt.Sprintf("--context-hops must be between 0 and %d", maxContextHops), Exit: 2}
 			}
@@ -372,7 +378,7 @@ func reviewCommand(opts *options) *cobra.Command {
 			return validateReviewFlags(staged, from, to, commit, gate)
 		},
 		RunE: func(cmd *cobra.Command, args []string) error {
-			rcfg, err := loadReviewDefaults(cmd, &gate, &filterMode, &minSeverity, &format, &expand, &tokenBudget, &deepContext, &contextHops, &conversation, &suggest, &patchRepair, &approval)
+			rcfg, err := loadReviewDefaults(cmd, &gate, &filterMode, &minSeverity, &format, &promptFormat, &expand, &tokenBudget, &deepContext, &contextHops, &conversation, &suggest, &patchRepair, &approval)
 			if err != nil {
 				return err
 			}
@@ -436,6 +442,7 @@ func reviewCommand(opts *options) *cobra.Command {
 					filterMode:      filterMode,
 					minSeverity:     minSeverity,
 					format:          format,
+					promptFormat:    promptFormat,
 					wantDiagram:     wantDiagram,
 					instruction:     instruction,
 					conversation:    conversation,
@@ -478,6 +485,7 @@ func reviewCommand(opts *options) *cobra.Command {
 				FilterMode:      filterMode,
 				WantDiagram:     wantDiagram,
 				Instruction:     instruction,
+				PromptFormat:    promptFormat,
 				NoSave:          noSave,
 				Progress:        prog,
 				TraceSink:       traceSink,
@@ -544,6 +552,7 @@ func reviewCommand(opts *options) *cobra.Command {
 	f.StringVar(&filterMode, "filter-mode", "diff_context", "Inline-eligibility filter on --pr: added|diff_context|file|nofilter (default diff_context; file/nofilter route off-diff findings to the summary/SARIF/local output, never inline)")
 	f.StringVar(&minSeverity, "min-severity", "", "Minimum severity posted INLINE on --pr: none|info|low|medium|high|critical (default keeps current behavior; below-threshold findings still appear in the summary histogram + SARIF, never inline)")
 	f.StringVar(&format, "format", "", "Review-comment presentation on --pr: full (default) | minimal (minimal drops the summary section + severity/priority badges, keeping inline findings)")
+	f.StringVar(&promptFormat, "prompt-format", "", "Review prompt format: legacy (default, fenced) | xml (XML-tagged elements)")
 	f.BoolVar(&wantDiagram, "walkthrough-diagram", false, "Ask the model to also emit an optional mermaid change diagram in the summary (opt-in; diagram quality varies; a malformed/omitted diagram degrades to a plain note)")
 	f.StringVar(&instruction, "instruction", "", "Extra free-text steer for THIS review (e.g. 'focus on the auth changes'); injected fenced, context-only, and length-capped, so it never redefines the finding schema")
 	f.BoolVar(&conversation, "conversation", false, "On --pr, fetch the prior PR conversation (miucr summary + review overviews + finding threads + developer replies) and inject it fenced/context-only as UNTRUSTED context (dropped on fork PRs); one extra read pass, no extra LLM call (default OFF)")
@@ -597,6 +606,7 @@ type prRunArgs struct {
 	filterMode      string
 	minSeverity     string
 	format          string
+	promptFormat    string
 	wantDiagram     bool
 	instruction     string
 	conversation    bool
@@ -658,6 +668,7 @@ func runPRReview(cmd *cobra.Command, a prRunArgs) error {
 		FilterMode:      a.filterMode,
 		MinSeverity:     a.minSeverity,
 		Format:          a.format,
+		PromptFormat:    a.promptFormat,
 		WantDiagram:     a.wantDiagram,
 		Instruction:     a.instruction,
 		Conversation:    a.conversation,
@@ -727,7 +738,7 @@ func runPRReview(cmd *cobra.Command, a prRunArgs) error {
 // command line. An explicit flag always wins (cmd.Flags().Changed); a config
 // value only fills an unset flag. Returns the validated Review so the caller can
 // also derive the timeout default. A config-load error propagates (typed).
-func loadReviewDefaults(cmd *cobra.Command, gate, filterMode, minSeverity, format *string, expand, tokenBudget *int, deepContext *bool, contextHops *int, conversation, suggest, patchRepair *bool, approval *config.ApprovalPolicy) (config.Review, error) {
+func loadReviewDefaults(cmd *cobra.Command, gate, filterMode, minSeverity, format, promptFormat *string, expand, tokenBudget *int, deepContext *bool, contextHops *int, conversation, suggest, patchRepair *bool, approval *config.ApprovalPolicy) (config.Review, error) {
 	cfg, err := config.Load()
 	if err != nil {
 		return config.Review{}, err
@@ -751,6 +762,9 @@ func loadReviewDefaults(cmd *cobra.Command, gate, filterMode, minSeverity, forma
 	}
 	if r.Format != "" && !f.Changed("format") {
 		*format = r.Format
+	}
+	if r.PromptFormat != "" && !f.Changed("prompt-format") {
+		*promptFormat = r.PromptFormat
 	}
 	if r.Expand != nil && !f.Changed("expand") {
 		*expand = *r.Expand
@@ -900,6 +914,19 @@ func validateFormat(format string) error {
 		Code:    "flags.invalid_format",
 		Message: fmt.Sprintf("unknown --format %q", format),
 		Hint:    "use " + strings.Join(ghub.ModeNames(), ", "),
+		Exit:    2,
+	}
+}
+
+// validatePromptFormat rejects an out-of-set --prompt-format value.
+func validatePromptFormat(f string) error {
+	if f == "" || f == "legacy" || f == "xml" {
+		return nil
+	}
+	return &CLIError{
+		Code:    "flags.invalid_prompt_format",
+		Message: fmt.Sprintf("unknown --prompt-format %q", f),
+		Hint:    "use legacy (default) or xml",
 		Exit:    2,
 	}
 }

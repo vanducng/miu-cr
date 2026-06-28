@@ -253,6 +253,7 @@ func (engineReviewer) Review(ctx stdctx.Context, req cli.ReviewRequest) (cli.Rev
 		RulesTokenBudget: defaultRulesTokenBudget,
 		WantDiagram:      req.WantDiagram,
 		Instruction:      req.Instruction,
+		PromptFormat:     req.PromptFormat,
 		OperatorPrompt:   req.OperatorPrompt,
 		Progress:         req.Progress,
 		TraceSink:        req.TraceSink,
@@ -476,6 +477,7 @@ func (prReviewer) ReviewPR(ctx stdctx.Context, req cli.PRReviewRequest) (cli.Rev
 		Retriever:        retr,
 		WantDiagram:      req.WantDiagram,
 		Instruction:      req.Instruction,
+		PromptFormat:     req.PromptFormat,
 		OperatorPrompt:   req.OperatorPrompt,
 		Conversation:     conversation,
 		Progress:         req.Progress,
@@ -1095,6 +1097,7 @@ func (a agentAdapter) Review(ctx stdctx.Context, rc engine.AgentContext) (engine
 		WantDiagram:     rc.WantDiagram,     // lockstep: forgetting this silently drops the diagram opt-in
 		Instruction:     rc.Instruction,     // lockstep: forgetting this silently drops the developer steer
 		Conversation:    rc.Conversation,    // lockstep: forgetting this silently drops the PR conversation
+		PromptFormat:    rc.PromptFormat,    // lockstep: forgetting this silently renders legacy under xml request
 		OperatorPrompt:  rc.OperatorPrompt,
 		RepoDir:         rc.RepoDir,
 		Rev:             rc.Rev,
