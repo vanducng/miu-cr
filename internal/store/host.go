@@ -102,6 +102,7 @@ type HostJobClaimInput struct {
 type HostJobClaim struct {
 	Job       HostJob
 	AttemptID int64
+	Title     string
 }
 
 type HostJobHeartbeatInput struct {

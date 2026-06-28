@@ -39,26 +39,30 @@ func TestServeTraceSinkFromEnv(t *testing.T) {
 	log := slog.New(slog.NewTextHandler(&buf, &slog.HandlerOptions{Level: slog.LevelDebug}))
 
 	t.Setenv("MIUCR_TRACE_LOG", "")
-	sink, err := serveTraceSinkFromEnv(log)
+	factory, err := serveTraceSinkFactoryFromEnv(log)
 	if err != nil {
 		t.Fatalf("default trace env: %v", err)
 	}
-	if sink != nil {
-		t.Fatal("trace sink should be disabled by default")
+	if factory != nil {
+		t.Fatal("trace sink factory should be disabled by default")
 	}
 
 	t.Setenv("MIUCR_TRACE_LOG", "true")
 	t.Setenv("MIUCR_TRACE_LOG_MAX_BYTES", "512")
-	sink, err = serveTraceSinkFromEnv(log)
+	factory, err = serveTraceSinkFactoryFromEnv(log)
 	if err != nil {
 		t.Fatalf("enabled trace env: %v", err)
 	}
-	if sink == nil {
-		t.Fatal("trace sink should be enabled")
+	if factory == nil {
+		t.Fatal("trace sink factory should be enabled")
+	}
+	factory(log.With("job_id", int64(7)))("system_prompt", "x")
+	if !strings.Contains(buf.String(), "job_id=7") {
+		t.Fatalf("per-job trace sink dropped bound context: %s", buf.String())
 	}
 
 	t.Setenv("MIUCR_TRACE_LOG_MAX_BYTES", "small")
-	if _, err := serveTraceSinkFromEnv(log); err == nil {
+	if _, err := serveTraceSinkFactoryFromEnv(log); err == nil {
 		t.Fatal("invalid max bytes should fail")
 	}
 }

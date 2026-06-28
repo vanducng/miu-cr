@@ -181,11 +181,11 @@ WITH picked_queued AS (
 	FROM updated
 	RETURNING id
 )
-SELECT updated.id, updated.repo_id, updated.session_id, updated.number, updated.head_sha, updated.base_sha, updated.policy_hash, updated.prompt_hash, updated.rules_hash, updated.dedupe_key, updated.priority, updated.available_at, updated.status, updated.attempts, updated.lease_owner, updated.lease_until, updated.review_id, updated.error, updated.created_at, updated.updated_at, updated.completed_at, attempt.id
-FROM updated, attempt`,
+SELECT updated.id, updated.repo_id, updated.session_id, updated.number, updated.head_sha, updated.base_sha, updated.policy_hash, updated.prompt_hash, updated.rules_hash, updated.dedupe_key, updated.priority, updated.available_at, updated.status, updated.attempts, updated.lease_owner, updated.lease_until, updated.review_id, updated.error, updated.created_at, updated.updated_at, updated.completed_at, attempt.id, COALESCE(s.title, '')
+FROM updated LEFT JOIN host_pr_sessions s ON s.id = updated.session_id, attempt`,
 		now, in.WorkerID, leaseUntil)
 	var claim store.HostJobClaim
-	job, err := scanHostJobWithAttempt(row, &claim.AttemptID)
+	job, err := scanHostJobWithAttempt(row, &claim.AttemptID, &claim.Title)
 	if errors.Is(err, sql.ErrNoRows) {
 		return store.HostJobClaim{}, false, nil
 	}
@@ -518,10 +518,10 @@ func scanHostPRSession(row scanner) (store.HostPRSession, error) {
 }
 
 func scanHostJob(row scanner) (store.HostJob, error) {
-	return scanHostJobWithAttempt(row, nil)
+	return scanHostJobWithAttempt(row, nil, nil)
 }
 
-func scanHostJobWithAttempt(row scanner, attemptID *int64) (store.HostJob, error) {
+func scanHostJobWithAttempt(row scanner, attemptID *int64, title *string) (store.HostJob, error) {
 	var (
 		j           store.HostJob
 		sessionID   sql.NullInt64
@@ -531,6 +531,9 @@ func scanHostJobWithAttempt(row scanner, attemptID *int64) (store.HostJob, error
 	args := []any{&j.ID, &j.RepoID, &sessionID, &j.Number, &j.HeadSHA, &j.BaseSHA, &j.PolicyHash, &j.PromptHash, &j.RulesHash, &j.DedupeKey, &j.Priority, &j.AvailableAt, &j.Status, &j.Attempts, &j.LeaseOwner, &leaseUntil, &j.ReviewID, &j.Error, &j.CreatedAt, &j.UpdatedAt, &completedAt}
 	if attemptID != nil {
 		args = append(args, attemptID)
+	}
+	if title != nil {
+		args = append(args, title)
 	}
 	if err := row.Scan(args...); err != nil {
 		return store.HostJob{}, err
