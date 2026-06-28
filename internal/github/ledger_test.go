@@ -247,11 +247,10 @@ func TestRenderSummaryLedgerReviewPassed(t *testing.T) {
 	now := time.Date(2026, 6, 26, 22, 51, 0, 0, time.UTC)
 	// Non-nil but empty ledger (clean review) → "Review passed", not "No findings".
 	out := RenderSummaryFull(&PRInfo{HeadSHA: "h"}, nil, nil, 0, nil, nil, SummaryOptions{Ledger: []LedgerEntry{}, Now: now})
-	if !strings.Contains(out, "Review_passed") || !strings.Contains(out, "`0 open`") || !strings.Contains(out, "🎉") {
-		t.Fatalf("clean ledger review should show the Review passed badge + open tally:\n%s", out)
-	}
-	if strings.Contains(out, "<sub><sub>![Review passed") {
-		t.Fatalf("the Review passed badge should render full-size, not shrunk via <sub>:\n%s", out)
+	// A clean review renders the Review passed pill in the same <sub><sub> chip
+	// style as the severity chips (consistent + baseline-aligned).
+	if !strings.Contains(out, "<sub><sub>![Review passed](https://img.shields.io/badge/Review_passed-brightgreen?style=flat)</sub></sub>") {
+		t.Fatalf("clean ledger review should show the Review passed chip in the shields-chip style:\n%s", out)
 	}
 	if strings.Contains(out, "No_findings") {
 		t.Fatalf("ledger mode must not use the legacy No findings badge:\n%s", out)
@@ -296,16 +295,20 @@ func TestRenderSummaryLedgerNoMarkerWithoutDiff(t *testing.T) {
 }
 
 func TestLedgerResultLineAllClearShowsStats(t *testing.T) {
-	// All findings resolved (0 open): the all-clear Result line shows the at-a-glance
-	// open/resolved tally beside the full-size green Review passed badge.
+	// All findings resolved (0 open): the all-clear Result line shows a Review passed
+	// chip plus a "N resolved" chip, both in the <sub><sub> shields-chip style.
 	ledger := []LedgerEntry{
 		{FP: "aaaaaaaaaaaaaaaa", Path: "a.go", Status: statusResolved, Sev: "high", FirstSev: "high", OpenSHA: "aaaaaa1", ResSHA: "bbbbbb2"},
 	}
 	line := ledgerResultLine(ledger)
-	for _, want := range []string{"Review_passed", "`0 open`", "`1 resolved`", "🎉"} {
+	for _, want := range []string{"<sub><sub>![Review passed]", "Review_passed-brightgreen", "<sub><sub>![1 resolved]", "1_resolved-brightgreen"} {
 		if !strings.Contains(line, want) {
 			t.Fatalf("all-clear Result line missing %q, got %q", want, line)
 		}
+	}
+	// No code-span pills or trailing emoji — pure chips, like the open-findings line.
+	if strings.Contains(line, "`0 open`") || strings.Contains(line, "🎉") {
+		t.Fatalf("all-clear line should be pure chips (no code-span/emoji), got %q", line)
 	}
 }
 

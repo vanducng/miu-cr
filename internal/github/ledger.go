@@ -205,9 +205,19 @@ func capLedger(entries []LedgerEntry) []LedgerEntry {
 	return out
 }
 
+// greenChip renders a small green shields pill in the same <sub><sub> style as
+// severityCountBadge, so the all-clear Result line aligns with the severity
+// chips. text is internal (no user input → no escaping); spaces map to the
+// shields underscore separator.
+func greenChip(text string) string {
+	return fmt.Sprintf("<sub><sub>![%s](https://img.shields.io/badge/%s-brightgreen?style=flat)</sub></sub>",
+		text, strings.ReplaceAll(text, " ", "_"))
+}
+
 // ledgerResultLine builds the **Result:** lead for ledger mode: open-severity
-// count chips when findings are open, else a full-size green "Review passed"
-// badge with at-a-glance open/resolved stats.
+// count chips when findings are open, else a green "Review passed" chip (plus a
+// "N resolved" chip when any) in the SAME <sub><sub> shields-chip style as the
+// severity chips, so the all-clear line is visually consistent and baseline-aligned.
 func ledgerResultLine(entries []LedgerEntry) string {
 	counts := map[string]int{}
 	open, resolved := 0, 0
@@ -220,14 +230,12 @@ func ledgerResultLine(entries []LedgerEntry) string {
 		counts[severityLabel(e.Sev)]++
 	}
 
-	// All clear: a full-size green badge (the badge text IS the pass signal) plus
-	// a tally so it reads as "we checked and it's clean", not a bare stamp.
 	if open == 0 {
-		line := "![Review passed](https://img.shields.io/badge/Review_passed-brightgreen?style=flat) · `0 open`"
+		chips := []string{greenChip("Review passed")}
 		if resolved > 0 {
-			line += fmt.Sprintf(" · `%d resolved`", resolved)
+			chips = append(chips, greenChip(fmt.Sprintf("%d resolved", resolved)))
 		}
-		return line + " 🎉"
+		return strings.Join(chips, " ")
 	}
 	// Just the per-severity chips. The open total is NOT appended — it already
 	// shows in the "⚠️ Open (N)" tracking-table heading below.
