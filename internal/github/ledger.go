@@ -214,13 +214,14 @@ func greenChip(text string) string {
 		text, strings.ReplaceAll(text, " ", "_"))
 }
 
-// greenResultBadge renders one all-green two-segment shields badge
-// ("label | message"). labelColor forces the label half green too, so the whole
-// pill reads as a single success badge instead of two separate chips.
+// greenResultBadge renders one all-green shields pill "label | msg". The bar is a
+// single segment (not shields' label/message split, which shows no divider when
+// both halves are green); %7C keeps it valid in the URL and safe in a table cell.
 func greenResultBadge(label, msg string) string {
-	enc := func(s string) string { return strings.ReplaceAll(s, " ", "_") }
-	return fmt.Sprintf("<sub><sub>![%s](https://img.shields.io/badge/%s-%s-brightgreen?style=flat&labelColor=brightgreen)</sub></sub>",
-		label+" "+msg, enc(label), enc(msg))
+	enc := strings.ReplaceAll(label+" | "+msg, " ", "_")
+	enc = strings.ReplaceAll(enc, "|", "%7C")
+	return fmt.Sprintf("<sub><sub>![%s %s](https://img.shields.io/badge/%s-brightgreen?style=flat)</sub></sub>",
+		label, msg, enc)
 }
 
 // ledgerResultLine builds the **Result:** lead for ledger mode: open-severity

@@ -299,7 +299,7 @@ func TestLedgerResultLineAllClearShowsStats(t *testing.T) {
 		{FP: "aaaaaaaaaaaaaaaa", Path: "a.go", Status: statusResolved, Sev: "high", FirstSev: "high", OpenSHA: "aaaaaa1", ResSHA: "bbbbbb2"},
 	}
 	line := ledgerResultLine(ledger)
-	want := "<sub><sub>![Review passed 1 resolved](https://img.shields.io/badge/Review_passed-1_resolved-brightgreen?style=flat&labelColor=brightgreen)</sub></sub>"
+	want := "<sub><sub>![Review passed 1 resolved](https://img.shields.io/badge/Review_passed_%7C_1_resolved-brightgreen?style=flat)</sub></sub>"
 	if line != want {
 		t.Fatalf("all-clear Result line should be one combined badge\n got: %q\nwant: %q", line, want)
 	}
