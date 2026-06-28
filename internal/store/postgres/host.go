@@ -196,6 +196,40 @@ FROM updated, attempt`,
 	return claim, true, nil
 }
 
+func (s *Store) HeartbeatHostJob(ctx context.Context, in store.HostJobHeartbeatInput) error {
+	now := in.Now
+	if now.IsZero() {
+		now = time.Now().UTC()
+	}
+	if in.LeaseDuration <= 0 {
+		in.LeaseDuration = time.Minute
+	}
+	res, err := s.db.ExecContext(ctx, `
+UPDATE host_jobs
+SET lease_until=$3,
+    updated_at=$2
+WHERE id=$1
+  AND status='running'
+  AND attempts = (
+    SELECT attempt
+    FROM host_job_attempts
+    WHERE id=$4
+      AND job_id=$1
+      AND status='running'
+  )`, in.JobID, now, now.Add(in.LeaseDuration), in.AttemptID)
+	if err != nil {
+		return err
+	}
+	affected, err := res.RowsAffected()
+	if err != nil {
+		return err
+	}
+	if affected == 0 {
+		return store.ErrHostStaleAttempt
+	}
+	return nil
+}
+
 func (s *Store) CompleteHostJob(ctx context.Context, in store.HostJobCompleteInput) error {
 	if in.Status != "done" && in.Status != "failed" && in.Status != "canceled" {
 		return fmt.Errorf("host job status %q is invalid", in.Status)
