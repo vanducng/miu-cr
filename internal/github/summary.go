@@ -72,6 +72,28 @@ func severityCounts(findings []engine.Finding) string {
 	return strings.Join(chips, " ")
 }
 
+// offDiffSet returns the fingerprints of this-run findings that fall OUTSIDE the
+// inline-eligible diff set (per mode) — GitHub can't carry them as inline
+// comments, so they live only in the ledger's Open table, which tags them
+// (off-diff). Returns nil when there's no diff to compare against (every render
+// path with a real post carries the diffs).
+func offDiffSet(findings []engine.Finding, diffs []diff.Diff, mode FilterMode) map[string]bool {
+	if len(findings) == 0 || len(diffs) == 0 {
+		return nil
+	}
+	eligible := make(map[string]bool)
+	for _, f := range inlineEligible(findings, diffs, mode) {
+		eligible[Fingerprint(f)] = true
+	}
+	off := make(map[string]bool)
+	for _, f := range findings {
+		if fp := Fingerprint(f); !eligible[fp] {
+			off[fp] = true
+		}
+	}
+	return off
+}
+
 // commitRef renders the head SHA as a short (7-char) linked reference when an HTML base
 // is known, else a short code span, so the summary never repeats the full 40-char SHA.
 func commitRef(info *PRInfo) string {
@@ -111,7 +133,11 @@ func RenderSummaryWithOverflow(info *PRInfo, findings []engine.Finding, stats ma
 // it hard to transpose the same-typed walkthrough/diagram strings or the
 // diffs/reviewID pair. The zero value reproduces the legacy summary byte-for-byte.
 type SummaryOptions struct {
-	Diffs         []diff.Diff
+	Diffs []diff.Diff
+	// FilterMode is the inline-eligibility filter used for posting; the ledger
+	// Open table marks a finding (off-diff) when it falls outside this set (so it
+	// could not be carried as an inline comment). Empty = diff_context.
+	FilterMode    FilterMode
 	ReviewID      string
 	Walkthrough   string
 	FileSummaries map[string]string
@@ -182,7 +208,7 @@ func RenderSummaryFull(info *PRInfo, findings []engine.Finding, stats map[string
 		if p.Walkthrough {
 			renderWalkthrough(&b, opts.Walkthrough)
 		}
-		renderLedger(&b, info, opts.Ledger, opts.InlineURLs)
+		renderLedger(&b, info, opts.Ledger, opts.InlineURLs, offDiffSet(findings, opts.Diffs, opts.FilterMode))
 	} else {
 		var lead string
 		if p.ResultBadges {
