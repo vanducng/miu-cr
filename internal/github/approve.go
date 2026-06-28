@@ -130,7 +130,7 @@ func approvalPriorityRank(priority string) int {
 	case "P4":
 		return engine.MaxSeverityRank([]engine.Finding{{Severity: "info"}})
 	default:
-		return 0
+		return -1
 	}
 }
 

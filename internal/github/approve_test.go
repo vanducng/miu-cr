@@ -72,6 +72,11 @@ func TestResolveEventThreshold(t *testing.T) {
 	if ev, rs := resolveEvent(opts, info, true, []engine.Finding{{Severity: "low"}}, 1, true); ev != "COMMENT" || rs != approveReasonThresholdFailed {
 		t.Fatalf("P3 finding should not approve under P4 threshold, got (%q,%q)", ev, rs)
 	}
+
+	opts.Approval.MaxPriority = "PX"
+	if ev, rs := resolveEvent(opts, info, true, nil, 1, true); ev != "COMMENT" || rs != approveReasonThresholdFailed {
+		t.Fatalf("invalid priority should fail closed, got (%q,%q)", ev, rs)
+	}
 }
 
 func withFork(p PRInfo) PRInfo { p.IsFork = true; return p }
