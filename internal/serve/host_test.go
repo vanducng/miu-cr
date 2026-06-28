@@ -189,6 +189,36 @@ func TestHostRunnerPrunesThreadResolutionSyncThrottleKeys(t *testing.T) {
 	}
 }
 
+func TestHostRunnerPrunesThreadResolutionSyncAfterReconcileError(t *testing.T) {
+	now := time.Date(2026, 6, 28, 10, 0, 0, 0, time.UTC)
+	cfg := hostRunnerConfig(t)
+	st := cfg.Store.(*fakeHostStore)
+	st.reconcileErr = errors.New("boom")
+	cfg.NewNotifGetter = func(string) notifGetter {
+		return &fakeNotifGetter{prs: map[string][]*github.PullRequest{"octo/hello": {
+			prWithHead(2, "sha-B"),
+		}}}
+	}
+	r, err := NewHostRunner(cfg)
+	if err != nil {
+		t.Fatalf("NewHostRunner: %v", err)
+	}
+	r.threadSyncLast = map[string]time.Time{
+		"octo/hello#1": now,
+		"octo/hello#2": now,
+	}
+
+	if err := r.Tick(stdctx.Background()); err != nil {
+		t.Fatalf("Tick: %v", err)
+	}
+	if _, ok := r.threadSyncLast["octo/hello#1"]; ok {
+		t.Fatal("closed PR key was not pruned after reconcile error")
+	}
+	if _, ok := r.threadSyncLast["octo/hello#2"]; !ok {
+		t.Fatal("open PR key was pruned after reconcile error")
+	}
+}
+
 func TestHostRunnerThreadResolutionSyncDropClearsThrottle(t *testing.T) {
 	now := time.Date(2026, 6, 28, 10, 0, 0, 0, time.UTC)
 	r := &HostRunner{
@@ -963,6 +993,7 @@ type fakeHostStore struct {
 	lastReconcile store.HostClosedPRsInput
 	pruneBlock    <-chan struct{}
 	sessionErrFor map[int64]error
+	reconcileErr  error
 }
 
 func newFakeHostStore() *fakeHostStore {
@@ -999,6 +1030,9 @@ func (s *fakeHostStore) ReconcileHostClosedPRs(_ stdctx.Context, in store.HostCl
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	s.lastReconcile = in
+	if s.reconcileErr != nil {
+		return store.HostClosedPRsResult{}, s.reconcileErr
+	}
 	open := map[int64]bool{}
 	for _, n := range in.OpenNumbers {
 		open[n] = true

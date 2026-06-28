@@ -513,11 +513,9 @@ func (h *HostRunner) pollRepo(ctx stdctx.Context, snap hostRunnerSnapshot, repo 
 	if err != nil {
 		h.log.Warn("host: failed to reconcile closed PRs", "repo", repo.Slug, "error", config.RedactString(err.Error()))
 	} else if res.SessionsClosed > 0 || res.JobsCanceled > 0 {
-		h.pruneThreadResolutionSync(repo.Slug, openNumbers)
 		h.log.Info("host: reconciled closed PRs", "repo", repo.Slug, "sessions_closed", res.SessionsClosed, "jobs_canceled", res.JobsCanceled)
-	} else {
-		h.pruneThreadResolutionSync(repo.Slug, openNumbers)
 	}
+	h.pruneThreadResolutionSync(repo.Slug, openNumbers)
 	return pollFloor, nil
 }
 
@@ -1006,7 +1004,7 @@ func RunHost(ctx stdctx.Context, pool *Pool, runner *HostRunner) error {
 		case <-done:
 			return drain()
 		case <-time.After(runHostDrainGrace):
-			runner.waitThreadResolutionSync(runHostDrainGrace)
+			runner.waitThreadResolutionSync(0)
 			return ErrHostRunnerStopTimeout
 		}
 	}
