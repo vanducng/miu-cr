@@ -55,6 +55,13 @@ comment with a new marker); subsequent re-runs dedupe normally. On a
 first M5 review **manually** (or off-hours) to absorb the one-time re-post before
 the next scheduled run.
 
+## [0.61.4](https://github.com/vanducng/miu-cr/compare/v0.61.3...v0.61.4) (2026-06-28)
+
+
+### Bug Fixes
+
+* **review:** combine all-clear result into one badge ([#187](https://github.com/vanducng/miu-cr/issues/187)) ([2c55530](https://github.com/vanducng/miu-cr/commit/2c555305a91e7ad28b239dee8a4a76d9cbc960b8))
+
 ## [0.61.3](https://github.com/vanducng/miu-cr/compare/v0.61.2...v0.61.3) (2026-06-28)
 
 
