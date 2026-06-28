@@ -216,9 +216,12 @@ func greenChip(text string) string {
 
 // greenResultBadge renders one all-green shields pill "label | msg". The bar is a
 // single segment (not shields' label/message split, which shows no divider when
-// both halves are green); %7C keeps it valid in the URL and safe in a table cell.
+// both halves are green). Escaping mirrors shields' own conventions: a literal "-"
+// doubles to "--" (else shields reads it as the message/color delimiter), and the
+// "|" becomes %7C so it stays valid in the URL and safe inside a table cell.
 func greenResultBadge(label, msg string) string {
 	enc := strings.ReplaceAll(label+" | "+msg, " ", "_")
+	enc = strings.ReplaceAll(enc, "-", "--")
 	enc = strings.ReplaceAll(enc, "|", "%7C")
 	return fmt.Sprintf("<sub><sub>![%s %s](https://img.shields.io/badge/%s-brightgreen?style=flat)</sub></sub>",
 		label, msg, enc)
