@@ -75,6 +75,7 @@ window    = "5h"       # a Go duration (1h, 5h, 24h, 168h) OR "monthly" (calenda
 - **Window** — a fixed window: a Go duration bucketed off the epoch (so `5h` resets every 5 hours on fixed boundaries, `24h` daily), or `monthly` for a calendar month. Hourly and 5-hourly windows are first-class. Changing the window starts a fresh bucket.
 - **Enforcement** — **fail-closed and hard**: before each review the accumulated usage for the current window is checked; at/over the limit the review is **blocked** with a typed `quota.exceeded` error (and a one-shot warning at ≥80%). A counter that can't be read/opened also blocks, but as a **retryable** `store.unavailable` (not `quota.exceeded`) so a transient DB outage is retried, not mistaken for a hit. On the [serve host](/serve-and-action/), a genuine quota-blocked PR is **skipped and logged** (the poller keeps running); a later push or comment re-triggers a fresh job that re-checks the window.
 - **State** — usage counters persist in the same store as history (`state.db` for the CLI, Postgres for the host), surviving one-shot CLI invocations. A bad `dimension`/`window`/`limit` is a typed `config.invalid` (exit `2`).
+- **Metering scope** — the counter records the main review pass. The optional `--patch-repair` second pass is **not yet metered**, so a `--patch-repair` run under-counts slightly (fail-open, bounded). The serve host does not use `--patch-repair`.
 
 The host config (`host.yaml`) takes the same block under each `providers.<name>`.
 

@@ -606,6 +606,11 @@ func (e *Engine) Review(ctx stdctx.Context, req Request) (ReviewResult, error) {
 		stats["output_tokens"] = float64(out.Usage.OutputTokens)
 	}
 	if req.Quota != nil {
+		// out.Usage is the main review pass only. The optional --patch-repair
+		// second pass (repairPatches, below) issues extra LLM calls whose tokens
+		// are NOT yet metered here, so a --patch-repair run under-counts (fail
+		// open, bounded). Metering it needs RepairPatch to return Usage across all
+		// backends; deferred. The serve host does not use --patch-repair.
 		if rerr := req.Quota.Record(ctx, out.Usage); rerr != nil {
 			stats["quota_record_error"] = config.RedactString(rerr.Error())
 		}
