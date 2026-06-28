@@ -44,12 +44,12 @@ func (f *fakeAgent) Review(ctx stdctx.Context, rc Context) (engine.ReviewOutput,
 
 // RepairPatch records the request and returns the canned reply, fence-stripped
 // the same way the production backends parse it.
-func (f *fakeAgent) RepairPatch(_ stdctx.Context, rr RepairRequest) (string, error) {
+func (f *fakeAgent) RepairPatch(_ stdctx.Context, rr RepairRequest) (string, engine.Usage, error) {
 	f.gotRepair = rr
 	if f.repairErr != nil {
-		return "", f.repairErr
+		return "", engine.Usage{}, f.repairErr
 	}
-	return parseRepairReply(f.repairReply), nil
+	return parseRepairReply(f.repairReply), engine.Usage{}, nil
 }
 
 var _ Agent = (*fakeAgent)(nil)

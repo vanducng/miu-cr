@@ -26,10 +26,12 @@ func (f *fakeUsage) ProviderUsage(_ stdctx.Context, _, _ string) (store.Provider
 	return f.c, nil
 }
 
-func (f *fakeUsage) AddProviderUsage(_ stdctx.Context, _, _ string, in, out, reqs int64) error {
+func (f *fakeUsage) AddProviderUsage(_ stdctx.Context, _, _ string, in, out, cacheRead, cacheCreate, reqs int64) error {
 	f.adds++
 	f.c.InputTokens += in
 	f.c.OutputTokens += out
+	f.c.CacheReadTokens += cacheRead
+	f.c.CacheCreationTokens += cacheCreate
 	f.c.Requests += reqs
 	return nil
 }
@@ -64,6 +66,30 @@ func TestCheckBlocksAtLimit(t *testing.T) {
 	err := g.Check(stdctx.Background())
 	if err == nil || codeOf(err) != "quota.exceeded" {
 		t.Fatalf("at/over limit must block with quota.exceeded, got %v", err)
+	}
+}
+
+// The tokens dimension must meter cache buckets too: cached input that the old
+// counter dropped now pushes the total to/over the limit.
+func TestCheckCountsCacheTokens(t *testing.T) {
+	// uncached input 100 + output 50 = 150 (under 1000), but +700 cache-read +200
+	// cache-creation = 1050 total >= 1000 must block.
+	f := &fakeUsage{c: store.ProviderUsageCount{InputTokens: 100, OutputTokens: 50, CacheReadTokens: 700, CacheCreationTokens: 200}}
+	g := newGate(t, f, config.QuotaConfig{Dimension: "tokens", Limit: 1000, Window: "5h"}, nil)
+	if err := g.Check(stdctx.Background()); err == nil || codeOf(err) != "quota.exceeded" {
+		t.Fatalf("cache tokens must count toward the limit, got %v", err)
+	}
+}
+
+// Record must persist cache buckets so they accumulate (not be silently dropped).
+func TestRecordPersistsCacheTokens(t *testing.T) {
+	f := &fakeUsage{}
+	g := newGate(t, f, config.QuotaConfig{Dimension: "tokens", Limit: 1_000_000, Window: "5h"}, nil)
+	if err := g.Record(stdctx.Background(), engine.Usage{InputTokens: 7, OutputTokens: 20, CacheReadTokens: 300, CacheCreationTokens: 50}); err != nil {
+		t.Fatalf("Record: %v", err)
+	}
+	if f.c.CacheReadTokens != 300 || f.c.CacheCreationTokens != 50 || f.c.InputTokens != 7 || f.c.OutputTokens != 20 {
+		t.Fatalf("cache buckets not persisted: %+v", f.c)
 	}
 }
 

@@ -63,7 +63,7 @@ default_provider = "anthropic"
 # limit a review is blocked with a typed `quota.exceeded` error (on the serve
 # host the PR is skipped+logged). Counters persist in state.db / Postgres.
 # [providers.openai.quota]
-# dimension = "tokens"                   # tokens (default; input+output) | requests (one per review)
+# dimension = "tokens"                   # tokens (default; input incl. cache + output) | requests (one per review)
 # limit     = 2_000_000                  # cap in the chosen dimension; must be > 0
 # window    = "5h"                       # Go duration (1h, 5h, 24h, 168h) OR "monthly" (calendar UTC)
 

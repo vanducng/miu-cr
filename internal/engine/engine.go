@@ -288,10 +288,10 @@ type Retriever interface {
 type Agent interface {
 	Review(ctx stdctx.Context, rc AgentContext) (ReviewOutput, error)
 	// RepairPatch runs the conditional second pass: ONE span + ONE problem in,
-	// the minimal replacement out (already fence-stripped/trimmed). "" => no
-	// usable replacement; the engine falls back to the original finding. The wire
-	// layer adapts this to agent.RepairPatch, keeping engine below agent.
-	RepairPatch(ctx stdctx.Context, rr RepairRequest) (string, error)
+	// the minimal replacement out (already fence-stripped/trimmed) plus that call's
+	// token Usage. "" => no usable replacement; the engine falls back to the
+	// original finding. The wire layer adapts this to agent.RepairPatch.
+	RepairPatch(ctx stdctx.Context, rr RepairRequest) (string, Usage, error)
 }
 
 // RepairRequest is the engine-side shadow of agent.RepairRequest (defined here so
@@ -601,27 +601,30 @@ func (e *Engine) Review(ctx stdctx.Context, req Request) (ReviewResult, error) {
 	for k, v := range passStats {
 		stats[k] = v
 	}
-	if out.Usage.InputTokens > 0 || out.Usage.OutputTokens > 0 {
+	repairStart := time.Now()
+	kept, repairUsage := e.repairPatches(ctx, kept, selected, req, stats)
+	out.Usage.Add(repairUsage) // fold the --patch-repair second-pass tokens into metering + stats
+	if req.PatchRepair && req.Post {
+		stats["patch_repair_ms"] = float64(time.Since(repairStart).Milliseconds())
+	}
+
+	if out.Usage.TotalTokens() > 0 {
 		stats["input_tokens"] = float64(out.Usage.InputTokens)
 		stats["output_tokens"] = float64(out.Usage.OutputTokens)
+		stats["cache_read_tokens"] = float64(out.Usage.CacheReadTokens)
+		stats["cache_creation_tokens"] = float64(out.Usage.CacheCreationTokens)
+		stats["total_input_tokens"] = float64(out.Usage.TotalInputTokens())
+		stats["cache_hit_ratio"] = out.Usage.CacheHitRatio()
 	}
 	if req.Quota != nil {
-		// out.Usage is the main review pass only. The optional --patch-repair
-		// second pass (repairPatches, below) issues extra LLM calls whose tokens
-		// are NOT yet metered here, so a --patch-repair run under-counts (fail
-		// open, bounded). Metering it needs RepairPatch to return Usage across all
-		// backends; deferred. The serve host does not use --patch-repair.
+		// out.Usage now includes the --patch-repair second pass (folded in above), so
+		// the quota meters the full review. Record is fail-open: a counter write error
+		// surfaces in stats but never fails the review.
 		if rerr := req.Quota.Record(ctx, out.Usage); rerr != nil {
 			stats["quota_record_error"] = config.RedactString(rerr.Error())
 		}
 	}
 	addTraceStats(stats, trace)
-
-	repairStart := time.Now()
-	kept = e.repairPatches(ctx, kept, selected, req, stats)
-	if req.PatchRepair && req.Post {
-		stats["patch_repair_ms"] = float64(time.Since(repairStart).Milliseconds())
-	}
 
 	result := ReviewResult{Findings: kept, Walkthrough: out.Walkthrough, FileSummaries: out.FileSummaries, Diagram: out.Diagram, Confidence: out.Confidence, ConfidenceReason: out.ConfidenceReason, Stats: stats}
 

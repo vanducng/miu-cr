@@ -64,6 +64,65 @@ func TestOpen_MigratesPreStatusReviewsTable(t *testing.T) {
 	}
 }
 
+// TestOpen_MigratesPreCacheProviderUsageTable proves a DB whose provider_usage
+// table predates the cache-token columns gains them on Open (the ALTER backfill),
+// preserves existing counts, round-trips the cache buckets, and is idempotent.
+func TestOpen_MigratesPreCacheProviderUsageTable(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "state.db")
+
+	raw, err := sql.Open("sqlite", dsn(path))
+	if err != nil {
+		t.Fatalf("open raw: %v", err)
+	}
+	if _, err := raw.Exec(`CREATE TABLE provider_usage (
+		provider      TEXT NOT NULL,
+		period        TEXT NOT NULL,
+		input_tokens  INTEGER NOT NULL DEFAULT 0,
+		output_tokens INTEGER NOT NULL DEFAULT 0,
+		requests      INTEGER NOT NULL DEFAULT 0,
+		updated_at    TEXT NOT NULL,
+		PRIMARY KEY (provider, period)
+	);`); err != nil {
+		t.Fatalf("create old table: %v", err)
+	}
+	if _, err := raw.Exec(`INSERT INTO provider_usage (provider, period, input_tokens, output_tokens, requests, updated_at)
+		VALUES ('zai', '24h-1', 100, 50, 1, '2026-01-01T00:00:00Z')`); err != nil {
+		t.Fatalf("seed old row: %v", err)
+	}
+	_ = raw.Close()
+
+	s, err := Open(path)
+	if err != nil {
+		t.Fatalf("Open should backfill pre-cache provider_usage: %v", err)
+	}
+	// Existing counts preserved; cache buckets default to zero.
+	got, err := s.ProviderUsage(context.Background(), "zai", "24h-1")
+	if err != nil {
+		t.Fatalf("ProviderUsage after migrate: %v", err)
+	}
+	if got.InputTokens != 100 || got.OutputTokens != 50 || got.CacheReadTokens != 0 || got.CacheCreationTokens != 0 || got.Requests != 1 {
+		t.Fatalf("pre-cache row after migrate = %+v", got)
+	}
+	// Cache buckets now round-trip on add.
+	if err := s.AddProviderUsage(context.Background(), "zai", "24h-1", 5, 2, 30, 10, 1); err != nil {
+		t.Fatalf("AddProviderUsage post-migrate: %v", err)
+	}
+	if got, _ = s.ProviderUsage(context.Background(), "zai", "24h-1"); got.CacheReadTokens != 30 || got.CacheCreationTokens != 10 || got.InputTokens != 105 {
+		t.Fatalf("post-migrate cache round-trip = %+v", got)
+	}
+	_ = s.Close()
+
+	// Re-open is an idempotent no-op (columns already present) and keeps the data.
+	s2, err := Open(path)
+	if err != nil {
+		t.Fatalf("second Open must be a no-op: %v", err)
+	}
+	t.Cleanup(func() { _ = s2.Close() })
+	if got, _ = s2.ProviderUsage(context.Background(), "zai", "24h-1"); got.CacheReadTokens != 30 {
+		t.Fatalf("idempotent re-open lost cache data: %+v", got)
+	}
+}
+
 // TestOpen_MigratesPreHistoryReviewsTable proves a DB whose reviews table
 // predates the history columns (owner/repo/number/provider/model/transcript/raw)
 // gains them on Open without data loss, and new writes round-trip the new fields.

@@ -1106,7 +1106,7 @@ func (a agentAdapter) Review(ctx stdctx.Context, rc engine.AgentContext) (engine
 
 // RepairPatch forwards the engine's repair request to the concrete agent —
 // lockstep: a missed forward silently no-ops repair for the real agent.
-func (a agentAdapter) RepairPatch(ctx stdctx.Context, rr engine.RepairRequest) (string, error) {
+func (a agentAdapter) RepairPatch(ctx stdctx.Context, rr engine.RepairRequest) (string, engine.Usage, error) {
 	return a.inner.RepairPatch(ctx, agent.RepairRequest{
 		Span:      rr.Span,
 		Rationale: rr.Rationale,
@@ -1202,10 +1202,10 @@ func (l *lazyAgent) Review(ctx stdctx.Context, rc engine.AgentContext) (engine.R
 
 // RepairPatch reuses the memoized agent (mirroring Review) — lockstep with the
 // engine.Agent interface.
-func (l *lazyAgent) RepairPatch(ctx stdctx.Context, rr engine.RepairRequest) (string, error) {
+func (l *lazyAgent) RepairPatch(ctx stdctx.Context, rr engine.RepairRequest) (string, engine.Usage, error) {
 	a, err := l.resolve(ctx)
 	if err != nil {
-		return "", err
+		return "", engine.Usage{}, err
 	}
 	return a.RepairPatch(ctx, rr)
 }

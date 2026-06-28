@@ -3,11 +3,15 @@ package store
 import "context"
 
 // ProviderUsageCount is the accumulated usage for one (provider, period) bucket.
-// A missing bucket reads back as the zero value, not an error.
+// A missing bucket reads back as the zero value, not an error. InputTokens is the
+// uncached input; CacheReadTokens/CacheCreationTokens are the cached buckets — the
+// tokens quota meters their sum plus output so cached input is not undercounted.
 type ProviderUsageCount struct {
-	InputTokens  int64
-	OutputTokens int64
-	Requests     int64
+	InputTokens         int64
+	OutputTokens        int64
+	CacheReadTokens     int64
+	CacheCreationTokens int64
+	Requests            int64
 }
 
 // ProviderUsageStore meters per-provider usage for the quota gate. It is a
@@ -20,5 +24,5 @@ type ProviderUsageStore interface {
 	ProviderUsage(ctx context.Context, provider, period string) (ProviderUsageCount, error)
 	// AddProviderUsage atomically increments the (provider, period) counter by the
 	// given deltas (upsert). Negative deltas are not expected.
-	AddProviderUsage(ctx context.Context, provider, period string, inputTokens, outputTokens, requests int64) error
+	AddProviderUsage(ctx context.Context, provider, period string, inputTokens, outputTokens, cacheReadTokens, cacheCreationTokens, requests int64) error
 }

@@ -36,8 +36,8 @@ func (f *fakeAgent) Review(_ stdctx.Context, _ engine.AgentContext) (engine.Revi
 	}, nil
 }
 
-func (f *fakeAgent) RepairPatch(stdctx.Context, engine.RepairRequest) (string, error) {
-	return "", nil
+func (f *fakeAgent) RepairPatch(stdctx.Context, engine.RepairRequest) (string, engine.Usage, error) {
+	return "", engine.Usage{}, nil
 }
 
 func git(t *testing.T, dir string, args ...string) {

@@ -147,7 +147,7 @@ func TestCodexAgentRepairPatch(t *testing.T) {
 	defer srv.Close()
 
 	a := newTestCodexAgent(t, srv)
-	out, err := a.RepairPatch(stdctx.Background(), RepairRequest{Span: "val := m[key]", Rationale: "missing check", Category: "bug", Severity: "high"})
+	out, _, err := a.RepairPatch(stdctx.Background(), RepairRequest{Span: "val := m[key]", Rationale: "missing check", Category: "bug", Severity: "high"})
 	if err != nil {
 		t.Fatalf("RepairPatch: %v", err)
 	}

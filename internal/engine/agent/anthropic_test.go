@@ -258,7 +258,7 @@ func TestAnthropicAgentClassifies401(t *testing.T) {
 func TestAnthropicAgentRepairPatch(t *testing.T) {
 	fc := &fakeAnthropic{responses: []string{textMessage("```go\nval, ok := m[key]\n```")}}
 	a := &anthropicAgent{client: fc, model: "claude-test"}
-	out, err := a.RepairPatch(stdctx.Background(), RepairRequest{Span: "val := m[key]", Rationale: "missing check", Category: "bug", Severity: "high"})
+	out, _, err := a.RepairPatch(stdctx.Background(), RepairRequest{Span: "val := m[key]", Rationale: "missing check", Category: "bug", Severity: "high"})
 	if err != nil {
 		t.Fatalf("RepairPatch: %v", err)
 	}
@@ -290,7 +290,7 @@ func TestAnthropicAgentRepairPatchErrorWrapped(t *testing.T) {
 		client: &fakeAnthropic{err: fmt.Errorf("401 x-api-key: %s invalid", secretToken)},
 		model:  "claude-test",
 	}
-	_, err := a.RepairPatch(stdctx.Background(), RepairRequest{Span: "x"})
+	_, _, err := a.RepairPatch(stdctx.Background(), RepairRequest{Span: "x"})
 	if err == nil || !strings.Contains(err.Error(), "messages.new") {
 		t.Fatalf("expected wrapped error, got %v", err)
 	}

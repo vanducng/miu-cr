@@ -89,7 +89,7 @@ type Agent interface {
 	// ONE problem and returns the minimal replacement (fence-stripped). The engine
 	// re-validates the reply; "" means no usable replacement (the engine falls
 	// back to the original finding).
-	RepairPatch(ctx stdctx.Context, rr RepairRequest) (string, error)
+	RepairPatch(ctx stdctx.Context, rr RepairRequest) (string, engine.Usage, error)
 }
 
 const (
@@ -240,6 +240,8 @@ func (a *anthropicAgent) Review(ctx stdctx.Context, rc Context) (engine.ReviewOu
 		}
 		usage.InputTokens += msg.Usage.InputTokens
 		usage.OutputTokens += msg.Usage.OutputTokens
+		usage.CacheReadTokens += msg.Usage.CacheReadInputTokens
+		usage.CacheCreationTokens += msg.Usage.CacheCreationInputTokens
 		params.Messages = append(params.Messages, msg.ToParam())
 
 		toolResults, finalText := a.dispatch(ctx, rc, turn, msg)
@@ -267,7 +269,7 @@ func (a *anthropicAgent) Review(ctx stdctx.Context, rc Context) (engine.ReviewOu
 // repairSystemPrompt, user = BuildRepairPrompt) and returns the fence-stripped,
 // trimmed reply. Reuses the same creds/client as Review; the ctx deadline owns
 // the wall clock.
-func (a *anthropicAgent) RepairPatch(ctx stdctx.Context, rr RepairRequest) (string, error) {
+func (a *anthropicAgent) RepairPatch(ctx stdctx.Context, rr RepairRequest) (string, engine.Usage, error) {
 	if a.timeout > 0 {
 		var cancel stdctx.CancelFunc
 		ctx, cancel = stdctx.WithTimeout(ctx, a.timeout)
@@ -283,7 +285,7 @@ func (a *anthropicAgent) RepairPatch(ctx stdctx.Context, rr RepairRequest) (stri
 		},
 	})
 	if err != nil {
-		return "", classifyAnthropicErr(err)
+		return "", engine.Usage{}, classifyAnthropicErr(err)
 	}
 	var text strings.Builder
 	for _, block := range msg.Content {
@@ -291,7 +293,13 @@ func (a *anthropicAgent) RepairPatch(ctx stdctx.Context, rr RepairRequest) (stri
 			text.WriteString(block.Text)
 		}
 	}
-	return parseRepairReply(text.String()), nil
+	u := engine.Usage{
+		InputTokens:         msg.Usage.InputTokens,
+		OutputTokens:        msg.Usage.OutputTokens,
+		CacheReadTokens:     msg.Usage.CacheReadInputTokens,
+		CacheCreationTokens: msg.Usage.CacheCreationInputTokens,
+	}
+	return parseRepairReply(text.String()), u, nil
 }
 
 // parseRepairReply fence-strips the model reply and trims it consistently with

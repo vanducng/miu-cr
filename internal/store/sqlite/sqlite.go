@@ -89,6 +89,10 @@ func Open(path string) (*Store, error) {
 		_ = db.Close()
 		return nil, fmt.Errorf("migrate reviews columns: %w", err)
 	}
+	if err := migrateProviderUsageColumns(db); err != nil {
+		_ = db.Close()
+		return nil, fmt.Errorf("migrate provider_usage columns: %w", err)
+	}
 	return &Store{db: db}, nil
 }
 
@@ -112,7 +116,7 @@ var reviewColumnMigrations = []struct{ col, ddl string }{
 // migrateReviewColumns backfills any missing reviews column on a DB created
 // before that column existed. Idempotent, a no-op once all columns are present.
 func migrateReviewColumns(db *sql.DB) error {
-	have, err := reviewColumns(db)
+	have, err := tableColumns(db, "reviews")
 	if err != nil {
 		return err
 	}
@@ -127,8 +131,37 @@ func migrateReviewColumns(db *sql.DB) error {
 	return nil
 }
 
-func reviewColumns(db *sql.DB) (map[string]bool, error) {
-	rows, err := db.Query(`PRAGMA table_info(reviews)`)
+// providerUsageColumnMigrations backfill the cache-token columns on a
+// provider_usage table created before they existed (CREATE TABLE IF NOT EXISTS is
+// a no-op on an existing table). Idempotent via the column-presence guard.
+var providerUsageColumnMigrations = []struct{ col, ddl string }{
+	{"cache_read_tokens", `ALTER TABLE provider_usage ADD COLUMN cache_read_tokens INTEGER NOT NULL DEFAULT 0`},
+	{"cache_creation_tokens", `ALTER TABLE provider_usage ADD COLUMN cache_creation_tokens INTEGER NOT NULL DEFAULT 0`},
+}
+
+// migrateProviderUsageColumns backfills any missing provider_usage column on a DB
+// created before that column existed. Idempotent once all columns are present.
+func migrateProviderUsageColumns(db *sql.DB) error {
+	have, err := tableColumns(db, "provider_usage")
+	if err != nil {
+		return err
+	}
+	for _, m := range providerUsageColumnMigrations {
+		if have[m.col] {
+			continue
+		}
+		if _, err := db.Exec(m.ddl); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+// tableColumns returns the column set of table. table MUST be a trusted
+// compile-time literal (PRAGMA cannot bind a parameter, so it is interpolated);
+// never pass user/config/network-derived input here.
+func tableColumns(db *sql.DB, table string) (map[string]bool, error) {
+	rows, err := db.Query(fmt.Sprintf(`PRAGMA table_info(%s)`, table))
 	if err != nil {
 		return nil, err
 	}

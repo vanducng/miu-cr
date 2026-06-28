@@ -78,16 +78,18 @@ func (g *Gate) Check(ctx stdctx.Context) error {
 // Record adds the completed pass's usage (tokens + one request) to the current
 // period's counter.
 func (g *Gate) Record(ctx stdctx.Context, u engine.Usage) error {
-	return g.store.AddProviderUsage(ctx, g.provider, PeriodKey(g.cfg.Window, g.now()), u.InputTokens, u.OutputTokens, 1)
+	return g.store.AddProviderUsage(ctx, g.provider, PeriodKey(g.cfg.Window, g.now()),
+		u.InputTokens, u.OutputTokens, u.CacheReadTokens, u.CacheCreationTokens, 1)
 }
 
 // used projects the counter onto the configured dimension. tokens (default) sums
-// input+output; requests counts reviews.
+// ALL tokens processed — uncached input + both cache buckets + output — so cached
+// input is metered, not undercounted; requests counts reviews.
 func (g *Gate) used(c store.ProviderUsageCount) int64 {
 	if g.cfg.QuotaDimension() == "requests" {
 		return c.Requests
 	}
-	return c.InputTokens + c.OutputTokens
+	return c.InputTokens + c.CacheReadTokens + c.CacheCreationTokens + c.OutputTokens
 }
 
 func (g *Gate) exceeded(period string, used int64) error {

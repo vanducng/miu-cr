@@ -31,18 +31,18 @@ func TestProviderUsageMissingRowIsZero(t *testing.T) {
 func TestProviderUsageAddRoundTripAndAccumulates(t *testing.T) {
 	s := openUsageStore(t)
 	ctx := context.Background()
-	if err := s.AddProviderUsage(ctx, "zai", "2026-06", 100, 50, 1); err != nil {
+	if err := s.AddProviderUsage(ctx, "zai", "2026-06", 100, 50, 30, 10, 1); err != nil {
 		t.Fatalf("add1: %v", err)
 	}
-	if err := s.AddProviderUsage(ctx, "zai", "2026-06", 10, 5, 1); err != nil {
+	if err := s.AddProviderUsage(ctx, "zai", "2026-06", 10, 5, 3, 1, 1); err != nil {
 		t.Fatalf("add2: %v", err)
 	}
 	got, err := s.ProviderUsage(ctx, "zai", "2026-06")
 	if err != nil {
 		t.Fatalf("read: %v", err)
 	}
-	if got.InputTokens != 110 || got.OutputTokens != 55 || got.Requests != 2 {
-		t.Fatalf("want {110 55 2}, got %+v", got)
+	if got.InputTokens != 110 || got.OutputTokens != 55 || got.CacheReadTokens != 33 || got.CacheCreationTokens != 11 || got.Requests != 2 {
+		t.Fatalf("want {in110 out55 cr33 cc11 req2}, got %+v", got)
 	}
 	// Distinct period bucket is isolated.
 	other, _ := s.ProviderUsage(ctx, "zai", "2026-07")
@@ -60,7 +60,7 @@ func TestProviderUsageConcurrentAddsSum(t *testing.T) {
 		wg.Add(1)
 		go func() {
 			defer wg.Done()
-			_ = s.AddProviderUsage(ctx, "openai", "2026-06-28", 2, 1, 1)
+			_ = s.AddProviderUsage(ctx, "openai", "2026-06-28", 2, 1, 3, 0, 1)
 		}()
 	}
 	wg.Wait()
@@ -68,7 +68,7 @@ func TestProviderUsageConcurrentAddsSum(t *testing.T) {
 	if err != nil {
 		t.Fatalf("read: %v", err)
 	}
-	if got.InputTokens != 2*n || got.OutputTokens != n || got.Requests != n {
-		t.Fatalf("concurrent adds lost increments: got %+v (want in=%d out=%d req=%d)", got, 2*n, n, n)
+	if got.InputTokens != 2*n || got.OutputTokens != n || got.CacheReadTokens != 3*n || got.Requests != n {
+		t.Fatalf("concurrent adds lost increments: got %+v (want in=%d out=%d cr=%d req=%d)", got, 2*n, n, 3*n, n)
 	}
 }
