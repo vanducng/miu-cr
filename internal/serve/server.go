@@ -40,6 +40,7 @@ type Job struct {
 	Timeout       time.Duration
 	Review        *JobReviewOptions
 	HeadSHA       string
+	Title         string
 	HostJobID     int64
 	HostAttemptID int64
 	HostAttempt   int
@@ -52,6 +53,14 @@ type Job struct {
 	// webhook path is byte-for-byte unchanged; the poller sets it to record its
 	// dedup cursor only on review success.
 	OnDone func(error)
+}
+
+// ShortSHA truncates a git SHA to its first 7 chars for human-scannable logs.
+func ShortSHA(s string) string {
+	if len(s) > 7 {
+		return s[:7]
+	}
+	return s
 }
 
 type JobReviewOptions struct {

@@ -895,6 +895,7 @@ func (h *HostRunner) claimReady(ctx stdctx.Context, snap hostRunnerSnapshot, rep
 			Timeout:       timeout,
 			Review:        &review,
 			HeadSHA:       claim.Job.HeadSHA,
+			Title:         claim.Title,
 			HostJobID:     jobID,
 			HostAttemptID: attemptID,
 			HostAttempt:   attempts,
@@ -920,7 +921,7 @@ func (h *HostRunner) claimReady(ctx stdctx.Context, snap hostRunnerSnapshot, rep
 		}
 		switch h.disp.Submit(job) {
 		case SubmitQueued:
-			h.log.Debug("host: review job submitted", "ref", job.Ref, "job_id", jobID, "attempt_id", attemptID, "attempt", attempts, "head_sha", claim.Job.HeadSHA, "lease_seconds", int(heartbeatLease.Seconds()))
+			h.log.Debug("host: review job submitted", "ref", job.Ref, "pr_title", config.RedactString(claim.Title), "job_id", jobID, "attempt_id", attemptID, "attempt", attempts, "head_sha", ShortSHA(claim.Job.HeadSHA), "lease_seconds", int(heartbeatLease.Seconds()))
 		case SubmitDuplicate:
 			stopHeartbeat()
 			now := h.now().UTC()
@@ -947,6 +948,7 @@ func (h *HostRunner) claimReady(ctx stdctx.Context, snap hostRunnerSnapshot, rep
 }
 
 func (h *HostRunner) startHostJobHeartbeat(ctx stdctx.Context, jobID, attemptID int64, attempt int, headSHA string, lease time.Duration, ref string) func() {
+	headSHA = ShortSHA(headSHA)
 	if jobID == 0 || attemptID == 0 {
 		return func() {}
 	}

@@ -53,9 +53,12 @@ func captureReasoningFromEnv() (bool, error) {
 	return boolEnv("MIUCR_TRACE_REASONING")
 }
 
-func serveTraceSinkFromEnv(log *slog.Logger) (func(step string, payload any), error) {
-	if log == nil {
-		log = slog.Default()
+// serveTraceSinkFactoryFromEnv returns a builder that, given a per-call logger,
+// produces a trace sink — or nil when MIUCR_TRACE_LOG is off. Binding the logger
+// per call lets callers tag each review's trace lines with job context.
+func serveTraceSinkFactoryFromEnv(base *slog.Logger) (func(*slog.Logger) func(step string, payload any), error) {
+	if base == nil {
+		base = slog.Default()
 	}
 	enabled, err := boolEnv("MIUCR_TRACE_LOG")
 	if err != nil {
@@ -68,8 +71,13 @@ func serveTraceSinkFromEnv(log *slog.Logger) (func(step string, payload any), er
 	if err != nil {
 		return nil, err
 	}
-	log.Info("review trace logging enabled", "max_bytes", maxBytes)
-	return newTraceLogSink(log, maxBytes), nil
+	base.Info("review trace logging enabled", "max_bytes", maxBytes)
+	return func(l *slog.Logger) func(step string, payload any) {
+		if l == nil {
+			l = base
+		}
+		return newTraceLogSink(l, maxBytes)
+	}, nil
 }
 
 func boolEnv(name string) (bool, error) {

@@ -199,7 +199,7 @@ func serveCommand(opts *options) *cobra.Command {
 				if workers <= 0 {
 					workers = 1
 				}
-				traceSink, err := serveTraceSinkFromEnv(log)
+				traceSinkFactory, err := serveTraceSinkFactoryFromEnv(log)
 				if err != nil {
 					return err
 				}
@@ -207,7 +207,7 @@ func serveCommand(opts *options) *cobra.Command {
 				if err != nil {
 					return err
 				}
-				pool := serve.NewPoolWithWorkers(buildServeReviewFn(log, "", reviewStore, traceSink, captureReasoning), log, workers)
+				pool := serve.NewPoolWithWorkers(buildServeReviewFn(log, "", reviewStore, traceSinkFactory, captureReasoning), log, workers)
 				runner, err := serve.NewHostRunner(serve.HostRunnerConfig{
 					Store:           hostStore,
 					Repos:           snapshot.Repos,
@@ -314,7 +314,7 @@ func serveCommand(opts *options) *cobra.Command {
 				defer closeStore()
 				reviewStore = st
 			}
-			traceSink, err := serveTraceSinkFromEnv(log)
+			traceSinkFactory, err := serveTraceSinkFactoryFromEnv(log)
 			if err != nil {
 				return err
 			}
@@ -322,7 +322,7 @@ func serveCommand(opts *options) *cobra.Command {
 			if err != nil {
 				return err
 			}
-			reviewFn := buildServeReviewFn(log, gate, reviewStore, traceSink, captureReasoning)
+			reviewFn := buildServeReviewFn(log, gate, reviewStore, traceSinkFactory, captureReasoning)
 
 			pollCfg := func(disp serve.Dispatcher) serve.PollConfig {
 				return serve.PollConfig{
@@ -1271,8 +1271,12 @@ func buildTokenSource(g config.Github) (ghub.TokenSource, error) {
 // RETURNED cli.ReviewOutcome (not in Job.OnDone(error)), so the upsert rides here,
 // inside reviewFn, not in OnDone. The webhook/poll paths leave ReviewID empty and
 // skip the upsert (byte-for-byte unchanged).
-func buildServeReviewFn(log *slog.Logger, gate string, st serve.ReviewStore, traceSink func(step string, payload any), captureReasoning bool) func(serve.Job) error {
+func buildServeReviewFn(log *slog.Logger, gate string, st serve.ReviewStore, traceSinkFactory func(*slog.Logger) func(step string, payload any), captureReasoning bool) func(serve.Job) error {
 	return func(j serve.Job) error {
+		var traceSink func(step string, payload any)
+		if traceSinkFactory != nil {
+			traceSink = traceSinkFactory(log.With(serveJobLogAttrs(j)...))
+		}
 		review := serve.JobReviewOptions{Post: true, Gate: gate}
 		if j.Review != nil {
 			review = *j.Review
@@ -1287,7 +1291,7 @@ func buildServeReviewFn(log *slog.Logger, gate string, st serve.ReviewStore, tra
 		jobCtx, cancel := stdctx.WithTimeout(stdctx.Background(), timeout)
 		defer cancel()
 		progress := func(stage string) {
-			log.Debug("review progress", serveJobLogAttrs(j, "head_sha", j.HeadSHA, "stage", config.RedactString(stage))...)
+			log.Debug("review progress", serveJobLogAttrs(j, "stage", config.RedactString(stage))...)
 		}
 		out, err := ReviewPRForServe(jobCtx, PRReviewRequest{
 			Ref:              j.Ref,
@@ -1329,20 +1333,19 @@ func buildServeReviewFn(log *slog.Logger, gate string, st serve.ReviewStore, tra
 			// comment re-triggers a fresh job that re-checks the quota.
 			var ce *CLIError
 			if errors.As(err, &ce) && ce.Code == "quota.exceeded" {
-				log.Warn("review skipped: provider quota exhausted", serveJobLogAttrs(j, "head_sha", j.HeadSHA, "err", config.RedactString(err.Error()))...)
+				log.Warn("review skipped: provider quota exhausted", serveJobLogAttrs(j, "err", config.RedactString(err.Error()))...)
 				persistFinalReview(log, st, j.ReviewID, "done", ReviewOutcome{})
 				return nil
 			}
-			log.Error("review failed", serveJobLogAttrs(j, "head_sha", j.HeadSHA, "err", config.RedactString(err.Error()))...)
+			log.Error("review failed", serveJobLogAttrs(j, "err", config.RedactString(err.Error()))...)
 			persistFinalReview(log, st, j.ReviewID, "failed", ReviewOutcome{})
 			return err
 		}
-		posted, action, headSHA := 0, "none", ""
+		posted, action := 0, "none"
 		if out.PR != nil {
 			posted, action = out.PR.PostedInline, out.PR.SummaryAction
-			headSHA = out.PR.HeadSHA
 		}
-		log.Info("review done", serveJobLogAttrs(j, "review_id", out.ReviewID, "head_sha", headSHA, "findings", len(out.Findings), "posted_inline", posted, "summary", action)...)
+		log.Info("review done", serveJobLogAttrs(j, "review_id", out.ReviewID, "findings", len(out.Findings), "posted_inline", posted, "summary", action)...)
 		persistFinalReview(log, st, j.ReviewID, "done", out)
 		return nil
 	}
@@ -1350,6 +1353,9 @@ func buildServeReviewFn(log *slog.Logger, gate string, st serve.ReviewStore, tra
 
 func serveJobLogAttrs(j serve.Job, attrs ...any) []any {
 	out := []any{"ref", j.Ref}
+	if j.Title != "" {
+		out = append(out, "pr_title", config.RedactString(j.Title))
+	}
 	if j.HostJobID != 0 {
 		out = append(out, "job_id", j.HostJobID)
 	}
@@ -1358,6 +1364,9 @@ func serveJobLogAttrs(j serve.Job, attrs ...any) []any {
 	}
 	if j.HostAttempt != 0 {
 		out = append(out, "attempt", j.HostAttempt)
+	}
+	if j.HeadSHA != "" {
+		out = append(out, "head_sha", serve.ShortSHA(j.HeadSHA))
 	}
 	return append(out, attrs...)
 }

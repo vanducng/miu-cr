@@ -181,6 +181,9 @@ func TestHostEnqueueRequeuesExpiredRunningJob(t *testing.T) {
 	if err != nil || !ok {
 		t.Fatalf("claim ok=%v err=%v", ok, err)
 	}
+	if claim.Title != "Synthetic PR" {
+		t.Fatalf("claim title = %q, want session title (JOIN regression)", claim.Title)
+	}
 	in.Now = now.Add(2 * time.Second)
 	in.AvailableAt = in.Now
 	requeued, ok, err := s.EnqueueHostJob(ctx, in)
