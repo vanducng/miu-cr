@@ -14,8 +14,10 @@ func intPtr(n int) *int    { return &n }
 // restores them after.
 func stubReviewValidators(t *testing.T) {
 	t.Helper()
-	prevG, prevF, prevM := gateValidator, filterModeValidator, minSeverityValidator
-	t.Cleanup(func() { gateValidator, filterModeValidator, minSeverityValidator = prevG, prevF, prevM })
+	prevG, prevF, prevM, prevFmt := gateValidator, filterModeValidator, minSeverityValidator, formatValidator
+	t.Cleanup(func() {
+		gateValidator, filterModeValidator, minSeverityValidator, formatValidator = prevG, prevF, prevM, prevFmt
+	})
 	inSet := func(set ...string) func(string) bool {
 		return func(s string) bool {
 			for _, v := range set {
@@ -29,6 +31,7 @@ func stubReviewValidators(t *testing.T) {
 	gateValidator = inSet("none", "info", "low", "medium", "high", "critical")
 	filterModeValidator = inSet("added", "diff_context", "file", "nofilter")
 	minSeverityValidator = inSet("none", "info", "low", "medium", "high", "critical")
+	formatValidator = inSet("full", "minimal")
 }
 
 func TestValidateReview(t *testing.T) {

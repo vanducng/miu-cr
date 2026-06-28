@@ -853,7 +853,7 @@ func validateFormat(format string) error {
 	return &CLIError{
 		Code:    "flags.invalid_format",
 		Message: fmt.Sprintf("unknown --format %q", format),
-		Hint:    "use " + strings.Join(ghub.ModeNames(), " or "),
+		Hint:    "use " + strings.Join(ghub.ModeNames(), ", "),
 		Exit:    2,
 	}
 }
