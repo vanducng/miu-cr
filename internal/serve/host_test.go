@@ -834,6 +834,23 @@ func TestRunHostReturnsWhenRunnerDoesNotStop(t *testing.T) {
 	}
 }
 
+func TestHostRunnerWaitsForThreadResolutionSync(t *testing.T) {
+	r := &HostRunner{}
+	r.threadSyncWG.Add(1)
+	done := make(chan struct{})
+	go func() {
+		<-done
+		r.threadSyncWG.Done()
+	}()
+	if r.waitThreadResolutionSync(time.Millisecond) {
+		t.Fatal("wait should time out while sync is running")
+	}
+	close(done)
+	if !r.waitThreadResolutionSync(time.Second) {
+		t.Fatal("wait should finish after sync completes")
+	}
+}
+
 func hostRunnerConfig(t *testing.T) HostRunnerConfig {
 	t.Helper()
 	gh := &fakeNotifGetter{

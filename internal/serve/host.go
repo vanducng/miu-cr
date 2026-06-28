@@ -114,6 +114,7 @@ type HostRunner struct {
 	now             func() time.Time
 	threadSyncLast  map[string]time.Time
 	threadSyncSem   chan struct{}
+	threadSyncWG    sync.WaitGroup
 }
 
 type hostRunnerSnapshot struct {
@@ -562,7 +563,9 @@ func (h *HostRunner) enqueueThreadResolutionSync(ctx stdctx.Context, client mgit
 		h.log.Warn("host: conversation resolution sync dropped; workers busy", "repo", repo.Slug, "pr", pr.GetNumber(), "head_sha", pr.GetHead().GetSHA())
 		return
 	}
+	h.threadSyncWG.Add(1)
 	go func() {
+		defer h.threadSyncWG.Done()
 		defer func() { <-h.threadSyncSem }()
 		h.syncThreadResolution(ctx, client, repo, pr, now)
 	}()
@@ -970,6 +973,16 @@ func hostFailedRetryDelay(attempts int) time.Duration {
 }
 
 func RunHost(ctx stdctx.Context, pool *Pool, runner *HostRunner) error {
+	drain := func() error {
+		syncDone := runner.waitThreadResolutionSync(runHostDrainGrace)
+		if pool != nil {
+			pool.Drain()
+		}
+		if !syncDone {
+			return ErrHostRunnerStopTimeout
+		}
+		return nil
+	}
 	done := make(chan struct{})
 	go func() {
 		runner.Run(ctx)
@@ -978,21 +991,36 @@ func RunHost(ctx stdctx.Context, pool *Pool, runner *HostRunner) error {
 	<-ctx.Done()
 	select {
 	case <-done:
+		return drain()
 	case <-time.After(runHostDrainGrace):
 		if pool != nil {
 			pool.Drain()
 		}
 		select {
 		case <-done:
-			return nil
+			return drain()
 		case <-time.After(runHostDrainGrace):
 			return ErrHostRunnerStopTimeout
 		}
 	}
-	if pool != nil {
-		pool.Drain()
+}
+
+func (h *HostRunner) waitThreadResolutionSync(timeout time.Duration) bool {
+	done := make(chan struct{})
+	go func() {
+		h.threadSyncWG.Wait()
+		close(done)
+	}()
+	if timeout <= 0 {
+		<-done
+		return true
 	}
-	return nil
+	select {
+	case <-done:
+		return true
+	case <-time.After(timeout):
+		return false
+	}
 }
 
 func HashJSON(v any) string {
