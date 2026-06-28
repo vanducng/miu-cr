@@ -501,7 +501,7 @@ func (h *HostRunner) pollRepo(ctx stdctx.Context, snap hostRunnerSnapshot, repo 
 			h.log.Warn("host: failed to enqueue PR review", "repo", repo.Slug, "pr", number, "error", config.RedactString(err.Error()))
 			continue
 		}
-		if repo.ThreadResolutionSync.Enabled() && h.shouldSyncThreadResolution(repo.Slug, number, repo.ThreadResolutionSync.Interval, now) {
+		if repo.ThreadResolutionSync.Enabled() {
 			if threadSyncClient == nil {
 				threadSyncClient = mgithub.NewClient(token)
 			}
@@ -518,18 +518,30 @@ func (h *HostRunner) pollRepo(ctx stdctx.Context, snap hostRunnerSnapshot, repo 
 	return pollFloor, nil
 }
 
-func (h *HostRunner) shouldSyncThreadResolution(slug string, number int64, interval time.Duration, now time.Time) bool {
+func (h *HostRunner) reserveThreadResolutionSync(slug string, number int64, interval time.Duration, now time.Time) (bool, string) {
 	if interval <= 0 {
 		interval = defaultThreadResolutionSyncInterval
 	}
 	key := fmt.Sprintf("%s#%d", slug, number)
 	h.mu.Lock()
 	defer h.mu.Unlock()
+	if h.threadSyncStop {
+		delete(h.threadSyncLast, key)
+		return false, "stopping"
+	}
 	if last, ok := h.threadSyncLast[key]; ok && now.Sub(last) < interval {
-		return false
+		return false, "throttled"
+	}
+	if h.threadSyncActive >= maxThreadResolutionSyncWorkers {
+		delete(h.threadSyncLast, key)
+		return false, "workers_busy"
 	}
 	h.threadSyncLast[key] = now
-	return true
+	if h.threadSyncActive == 0 {
+		h.threadSyncDone = make(chan struct{})
+	}
+	h.threadSyncActive++
+	return true, ""
 }
 
 func (h *HostRunner) pruneThreadResolutionSync(slug string, openNumbers []int64) {
@@ -556,25 +568,16 @@ func (h *HostRunner) pruneThreadResolutionSync(slug string, openNumbers []int64)
 }
 
 func (h *HostRunner) enqueueThreadResolutionSync(ctx stdctx.Context, client mgithub.Client, repo HostRepoConfig, pr *github.PullRequest, now time.Time) {
-	key := fmt.Sprintf("%s#%d", repo.Slug, pr.GetNumber())
-	h.mu.Lock()
-	if h.threadSyncStop {
-		delete(h.threadSyncLast, key)
-		h.mu.Unlock()
-		h.log.Warn("host: conversation resolution sync dropped; host stopping", "repo", repo.Slug, "pr", pr.GetNumber(), "head_sha", pr.GetHead().GetSHA())
+	ok, reason := h.reserveThreadResolutionSync(repo.Slug, int64(pr.GetNumber()), repo.ThreadResolutionSync.Interval, now)
+	if !ok {
+		if reason == "stopping" {
+			h.log.Warn("host: conversation resolution sync dropped; host stopping", "repo", repo.Slug, "pr", pr.GetNumber(), "head_sha", pr.GetHead().GetSHA())
+		}
+		if reason == "workers_busy" {
+			h.log.Warn("host: conversation resolution sync dropped; workers busy", "repo", repo.Slug, "pr", pr.GetNumber(), "head_sha", pr.GetHead().GetSHA())
+		}
 		return
 	}
-	if h.threadSyncActive >= maxThreadResolutionSyncWorkers {
-		delete(h.threadSyncLast, key)
-		h.mu.Unlock()
-		h.log.Warn("host: conversation resolution sync dropped; workers busy", "repo", repo.Slug, "pr", pr.GetNumber(), "head_sha", pr.GetHead().GetSHA())
-		return
-	}
-	if h.threadSyncActive == 0 {
-		h.threadSyncDone = make(chan struct{})
-	}
-	h.threadSyncActive++
-	h.mu.Unlock()
 	go func() {
 		defer h.finishThreadResolutionSync()
 		h.syncThreadResolution(ctx, client, repo, pr, now)
@@ -1009,13 +1012,13 @@ func RunHost(ctx stdctx.Context, pool *Pool, runner *HostRunner) error {
 	case <-done:
 		return drain()
 	case <-time.After(runHostDrainGrace):
+		if err := drain(); err != nil {
+			return err
+		}
 		select {
 		case <-done:
-			return drain()
-		case <-time.After(runHostDrainGrace):
-			if err := drain(); err != nil {
-				return err
-			}
+			return nil
+		default:
 			return ErrHostRunnerStopTimeout
 		}
 	}

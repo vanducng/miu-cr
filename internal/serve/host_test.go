@@ -150,18 +150,21 @@ func TestHostRunnerThreadResolutionSyncThrottleIsPerPR(t *testing.T) {
 	r := &HostRunner{threadSyncLast: map[string]time.Time{}}
 	now := time.Date(2026, 6, 28, 10, 0, 0, 0, time.UTC)
 	interval := 2 * time.Minute
-	if !r.shouldSyncThreadResolution("octo/hello", 1, interval, now) {
+	if ok, _ := r.reserveThreadResolutionSync("octo/hello", 1, interval, now); !ok {
 		t.Fatal("first sync should run")
 	}
-	if r.shouldSyncThreadResolution("octo/hello", 1, interval, now.Add(30*time.Second)) {
+	r.finishThreadResolutionSync()
+	if ok, _ := r.reserveThreadResolutionSync("octo/hello", 1, interval, now.Add(30*time.Second)); ok {
 		t.Fatal("same PR should be throttled inside interval")
 	}
-	if !r.shouldSyncThreadResolution("octo/hello", 2, interval, now.Add(30*time.Second)) {
+	if ok, _ := r.reserveThreadResolutionSync("octo/hello", 2, interval, now.Add(30*time.Second)); !ok {
 		t.Fatal("different PR should not share throttle state")
 	}
-	if !r.shouldSyncThreadResolution("octo/hello", 1, interval, now.Add(interval)) {
+	r.finishThreadResolutionSync()
+	if ok, _ := r.reserveThreadResolutionSync("octo/hello", 1, interval, now.Add(interval)); !ok {
 		t.Fatal("same PR should run again after interval")
 	}
+	r.finishThreadResolutionSync()
 }
 
 func TestHostRunnerPrunesThreadResolutionSyncThrottleKeys(t *testing.T) {
@@ -222,7 +225,7 @@ func TestHostRunnerPrunesThreadResolutionSyncAfterReconcileError(t *testing.T) {
 func TestHostRunnerThreadResolutionSyncDropClearsThrottle(t *testing.T) {
 	now := time.Date(2026, 6, 28, 10, 0, 0, 0, time.UTC)
 	r := &HostRunner{
-		threadSyncLast:   map[string]time.Time{"octo/hello#1": now},
+		threadSyncLast:   map[string]time.Time{"octo/hello#1": now.Add(-time.Hour)},
 		threadSyncActive: maxThreadResolutionSyncWorkers,
 		threadSyncDone:   make(chan struct{}),
 		log:              slog.New(slog.NewTextHandler(io.Discard, nil)),
