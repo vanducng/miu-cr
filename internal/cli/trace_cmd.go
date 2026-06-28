@@ -5,8 +5,6 @@ import (
 	"errors"
 	"fmt"
 	"io"
-	"regexp"
-	"strconv"
 	"strings"
 	"sync"
 
@@ -14,24 +12,9 @@ import (
 
 	"github.com/vanducng/miu-cr/internal/config"
 	"github.com/vanducng/miu-cr/internal/engine"
+	ghub "github.com/vanducng/miu-cr/internal/github"
 	"github.com/vanducng/miu-cr/internal/store"
 )
-
-// prRefRe matches a PR reference "owner/repo#number" so trace can resolve it to
-// the latest review for that PR instead of requiring the review id.
-var prRefRe = regexp.MustCompile(`^([^/\s]+)/([^#\s]+)#(\d+)$`)
-
-func parsePRRef(s string) (store.PRKey, bool) {
-	m := prRefRe.FindStringSubmatch(s)
-	if m == nil {
-		return store.PRKey{}, false
-	}
-	n, err := strconv.Atoi(m[3])
-	if err != nil {
-		return store.PRKey{}, false
-	}
-	return store.PRKey{Owner: m[1], Repo: m[2], Number: n}, true
-}
 
 // newTraceSink returns a trace Sink that writes each captured step to w as one
 // NDJSON line ({"step":...,"payload":...}). Used by --trace to stream the live
@@ -73,9 +56,10 @@ func traceCommand(_ *options) *cobra.Command {
 				return err
 			}
 			defer closeStore()
-			// A PR ref (owner/repo#number) resolves to that PR's most recent review.
-			if key, ok := parsePRRef(id); ok {
-				lr, found, lerr := st.LatestReviewForPR(cmd.Context(), key)
+			// A PR ref (owner/repo#number or a PR URL) resolves to that PR's most
+			// recent review; a bare review id fails ParseRef and falls through.
+			if ref, perr := ghub.ParseRef(id); perr == nil {
+				lr, found, lerr := st.LatestReviewForPR(cmd.Context(), store.PRKey{Owner: ref.Owner, Repo: ref.Repo, Number: ref.Number})
 				if lerr != nil {
 					return &CLIError{Code: "store.unavailable", Message: config.RedactString(lerr.Error()), Hint: "the review store could not be read — check the DB/config", Exit: 1, Details: map[string]any{"ref": id}}
 				}

@@ -164,20 +164,28 @@ func TestTraceShowMissingID(t *testing.T) {
 	}
 }
 
-func TestParsePRRef(t *testing.T) {
-	refs := map[string]store.PRKey{
-		"acme/widget#7":      {Owner: "acme", Repo: "widget", Number: 7},
-		"vanducng/miu-cr#20": {Owner: "vanducng", Repo: "miu-cr", Number: 20},
+func TestTraceResolvesPRRef(t *testing.T) {
+	s, err := sqlite.Open(filepath.Join(t.TempDir(), "state.db"))
+	if err != nil {
+		t.Fatalf("open store: %v", err)
 	}
-	for in, want := range refs {
-		if got, ok := parsePRRef(in); !ok || got != want {
-			t.Fatalf("parsePRRef(%q) = %+v ok=%v, want %+v", in, got, ok, want)
-		}
+	t.Cleanup(func() { _ = s.Close() })
+	id, err := s.SaveReview(stdctx.Background(), store.ReviewRecord{
+		Mode: "pr", Status: "done", Owner: "acme", Repo: "widget", Number: 7,
+		TraceJSON: `{"system_prompt":"hi"}`,
+	})
+	if err != nil {
+		t.Fatalf("seed: %v", err)
 	}
-	for _, in := range []string{"137a960f863e0d851c8c9dcd7a704a5f", "acme/widget", "acme#7", "owner/repo#x", ""} {
-		if _, ok := parsePRRef(in); ok {
-			t.Fatalf("parsePRRef(%q) should not parse as a PR ref", in)
-		}
+	out, err := runTrace(t, s, false, "acme/widget#7")
+	if err != nil {
+		t.Fatalf("trace by ref: %v", err)
+	}
+	if !strings.Contains(out, id) {
+		t.Fatalf("ref did not resolve to review %s:\n%s", id, out)
+	}
+	if _, err := runTrace(t, s, false, "acme/widget#999"); err == nil {
+		t.Fatal("unknown PR ref must error")
 	}
 }
 
