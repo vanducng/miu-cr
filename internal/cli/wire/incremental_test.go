@@ -191,6 +191,22 @@ func TestReviewReuseKeyChangesForReviewShape(t *testing.T) {
 	}
 }
 
+func TestReviewReuseKeyIgnoresPublishOnlyFields(t *testing.T) {
+	cfg := config.Defaults()
+	req := cli.PRReviewRequest{Post: true, Gate: "high", DeepContext: true, FilterMode: "diff_context", Format: "full"}
+	base := reviewReuseKey(req, cfg)
+	req.Format = "minimal"
+	req.Suggest = true
+	req.Approval = config.ApprovalPolicy{Mode: "threshold", MaxSeverity: "low", Note: "on_findings"}
+	if got := reviewReuseKey(req, cfg); got != base {
+		t.Fatalf("publish-only fields changed reuse key: base=%s got=%s", base, got)
+	}
+	req.Gate = "critical"
+	if got := reviewReuseKey(req, cfg); got == base {
+		t.Fatal("analysis field change should change reuse key")
+	}
+}
+
 func TestApprovalReuseRequiresApprovalWhenEligible(t *testing.T) {
 	ctx := stdctx.Background()
 	info := prInfo("sha-1")

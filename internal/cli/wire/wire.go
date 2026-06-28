@@ -544,10 +544,7 @@ func priorPublishedAtHead(info *mgithub.PRInfo, reuseKey string) bool {
 
 type reviewReuseShape struct {
 	Version         string
-	Post            bool
-	Suggest         bool
 	PatchRepair     bool
-	Approval        config.ApprovalPolicy
 	Gate            string
 	Provider        string
 	BaseURL         string
@@ -563,7 +560,6 @@ type reviewReuseShape struct {
 	Subagents       config.ReviewSubagents
 	FilterMode      string
 	MinSeverity     string
-	Format          string
 	WantDiagram     bool
 	Instruction     string
 	OperatorPrompt  string
@@ -624,10 +620,7 @@ func reviewReuseKey(req cli.PRReviewRequest, cfg config.Config) string {
 func newReviewReuseShape(req cli.PRReviewRequest, cfg config.Config, providerName string, provider config.Provider) reviewReuseShape {
 	shape := reviewReuseShape{
 		Version:         cli.Version(),
-		Post:            req.Post,
-		Suggest:         req.Suggest,
 		PatchRepair:     req.PatchRepair,
-		Approval:        req.Approval,
 		Gate:            req.Gate,
 		Provider:        req.Provider,
 		BaseURL:         req.BaseURL,
@@ -643,7 +636,6 @@ func newReviewReuseShape(req cli.PRReviewRequest, cfg config.Config, providerNam
 		Subagents:       req.Subagents,
 		FilterMode:      req.FilterMode,
 		MinSeverity:     req.MinSeverity,
-		Format:          req.Format,
 		WantDiagram:     req.WantDiagram,
 		Instruction:     req.Instruction,
 		OperatorPrompt:  req.OperatorPrompt,

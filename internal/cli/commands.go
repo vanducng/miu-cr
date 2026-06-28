@@ -646,7 +646,7 @@ func buildServeHostRepos(ctx stdctx.Context, cfg config.HostConfig, path string)
 			Enabled:       enabled,
 			Poll:          poll,
 			ConfigHash:    serve.HashJSON(repo),
-			PolicyHash:    serve.HashJSON(review),
+			PolicyHash:    serve.HashJSON(hostReviewAnalysisShape(review)),
 			PromptHash:    promptHash,
 			RulesHash:     rulesHash,
 			ReviewTimeout: durationOrDefault(review.Timeout, reviewTO),
@@ -655,6 +655,38 @@ func buildServeHostRepos(ctx stdctx.Context, cfg config.HostConfig, path string)
 		})
 	}
 	return out, reviewTO, nil
+}
+
+func hostReviewAnalysisShape(review config.HostReview) any {
+	return struct {
+		Gate         string
+		FilterMode   string
+		MinSeverity  string
+		Timeout      string
+		Expand       *int
+		TokenBudget  *int
+		ContextHops  *int
+		Mode         string
+		DeepContext  *bool
+		Conversation *bool
+		Force        *bool
+		PatchRepair  *bool
+		Subagents    config.ReviewSubagents
+	}{
+		Gate:         review.Gate,
+		FilterMode:   review.FilterMode,
+		MinSeverity:  review.MinSeverity,
+		Timeout:      review.Timeout,
+		Expand:       review.Expand,
+		TokenBudget:  review.TokenBudget,
+		ContextHops:  review.ContextHops,
+		Mode:         review.Mode,
+		DeepContext:  review.DeepContext,
+		Conversation: review.Conversation,
+		Force:        review.Force,
+		PatchRepair:  review.PatchRepair,
+		Subagents:    review.Subagents,
+	}
 }
 
 func hostReviewOptions(provider config.HostProvider, secret string, review config.HostReview) (serve.JobReviewOptions, error) {
