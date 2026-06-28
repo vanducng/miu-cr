@@ -132,7 +132,7 @@ already surfaces the inline review thread below). Directly under the Result line
 bullets** (one short line each), kept above the tracking tables as a quick skim. Then comes the
 **finding lifecycle ledger**, two ALWAYS-VISIBLE tables labelled in bold (not oversized H3):
 **⚠️ Open (N)** and **✅ Resolved (N)**. Each row is keyed by the finding's line-independent
-fingerprint with a **Priority** column (P0–P4 + emoji), its **severity before→after** (e.g.
+fingerprint with a **Priority** column (P0–P4 + emoji), its **priority before→after** (e.g.
 `🟡→🔴` on escalation, `🟠→✅` when fixed), a **Location** (the `file:line` label links to the
 finding's **inline review thread** — the `#discussion_r…` anchor — when a comment exists for it,
 else to the file blob), and the linked **origin commit** (plus, for resolved rows, the linked
@@ -258,11 +258,11 @@ database**: the GitHub Action path needs no state of its own.
 > repo, run the first review manually to absorb the re-post before the next
 > scheduled flood.
 
-### Optional resolution tracking (serve / local)
+### Resolution tracking
 
-An **opt-in** SQLite PR-thread store adds per-PR resolution tracking on top of
-the portable comment dedupe. Enable it by setting `MIUCR_PR_STORE` (any value)
-for `miucr serve` or local `miucr review --pr`:
+The PR summary carries a storeless lifecycle ledger in the hidden
+`<!-- miu-cr-ledger:... -->` marker, so resolution state survives ephemeral CI
+without a local PR-thread store:
 
 - A finding posted on a prior run that is **absent** from the current run, when
   its file is **still in the diff**, is marked **resolved** and is not re-raised.
@@ -270,10 +270,16 @@ for `miucr serve` or local `miucr review --pr`:
   is **reopened** and re-posted, so LLM non-determinism can never permanently
   suppress a real finding.
 
-The store holds finding text **locally only** under `~/.config/miu/cr/state.db`;
-it never reaches the JSON envelope and is never committed. It is **off by
-default** and stays **nil on the GitHub Action / CI path**: with no store, the
-publish behavior is byte-for-byte the stateless comment-dedupe path.
+`serve --host` can optionally mirror manual GitHub "Resolve conversation" state
+into that same summary table with `thread_resolution_sync.mode: poll`. This is
+metadata-only: it never starts an LLM review and never feeds approval decisions.
+
+For `miucr review --pr --post` outside the Action path, `MIUCR_PR_STORE=1` also
+opens the optional PR-thread store. That store layers prior posted/resolved
+fingerprints on top of the GitHub comment markers, so a finding that was resolved
+and later reappears can be re-posted even though the old hidden marker still
+exists. Store writes are best-effort after a successful post; they never change
+the JSON envelope.
 
 If a review would carry more inline comments than GitHub accepts in one request,
 miu-cr posts the highest-severity findings up to a fixed cap (40), notes the
@@ -355,8 +361,8 @@ Checks-mode outcomes surface in the `data.pr` envelope block as `mode`,
 
 ## Opt-in write-actions
 
-Two write-actions extend `--post`. **Both default OFF**; without them the review
-is comment-only.
+Two CLI write-actions extend `--post`. **Both default OFF**; without them the
+CLI review is comment-only.
 
 ```sh
 miucr review --pr owner/repo#123 --post --suggest --approval threshold --approval-max-priority P3
@@ -413,9 +419,10 @@ Any missed precondition silently **degrades to `COMMENT`** with a reason; it
 ### Inheritance
 
 `serve` inherits both flags **OFF**: a webhook daemon must not auto-suggest or
-auto-approve. The GitHub Action stays **comment-only** for now (a default-token
-APPROVE is a self-approve / supply-chain risk), so it exposes no `suggest` or
-`approval` inputs.
+auto-approve unless host config opts in. The composite GitHub Action exposes
+`suggest` (default `true`) and `patch-repair` (default `false`), but it does not
+expose approval inputs because a default-token APPROVE is a self-approval /
+supply-chain risk.
 
 ## Fork PRs
 

@@ -85,15 +85,16 @@ The optional `[review]` table sets defaults for `miucr review` flags. An **expli
 
 ```toml
 [review]
-gate         = "high"          # default --gate: none|info|low|medium|high|critical
-filter_mode  = "diff_context"  # default --filter-mode (--pr): added|diff_context|file|nofilter
-min_severity = "low"           # default --min-severity (--pr inline floor)
-timeout      = "900s"          # default review timeout (a Go duration: 900s, 15m, …)
-expand       = 20              # default --expand
-token_budget = 0               # default --token-budget; 0 = no cap
-deep_context = true            # default --deep-context
+gate         = "high"          # CLI default --gate: none|info|low|medium|high|critical
+filter_mode  = "diff_context"  # CLI default --filter-mode (--pr): added|diff_context|file|nofilter
+min_severity = "low"           # optional --min-severity inline floor; unset means no floor
+format       = "full"          # CLI default --format: full|minimal
+timeout      = "900s"          # review timeout (a Go duration; CLI review default is 900s)
+expand       = 5               # CLI default --expand; --deep-context raises it to 20
+token_budget = 0               # CLI default --token-budget; 0 = no cap
+deep_context = false           # CLI default --deep-context
 # context_hops = 3             # optional override; omit to let deep_context choose automatically
-conversation = true            # default --conversation on --pr
+conversation = false           # CLI default --conversation on --pr
 thinking     = "auto"          # auto|off|low|medium|high. auto = extended thinking/reasoning
                                # ON when the model supports it (Claude, gpt-5/o-series, codex) —
                                # deeper analysis. Off (or unsupported model) falls back to
@@ -102,8 +103,8 @@ temperature  = 0               # LLM sampling temperature (0–2), used when thi
                                # Default 0 = deterministic: re-reviews of the same diff stay
                                # stable instead of churning findings. Applies to anthropic +
                                # openai chat models; reasoning models (which need temp 1) ignore it.
-suggest      = false           # default --suggest (GitHub one-click suggestions on --post)
-patch_repair = false           # default --patch-repair; requires suggest=true
+suggest      = false           # CLI default --suggest (Action input defaults true)
+patch_repair = false           # CLI default --patch-repair; requires suggest=true
 
 [review.subagents]             # optional scoped fanout inside one review
 mode = "auto"                  # off|auto|always
@@ -114,7 +115,7 @@ require_all = true             # failed subagent prevents approval/check success
 
 [review.approval]              # optional default for --approval on PR --post
 mode = "off"                   # off|clean|threshold
-max_priority = "P3"            # threshold mode only; P0|P1|P2|P3|P4
+max_priority = "P4"            # threshold mode only; P0|P1|P2|P3|P4
 note = "on_findings"           # none|on_findings|always
 
 [[review.subagents.agents]]
