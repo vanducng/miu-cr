@@ -21,6 +21,8 @@ const (
 	statusOpen     = "open"
 	statusResolved = "resolved"
 	statusReopened = "reopened"
+
+	resolutionConversation = "conversation"
 )
 
 // maxLedgerEntries bounds the tracked set so the hidden marker + rendered tables
@@ -49,6 +51,7 @@ type LedgerEntry struct {
 	FirstSev string `json:"fv"`           // severity when first opened (the "before")
 	OpenSHA  string `json:"os"`           // origin commit (head when first opened)
 	ResSHA   string `json:"rs,omitempty"` // head when resolved
+	ResKind  string `json:"rk,omitempty"` // conversation when resolved outside review result
 	FirstAt  string `json:"fa"`           // RFC3339 first opened
 	ResAt    string `json:"ra,omitempty"` // RFC3339 resolved
 	Reopens  int    `json:"ro,omitempty"` // times resolved-then-reappeared
@@ -117,6 +120,7 @@ func MergeLedger(prior []LedgerEntry, current []engine.Finding, headSHA string, 
 				e.Status = statusReopened
 				e.Reopens++
 				e.ResSHA = ""
+				e.ResKind = ""
 				e.ResAt = ""
 			case statusReopened, statusOpen:
 				// already current; keep status
@@ -155,6 +159,11 @@ func MergeLedger(prior []LedgerEntry, current []engine.Finding, headSHA string, 
 		if e.Status != statusResolved && diffPaths[e.Path] {
 			e.Status = statusResolved
 			e.ResSHA = headSHA
+			e.ResKind = ""
+			e.ResAt = nowStr
+		} else if e.Status == statusResolved && e.ResKind == resolutionConversation && diffPaths[e.Path] {
+			e.ResSHA = headSHA
+			e.ResKind = ""
 			e.ResAt = nowStr
 		}
 	}
@@ -312,20 +321,24 @@ func renderLedger(b *strings.Builder, info *PRInfo, entries []LedgerEntry, inlin
 			shown = shown[:maxResolvedRows]
 		}
 		for _, e := range shown {
-			// Show "opened → resolved" only when they are DIFFERENT commits (a real
-			// cross-commit fix); when a finding opened and resolved at the same commit
-			// (e.g. a re-review of the same SHA) the transition is noise — show one SHA.
-			resolvedCell := shaLink(info, e.ResSHA)
-			if e.OpenSHA != "" && e.ResSHA != "" && e.OpenSHA != e.ResSHA {
-				resolvedCell = shaLink(info, e.OpenSHA) + " → " + resolvedCell
-			}
-			fmt.Fprintf(b, "| %s | %s | %s | %s |\n", ledgerSevCell(e, true), ledgerIssue(e, false), ledgerLocation(info, e, inlineURLs), resolvedCell)
+			fmt.Fprintf(b, "| %s | %s | %s | %s |\n", ledgerSevCell(e, true), ledgerIssue(e, false), ledgerLocation(info, e, inlineURLs), ledgerResolvedCell(info, e))
 		}
 		if extra > 0 {
 			fmt.Fprintf(b, "\n_+%d older resolved finding(s) tracked but not shown._\n", extra)
 		}
 		b.WriteString("\n")
 	}
+}
+
+func ledgerResolvedCell(info *PRInfo, e LedgerEntry) string {
+	cell := shaLink(info, e.ResSHA)
+	if e.OpenSHA != "" && e.ResSHA != "" && e.OpenSHA != e.ResSHA {
+		cell = shaLink(info, e.OpenSHA) + " → " + cell
+	}
+	if e.ResKind == resolutionConversation {
+		cell += " · conversation resolved"
+	}
+	return cell
 }
 
 // ledgerSevCell renders the Priority cell. Resolved rows show the plain

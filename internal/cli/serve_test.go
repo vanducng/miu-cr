@@ -463,6 +463,49 @@ func TestBuildServeHostReposAllowsZeroReviewOverrides(t *testing.T) {
 	}
 }
 
+func TestBuildServeHostReposThreadResolutionSyncLayering(t *testing.T) {
+	cfg := config.HostConfig{
+		Host: config.HostRuntime{Review: config.HostReview{ThreadResolutionSync: config.ThreadResolutionSyncConfig{Mode: "off", Interval: "10m"}}},
+		Repos: []config.HostRepo{{
+			Name:          "service-api",
+			Slug:          "example-org/service-api",
+			Owner:         "example-org",
+			Repo:          "service-api",
+			GitURL:        "https://github.com/example-org/service-api.git",
+			GithubAccount: "pat",
+			Review:        config.HostReview{ThreadResolutionSync: config.ThreadResolutionSyncConfig{Mode: "poll", Interval: "2m"}},
+		}},
+	}
+	repos, _, err := buildServeHostRepos(stdctx.Background(), cfg, filepath.Join(t.TempDir(), "host.yaml"))
+	if err != nil {
+		t.Fatalf("buildServeHostRepos: %v", err)
+	}
+	if repos[0].ThreadResolutionSync.Mode != "poll" || repos[0].ThreadResolutionSync.Interval != 2*time.Minute {
+		t.Fatalf("repo override did not enable thread resolution sync: %+v", repos[0])
+	}
+}
+
+func TestBuildServeHostReposRejectsInvalidThreadResolutionSync(t *testing.T) {
+	cfg := config.HostConfig{
+		Host: config.HostRuntime{Review: config.HostReview{ThreadResolutionSync: config.ThreadResolutionSyncConfig{Mode: "webhook"}}},
+		Repos: []config.HostRepo{{
+			Name:          "service-api",
+			Slug:          "example-org/service-api",
+			Owner:         "example-org",
+			Repo:          "service-api",
+			GitURL:        "https://github.com/example-org/service-api.git",
+			GithubAccount: "pat",
+		}},
+	}
+	if _, _, err := buildServeHostRepos(stdctx.Background(), cfg, filepath.Join(t.TempDir(), "host.yaml")); err == nil {
+		t.Fatal("expected invalid thread resolution sync mode to fail")
+	}
+	cfg.Host.Review.ThreadResolutionSync = config.ThreadResolutionSyncConfig{Mode: "poll", Interval: "soon"}
+	if _, _, err := buildServeHostRepos(stdctx.Background(), cfg, filepath.Join(t.TempDir(), "host.yaml")); err == nil {
+		t.Fatal("expected invalid thread resolution sync interval to fail")
+	}
+}
+
 func TestBuildServeHostReposMergesPRFilterRules(t *testing.T) {
 	cfg := config.HostConfig{
 		Review: config.HostReview{PRFilter: config.HostPRFilter{
@@ -558,11 +601,12 @@ func TestHostReviewAnalysisShapeClassifiesEveryField(t *testing.T) {
 		hashed[shape.Field(i).Name] = true
 	}
 	ignored := map[string]bool{
-		"Format":   true,
-		"Post":     true,
-		"Suggest":  true,
-		"Approval": true,
-		"PRFilter": true,
+		"Format":               true,
+		"Post":                 true,
+		"Suggest":              true,
+		"Approval":             true,
+		"PRFilter":             true,
+		"ThreadResolutionSync": true,
 	}
 	review := reflect.TypeOf(config.HostReview{})
 	for i := 0; i < review.NumField(); i++ {

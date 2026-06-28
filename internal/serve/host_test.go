@@ -3,6 +3,8 @@ package serve
 import (
 	stdctx "context"
 	"errors"
+	"io"
+	"log/slog"
 	"net/http"
 	"os"
 	"strings"
@@ -13,6 +15,7 @@ import (
 	"github.com/google/go-github/v84/github"
 
 	"github.com/vanducng/miu-cr/internal/config"
+	mgithub "github.com/vanducng/miu-cr/internal/github"
 	"github.com/vanducng/miu-cr/internal/store"
 )
 
@@ -141,6 +144,125 @@ func TestHostRunnerSkipsDraftPRsByDefault(t *testing.T) {
 	}
 	if disp.count() != 1 {
 		t.Fatalf("submitted jobs = %d, want 1", disp.count())
+	}
+}
+
+func TestHostRunnerThreadResolutionSyncThrottleIsPerPR(t *testing.T) {
+	r := &HostRunner{threadSyncLast: map[string]time.Time{}}
+	now := time.Date(2026, 6, 28, 10, 0, 0, 0, time.UTC)
+	interval := 2 * time.Minute
+	if ok, _ := r.reserveThreadResolutionSync("octo/hello", 1, interval, now); !ok {
+		t.Fatal("first sync should run")
+	}
+	r.finishThreadResolutionSync()
+	if ok, _ := r.reserveThreadResolutionSync("octo/hello", 1, interval, now.Add(30*time.Second)); ok {
+		t.Fatal("same PR should be throttled inside interval")
+	}
+	if ok, _ := r.reserveThreadResolutionSync("octo/hello", 2, interval, now.Add(30*time.Second)); !ok {
+		t.Fatal("different PR should not share throttle state")
+	}
+	r.finishThreadResolutionSync()
+	if ok, _ := r.reserveThreadResolutionSync("octo/hello", 1, interval, now.Add(interval)); !ok {
+		t.Fatal("same PR should run again after interval")
+	}
+	r.finishThreadResolutionSync()
+}
+
+func TestHostRunnerPrunesThreadResolutionSyncThrottleKeys(t *testing.T) {
+	now := time.Date(2026, 6, 28, 10, 0, 0, 0, time.UTC)
+	r := &HostRunner{threadSyncLast: map[string]time.Time{
+		"octo/hello#1": now,
+		"octo/hello#2": now,
+		"octo/other#1": now,
+		"bad-key":      now,
+	}}
+
+	r.pruneThreadResolutionSync("octo/hello", []int64{2})
+
+	if _, ok := r.threadSyncLast["octo/hello#1"]; ok {
+		t.Fatal("closed PR key was not pruned")
+	}
+	if _, ok := r.threadSyncLast["octo/hello#2"]; !ok {
+		t.Fatal("open PR key was pruned")
+	}
+	if _, ok := r.threadSyncLast["octo/other#1"]; !ok {
+		t.Fatal("different repo key was pruned")
+	}
+	if _, ok := r.threadSyncLast["bad-key"]; !ok {
+		t.Fatal("different prefix key was pruned")
+	}
+}
+
+func TestHostRunnerPrunesThreadResolutionSyncAfterReconcileError(t *testing.T) {
+	now := time.Date(2026, 6, 28, 10, 0, 0, 0, time.UTC)
+	cfg := hostRunnerConfig(t)
+	st := cfg.Store.(*fakeHostStore)
+	st.reconcileErr = errors.New("boom")
+	cfg.NewNotifGetter = func(string) notifGetter {
+		return &fakeNotifGetter{prs: map[string][]*github.PullRequest{"octo/hello": {
+			prWithHead(2, "sha-B"),
+		}}}
+	}
+	r, err := NewHostRunner(cfg)
+	if err != nil {
+		t.Fatalf("NewHostRunner: %v", err)
+	}
+	r.threadSyncLast = map[string]time.Time{
+		"octo/hello#1": now,
+		"octo/hello#2": now,
+	}
+
+	if err := r.Tick(stdctx.Background()); err != nil {
+		t.Fatalf("Tick: %v", err)
+	}
+	if _, ok := r.threadSyncLast["octo/hello#1"]; ok {
+		t.Fatal("closed PR key was not pruned after reconcile error")
+	}
+	if _, ok := r.threadSyncLast["octo/hello#2"]; !ok {
+		t.Fatal("open PR key was pruned after reconcile error")
+	}
+}
+
+func TestHostRunnerThreadResolutionSyncDropClearsThrottle(t *testing.T) {
+	now := time.Date(2026, 6, 28, 10, 0, 0, 0, time.UTC)
+	r := &HostRunner{
+		threadSyncLast:   map[string]time.Time{"octo/hello#1": now.Add(-time.Hour)},
+		threadSyncActive: maxThreadResolutionSyncWorkers,
+		threadSyncDone:   make(chan struct{}),
+		log:              slog.New(slog.NewTextHandler(io.Discard, nil)),
+	}
+
+	r.enqueueThreadResolutionSync(stdctx.Background(), nil, HostRepoConfig{Slug: "octo/hello"}, prWithHead(1, "sha-A"), now)
+
+	if _, ok := r.threadSyncLast["octo/hello#1"]; ok {
+		t.Fatal("dropped sync kept throttle reservation")
+	}
+}
+
+func TestHostRunnerThreadResolutionSyncDetachesFromPollContext(t *testing.T) {
+	now := time.Date(2026, 6, 28, 10, 0, 0, 0, time.UTC)
+	client := &threadSyncContextClient{}
+	r := &HostRunner{
+		threadSyncLast: map[string]time.Time{},
+		log:            slog.New(slog.NewTextHandler(io.Discard, nil)),
+	}
+	ctx, cancel := stdctx.WithCancel(stdctx.Background())
+	cancel()
+
+	r.enqueueThreadResolutionSync(ctx, client, HostRepoConfig{
+		Slug:  "octo/hello",
+		Owner: "octo",
+		Repo:  "hello",
+		ThreadResolutionSync: HostThreadResolutionSync{
+			Interval: time.Minute,
+		},
+	}, prWithHead(1, "sha-A"), now)
+
+	if !r.waitThreadResolutionSync(time.Second) {
+		t.Fatal("sync worker did not finish")
+	}
+	if err := client.issueContextErr(); err != nil {
+		t.Fatalf("sync worker inherited canceled poll context: %v", err)
 	}
 }
 
@@ -773,6 +895,86 @@ func TestRunHostReturnsWhenRunnerDoesNotStop(t *testing.T) {
 	}
 }
 
+func TestHostRunnerWaitsForThreadResolutionSync(t *testing.T) {
+	r := &HostRunner{threadSyncActive: 1, threadSyncDone: make(chan struct{})}
+	done := make(chan struct{})
+	go func() {
+		<-done
+		r.finishThreadResolutionSync()
+	}()
+	if r.waitThreadResolutionSync(time.Millisecond) {
+		t.Fatal("wait should time out while sync is running")
+	}
+	close(done)
+	if !r.waitThreadResolutionSync(time.Second) {
+		t.Fatal("wait should finish after sync completes")
+	}
+}
+
+type threadSyncContextClient struct {
+	mu  sync.Mutex
+	err error
+}
+
+func (c *threadSyncContextClient) issueContextErr() error {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	return c.err
+}
+
+func (c *threadSyncContextClient) ListIssueComments(ctx stdctx.Context, _, _ string, _ int, _ *github.IssueListCommentsOptions) ([]*github.IssueComment, *github.Response, error) {
+	c.mu.Lock()
+	c.err = ctx.Err()
+	c.mu.Unlock()
+	return nil, nil, nil
+}
+
+func (c *threadSyncContextClient) GetPR(stdctx.Context, string, string, int) (*github.PullRequest, error) {
+	return nil, nil
+}
+
+func (c *threadSyncContextClient) ListFiles(stdctx.Context, string, string, int, *github.ListOptions) ([]*github.CommitFile, *github.Response, error) {
+	return nil, nil, nil
+}
+
+func (c *threadSyncContextClient) GetCommit(stdctx.Context, string, string, string) (*github.Commit, error) {
+	return nil, nil
+}
+
+func (c *threadSyncContextClient) CreateReview(stdctx.Context, string, string, int, *github.PullRequestReviewRequest) (*github.PullRequestReview, error) {
+	return nil, nil
+}
+
+func (c *threadSyncContextClient) ListReviews(stdctx.Context, string, string, int, *github.ListOptions) ([]*github.PullRequestReview, *github.Response, error) {
+	return nil, nil, nil
+}
+
+func (c *threadSyncContextClient) ListReviewComments(stdctx.Context, string, string, int, *github.PullRequestListCommentsOptions) ([]*github.PullRequestComment, *github.Response, error) {
+	return nil, nil, nil
+}
+
+func (c *threadSyncContextClient) CreateIssueComment(stdctx.Context, string, string, int, *github.IssueComment) (*github.IssueComment, error) {
+	return nil, nil
+}
+
+func (c *threadSyncContextClient) EditIssueComment(stdctx.Context, string, string, int64, *github.IssueComment) (*github.IssueComment, error) {
+	return nil, nil
+}
+
+func (c *threadSyncContextClient) CreateCheckRun(stdctx.Context, string, string, github.CreateCheckRunOptions) (*github.CheckRun, error) {
+	return nil, nil
+}
+
+func (c *threadSyncContextClient) UpdateCheckRun(stdctx.Context, string, string, int64, github.UpdateCheckRunOptions) (*github.CheckRun, error) {
+	return nil, nil
+}
+
+func (c *threadSyncContextClient) ListCheckRunsForRef(stdctx.Context, string, string, string, *github.ListCheckRunsOptions) (*github.ListCheckRunsResults, *github.Response, error) {
+	return nil, nil, nil
+}
+
+var _ mgithub.Client = (*threadSyncContextClient)(nil)
+
 func hostRunnerConfig(t *testing.T) HostRunnerConfig {
 	t.Helper()
 	gh := &fakeNotifGetter{
@@ -885,6 +1087,7 @@ type fakeHostStore struct {
 	lastReconcile store.HostClosedPRsInput
 	pruneBlock    <-chan struct{}
 	sessionErrFor map[int64]error
+	reconcileErr  error
 }
 
 func newFakeHostStore() *fakeHostStore {
@@ -921,6 +1124,9 @@ func (s *fakeHostStore) ReconcileHostClosedPRs(_ stdctx.Context, in store.HostCl
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	s.lastReconcile = in
+	if s.reconcileErr != nil {
+		return store.HostClosedPRsResult{}, s.reconcileErr
+	}
 	open := map[int64]bool{}
 	for _, n := range in.OpenNumbers {
 		open[n] = true

@@ -30,6 +30,9 @@ x:
   host_review: &host_review
     suggest: true
     patch_repair: true
+    thread_resolution_sync:
+      mode: poll
+      interval: 7m
     approval:
       mode: threshold
       max_priority: P3
@@ -99,6 +102,9 @@ repos:
 	}
 	if cfg.Host.Review.PatchRepair == nil || !*cfg.Host.Review.PatchRepair {
 		t.Fatalf("merged host review not loaded: %+v", cfg.Host.Review)
+	}
+	if cfg.Host.Review.ThreadResolutionSync.Mode != "poll" || cfg.Host.Review.ThreadResolutionSync.Interval != "7m" {
+		t.Fatalf("thread resolution sync not loaded: %+v", cfg.Host.Review)
 	}
 	if cfg.Host.Review.Approval.Mode != "threshold" || cfg.Host.Review.Approval.MaxPriority != "P3" || cfg.Host.Review.Approval.Note != "on_findings" {
 		t.Fatalf("host approval not loaded: %+v", cfg.Host.Review.Approval)
