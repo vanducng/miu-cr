@@ -33,7 +33,7 @@ func SyncSummaryConversationResolved(ctx stdctx.Context, client Client, info *PR
 	if err != nil {
 		return ThreadResolutionSyncResult{Reason: "thread_fetch_failed"}, mapWriteError("github.thread_resolution_sync_failed", "listing review threads", err)
 	}
-	next, delta := SyncLedgerConversationResolved(prior, resolved, info.HeadSHA, now)
+	next, delta := SyncLedgerConversationResolved(prior, resolved, now)
 	result := ThreadResolutionSyncResult{Reason: "unchanged", Entries: len(next), Resolved: delta.Resolved, Reopened: delta.Reopened}
 	if delta.Resolved == 0 && delta.Reopened == 0 {
 		return result, nil
@@ -61,7 +61,7 @@ type ThreadResolutionLedgerDelta struct {
 	Reopened int
 }
 
-func SyncLedgerConversationResolved(prior []LedgerEntry, resolved map[string]bool, headSHA string, now time.Time) ([]LedgerEntry, ThreadResolutionLedgerDelta) {
+func SyncLedgerConversationResolved(prior []LedgerEntry, resolved map[string]bool, now time.Time) ([]LedgerEntry, ThreadResolutionLedgerDelta) {
 	nowStr := now.UTC().Format(time.RFC3339)
 	out := make([]LedgerEntry, len(prior))
 	copy(out, prior)
@@ -71,7 +71,7 @@ func SyncLedgerConversationResolved(prior []LedgerEntry, resolved map[string]boo
 		if resolved[e.FP] {
 			if e.Status != statusResolved {
 				e.Status = statusResolved
-				e.ResSHA = headSHA
+				e.ResSHA = e.OpenSHA
 				e.ResKind = resolutionConversation
 				e.ResAt = nowStr
 				delta.Resolved++

@@ -39,11 +39,11 @@ func TestSyncLedgerConversationResolvedMarksOpen(t *testing.T) {
 	now := time.Date(2026, 6, 28, 10, 0, 0, 0, time.UTC)
 	entries := []LedgerEntry{{FP: fpStr(1), Path: "a.go", Status: statusOpen, Sev: "low", FirstSev: "low", OpenSHA: "aaaaaa1"}}
 
-	got, delta := SyncLedgerConversationResolved(entries, map[string]bool{fpStr(1): true}, "bbbbbb2", now)
+	got, delta := SyncLedgerConversationResolved(entries, map[string]bool{fpStr(1): true}, now)
 	if delta.Resolved != 1 || delta.Reopened != 0 {
 		t.Fatalf("delta = %+v, want one resolved", delta)
 	}
-	if got[0].Status != statusResolved || got[0].ResKind != resolutionConversation || got[0].ResSHA != "bbbbbb2" {
+	if got[0].Status != statusResolved || got[0].ResKind != resolutionConversation || got[0].ResSHA != "aaaaaa1" {
 		t.Fatalf("entry not conversation-resolved: %+v", got[0])
 	}
 }
@@ -55,7 +55,7 @@ func TestSyncLedgerConversationResolvedReopensOnlyConversationRows(t *testing.T)
 		{FP: fpStr(2), Path: "b.go", Status: statusResolved, Sev: "low", FirstSev: "low", OpenSHA: "aaaaaa1", ResSHA: "bbbbbb2", ResAt: now.Format(time.RFC3339)},
 	}
 
-	got, delta := SyncLedgerConversationResolved(entries, nil, "cccccc3", now.Add(time.Hour))
+	got, delta := SyncLedgerConversationResolved(entries, nil, now.Add(time.Hour))
 	if delta.Resolved != 0 || delta.Reopened != 1 {
 		t.Fatalf("delta = %+v, want one reopen", delta)
 	}
@@ -201,6 +201,9 @@ func TestSyncSummaryConversationResolvedEditsExistingComment(t *testing.T) {
 	}
 	if !strings.Contains(client.editedBody, "conversation resolved") {
 		t.Fatalf("edited body missing conversation marker:\n%s", client.editedBody)
+	}
+	if !strings.Contains(client.editedBody, "`aaaaaa1`") || strings.Contains(client.editedBody, "`bbbbbb2` · conversation resolved") {
+		t.Fatalf("conversation resolution should keep the reviewed commit:\n%s", client.editedBody)
 	}
 }
 
