@@ -100,6 +100,41 @@ func TestRepairEmptyPatchRepaired(t *testing.T) {
 	}
 }
 
+// The --patch-repair second pass must be metered: its tokens fold into the quota
+// Record and the usage stats, not be dropped (the production undercount this fixes).
+func TestRepairUsageIsMetered(t *testing.T) {
+	line := `password := "hunter2"`
+	dir := repairRepo(t, line)
+	fa := &fakeAgent{
+		usage:       engine.Usage{InputTokens: 1000, OutputTokens: 200, CacheReadTokens: 500},
+		repairUsage: engine.Usage{InputTokens: 30, OutputTokens: 10, CacheReadTokens: 5},
+		findings:    []engine.Finding{emptyPatchFinding(line)},
+		repair:      func(engine.RepairRequest) (string, error) { return `password := os.Getenv("PW")`, nil },
+	}
+	gate := &fakeGate{}
+	eng := engine.New(fa, gitcmd.New())
+	req := repairReq(dir, true, true)
+	req.Quota = gate
+	res, err := eng.Review(stdctx.Background(), req)
+	if err != nil {
+		t.Fatalf("Review: %v", err)
+	}
+	if len(fa.repairCalls) != 1 {
+		t.Fatalf("want 1 repair call, got %d", len(fa.repairCalls))
+	}
+	want := engine.Usage{InputTokens: 1030, OutputTokens: 210, CacheReadTokens: 505}
+	if gate.recorded != want {
+		t.Fatalf("metered usage = %+v, want review+repair %+v", gate.recorded, want)
+	}
+	st := res.Stats["patch_repair"].(map[string]any)
+	if st["input_tokens"].(float64) != 30 || st["output_tokens"].(float64) != 10 {
+		t.Fatalf("patch_repair must report its own token stat, got %+v", st)
+	}
+	if res.Stats["total_input_tokens"].(float64) != 1535 { // 1030 uncached + 505 cache-read
+		t.Fatalf("total_input_tokens = %v, want 1535", res.Stats["total_input_tokens"])
+	}
+}
+
 func TestRepairJunkReplyFallsBack(t *testing.T) {
 	line := `password := "hunter2"`
 	dir := repairRepo(t, line)

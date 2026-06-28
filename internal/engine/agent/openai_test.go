@@ -244,7 +244,7 @@ func TestOpenAIAgentForcedFinalizeStillErrors(t *testing.T) {
 func TestOpenAIAgentRepairPatch(t *testing.T) {
 	fc := &fakeOpenAI{responses: []string{textCompletion("```go\nval, ok := m[key]\n```")}}
 	a := &openaiAgent{client: fc, model: "gpt-test"}
-	out, err := a.RepairPatch(stdctx.Background(), RepairRequest{Span: "val := m[key]", Rationale: "missing check", Category: "bug", Severity: "high"})
+	out, _, err := a.RepairPatch(stdctx.Background(), RepairRequest{Span: "val := m[key]", Rationale: "missing check", Category: "bug", Severity: "high"})
 	if err != nil {
 		t.Fatalf("RepairPatch: %v", err)
 	}

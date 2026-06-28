@@ -43,8 +43,8 @@ func (f *subagentFake) Review(_ stdctx.Context, rc engine.AgentContext) (engine.
 	}, nil
 }
 
-func (f *subagentFake) RepairPatch(stdctx.Context, engine.RepairRequest) (string, error) {
-	return "", nil
+func (f *subagentFake) RepairPatch(stdctx.Context, engine.RepairRequest) (string, engine.Usage, error) {
+	return "", engine.Usage{}, nil
 }
 
 func TestReviewSubagentsFanOutAndMerge(t *testing.T) {

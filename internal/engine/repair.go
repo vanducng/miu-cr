@@ -22,9 +22,9 @@ const repairSpanRuneCap = 4000
 // patch is committed onto the finding ONLY if it now passes, else the original is
 // kept. OFF (req.PatchRepair && req.Post false) is byte-identical: no calls, no stat.
 // On any error it falls back to the original finding and NEVER fails the review.
-func (e *Engine) repairPatches(ctx stdctx.Context, kept []Finding, selected []diff.Diff, req Request, stats map[string]any) []Finding {
+func (e *Engine) repairPatches(ctx stdctx.Context, kept []Finding, selected []diff.Diff, req Request, stats map[string]any) ([]Finding, Usage) {
 	if !req.PatchRepair || !req.Post || e.Agent == nil || classifyReplacement == nil {
-		return kept
+		return kept, Usage{}
 	}
 
 	newFileContent := make(map[string]string, len(selected))
@@ -82,15 +82,17 @@ func (e *Engine) repairPatches(ctx stdctx.Context, kept []Finding, selected []di
 	}
 
 	attempted, repaired := 0, 0
+	var usage Usage
 	for _, c := range cands {
 		attempted++
 		f := kept[c.idx]
-		reply, err := e.Agent.RepairPatch(ctx, RepairRequest{
+		reply, u, err := e.Agent.RepairPatch(ctx, RepairRequest{
 			Span:      c.span,
 			Rationale: f.Rationale,
 			Category:  f.Category,
 			Severity:  f.Severity,
 		})
+		usage.Add(u) // count tokens even for a rejected/failed repair — they were spent
 		if err != nil || strings.TrimSpace(reply) == "" {
 			continue
 		}
@@ -104,11 +106,15 @@ func (e *Engine) repairPatches(ctx stdctx.Context, kept []Finding, selected []di
 	}
 
 	stats["patch_repair"] = map[string]any{
-		"attempted":   float64(attempted),
-		"repaired":    float64(repaired),
-		"skipped_cap": float64(skippedCap),
+		"attempted":             float64(attempted),
+		"repaired":              float64(repaired),
+		"skipped_cap":           float64(skippedCap),
+		"input_tokens":          float64(usage.InputTokens),
+		"output_tokens":         float64(usage.OutputTokens),
+		"cache_read_tokens":     float64(usage.CacheReadTokens),
+		"cache_creation_tokens": float64(usage.CacheCreationTokens),
 	}
-	return kept
+	return kept, usage
 }
 
 // cleanNow reports whether the (possibly repaired) finding now passes the injected

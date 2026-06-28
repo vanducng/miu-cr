@@ -43,8 +43,8 @@ type Provider struct {
 }
 
 // QuotaConfig caps one provider instance's usage over a recurring window. nil
-// (absent block) = no quota. Dimension meters "tokens" (input+output, default)
-// or "requests" (one per review). Window is a Go duration ("1h", "5h", "24h") or
+// (absent block) = no quota. Dimension meters "tokens" (all input incl. cache +
+// output, default) or "requests" (one per review). Window is a Go duration ("1h", "5h", "24h") or
 // "monthly" (calendar month, UTC). Enforcement is fail-closed and per-instance,
 // aggregating across every repo/review that uses the provider. Tags cover both
 // the user TOML config and the host YAML config (one shared shape).

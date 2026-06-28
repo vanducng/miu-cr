@@ -115,7 +115,7 @@ func openAITools() []openai.ChatCompletionToolUnionParam {
 
 // RepairPatch issues one tools-less, code-only chat completion and returns the
 // fence-stripped, trimmed reply (lockstep with anthropicAgent.RepairPatch).
-func (a *openaiAgent) RepairPatch(ctx stdctx.Context, rr RepairRequest) (string, error) {
+func (a *openaiAgent) RepairPatch(ctx stdctx.Context, rr RepairRequest) (string, engine.Usage, error) {
 	if a.timeout > 0 {
 		var cancel stdctx.CancelFunc
 		ctx, cancel = stdctx.WithTimeout(ctx, a.timeout)
@@ -136,12 +136,18 @@ func (a *openaiAgent) RepairPatch(ctx stdctx.Context, rr RepairRequest) (string,
 	}
 	resp, err := a.client.create(ctx, repairParams)
 	if err != nil {
-		return "", classifyOpenAIErr(err)
+		return "", engine.Usage{}, classifyOpenAIErr(err)
 	}
 	if len(resp.Choices) == 0 {
-		return "", fmt.Errorf("agent: empty completion (no choices)")
+		return "", engine.Usage{}, fmt.Errorf("agent: empty completion (no choices)")
 	}
-	return parseRepairReply(resp.Choices[0].Message.Content), nil
+	cached := resp.Usage.PromptTokensDetails.CachedTokens
+	u := engine.Usage{
+		InputTokens:     resp.Usage.PromptTokens - cached,
+		OutputTokens:    resp.Usage.CompletionTokens,
+		CacheReadTokens: cached,
+	}
+	return parseRepairReply(resp.Choices[0].Message.Content), u, nil
 }
 
 func (a *openaiAgent) Review(ctx stdctx.Context, rc Context) (engine.ReviewOutput, error) {
@@ -207,8 +213,11 @@ func (a *openaiAgent) Review(ctx stdctx.Context, rc Context) (engine.ReviewOutpu
 		if len(resp.Choices) == 0 {
 			return engine.ReviewOutput{}, fmt.Errorf("agent: empty completion (no choices)")
 		}
-		usage.InputTokens += resp.Usage.PromptTokens
+		// OpenAI prompt_tokens INCLUDES cached; subtract so InputTokens stays uncached.
+		cached := resp.Usage.PromptTokensDetails.CachedTokens
+		usage.InputTokens += resp.Usage.PromptTokens - cached
 		usage.OutputTokens += resp.Usage.CompletionTokens
+		usage.CacheReadTokens += cached
 		msg := resp.Choices[0].Message
 		params.Messages = append(params.Messages, msg.ToParam())
 

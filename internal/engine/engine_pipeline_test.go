@@ -38,6 +38,7 @@ type fakeAgent struct {
 	// repair drives RepairPatch; nil => default "" (no usable replacement). It
 	// records every call so tests can assert call count / order / skip.
 	repair      func(engine.RepairRequest) (string, error)
+	repairUsage engine.Usage // returned per RepairPatch call (patch-repair metering tests)
 	repairCalls []engine.RepairRequest
 }
 
@@ -69,12 +70,13 @@ func (f *fakeAgent) Review(_ stdctx.Context, rc engine.AgentContext) (engine.Rev
 	}, nil
 }
 
-func (f *fakeAgent) RepairPatch(_ stdctx.Context, rr engine.RepairRequest) (string, error) {
+func (f *fakeAgent) RepairPatch(_ stdctx.Context, rr engine.RepairRequest) (string, engine.Usage, error) {
 	f.repairCalls = append(f.repairCalls, rr)
 	if f.repair != nil {
-		return f.repair(rr)
+		s, err := f.repair(rr)
+		return s, f.repairUsage, err
 	}
-	return "", nil
+	return "", f.repairUsage, nil
 }
 
 // fakeRetriever drives the engine's semantic seam without embed/DB/network.

@@ -77,6 +77,7 @@ var postgresMigrations = []schemaMigration{
 	{Name: "0003_host_schema", SQL: HostSchemaSQL},
 	{Name: "0004_provider_usage", SQL: ProviderUsageSchemaSQL},
 	{Name: "0005_host_jobs_repo_status_idx", SQL: hostJobsRepoStatusIdxSQL},
+	{Name: "0006_provider_usage_cache", SQL: providerUsageCacheSQL},
 }
 
 // hostJobsRepoStatusIdxSQL backs the per-repo status filter in

@@ -44,14 +44,23 @@ CREATE TABLE IF NOT EXISTS pr_findings (
 // on an existing DB), while staying part of SchemaSQL for the schema-parity test.
 const ProviderUsageSchemaSQL = `
 CREATE TABLE IF NOT EXISTS provider_usage (
-	provider      TEXT NOT NULL,
-	period        TEXT NOT NULL,
-	input_tokens  BIGINT NOT NULL DEFAULT 0,
-	output_tokens BIGINT NOT NULL DEFAULT 0,
-	requests      BIGINT NOT NULL DEFAULT 0,
-	updated_at    TEXT NOT NULL,
+	provider              TEXT NOT NULL,
+	period                TEXT NOT NULL,
+	input_tokens          BIGINT NOT NULL DEFAULT 0,
+	output_tokens         BIGINT NOT NULL DEFAULT 0,
+	cache_read_tokens     BIGINT NOT NULL DEFAULT 0,
+	cache_creation_tokens BIGINT NOT NULL DEFAULT 0,
+	requests              BIGINT NOT NULL DEFAULT 0,
+	updated_at            TEXT NOT NULL,
 	PRIMARY KEY (provider, period)
 );
+`
+
+// providerUsageCacheSQL backfills the cache-token columns on a provider_usage
+// table created by the 0004 migration (before cache metering). Idempotent.
+const providerUsageCacheSQL = `
+ALTER TABLE provider_usage ADD COLUMN IF NOT EXISTS cache_read_tokens BIGINT NOT NULL DEFAULT 0;
+ALTER TABLE provider_usage ADD COLUMN IF NOT EXISTS cache_creation_tokens BIGINT NOT NULL DEFAULT 0;
 `
 
 const HostSchemaSQL = `

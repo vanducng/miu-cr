@@ -166,7 +166,7 @@ func codexTools() []codexTool {
 // RepairPatch issues one tools-less, code-only Responses completion over the
 // same SSE/stream path as Review (stream:true, entitled model id) and returns
 // the fence-stripped, trimmed reply (lockstep with the SDK backends).
-func (a *codexAgent) RepairPatch(ctx stdctx.Context, rr RepairRequest) (string, error) {
+func (a *codexAgent) RepairPatch(ctx stdctx.Context, rr RepairRequest) (string, engine.Usage, error) {
 	if a.timeout > 0 {
 		var cancel stdctx.CancelFunc
 		ctx, cancel = stdctx.WithTimeout(ctx, a.timeout)
@@ -185,7 +185,7 @@ func (a *codexAgent) RepairPatch(ctx stdctx.Context, rr RepairRequest) (string, 
 		MaxOutputTokens: repairMaxTokens,
 	})
 	if err != nil {
-		return "", err
+		return "", engine.Usage{}, err
 	}
 	var text strings.Builder
 	for _, o := range resp.Output {
@@ -198,7 +198,8 @@ func (a *codexAgent) RepairPatch(ctx stdctx.Context, rr RepairRequest) (string, 
 			}
 		}
 	}
-	return parseRepairReply(text.String()), nil
+	// codex SSE usage is not parsed (its Review path is unmetered too); zero usage.
+	return parseRepairReply(text.String()), engine.Usage{}, nil
 }
 
 func (a *codexAgent) Review(ctx stdctx.Context, rc Context) (engine.ReviewOutput, error) {

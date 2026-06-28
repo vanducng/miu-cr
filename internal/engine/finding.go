@@ -33,11 +33,43 @@ type ReviewOutput struct {
 	Usage Usage
 }
 
-// Usage is the LLM token consumption for a review. Input+output only; the quota
-// path meters on these and the engine surfaces them in stats when present.
+// Usage is the LLM token consumption for a review, broken down so the quota path
+// meters total input (incl. cache) and callers can derive a cache-hit ratio.
+// InputTokens is the UNCACHED new input only. Backends normalize to this: Anthropic
+// reports cache as separate buckets outside input_tokens, while OpenAI reports
+// cached_tokens as a sub-count of prompt_tokens — so the OpenAI backend subtracts it
+// to keep InputTokens the uncached remainder. Zero when the backend/fake omits it.
 type Usage struct {
-	InputTokens  int64
-	OutputTokens int64
+	InputTokens         int64
+	OutputTokens        int64
+	CacheReadTokens     int64
+	CacheCreationTokens int64
+}
+
+// Add accumulates another pass's usage into u (all four buckets).
+func (u *Usage) Add(o Usage) {
+	u.InputTokens += o.InputTokens
+	u.OutputTokens += o.OutputTokens
+	u.CacheReadTokens += o.CacheReadTokens
+	u.CacheCreationTokens += o.CacheCreationTokens
+}
+
+// TotalInputTokens is all input processed: uncached new input plus both cache buckets.
+func (u Usage) TotalInputTokens() int64 {
+	return u.InputTokens + u.CacheReadTokens + u.CacheCreationTokens
+}
+
+// TotalTokens is total input (incl. cache) plus output — what the tokens quota meters.
+func (u Usage) TotalTokens() int64 { return u.TotalInputTokens() + u.OutputTokens }
+
+// CacheHitRatio is cache-read over total input (0 when there is no input). It is the
+// usage-optimization signal: how much input was served from the prompt cache.
+func (u Usage) CacheHitRatio() float64 {
+	ti := u.TotalInputTokens()
+	if ti == 0 {
+		return 0
+	}
+	return float64(u.CacheReadTokens) / float64(ti)
 }
 
 // ReviewResult is the engine output: the persisted id (empty when no Store is

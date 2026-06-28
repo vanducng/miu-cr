@@ -21,9 +21,9 @@ func (c *captureAgent) Review(_ stdctx.Context, rc agent.Context) (engine.Review
 	return engine.ReviewOutput{}, nil
 }
 
-func (c *captureAgent) RepairPatch(_ stdctx.Context, rr agent.RepairRequest) (string, error) {
+func (c *captureAgent) RepairPatch(_ stdctx.Context, rr agent.RepairRequest) (string, engine.Usage, error) {
 	c.gotRepair = rr
-	return "", nil
+	return "", engine.Usage{}, nil
 }
 
 func TestAgentAdapterForwardsRules(t *testing.T) {
