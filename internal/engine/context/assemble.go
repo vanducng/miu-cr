@@ -121,7 +121,7 @@ func xmlEscAttr(s string) string {
 func renderXML(diffs []diff.Diff, expand int, withWindows bool) string {
 	var sb strings.Builder
 	for _, d := range diffs {
-		sb.WriteString(fmt.Sprintf("<file path=%q>\n", xmlEscAttr(d.NewPath)))
+		sb.WriteString(fmt.Sprintf("<file path=\"%s\">\n", xmlEscAttr(d.NewPath)))
 		sb.WriteString("<diff>")
 		sb.WriteString(xmlEscBody(strings.TrimRight(d.Diff, "\n")))
 		sb.WriteString("</diff>\n")
@@ -143,7 +143,7 @@ func renderFilenamesXML(diffs []diff.Diff) string {
 	var sb strings.Builder
 	sb.WriteString("<files_changed>\n")
 	for _, d := range diffs {
-		sb.WriteString(fmt.Sprintf("<file path=%q/>\n", xmlEscAttr(d.NewPath)))
+		sb.WriteString(fmt.Sprintf("<file path=\"%s\"/>\n", xmlEscAttr(d.NewPath)))
 	}
 	sb.WriteString("</files_changed>\n")
 	return sb.String()

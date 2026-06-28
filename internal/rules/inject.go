@@ -113,7 +113,7 @@ func renderRuleXML(r Rule, allowContextFiles bool, totalContext *int) string {
 	if untrusted {
 		trust = "untrusted"
 	}
-	sb.WriteString(fmt.Sprintf("<rule stem=%q provenance=%q trust=%q>\n", xmlEscAttr(r.Stem), xmlEscAttr(r.Provenance.String()), trust))
+	sb.WriteString(fmt.Sprintf("<rule stem=\"%s\" provenance=\"%s\" trust=\"%s\">\n", xmlEscAttr(r.Stem), xmlEscAttr(r.Provenance.String()), trust))
 	if untrusted {
 		// Mirror the markdown path's semantic fence: structural escaping stops a
 		// break-out, but the model still needs telling not to obey an untrusted rule.
@@ -246,7 +246,7 @@ func inlineContextFile(r Rule, cf string, totalContext *int, xml bool) string {
 	if xml {
 		// Untrusted file content must be entity-escaped so a planted </rule> /
 		// <file> can't forge a boundary in the xml prompt.
-		sb.WriteString(fmt.Sprintf("<context_file name=%q>\n", xmlEscAttr(clean)))
+		sb.WriteString(fmt.Sprintf("<context_file name=\"%s\">\n", xmlEscAttr(clean)))
 		sb.WriteString(xmlEsc(string(content)))
 		if len(content) > 0 && content[len(content)-1] != '\n' {
 			sb.WriteString("\n")
@@ -267,7 +267,7 @@ func inlineContextFile(r Rule, cf string, totalContext *int, xml bool) string {
 // the (untrusted) path is entity-escaped so it can't break out of the element.
 func skipContext(cf, reason string, xml bool) string {
 	if xml {
-		return fmt.Sprintf("[context_file %q skipped: %s]\n", xmlEscAttr(cf), reason)
+		return fmt.Sprintf("[context_file \"%s\" skipped: %s]\n", xmlEscAttr(cf), reason)
 	}
 	return fmt.Sprintf("[context_file %q skipped: %s]\n", cf, reason)
 }

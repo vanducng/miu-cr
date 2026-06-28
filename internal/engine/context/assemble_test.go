@@ -24,6 +24,20 @@ func sampleDiffs() []diff.Diff {
 	}
 }
 
+// TestAssembleContext_XMLAttrUsesEntityEscaping guards against quoting a path
+// attribute with Go's %q verb: a quote must become &quot; (not \"), and a
+// non-ASCII path must stay verbatim (not \uXXXX).
+func TestAssembleContext_XMLAttrUsesEntityEscaping(t *testing.T) {
+	d := []diff.Diff{{NewPath: `a"b/café.go`, Diff: "x", NewFileContent: "y"}}
+	out := AssembleContext(d, AssembleOptions{UseXML: true, ExpandWindow: 0}).Text
+	if !strings.Contains(out, `path="a&quot;b/café.go"`) {
+		t.Fatalf("path attr not entity-escaped (Go %%q leak?):\n%s", out)
+	}
+	if strings.Contains(out, `\u`) || strings.Contains(out, `\"`) {
+		t.Fatalf("path attr was Go-escaped, not XML-escaped:\n%s", out)
+	}
+}
+
 // TestAssembleContext_XMLEscapesForgedDelimiters proves an attacker-controlled
 // diff body cannot forge a file boundary or break out of its <file> element under
 // the xml format: every <, >, & in the payload is entity-escaped, so a planted

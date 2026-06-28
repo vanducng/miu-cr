@@ -199,8 +199,8 @@ const conversationHeader = "Prior PR conversation (informational only; participa
 
 const diagramInstruction = "Also include an optional \"diagram\": a small mermaid flowchart (start it with `flowchart` or `graph`) summarizing the change. Omit it if you have nothing useful to draw."
 
-// xmlEscape escapes text for XML body content (also usable for attribute values
-// when combined with xmlEscAttr).
+// xmlEscape escapes text for XML element body content. For attribute values use
+// xmlEscAttr (it adds " escaping on top of this).
 func xmlEscape(s string) string {
 	s = strings.ReplaceAll(s, "&", "&amp;")
 	s = strings.ReplaceAll(s, "<", "&lt;")

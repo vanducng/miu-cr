@@ -90,9 +90,9 @@ func TestValidateReview(t *testing.T) {
 
 func TestMergeReviewMergesNewFields(t *testing.T) {
 	base := Review{Approval: ApprovalPolicy{Mode: "clean"}}
-	file := Review{Gate: "low", FilterMode: "file", MinSeverity: "medium", Timeout: "120s", Expand: intPtr(12), TokenBudget: intPtr(0), DeepContext: boolPtr(true), ContextHops: intPtr(3), Conversation: boolPtr(true), Suggest: boolPtr(false), Approval: ApprovalPolicy{Mode: "threshold", MaxPriority: "P3"}, Subagents: ReviewSubagents{Mode: "auto", Agents: []ReviewSubagent{{Name: "go", Include: []string{"**/*.go"}}}}}
+	file := Review{Gate: "low", FilterMode: "file", MinSeverity: "medium", PromptFormat: "markdown", Timeout: "120s", Expand: intPtr(12), TokenBudget: intPtr(0), DeepContext: boolPtr(true), ContextHops: intPtr(3), Conversation: boolPtr(true), Suggest: boolPtr(false), Approval: ApprovalPolicy{Mode: "threshold", MaxPriority: "P3"}, Subagents: ReviewSubagents{Mode: "auto", Agents: []ReviewSubagent{{Name: "go", Include: []string{"**/*.go"}}}}}
 	out := mergeReview(base, file)
-	if out.Gate != "low" || out.FilterMode != "file" || out.MinSeverity != "medium" || out.Timeout != "120s" {
+	if out.Gate != "low" || out.FilterMode != "file" || out.MinSeverity != "medium" || out.PromptFormat != "markdown" || out.Timeout != "120s" {
 		t.Fatalf("scalar review fields not merged: %+v", out)
 	}
 	if out.Expand == nil || *out.Expand != 12 || out.TokenBudget == nil || *out.TokenBudget != 0 || out.DeepContext == nil || !*out.DeepContext || out.ContextHops == nil || *out.ContextHops != 3 || out.Conversation == nil || !*out.Conversation {
