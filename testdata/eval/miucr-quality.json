@@ -40,6 +40,18 @@
       "id": "clean-small-change",
       "fixture": "clean-small-change",
       "expected": []
+    },
+    {
+      "id": "delimiter-collision",
+      "fixture": "delimiter-collision",
+      "expected": [
+        {
+          "id": "average-division-by-zero",
+          "file": "processor.go",
+          "severity": "high",
+          "category": "bug"
+        }
+      ]
     }
   ]
 }

@@ -113,8 +113,9 @@ default_provider = "anthropic"
 # fill a flag you did not pass. See `miucr config show --all` for the effective
 # config. Leave a key unset to keep the built-in flag default.
 # [review]
-# gate         = "high"          # fail (exit 2) at this severity: none|info|low|medium|high|critical
-# filter_mode  = "diff_context"  # --pr inline eligibility: added|diff_context|file|nofilter
+# gate          = "high"          # fail (exit 2) at this severity: none|info|low|medium|high|critical
+# filter_mode   = "diff_context"  # --pr inline eligibility: added|diff_context|file|nofilter
+# prompt_format = "xml"           # review prompt format: xml (default, injection-hardened) | markdown
 # min_severity = "low"           # --pr inline floor: none|info|low|medium|high|critical
 # timeout      = "300s"          # review timeout (a Go duration: 300s, 5m, …)
 # suggest      = false           # emit GitHub one-click suggestions on --post (default off)

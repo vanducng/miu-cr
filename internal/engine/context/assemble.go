@@ -9,8 +9,9 @@ import (
 
 // AssembleOptions controls context assembly.
 type AssembleOptions struct {
-	TokenBudget  int // approximate token budget (len(text)/4); <=0 disables budgeting
-	ExpandWindow int // context lines added above/below each hunk in the new-content window; <=0 disables expansion
+	TokenBudget  int  // approximate token budget (len(text)/4); <=0 disables budgeting
+	ExpandWindow int  // context lines added above/below each hunk in the new-content window; <=0 disables expansion
+	UseXML       bool // emit XML-tagged file sections instead of markdown === File: === delimiters
 }
 
 // Truncation levels, ordered from richest to leanest. Recorded in Stats so
@@ -33,7 +34,13 @@ type AssembledContext struct {
 // degrades through the truncation ladder (drop expansion windows, then
 // hunks-only, then filenames-only) and records the applied level in Stats.
 func AssembleContext(diffs []diff.Diff, opts AssembleOptions) AssembledContext {
-	full := render(diffs, opts.ExpandWindow, true)
+	renderFn := render
+	renderFilesFn := renderFilenames
+	if opts.UseXML {
+		renderFn = renderXML
+		renderFilesFn = renderFilenamesXML
+	}
+	full := renderFn(diffs, opts.ExpandWindow, true)
 	stats := map[string]any{
 		"files":            len(diffs),
 		"truncation_level": LevelFull,
@@ -44,14 +51,14 @@ func AssembleContext(diffs []diff.Diff, opts AssembleOptions) AssembledContext {
 		return AssembledContext{Text: full, Stats: stats}
 	}
 
-	hunks := render(diffs, 0, false)
+	hunks := renderFn(diffs, 0, false)
 	if !overBudget(hunks, opts.TokenBudget) {
 		stats["truncation_level"] = LevelHunksOnly
 		stats["est_tokens"] = estTokens(hunks)
 		return AssembledContext{Text: hunks, Stats: stats}
 	}
 
-	names := renderFilenames(diffs)
+	names := renderFilesFn(diffs)
 	stats["truncation_level"] = LevelFilenamesOnly
 	stats["est_tokens"] = estTokens(names)
 	return AssembledContext{Text: names, Stats: stats}
@@ -91,6 +98,54 @@ func renderFilenames(diffs []diff.Diff) string {
 		sb.WriteString(d.NewPath)
 		sb.WriteString("\n")
 	}
+	return sb.String()
+}
+
+// xmlEscBody escapes text for XML element body content.
+func xmlEscBody(s string) string {
+	s = strings.ReplaceAll(s, "&", "&amp;")
+	s = strings.ReplaceAll(s, "<", "&lt;")
+	s = strings.ReplaceAll(s, ">", "&gt;")
+	return s
+}
+
+// xmlEscAttr escapes text for an XML attribute value (additionally escapes ").
+func xmlEscAttr(s string) string {
+	s = xmlEscBody(s)
+	s = strings.ReplaceAll(s, `"`, "&quot;")
+	return s
+}
+
+// renderXML emits per-file sections using XML-tagged structure instead of the
+// markdown === File: === delimiters; file paths and content bodies are escaped.
+func renderXML(diffs []diff.Diff, expand int, withWindows bool) string {
+	var sb strings.Builder
+	for _, d := range diffs {
+		sb.WriteString(fmt.Sprintf("<file path=\"%s\">\n", xmlEscAttr(d.NewPath)))
+		sb.WriteString("<diff>")
+		sb.WriteString(xmlEscBody(strings.TrimRight(d.Diff, "\n")))
+		sb.WriteString("</diff>\n")
+		if withWindows && d.NewFileContent != "" {
+			win := newContentWindow(d, expand)
+			if win != "" {
+				sb.WriteString("<new_content>")
+				sb.WriteString(xmlEscBody(win))
+				sb.WriteString("</new_content>\n")
+			}
+		}
+		sb.WriteString("</file>\n\n")
+	}
+	return sb.String()
+}
+
+// renderFilenamesXML emits the filenames-only fallback in XML.
+func renderFilenamesXML(diffs []diff.Diff) string {
+	var sb strings.Builder
+	sb.WriteString("<files_changed>\n")
+	for _, d := range diffs {
+		sb.WriteString(fmt.Sprintf("<file path=\"%s\"/>\n", xmlEscAttr(d.NewPath)))
+	}
+	sb.WriteString("</files_changed>\n")
 	return sb.String()
 }
 

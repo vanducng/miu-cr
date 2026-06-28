@@ -203,7 +203,11 @@ func serveCommand(opts *options) *cobra.Command {
 				if err != nil {
 					return err
 				}
-				pool := serve.NewPoolWithWorkers(buildServeReviewFn(log, "", reviewStore, traceSink), log, workers)
+				captureReasoning, err := captureReasoningFromEnv()
+				if err != nil {
+					return err
+				}
+				pool := serve.NewPoolWithWorkers(buildServeReviewFn(log, "", reviewStore, traceSink, captureReasoning), log, workers)
 				runner, err := serve.NewHostRunner(serve.HostRunnerConfig{
 					Store:           hostStore,
 					Repos:           snapshot.Repos,
@@ -314,7 +318,11 @@ func serveCommand(opts *options) *cobra.Command {
 			if err != nil {
 				return err
 			}
-			reviewFn := buildServeReviewFn(log, gate, reviewStore, traceSink)
+			captureReasoning, err := captureReasoningFromEnv()
+			if err != nil {
+				return err
+			}
+			reviewFn := buildServeReviewFn(log, gate, reviewStore, traceSink, captureReasoning)
 
 			pollCfg := func(disp serve.Dispatcher) serve.PollConfig {
 				return serve.PollConfig{
@@ -668,6 +676,7 @@ type hostReviewAnalysisFields struct {
 	Gate         string
 	FilterMode   string
 	MinSeverity  string
+	PromptFormat string
 	Timeout      string
 	Expand       *int
 	TokenBudget  *int
@@ -695,6 +704,7 @@ func hostReviewAnalysisShape(review config.HostReview) any {
 		Force:        review.Force,
 		PatchRepair:  review.PatchRepair,
 		Subagents:    review.Subagents,
+		PromptFormat: review.PromptFormat,
 	}
 }
 
@@ -710,6 +720,7 @@ func hostReviewOptions(providerName string, provider config.HostProvider, secret
 		FilterMode:    review.FilterMode,
 		MinSeverity:   review.MinSeverity,
 		Format:        review.Format,
+		PromptFormat:  review.PromptFormat,
 		Mode:          review.Mode,
 		BaseURL:       provider.BaseURL,
 		Model:         provider.Model,
@@ -1105,6 +1116,9 @@ func mergeHostReview(base, over config.HostReview) config.HostReview {
 	if over.Format != "" {
 		out.Format = over.Format
 	}
+	if over.PromptFormat != "" {
+		out.PromptFormat = over.PromptFormat
+	}
 	if over.Timeout != "" {
 		out.Timeout = over.Timeout
 	}
@@ -1257,7 +1271,7 @@ func buildTokenSource(g config.Github) (ghub.TokenSource, error) {
 // RETURNED cli.ReviewOutcome (not in Job.OnDone(error)), so the upsert rides here,
 // inside reviewFn, not in OnDone. The webhook/poll paths leave ReviewID empty and
 // skip the upsert (byte-for-byte unchanged).
-func buildServeReviewFn(log *slog.Logger, gate string, st serve.ReviewStore, traceSink func(step string, payload any)) func(serve.Job) error {
+func buildServeReviewFn(log *slog.Logger, gate string, st serve.ReviewStore, traceSink func(step string, payload any), captureReasoning bool) func(serve.Job) error {
 	return func(j serve.Job) error {
 		review := serve.JobReviewOptions{Post: true, Gate: gate}
 		if j.Review != nil {
@@ -1276,35 +1290,37 @@ func buildServeReviewFn(log *slog.Logger, gate string, st serve.ReviewStore, tra
 			log.Debug("review progress", serveJobLogAttrs(j, "head_sha", j.HeadSHA, "stage", config.RedactString(stage))...)
 		}
 		out, err := ReviewPRForServe(jobCtx, PRReviewRequest{
-			Ref:            j.Ref,
-			Token:          j.Token,
-			Post:           review.Post,
-			Suggest:        review.Suggest,
-			PatchRepair:    review.PatchRepair,
-			Approval:       review.Approval,
-			Gate:           review.Gate,
-			Provider:       review.Provider,
-			APIKey:         review.APIKey,
-			BaseURL:        review.BaseURL,
-			AuthToken:      review.AuthToken,
-			Model:          review.Model,
-			Quota:          review.Quota,
-			QuotaProvider:  review.QuotaProvider,
-			Timeout:        timeout,
-			ExpandWindow:   review.ExpandWindow,
-			TokenBudget:    review.TokenBudget,
-			DeepContext:    review.DeepContext,
-			ContextHops:    review.ContextHops,
-			Subagents:      review.Subagents,
-			FilterMode:     review.FilterMode,
-			MinSeverity:    review.MinSeverity,
-			Format:         review.Format,
-			OperatorPrompt: review.OperatorPrompt,
-			Conversation:   review.Conversation,
-			Mode:           review.Mode,
-			Force:          review.Force,
-			Progress:       progress,
-			TraceSink:      traceSink,
+			Ref:              j.Ref,
+			Token:            j.Token,
+			Post:             review.Post,
+			Suggest:          review.Suggest,
+			PatchRepair:      review.PatchRepair,
+			Approval:         review.Approval,
+			Gate:             review.Gate,
+			Provider:         review.Provider,
+			APIKey:           review.APIKey,
+			BaseURL:          review.BaseURL,
+			AuthToken:        review.AuthToken,
+			Model:            review.Model,
+			Quota:            review.Quota,
+			QuotaProvider:    review.QuotaProvider,
+			Timeout:          timeout,
+			ExpandWindow:     review.ExpandWindow,
+			TokenBudget:      review.TokenBudget,
+			DeepContext:      review.DeepContext,
+			ContextHops:      review.ContextHops,
+			Subagents:        review.Subagents,
+			FilterMode:       review.FilterMode,
+			MinSeverity:      review.MinSeverity,
+			Format:           review.Format,
+			PromptFormat:     review.PromptFormat,
+			OperatorPrompt:   review.OperatorPrompt,
+			Conversation:     review.Conversation,
+			Mode:             review.Mode,
+			Force:            review.Force,
+			Progress:         progress,
+			TraceSink:        traceSink,
+			CaptureReasoning: captureReasoning,
 		})
 		if err != nil {
 			// A quota-exhausted provider is a terminal skip for THIS job, not a
@@ -1487,5 +1503,5 @@ func commandPath(args []string) string {
 
 func init() {
 	cobra.EnableCommandSorting = false
-	config.SetReviewValidators(engine.ValidGate, ghub.ValidFilterMode, ghub.ValidMinSeverity, ghub.ValidFormat)
+	config.SetReviewValidators(engine.ValidGate, ghub.ValidFilterMode, ghub.ValidMinSeverity, ghub.ValidFormat, engine.ValidPromptFormat)
 }

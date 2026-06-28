@@ -80,6 +80,7 @@ type ReviewRequest struct {
 	WantDiagram     bool   // opt into the mermaid change diagram (default off)
 	Instruction     string // optional per-review developer steer; injected fenced/context-only into the USER turn
 	OperatorPrompt  string
+	PromptFormat    string       // "xml" (default) | "markdown"
 	NoSave          bool         // opt out of persisting this run to the local history store
 	Progress        func(string) // nil = silent; stderr milestones, never the stdout envelope
 	// TraceSink, when non-nil, streams each captured trace step (system prompt, diff
@@ -87,6 +88,9 @@ type ReviewRequest struct {
 	// stderr as NDJSON (--trace). Local-only; distinct from Progress; the stdout
 	// result envelope is untouched.
 	TraceSink func(step string, payload any)
+	// CaptureReasoning opts into capturing model reasoning into the trace; gated by
+	// MIUCR_TRACE_REASONING. Requires [review].thinking to be on.
+	CaptureReasoning bool
 }
 
 // ReviewOutcome is the Reviewer's result: anchored findings plus run stats. PR
@@ -215,6 +219,7 @@ type PRReviewRequest struct {
 	WantDiagram     bool   // opt into the mermaid change diagram (default off)
 	Instruction     string // optional per-review developer steer; injected fenced/context-only into the USER turn
 	OperatorPrompt  string
+	PromptFormat    string       // "xml" (default) | "markdown"
 	Conversation    bool         // opt into fetching the prior PR conversation; injected fenced/context-only, Untrusted, dropped on fork PRs
 	Mode            string       // review (default: inline+summary) | checks (GitHub Checks-API reporter)
 	NoSave          bool         // opt out of persisting this run to the local history store
@@ -222,6 +227,8 @@ type PRReviewRequest struct {
 	Progress        func(string) // nil = silent; stderr milestones, never the stdout envelope
 	// TraceSink streams live trace steps to stderr as NDJSON (--trace); nil = off.
 	TraceSink func(step string, payload any)
+	// CaptureReasoning opts into capturing model reasoning into the trace.
+	CaptureReasoning bool
 	// ActionsOut is the command's stdout writer (cmd.OutOrStdout()), used ONLY by the
 	// fork-PR 403 fallback to emit ::error:: workflow commands on the same stream as
 	// the JSON envelope (GitHub parses workflow commands only from stdout). nil →
@@ -326,6 +333,7 @@ func reviewCommand(opts *options) *cobra.Command {
 		filterMode   string
 		minSeverity  string
 		format       string
+		promptFormat string
 		wantDiagram  bool
 		instruction  string
 		conversation bool
@@ -358,6 +366,9 @@ func reviewCommand(opts *options) *cobra.Command {
 			if err := validateFormat(format); err != nil {
 				return err
 			}
+			if err := validatePromptFormat(promptFormat); err != nil {
+				return err
+			}
 			if contextHops < 0 || contextHops > maxContextHops {
 				return &CLIError{Code: "config.invalid", Message: fmt.Sprintf("--context-hops must be between 0 and %d", maxContextHops), Exit: 2}
 			}
@@ -372,7 +383,7 @@ func reviewCommand(opts *options) *cobra.Command {
 			return validateReviewFlags(staged, from, to, commit, gate)
 		},
 		RunE: func(cmd *cobra.Command, args []string) error {
-			rcfg, err := loadReviewDefaults(cmd, &gate, &filterMode, &minSeverity, &format, &expand, &tokenBudget, &deepContext, &contextHops, &conversation, &suggest, &patchRepair, &approval)
+			rcfg, err := loadReviewDefaults(cmd, &gate, &filterMode, &minSeverity, &format, &promptFormat, &expand, &tokenBudget, &deepContext, &contextHops, &conversation, &suggest, &patchRepair, &approval)
 			if err != nil {
 				return err
 			}
@@ -409,42 +420,48 @@ func reviewCommand(opts *options) *cobra.Command {
 			if traceLive {
 				traceSink = newTraceSink(cmd.ErrOrStderr())
 			}
+			captureReasoning, err := captureReasoningFromEnv()
+			if err != nil {
+				return err
+			}
 			if pr != "" {
 				return runPRReview(cmd, prRunArgs{
-					ref:             pr,
-					token:           token,
-					post:            post && !noPost,
-					suggest:         suggest,
-					patchRepair:     patchRepair,
-					approval:        approval,
-					gate:            gate,
-					provider:        provider,
-					apiKey:          apiKey,
-					baseURL:         baseURL,
-					authToken:       authToken,
-					model:           model,
-					timeout:         opts.timeout,
-					include:         include,
-					exclude:         exclude,
-					exts:            exts,
-					expand:          expand,
-					tokenBudget:     tokenBudget,
-					deepContext:     deepContext,
-					contextHops:     contextHops,
-					contextHopsAuto: contextHopsAuto,
-					subagents:       rcfg.Subagents,
-					filterMode:      filterMode,
-					minSeverity:     minSeverity,
-					format:          format,
-					wantDiagram:     wantDiagram,
-					instruction:     instruction,
-					conversation:    conversation,
-					mode:            mode,
-					sarifOut:        sarifOut,
-					noSave:          noSave,
-					force:           force,
-					progress:        prog,
-					traceSink:       traceSink,
+					ref:              pr,
+					token:            token,
+					post:             post && !noPost,
+					suggest:          suggest,
+					patchRepair:      patchRepair,
+					approval:         approval,
+					gate:             gate,
+					provider:         provider,
+					apiKey:           apiKey,
+					baseURL:          baseURL,
+					authToken:        authToken,
+					model:            model,
+					timeout:          opts.timeout,
+					include:          include,
+					exclude:          exclude,
+					exts:             exts,
+					expand:           expand,
+					tokenBudget:      tokenBudget,
+					deepContext:      deepContext,
+					contextHops:      contextHops,
+					contextHopsAuto:  contextHopsAuto,
+					subagents:        rcfg.Subagents,
+					filterMode:       filterMode,
+					minSeverity:      minSeverity,
+					format:           format,
+					promptFormat:     promptFormat,
+					wantDiagram:      wantDiagram,
+					instruction:      instruction,
+					conversation:     conversation,
+					mode:             mode,
+					sarifOut:         sarifOut,
+					noSave:           noSave,
+					force:            force,
+					progress:         prog,
+					traceSink:        traceSink,
+					captureReasoning: captureReasoning,
 				})
 			}
 			if err := nudgeIfUnconfigured(apiKey, authToken); err != nil {
@@ -454,33 +471,35 @@ func reviewCommand(opts *options) *cobra.Command {
 				return &CLIError{Code: "review.not_wired", Message: "review engine not wired", Exit: 1}
 			}
 			req := ReviewRequest{
-				Staged:          staged,
-				From:            from,
-				To:              to,
-				Commit:          commit,
-				Gate:            gate,
-				RepoDir:         repoDir,
-				IncludeGlobs:    include,
-				ExcludeGlobs:    exclude,
-				Extensions:      exts,
-				Provider:        provider,
-				APIKey:          apiKey,
-				BaseURL:         baseURL,
-				AuthToken:       authToken,
-				Model:           model,
-				Timeout:         opts.timeout,
-				ExpandWindow:    expand,
-				TokenBudget:     tokenBudget,
-				DeepContext:     deepContext,
-				ContextHops:     contextHops,
-				ContextHopsAuto: contextHopsAuto,
-				Subagents:       rcfg.Subagents,
-				FilterMode:      filterMode,
-				WantDiagram:     wantDiagram,
-				Instruction:     instruction,
-				NoSave:          noSave,
-				Progress:        prog,
-				TraceSink:       traceSink,
+				Staged:           staged,
+				From:             from,
+				To:               to,
+				Commit:           commit,
+				Gate:             gate,
+				RepoDir:          repoDir,
+				IncludeGlobs:     include,
+				ExcludeGlobs:     exclude,
+				Extensions:       exts,
+				Provider:         provider,
+				APIKey:           apiKey,
+				BaseURL:          baseURL,
+				AuthToken:        authToken,
+				Model:            model,
+				Timeout:          opts.timeout,
+				ExpandWindow:     expand,
+				TokenBudget:      tokenBudget,
+				DeepContext:      deepContext,
+				ContextHops:      contextHops,
+				ContextHopsAuto:  contextHopsAuto,
+				Subagents:        rcfg.Subagents,
+				FilterMode:       filterMode,
+				WantDiagram:      wantDiagram,
+				Instruction:      instruction,
+				PromptFormat:     promptFormat,
+				NoSave:           noSave,
+				Progress:         prog,
+				TraceSink:        traceSink,
+				CaptureReasoning: captureReasoning,
 			}
 			ctx := cmd.Context()
 			if opts.timeout > 0 {
@@ -544,6 +563,7 @@ func reviewCommand(opts *options) *cobra.Command {
 	f.StringVar(&filterMode, "filter-mode", "diff_context", "Inline-eligibility filter on --pr: added|diff_context|file|nofilter (default diff_context; file/nofilter route off-diff findings to the summary/SARIF/local output, never inline)")
 	f.StringVar(&minSeverity, "min-severity", "", "Minimum severity posted INLINE on --pr: none|info|low|medium|high|critical (default keeps current behavior; below-threshold findings still appear in the summary histogram + SARIF, never inline)")
 	f.StringVar(&format, "format", "", "Review-comment presentation on --pr: full (default) | minimal (minimal drops the summary section + severity/priority badges, keeping inline findings)")
+	f.StringVar(&promptFormat, "prompt-format", "", "Review prompt format: xml (default, injection-hardened) | markdown (fenced)")
 	f.BoolVar(&wantDiagram, "walkthrough-diagram", false, "Ask the model to also emit an optional mermaid change diagram in the summary (opt-in; diagram quality varies; a malformed/omitted diagram degrades to a plain note)")
 	f.StringVar(&instruction, "instruction", "", "Extra free-text steer for THIS review (e.g. 'focus on the auth changes'); injected fenced, context-only, and length-capped, so it never redefines the finding schema")
 	f.BoolVar(&conversation, "conversation", false, "On --pr, fetch the prior PR conversation (miucr summary + review overviews + finding threads + developer replies) and inject it fenced/context-only as UNTRUSTED context (dropped on fork PRs); one extra read pass, no extra LLM call (default OFF)")
@@ -585,27 +605,29 @@ type prRunArgs struct {
 	model       string
 	timeout     time.Duration
 
-	include         []string
-	exclude         []string
-	exts            []string
-	expand          int
-	tokenBudget     int
-	deepContext     bool
-	contextHops     int
-	contextHopsAuto bool
-	subagents       config.ReviewSubagents
-	filterMode      string
-	minSeverity     string
-	format          string
-	wantDiagram     bool
-	instruction     string
-	conversation    bool
-	mode            string
-	sarifOut        string
-	noSave          bool
-	force           bool
-	progress        func(string)
-	traceSink       func(step string, payload any)
+	include          []string
+	exclude          []string
+	exts             []string
+	expand           int
+	tokenBudget      int
+	deepContext      bool
+	contextHops      int
+	contextHopsAuto  bool
+	subagents        config.ReviewSubagents
+	filterMode       string
+	minSeverity      string
+	format           string
+	promptFormat     string
+	wantDiagram      bool
+	instruction      string
+	conversation     bool
+	mode             string
+	sarifOut         string
+	noSave           bool
+	force            bool
+	progress         func(string)
+	traceSink        func(step string, payload any)
+	captureReasoning bool
 }
 
 // runPRReview drives the --pr path: resolve the GitHub token (empty-tolerant for
@@ -633,40 +655,42 @@ func runPRReview(cmd *cobra.Command, a prRunArgs) error {
 	}
 
 	out, err := prReviewer.ReviewPR(ctx, PRReviewRequest{
-		Ref:             a.ref,
-		Token:           ghToken,
-		Post:            a.post,
-		Suggest:         a.suggest,
-		PatchRepair:     a.patchRepair,
-		Approval:        a.approval,
-		Gate:            a.gate,
-		Provider:        a.provider,
-		APIKey:          a.apiKey,
-		BaseURL:         a.baseURL,
-		AuthToken:       a.authToken,
-		Model:           a.model,
-		Timeout:         a.timeout,
-		IncludeGlobs:    a.include,
-		ExcludeGlobs:    a.exclude,
-		Extensions:      a.exts,
-		ExpandWindow:    a.expand,
-		TokenBudget:     a.tokenBudget,
-		DeepContext:     a.deepContext,
-		ContextHops:     a.contextHops,
-		ContextHopsAuto: a.contextHopsAuto,
-		Subagents:       a.subagents,
-		FilterMode:      a.filterMode,
-		MinSeverity:     a.minSeverity,
-		Format:          a.format,
-		WantDiagram:     a.wantDiagram,
-		Instruction:     a.instruction,
-		Conversation:    a.conversation,
-		Mode:            a.mode,
-		NoSave:          a.noSave,
-		Force:           a.force,
-		Progress:        a.progress,
-		TraceSink:       a.traceSink,
-		ActionsOut:      cmd.OutOrStdout(),
+		Ref:              a.ref,
+		Token:            ghToken,
+		Post:             a.post,
+		Suggest:          a.suggest,
+		PatchRepair:      a.patchRepair,
+		Approval:         a.approval,
+		Gate:             a.gate,
+		Provider:         a.provider,
+		APIKey:           a.apiKey,
+		BaseURL:          a.baseURL,
+		AuthToken:        a.authToken,
+		Model:            a.model,
+		Timeout:          a.timeout,
+		IncludeGlobs:     a.include,
+		ExcludeGlobs:     a.exclude,
+		Extensions:       a.exts,
+		ExpandWindow:     a.expand,
+		TokenBudget:      a.tokenBudget,
+		DeepContext:      a.deepContext,
+		ContextHops:      a.contextHops,
+		ContextHopsAuto:  a.contextHopsAuto,
+		Subagents:        a.subagents,
+		FilterMode:       a.filterMode,
+		MinSeverity:      a.minSeverity,
+		Format:           a.format,
+		PromptFormat:     a.promptFormat,
+		WantDiagram:      a.wantDiagram,
+		Instruction:      a.instruction,
+		Conversation:     a.conversation,
+		Mode:             a.mode,
+		NoSave:           a.noSave,
+		Force:            a.force,
+		Progress:         a.progress,
+		TraceSink:        a.traceSink,
+		CaptureReasoning: a.captureReasoning,
+		ActionsOut:       cmd.OutOrStdout(),
 	})
 	if err != nil {
 		return classifyReviewErr(err, a.timeout)
@@ -727,7 +751,7 @@ func runPRReview(cmd *cobra.Command, a prRunArgs) error {
 // command line. An explicit flag always wins (cmd.Flags().Changed); a config
 // value only fills an unset flag. Returns the validated Review so the caller can
 // also derive the timeout default. A config-load error propagates (typed).
-func loadReviewDefaults(cmd *cobra.Command, gate, filterMode, minSeverity, format *string, expand, tokenBudget *int, deepContext *bool, contextHops *int, conversation, suggest, patchRepair *bool, approval *config.ApprovalPolicy) (config.Review, error) {
+func loadReviewDefaults(cmd *cobra.Command, gate, filterMode, minSeverity, format, promptFormat *string, expand, tokenBudget *int, deepContext *bool, contextHops *int, conversation, suggest, patchRepair *bool, approval *config.ApprovalPolicy) (config.Review, error) {
 	cfg, err := config.Load()
 	if err != nil {
 		return config.Review{}, err
@@ -751,6 +775,9 @@ func loadReviewDefaults(cmd *cobra.Command, gate, filterMode, minSeverity, forma
 	}
 	if r.Format != "" && !f.Changed("format") {
 		*format = r.Format
+	}
+	if r.PromptFormat != "" && !f.Changed("prompt-format") {
+		*promptFormat = r.PromptFormat
 	}
 	if r.Expand != nil && !f.Changed("expand") {
 		*expand = *r.Expand
@@ -900,6 +927,19 @@ func validateFormat(format string) error {
 		Code:    "flags.invalid_format",
 		Message: fmt.Sprintf("unknown --format %q", format),
 		Hint:    "use " + strings.Join(ghub.ModeNames(), ", "),
+		Exit:    2,
+	}
+}
+
+// validatePromptFormat rejects an out-of-set --prompt-format value.
+func validatePromptFormat(f string) error {
+	if f == "" || f == "markdown" || f == "xml" {
+		return nil
+	}
+	return &CLIError{
+		Code:    "flags.invalid_prompt_format",
+		Message: fmt.Sprintf("unknown --prompt-format %q", f),
+		Hint:    "use xml (default) or markdown",
 		Exit:    2,
 	}
 }

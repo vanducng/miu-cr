@@ -87,7 +87,7 @@ func TestInlineContextFileRejectsSymlinkEscape(t *testing.T) {
 		Provenance: RepoUntrusted,
 		FM:         Frontmatter{AlwaysApply: true, ContextFiles: []string{"ctx.txt"}},
 	}
-	text, _, _ := BuildRulesSection([]Rule{r}, true, 0)
+	text, _, _ := BuildRulesSection([]Rule{r}, true, 0, false)
 	if strings.Contains(text, "TOP SECRET") {
 		t.Errorf("symlinked context_file escaped the rule directory: %q", text)
 	}
@@ -138,7 +138,7 @@ func TestInlineContextFileRejectsOversized(t *testing.T) {
 		Provenance: UserTrusted,
 		FM:         Frontmatter{AlwaysApply: true, ContextFiles: []string{"big.txt"}},
 	}
-	text, _, _ := BuildRulesSection([]Rule{r}, true, 0)
+	text, _, _ := BuildRulesSection([]Rule{r}, true, 0, false)
 	if strings.Contains(text, "ZZZZ") {
 		t.Errorf("oversized context_file must be rejected, not partially inlined: %q", text)
 	}
@@ -155,7 +155,7 @@ func TestInlineContextFileSkipNoteHidesAbsolutePath(t *testing.T) {
 		Provenance: UserTrusted,
 		FM:         Frontmatter{AlwaysApply: true, ContextFiles: []string{"missing.txt"}},
 	}
-	text, _, _ := BuildRulesSection([]Rule{r}, true, 0)
+	text, _, _ := BuildRulesSection([]Rule{r}, true, 0, false)
 	if strings.Contains(text, dir) {
 		t.Errorf("skip note leaked the absolute path %q: %s", dir, text)
 	}

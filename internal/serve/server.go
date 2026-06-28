@@ -65,6 +65,7 @@ type JobReviewOptions struct {
 	FilterMode     string
 	MinSeverity    string
 	Format         string
+	PromptFormat   string
 	Mode           string
 	Provider       string
 	APIKey         string

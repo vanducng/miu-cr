@@ -34,12 +34,12 @@ func TestThinkingSettingParse(t *testing.T) {
 }
 
 func TestSupportsAnthropicThinking(t *testing.T) {
-	for _, m := range []string{"claude-sonnet-4-5", "claude-opus-4-1", "claude-3-7-sonnet-latest"} {
+	for _, m := range []string{"claude-sonnet-4-5", "claude-opus-4-1", "claude-3-7-sonnet-latest", "glm-5.2", "glm-4.6", "glm-4.5"} {
 		if !supportsAnthropicThinking(m) {
 			t.Fatalf("want thinking-capable: %s", m)
 		}
 	}
-	for _, m := range []string{"claude-3-5-sonnet", "glm-4.6", "gpt-4o"} {
+	for _, m := range []string{"claude-3-5-sonnet", "glm-4", "glm-4-flash", "gpt-4o"} {
 		if supportsAnthropicThinking(m) {
 			t.Fatalf("want NOT thinking-capable: %s", m)
 		}

@@ -113,6 +113,7 @@ func traceSteps(tr engine.ReviewTrace) []traceStep {
 	add("injected_rules", tr.InjectedRules, len(tr.InjectedRules) > 0)
 	add("user_prompt", tr.UserPrompt, tr.UserPrompt != "")
 	add("model", map[string]string{"provider": tr.Provider, "model": tr.Model}, tr.Provider != "" || tr.Model != "")
+	add("reasoning", tr.Reasoning, tr.Reasoning != nil)
 	add("final_response", tr.FinalResponse, tr.FinalResponse != "")
 	add("tool_calls", tr.Turns, len(tr.Turns) > 0)
 	return steps
@@ -154,6 +155,15 @@ func renderTracePayload(ew *errWriter, payload any) {
 		}
 	case map[string]string:
 		ew.printf("provider: %s  model: %s\n", v["provider"], v["model"])
+	case *engine.TraceReasoning:
+		if v == nil {
+			break
+		}
+		if v.Tokens > 0 {
+			ew.printf("provider: %s  reasoning_tokens: %d\n%s\n", v.Provider, v.Tokens, v.Text)
+		} else {
+			ew.printf("provider: %s\n%s\n", v.Provider, v.Text)
+		}
 	case []engine.TurnRecord:
 		for _, tr := range v {
 			ew.printf("- [%d] %s %s\n", tr.Turn, tr.Tool, tr.Args)

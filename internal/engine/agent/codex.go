@@ -212,8 +212,8 @@ func (a *codexAgent) Review(ctx stdctx.Context, rc Context) (engine.ReviewOutput
 		rc.Runner = gitcmd.New()
 	}
 
-	userPrompt := BuildUserPrompt(PromptParts{Rules: rc.Rules, SemanticContext: rc.SemanticContext, ProjectContext: rc.ProjectContext, RelatedContext: rc.RelatedContext, WantDiagram: rc.WantDiagram, Instruction: rc.Instruction, Conversation: rc.Conversation, Diff: rc.Text})
-	system := reviewSystemPrompt(rc.OperatorPrompt)
+	userPrompt := BuildUserPrompt(PromptParts{Rules: rc.Rules, SemanticContext: rc.SemanticContext, ProjectContext: rc.ProjectContext, RelatedContext: rc.RelatedContext, WantDiagram: rc.WantDiagram, Instruction: rc.Instruction, Conversation: rc.Conversation, Diff: rc.Text, Format: rc.PromptFormat})
+	system := reviewSystemPrompt(rc.PromptFormat, rc.OperatorPrompt)
 	rc.Trace.SetSystemPrompt(system)
 	rc.Trace.SetModel("codex", a.model)
 	rc.Trace.SetPrompt(userPrompt)
@@ -242,6 +242,8 @@ func (a *codexAgent) Review(ctx stdctx.Context, rc Context) (engine.ReviewOutput
 		}
 		// codex IS a reasoning model, so "auto"/level → set its reasoning effort;
 		// "off" leaves the backend default. (No temperature on this transport.)
+		// CaptureReasoning is a no-op here: the Responses API exposes reasoning as an
+		// effort knob, not returned content blocks, so there is nothing to capture.
 		if wantOn, effort := thinkingSetting(a.thinking); wantOn {
 			req.Reasoning = &codexReasoning{Effort: effort}
 		}

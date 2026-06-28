@@ -76,20 +76,22 @@ func (e *Engine) reviewPasses(ctx stdctx.Context, req Request, selected []diff.D
 func (e *Engine) reviewOnce(ctx stdctx.Context, req Request, text string, shared reviewSharedContext, operatorPrompt, instruction string, trace *ReviewTrace) (ReviewOutput, int64, error) {
 	start := time.Now()
 	out, err := e.Agent.Review(ctx, AgentContext{
-		Text:            text,
-		Rules:           shared.rulesText,
-		SemanticContext: shared.semanticContext,
-		ProjectContext:  shared.projectContext,
-		RelatedContext:  shared.relatedContext,
-		WantDiagram:     req.WantDiagram,
-		Instruction:     instruction,
-		Conversation:    req.Conversation,
-		OperatorPrompt:  operatorPrompt,
-		RepoDir:         req.RepoDir,
-		Rev:             shared.rev,
-		Runner:          e.Runner,
-		Progress:        req.Progress,
-		Trace:           trace,
+		Text:             text,
+		Rules:            shared.rulesText,
+		SemanticContext:  shared.semanticContext,
+		ProjectContext:   shared.projectContext,
+		RelatedContext:   shared.relatedContext,
+		WantDiagram:      req.WantDiagram,
+		Instruction:      instruction,
+		Conversation:     req.Conversation,
+		PromptFormat:     req.PromptFormat,
+		OperatorPrompt:   operatorPrompt,
+		RepoDir:          req.RepoDir,
+		Rev:              shared.rev,
+		Runner:           e.Runner,
+		Progress:         req.Progress,
+		Trace:            trace,
+		CaptureReasoning: req.CaptureReasoning,
 	})
 	return out, time.Since(start).Milliseconds(), err
 }
@@ -171,6 +173,7 @@ func runSubagentPlans(ctx stdctx.Context, e *Engine, req Request, plans []subage
 			assembled := enginectx.AssembleContext(plan.files, enginectx.AssembleOptions{
 				TokenBudget:  subagentDiffBudget(req, shared),
 				ExpandWindow: req.ExpandWindow,
+				UseXML:       req.PromptFormat == "xml",
 			})
 			var trace *ReviewTrace
 			if shared.trace != nil {

@@ -253,9 +253,11 @@ func (engineReviewer) Review(ctx stdctx.Context, req cli.ReviewRequest) (cli.Rev
 		RulesTokenBudget: defaultRulesTokenBudget,
 		WantDiagram:      req.WantDiagram,
 		Instruction:      req.Instruction,
+		PromptFormat:     req.PromptFormat,
 		OperatorPrompt:   req.OperatorPrompt,
 		Progress:         req.Progress,
 		TraceSink:        req.TraceSink,
+		CaptureReasoning: req.CaptureReasoning,
 	})
 	if err != nil {
 		return cli.ReviewOutcome{}, err
@@ -476,10 +478,12 @@ func (prReviewer) ReviewPR(ctx stdctx.Context, req cli.PRReviewRequest) (cli.Rev
 		Retriever:        retr,
 		WantDiagram:      req.WantDiagram,
 		Instruction:      req.Instruction,
+		PromptFormat:     req.PromptFormat,
 		OperatorPrompt:   req.OperatorPrompt,
 		Conversation:     conversation,
 		Progress:         req.Progress,
 		TraceSink:        req.TraceSink,
+		CaptureReasoning: req.CaptureReasoning,
 	})
 	if err != nil {
 		// Review failed AFTER miucr's internal retries (provider/network/auth). On a
@@ -1083,20 +1087,22 @@ type agentAdapter struct{ inner agent.Agent }
 
 func (a agentAdapter) Review(ctx stdctx.Context, rc engine.AgentContext) (engine.ReviewOutput, error) {
 	return a.inner.Review(ctx, agent.Context{
-		Text:            rc.Text,
-		Rules:           rc.Rules,           // lockstep: forgetting this silently drops all rules
-		SemanticContext: rc.SemanticContext, // lockstep: forgetting this silently drops M7 advisory
-		ProjectContext:  rc.ProjectContext,  // lockstep: forgetting this silently drops deep project context
-		RelatedContext:  rc.RelatedContext,  // lockstep: forgetting this silently drops hop-expanded context
-		WantDiagram:     rc.WantDiagram,     // lockstep: forgetting this silently drops the diagram opt-in
-		Instruction:     rc.Instruction,     // lockstep: forgetting this silently drops the developer steer
-		Conversation:    rc.Conversation,    // lockstep: forgetting this silently drops the PR conversation
-		OperatorPrompt:  rc.OperatorPrompt,
-		RepoDir:         rc.RepoDir,
-		Rev:             rc.Rev,
-		Runner:          rc.Runner,
-		Progress:        rc.Progress,
-		Trace:           rc.Trace,
+		Text:             rc.Text,
+		Rules:            rc.Rules,           // lockstep: forgetting this silently drops all rules
+		SemanticContext:  rc.SemanticContext, // lockstep: forgetting this silently drops M7 advisory
+		ProjectContext:   rc.ProjectContext,  // lockstep: forgetting this silently drops deep project context
+		RelatedContext:   rc.RelatedContext,  // lockstep: forgetting this silently drops hop-expanded context
+		WantDiagram:      rc.WantDiagram,     // lockstep: forgetting this silently drops the diagram opt-in
+		Instruction:      rc.Instruction,     // lockstep: forgetting this silently drops the developer steer
+		Conversation:     rc.Conversation,    // lockstep: forgetting this silently drops the PR conversation
+		PromptFormat:     rc.PromptFormat,    // lockstep: forgetting this silently renders legacy under xml request
+		OperatorPrompt:   rc.OperatorPrompt,
+		RepoDir:          rc.RepoDir,
+		Rev:              rc.Rev,
+		Runner:           rc.Runner,
+		Progress:         rc.Progress,
+		Trace:            rc.Trace,
+		CaptureReasoning: rc.CaptureReasoning, // lockstep: forgetting this silently drops reasoning capture
 	})
 }
 

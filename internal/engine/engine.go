@@ -82,17 +82,30 @@ type RuleRef struct {
 // Sink, when non-nil, is invoked by each setter with the step name + the recorded
 // payload; phase 2 wires it to live --trace NDJSON on stderr; nil = persist-only.
 type ReviewTrace struct {
-	SystemPrompt  string                         `json:"system_prompt"`
-	UserPrompt    string                         `json:"user_prompt"`
-	DiffMeta      DiffMeta                       `json:"diff_meta"`
-	SelectedFiles []string                       `json:"selected_files"`
-	InjectedRules []RuleRef                      `json:"injected_rules"`
-	Model         string                         `json:"model"`
-	Provider      string                         `json:"provider"`
-	FinalResponse string                         `json:"final_response"`
-	Turns         []TurnRecord                   `json:"turns"`
-	Sink          func(step string, payload any) `json:"-"`
-	modelEmitted  bool                           // the live "model" step fires once, when model first becomes non-empty
+	SystemPrompt  string       `json:"system_prompt"`
+	UserPrompt    string       `json:"user_prompt"`
+	DiffMeta      DiffMeta     `json:"diff_meta"`
+	SelectedFiles []string     `json:"selected_files"`
+	InjectedRules []RuleRef    `json:"injected_rules"`
+	Model         string       `json:"model"`
+	Provider      string       `json:"provider"`
+	FinalResponse string       `json:"final_response"`
+	Turns         []TurnRecord `json:"turns"`
+	// Reasoning holds the model's captured internal reasoning. Populated only when
+	// CaptureReasoning is on AND [review].thinking is enabled (off = nothing to capture).
+	// Quotes diff content: always redacted at persist; opt-in, off by default.
+	Reasoning    *TraceReasoning                `json:"reasoning,omitempty"`
+	Sink         func(step string, payload any) `json:"-"`
+	modelEmitted bool                           // the live "model" step fires once, when model first becomes non-empty
+}
+
+// TraceReasoning holds one captured reasoning output. Text is the raw thinking for
+// Anthropic; "[hidden by provider]" for OpenAI (raw reasoning is not returned).
+// Tokens is the reasoning token count from the usage object (0 if not reported).
+type TraceReasoning struct {
+	Provider string `json:"provider"`
+	Text     string `json:"text"`
+	Tokens   int64  `json:"tokens,omitempty"`
 }
 
 // emit forwards a recorded step to the live Sink when set; nil-safe.
@@ -189,6 +202,16 @@ func (t *ReviewTrace) RecordTool(turn int, tool, args string) {
 	t.emit("tool", tr)
 }
 
+// SetReasoning captures the model's reasoning once (first non-empty wins); nil-safe.
+// Only call when text is non-empty: reasoning quotes diff content and is redacted at persist.
+func (t *ReviewTrace) SetReasoning(provider, text string, tokens int64) {
+	if t == nil || t.Reasoning != nil || text == "" {
+		return
+	}
+	t.Reasoning = &TraceReasoning{Provider: provider, Text: text, Tokens: tokens}
+	t.emit("reasoning", t.Reasoning)
+}
+
 // Store is the optional persistence seam: when set, Review saves each result and
 // GetReview re-fetches by id. Implemented by internal/store/sqlite.
 type Store interface {
@@ -243,7 +266,11 @@ type AgentContext struct {
 	Instruction string
 	// Conversation is the optional fetched PR conversation (Untrusted, fenced,
 	// byte-capped, context-only). LOCKSTEP: mirror Instruction at every hop.
-	Conversation   string
+	Conversation string
+	// PromptFormat selects the prompt serialization: "" or "xml" → XML-tagged format
+	// (the default, resolved in Engine.Review); "markdown" → fenced format. LOCKSTEP:
+	// mirror Conversation at every hop or the format is silently dropped.
+	PromptFormat   string
 	OperatorPrompt string
 	RepoDir        string
 	Rev            string
@@ -252,6 +279,9 @@ type AgentContext struct {
 	// Trace, when non-nil, captures the raw prompt, per-turn tool calls, and raw
 	// final response for persistence. nil = no capture (mirrors Progress).
 	Trace *ReviewTrace
+	// CaptureReasoning, when true, captures thinking blocks (Anthropic) or reasoning
+	// token count (OpenAI) into Trace.Reasoning. Requires [review].thinking to be on.
+	CaptureReasoning bool
 }
 
 type SubagentConfig struct {
@@ -351,6 +381,9 @@ type Request struct {
 	// drops it on fork PRs. Threaded onto AgentContext so it rides the USER turn; empty
 	// is byte-identical. LOCKSTEP: mirror Instruction at every hop.
 	Conversation string
+	// PromptFormat selects the prompt serialization: "" or "xml" → XML-tagged (default);
+	// "markdown" → fenced. LOCKSTEP: mirror Conversation at every hop.
+	PromptFormat string
 	// OperatorPrompt is trusted host policy. LOCKSTEP: mirror Conversation at every hop.
 	OperatorPrompt string
 
@@ -364,6 +397,11 @@ type Request struct {
 	// Progress; nil = persist-only (no live stream). Capture still runs regardless,
 	// so the live stream and the persisted trace stay consistent by construction.
 	TraceSink func(step string, payload any)
+
+	// CaptureReasoning, when true, captures the model's reasoning into ReviewTrace.Reasoning.
+	// Requires [review].thinking to be on (with thinking off there is nothing to capture).
+	// OFF by default; gated by MIUCR_TRACE_REASONING env var.
+	CaptureReasoning bool
 
 	// Post reports whether this run will publish (the --pr post path). Repair only
 	// matters when one-click suggestions are actually rendered, so the loop gates on
@@ -470,6 +508,12 @@ func gateRank(gate string) (int, bool) {
 // the max severity rank for the gate decision. An empty diff set yields an empty
 // findings list (not an error).
 func (e *Engine) Review(ctx stdctx.Context, req Request) (ReviewResult, error) {
+	// xml is the default prompt format; an unset value resolves here so every
+	// downstream dispatch (and inherited subagent requests) sees it. markdown is
+	// opt-out via an explicit "markdown".
+	if req.PromptFormat == "" {
+		req.PromptFormat = "xml"
+	}
 	diffs, err := diff.GetDiff(ctx, req.Mode, req.RepoDir, req.From, req.To, req.Commit, e.Runner)
 	if err != nil {
 		return ReviewResult{}, err
@@ -516,6 +560,7 @@ func (e *Engine) Review(ctx stdctx.Context, req Request) (ReviewResult, error) {
 	assembled := enginectx.AssembleContext(selected, enginectx.AssembleOptions{
 		TokenBudget:  diffBudget(req.TokenBudget, req.RulesTokenBudget),
 		ExpandWindow: req.ExpandWindow,
+		UseXML:       req.PromptFormat == "xml",
 	})
 	assembleMS := time.Since(assembleStart).Milliseconds()
 
@@ -724,7 +769,7 @@ func (e *Engine) buildRules(req Request, selected []diff.Diff, trace *ReviewTrac
 		refs = append(refs, RuleRef{Stem: r.Stem, Provenance: r.Provenance.String()})
 	}
 	trace.SetInjectedRules(refs)
-	return rules.BuildRulesSection(picked, !req.RulesFork, req.RulesTokenBudget)
+	return rules.BuildRulesSection(picked, !req.RulesFork, req.RulesTokenBudget, req.PromptFormat == "xml")
 }
 
 // trustedOnly drops Untrusted (repo) rules, used on fork PRs where repo rules
@@ -936,6 +981,12 @@ func redactTrace(t ReviewTrace) ReviewTrace {
 		turns[i] = TurnRecord{Turn: tr.Turn, Tool: tr.Tool, Args: config.RedactString(tr.Args)}
 	}
 	t.Turns = turns
+	// Reasoning quotes diff content; redact text while preserving provider/tokens metadata.
+	if t.Reasoning != nil {
+		r := *t.Reasoning
+		r.Text = config.RedactString(r.Text)
+		t.Reasoning = &r
+	}
 	return t
 }
 

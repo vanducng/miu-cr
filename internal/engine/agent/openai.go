@@ -162,8 +162,8 @@ func (a *openaiAgent) Review(ctx stdctx.Context, rc Context) (engine.ReviewOutpu
 		rc.Runner = gitcmd.New()
 	}
 
-	userPrompt := BuildUserPrompt(PromptParts{Rules: rc.Rules, SemanticContext: rc.SemanticContext, ProjectContext: rc.ProjectContext, RelatedContext: rc.RelatedContext, WantDiagram: rc.WantDiagram, Instruction: rc.Instruction, Conversation: rc.Conversation, Diff: rc.Text})
-	system := reviewSystemPrompt(rc.OperatorPrompt)
+	userPrompt := BuildUserPrompt(PromptParts{Rules: rc.Rules, SemanticContext: rc.SemanticContext, ProjectContext: rc.ProjectContext, RelatedContext: rc.RelatedContext, WantDiagram: rc.WantDiagram, Instruction: rc.Instruction, Conversation: rc.Conversation, Diff: rc.Text, Format: rc.PromptFormat})
+	system := reviewSystemPrompt(rc.PromptFormat, rc.OperatorPrompt)
 	rc.Trace.SetSystemPrompt(system)
 	rc.Trace.SetModel(string(config.KindOpenAI), a.model)
 	rc.Trace.SetPrompt(userPrompt)
@@ -218,6 +218,12 @@ func (a *openaiAgent) Review(ctx stdctx.Context, rc Context) (engine.ReviewOutpu
 		usage.InputTokens += resp.Usage.PromptTokens - cached
 		usage.OutputTokens += resp.Usage.CompletionTokens
 		usage.CacheReadTokens += cached
+		// OpenAI does not return raw reasoning text; capture token count only.
+		if rc.CaptureReasoning {
+			if rt := resp.Usage.CompletionTokensDetails.ReasoningTokens; rt > 0 {
+				rc.Trace.SetReasoning("openai", "[hidden by provider]", rt)
+			}
+		}
 		msg := resp.Choices[0].Message
 		params.Messages = append(params.Messages, msg.ToParam())
 

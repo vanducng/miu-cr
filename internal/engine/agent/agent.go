@@ -62,6 +62,10 @@ type Context struct {
 	// Conversation is the optional fetched PR conversation (UNTRUSTED). LOCKSTEP:
 	// mirror Instruction in ALL three backends or it is silently dropped.
 	Conversation string
+	// PromptFormat selects the prompt serialization: "xml" → XML-tagged; "" or "markdown"
+	// → fenced. The product default is xml (Engine.Review resolves "" → "xml" before this,
+	// so "" reaches here only in direct unit tests). LOCKSTEP: mirror in ALL backends.
+	PromptFormat string
 	// OperatorPrompt is trusted host policy. LOCKSTEP: mirror Conversation in ALL backends.
 	OperatorPrompt string
 	RepoDir        string
@@ -71,6 +75,9 @@ type Context struct {
 	// Trace, when non-nil, accumulates the raw prompt, per-turn tool calls, and
 	// raw final response for persistence. nil = no capture (mirrors Progress).
 	Trace *engine.ReviewTrace
+	// CaptureReasoning, when true, records thinking blocks into Trace.Reasoning.
+	// Only fires when [review].thinking produced blocks; off = byte-identical.
+	CaptureReasoning bool
 }
 
 // progress invokes the sink when set; a nil sink is a silent no-op.
@@ -191,8 +198,8 @@ func (a *anthropicAgent) Review(ctx stdctx.Context, rc Context) (engine.ReviewOu
 		rc.Runner = gitcmd.New()
 	}
 
-	userPrompt := BuildUserPrompt(PromptParts{Rules: rc.Rules, SemanticContext: rc.SemanticContext, ProjectContext: rc.ProjectContext, RelatedContext: rc.RelatedContext, WantDiagram: rc.WantDiagram, Instruction: rc.Instruction, Conversation: rc.Conversation, Diff: rc.Text})
-	system := reviewSystemPrompt(rc.OperatorPrompt)
+	userPrompt := BuildUserPrompt(PromptParts{Rules: rc.Rules, SemanticContext: rc.SemanticContext, ProjectContext: rc.ProjectContext, RelatedContext: rc.RelatedContext, WantDiagram: rc.WantDiagram, Instruction: rc.Instruction, Conversation: rc.Conversation, Diff: rc.Text, Format: rc.PromptFormat})
+	system := reviewSystemPrompt(rc.PromptFormat, rc.OperatorPrompt)
 	rc.Trace.SetSystemPrompt(system)
 	rc.Trace.SetModel("anthropic", a.model)
 	rc.Trace.SetPrompt(userPrompt)
@@ -314,14 +321,22 @@ func parseRepairReply(reply string) string {
 func (a *anthropicAgent) dispatch(ctx stdctx.Context, rc Context, turn int, msg *anthropic.Message) ([]anthropic.ContentBlockParamUnion, string) {
 	var results []anthropic.ContentBlockParamUnion
 	var text strings.Builder
+	var thinkingText strings.Builder
 	for _, block := range msg.Content {
 		switch block.Type {
 		case "text":
 			text.WriteString(block.Text)
+		case "thinking":
+			if rc.CaptureReasoning {
+				thinkingText.WriteString(block.Thinking)
+			}
 		case "tool_use":
 			out, isErr := runTool(ctx, rc, turn, block.Name, block.Input)
 			results = append(results, anthropic.NewToolResultBlock(block.ID, out, isErr))
 		}
+	}
+	if rc.CaptureReasoning && thinkingText.Len() > 0 {
+		rc.Trace.SetReasoning("anthropic", thinkingText.String(), 0)
 	}
 	return results, text.String()
 }

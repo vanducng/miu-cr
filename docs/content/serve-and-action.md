@@ -448,6 +448,14 @@ while the compose fallback remains off for deployments without an env file.
 Treat it as a local/debug switch because payloads can include prompt and diff
 context.
 
+Set `MIUCR_TRACE_REASONING=true` to add a `reasoning` trace step capturing what
+the model thought before answering: Claude and z.ai GLM 4.5+ return their
+thinking verbatim; OpenAI returns only a reasoning-token count plus a
+`[hidden by provider]` marker. It is off by default, redacted in storage like
+the other trace steps, and only produces output when `[review].thinking` is on
+(it reads the existing thinking, it does not add a separate reasoning budget).
+View it with `miucr trace <review-id>`.
+
 A complete runnable example is in
 [`examples/review-host/`](https://github.com/vanducng/miu-cr/tree/main/examples/review-host).
 The Docker publish workflow builds the same runtime image and pushes it as

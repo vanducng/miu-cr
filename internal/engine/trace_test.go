@@ -33,6 +33,30 @@ func TestRedactTraceCoversStructuredAndFreeText(t *testing.T) {
 	}
 }
 
+// redactTrace redacts the reasoning text field (reasoning quotes diff content).
+func TestRedactTraceRedactsReasoning(t *testing.T) {
+	const tok = "sk-ant-secrettoken1234567890"
+	tr := ReviewTrace{
+		Reasoning: &TraceReasoning{
+			Provider: "anthropic",
+			Text:     "the diff shows sk-ant-api_key: " + tok,
+			Tokens:   100,
+		},
+	}
+	blob, err := json.Marshal(redactTrace(tr))
+	if err != nil {
+		t.Fatalf("marshal: %v", err)
+	}
+	s := string(blob)
+	if strings.Contains(s, tok) {
+		t.Fatalf("token leaked in reasoning text:\n%s", s)
+	}
+	// Provider and tokens must survive redaction (non-secret metadata).
+	if !strings.Contains(s, "anthropic") {
+		t.Errorf("provider must survive redaction: %s", s)
+	}
+}
+
 // The setters are nil-safe (a nil *ReviewTrace is a no-op) and Sink, when set,
 // receives each recorded step.
 func TestReviewTraceSettersNilSafeAndSink(t *testing.T) {

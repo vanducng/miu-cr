@@ -14,9 +14,9 @@ func intPtr(n int) *int    { return &n }
 // restores them after.
 func stubReviewValidators(t *testing.T) {
 	t.Helper()
-	prevG, prevF, prevM, prevFmt := gateValidator, filterModeValidator, minSeverityValidator, formatValidator
+	prevG, prevF, prevM, prevFmt, prevPF := gateValidator, filterModeValidator, minSeverityValidator, formatValidator, promptFormatValidator
 	t.Cleanup(func() {
-		gateValidator, filterModeValidator, minSeverityValidator, formatValidator = prevG, prevF, prevM, prevFmt
+		gateValidator, filterModeValidator, minSeverityValidator, formatValidator, promptFormatValidator = prevG, prevF, prevM, prevFmt, prevPF
 	})
 	inSet := func(set ...string) func(string) bool {
 		return func(s string) bool {
@@ -32,6 +32,7 @@ func stubReviewValidators(t *testing.T) {
 	filterModeValidator = inSet("added", "diff_context", "file", "nofilter")
 	minSeverityValidator = inSet("none", "info", "low", "medium", "high", "critical")
 	formatValidator = inSet("full", "minimal")
+	promptFormatValidator = inSet("markdown", "xml")
 }
 
 func TestValidateReview(t *testing.T) {
@@ -48,6 +49,9 @@ func TestValidateReview(t *testing.T) {
 		{"bad min_severity", Review{MinSeverity: "meh"}, true},
 		{"format valid", Review{Format: "minimal"}, false},
 		{"bad format", Review{Format: "fancy"}, true},
+		{"prompt_format markdown ok", Review{PromptFormat: "markdown"}, false},
+		{"prompt_format xml ok", Review{PromptFormat: "xml"}, false},
+		{"bad prompt_format", Review{PromptFormat: "yaml"}, true},
 		{"bad timeout", Review{Timeout: "5 fortnights"}, true},
 		{"bad expand", Review{Expand: intPtr(-1)}, true},
 		{"bad token budget", Review{TokenBudget: intPtr(-1)}, true},
@@ -86,9 +90,9 @@ func TestValidateReview(t *testing.T) {
 
 func TestMergeReviewMergesNewFields(t *testing.T) {
 	base := Review{Approval: ApprovalPolicy{Mode: "clean"}}
-	file := Review{Gate: "low", FilterMode: "file", MinSeverity: "medium", Timeout: "120s", Expand: intPtr(12), TokenBudget: intPtr(0), DeepContext: boolPtr(true), ContextHops: intPtr(3), Conversation: boolPtr(true), Suggest: boolPtr(false), Approval: ApprovalPolicy{Mode: "threshold", MaxPriority: "P3"}, Subagents: ReviewSubagents{Mode: "auto", Agents: []ReviewSubagent{{Name: "go", Include: []string{"**/*.go"}}}}}
+	file := Review{Gate: "low", FilterMode: "file", MinSeverity: "medium", PromptFormat: "markdown", Timeout: "120s", Expand: intPtr(12), TokenBudget: intPtr(0), DeepContext: boolPtr(true), ContextHops: intPtr(3), Conversation: boolPtr(true), Suggest: boolPtr(false), Approval: ApprovalPolicy{Mode: "threshold", MaxPriority: "P3"}, Subagents: ReviewSubagents{Mode: "auto", Agents: []ReviewSubagent{{Name: "go", Include: []string{"**/*.go"}}}}}
 	out := mergeReview(base, file)
-	if out.Gate != "low" || out.FilterMode != "file" || out.MinSeverity != "medium" || out.Timeout != "120s" {
+	if out.Gate != "low" || out.FilterMode != "file" || out.MinSeverity != "medium" || out.PromptFormat != "markdown" || out.Timeout != "120s" {
 		t.Fatalf("scalar review fields not merged: %+v", out)
 	}
 	if out.Expand == nil || *out.Expand != 12 || out.TokenBudget == nil || *out.TokenBudget != 0 || out.DeepContext == nil || !*out.DeepContext || out.ContextHops == nil || *out.ContextHops != 3 || out.Conversation == nil || !*out.Conversation {
