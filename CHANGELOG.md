@@ -55,6 +55,13 @@ comment with a new marker); subsequent re-runs dedupe normally. On a
 first M5 review **manually** (or off-hours) to absorb the one-time re-post before
 the next scheduled run.
 
+## [0.70.0](https://github.com/vanducng/miu-cr/compare/v0.69.0...v0.70.0) (2026-06-28)
+
+
+### Features
+
+* **review:** add symbol context tool ([#205](https://github.com/vanducng/miu-cr/issues/205)) ([7cfa2db](https://github.com/vanducng/miu-cr/commit/7cfa2dbc98623ab543b020393fab303904c42e0f))
+
 ## [0.69.0](https://github.com/vanducng/miu-cr/compare/v0.68.0...v0.69.0) (2026-06-28)
 
 
