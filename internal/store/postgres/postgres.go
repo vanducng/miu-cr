@@ -75,6 +75,7 @@ var postgresMigrations = []schemaMigration{
 	{Name: "0001_reviews_pr_findings", SQL: SchemaSQL},
 	{Name: "0002_reviews_extended_columns", SQL: alterAddReviewColumnsSQL},
 	{Name: "0003_host_schema", SQL: HostSchemaSQL},
+	{Name: "0004_provider_usage", SQL: ProviderUsageSchemaSQL},
 	{Name: "0005_host_jobs_repo_status_idx", SQL: hostJobsRepoStatusIdxSQL},
 }
 

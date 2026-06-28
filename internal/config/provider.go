@@ -37,6 +37,30 @@ type Provider struct {
 	// Auth pins the credential method: "oauth", "api_key", "bearer", or "" for
 	// legacy auto behavior.
 	Auth string `toml:"auth,omitempty"`
+	// Quota optionally caps this provider instance's usage over a window. nil = no
+	// quota (usage uncapped — the default for every provider).
+	Quota *QuotaConfig `toml:"quota,omitempty"`
+}
+
+// QuotaConfig caps one provider instance's usage over a recurring window. nil
+// (absent block) = no quota. Dimension meters "tokens" (input+output, default)
+// or "requests" (one per review). Window is a Go duration ("1h", "5h", "24h") or
+// "monthly" (calendar month, UTC). Enforcement is fail-closed and per-instance,
+// aggregating across every repo/review that uses the provider. Tags cover both
+// the user TOML config and the host YAML config (one shared shape).
+type QuotaConfig struct {
+	Dimension string `toml:"dimension,omitempty" yaml:"dimension,omitempty" json:"dimension,omitempty"`
+	Limit     int64  `toml:"limit,omitempty" yaml:"limit,omitempty" json:"limit,omitempty"`
+	Window    string `toml:"window,omitempty" yaml:"window,omitempty" json:"window,omitempty"`
+}
+
+// QuotaDimension returns the effective dimension, defaulting an empty value to
+// "tokens" (only an explicit out-of-set value is rejected at validation).
+func (q QuotaConfig) QuotaDimension() string {
+	if q.Dimension == "" {
+		return "tokens"
+	}
+	return q.Dimension
 }
 
 // Store selects the persistence backend. DSN is never persisted to disk by

@@ -60,6 +60,24 @@ Credential source precedence is `auth_token` > non-empty `auth_env` > `auth_comm
 `auth_env` names an env var; `auth_command` reads from a local secret helper such as `gopass` or `op`. Neither writes the token to the config file. `auth_token` stores the literal token **in plaintext on disk**; use it only when an env var or secret helper isn't practical. miu-cr prints a one-time warning whenever a plaintext `auth_token` is used.
 :::
 
+### Per-provider usage quota: `[providers.<name>.quota]`
+
+Optionally cap how much a provider instance may be used over a recurring window. **There is no quota by default** (a provider with no `quota` block is uncapped). The cap is per **instance** and aggregates across every review/repo that uses it, so one block limits, say, the pricier OAuth provider everywhere at once.
+
+```toml
+[providers.openai.quota]
+dimension = "tokens"   # tokens (default; input+output) | requests (one per review)
+limit     = 2_000_000  # cap in the chosen dimension; must be > 0
+window    = "5h"       # a Go duration (1h, 5h, 24h, 168h) OR "monthly" (calendar month, UTC)
+```
+
+- **Dimension** — `tokens` meters input+output tokens (provider-agnostic, no price table); `requests` counts reviews. (`cost`/$ is not yet supported.)
+- **Window** — a fixed window: a Go duration bucketed off the epoch (so `5h` resets every 5 hours on fixed boundaries, `24h` daily), or `monthly` for a calendar month. Hourly and 5-hourly windows are first-class. Changing the window starts a fresh bucket.
+- **Enforcement** — **fail-closed and hard**: before each review the accumulated usage for the current window is checked; at/over the limit the review is **blocked** with a typed `quota.exceeded` error (and a one-shot warning at ≥80%). A counter that can't be read also blocks. On the [serve host](/serve-and-action/), a quota-blocked PR is **skipped and logged** (the poller keeps running); a later push or comment re-triggers a fresh job that re-checks the window.
+- **State** — usage counters persist in the same store as history (`state.db` for the CLI, Postgres for the host), surviving one-shot CLI invocations. A bad `dimension`/`window`/`limit` is a typed `config.invalid` (exit `2`).
+
+The host config (`host.yaml`) takes the same block under each `providers.<name>`.
+
 ### Review defaults: `[review]`
 
 The optional `[review]` table sets defaults for `miucr review` flags. An **explicit flag always wins**; a `[review]` value only fills a flag you did not pass. A bad enum or timeout is a typed `config.invalid` error (exit `2`).

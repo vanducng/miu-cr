@@ -28,6 +28,16 @@ type ReviewOutput struct {
 	// Confidence (1-5) is the model's confidence the change is safe to merge; 0 = not emitted.
 	Confidence       int
 	ConfidenceReason string
+	// Usage is the token consumption of this pass, summed across tool turns (and
+	// subagent passes via mergeSubagentOutputs). Zero when the backend/fake omits it.
+	Usage Usage
+}
+
+// Usage is the LLM token consumption for a review. Input+output only; the quota
+// path meters on these and the engine surfaces them in stats when present.
+type Usage struct {
+	InputTokens  int64
+	OutputTokens int64
 }
 
 // ReviewResult is the engine output: the persisted id (empty when no Store is

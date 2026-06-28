@@ -33,4 +33,13 @@ CREATE TABLE IF NOT EXISTS pr_findings (
 	last_seen   TEXT NOT NULL,
 	PRIMARY KEY (owner, repo, number, fingerprint)
 );
+CREATE TABLE IF NOT EXISTS provider_usage (
+	provider      TEXT NOT NULL,
+	period        TEXT NOT NULL,
+	input_tokens  INTEGER NOT NULL DEFAULT 0,
+	output_tokens INTEGER NOT NULL DEFAULT 0,
+	requests      INTEGER NOT NULL DEFAULT 0,
+	updated_at    TEXT NOT NULL,
+	PRIMARY KEY (provider, period)
+);
 `

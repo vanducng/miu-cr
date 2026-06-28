@@ -217,6 +217,7 @@ func (a *anthropicAgent) Review(ctx stdctx.Context, rc Context) (engine.ReviewOu
 	}
 
 	emptyRounds := 0
+	var usage engine.Usage
 	for turn := 0; turn < maxToolTurns; turn++ {
 		if err := ctx.Err(); err != nil {
 			return engine.ReviewOutput{}, err
@@ -237,11 +238,14 @@ func (a *anthropicAgent) Review(ctx stdctx.Context, rc Context) (engine.ReviewOu
 		if err != nil {
 			return engine.ReviewOutput{}, classifyAnthropicErr(err)
 		}
+		usage.InputTokens += msg.Usage.InputTokens
+		usage.OutputTokens += msg.Usage.OutputTokens
 		params.Messages = append(params.Messages, msg.ToParam())
 
 		toolResults, finalText := a.dispatch(ctx, rc, turn, msg)
 		if len(toolResults) == 0 {
 			if out, ok := parseFindings(finalText); ok {
+				out.Usage = usage
 				rc.Trace.SetFinalResponse(finalText)
 				return out, nil
 			}

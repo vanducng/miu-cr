@@ -74,6 +74,12 @@ type JobReviewOptions struct {
 	DeepContext    bool
 	ContextHops    int
 	Subagents      config.ReviewSubagents
+	// Quota is the host provider's usage quota (nil = none); QuotaProvider is the
+	// counter key (the provider instance name, since Provider above carries the
+	// kind). Threaded to the review path because the host config provider quota is
+	// not in the user config.toml the review path otherwise loads.
+	Quota         *config.QuotaConfig
+	QuotaProvider string
 }
 
 // SubmitResult tells callers why a job was not enqueued.

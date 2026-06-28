@@ -9,6 +9,7 @@ import (
 	"github.com/vanducng/miu-cr/internal/cli"
 	"github.com/vanducng/miu-cr/internal/config"
 	"github.com/vanducng/miu-cr/internal/engine"
+	"github.com/vanducng/miu-cr/internal/quota"
 	"github.com/vanducng/miu-cr/internal/store"
 	"github.com/vanducng/miu-cr/internal/store/postgres"
 	"github.com/vanducng/miu-cr/internal/store/sqlite"
@@ -126,6 +127,81 @@ func openPRThreadStore(ctx stdctx.Context, cfg config.Config) (store.PRThreadSto
 		}
 		return s.PRThread(), func() { _ = s.Close() }, nil
 	}
+}
+
+// openUsageStore opens the provider-usage (quota) store for the selected backend.
+// The returned store satisfies store.ProviderUsageStore; both backends' *Store do.
+// It resolves the backend identically to the history/PR-thread stores, so the
+// quota counter lives in the same DB (sqlite state.db for the CLI, postgres for
+// the host).
+func openUsageStore(ctx stdctx.Context, cfg config.Config) (store.ProviderUsageStore, func(), error) {
+	backend, err := validateBackend(cfg)
+	if err != nil {
+		return nil, nil, err
+	}
+	switch backend {
+	case "postgres":
+		dsn, err := requirePGDSN(cfg)
+		if err != nil {
+			return nil, nil, err
+		}
+		s, err := postgres.Open(ctx, dsn)
+		if err != nil {
+			return nil, nil, err
+		}
+		return s.UsageStore(), func() { _ = s.Close() }, nil
+	default:
+		path, err := sqlite.DefaultPath()
+		if err != nil {
+			return nil, nil, err
+		}
+		s, err := sqlite.Open(path)
+		if err != nil {
+			return nil, nil, err
+		}
+		return s.UsageStore(), func() { _ = s.Close() }, nil
+	}
+}
+
+// quotaProviderName resolves the counter key for a CLI quota lookup. The
+// --provider flag defaults to the literal "auto" (and may be empty); both mean
+// "use the configured default", so they map to defaultProvider — otherwise
+// cfg.Providers["auto"] always misses and the quota silently never enforces.
+func quotaProviderName(name, defaultProvider string) string {
+	if name == "" || name == "auto" {
+		return defaultProvider
+	}
+	return name
+}
+
+// buildQuotaGate constructs the engine quota gate for a review, or (nil, nil, nil)
+// when the resolved provider has no quota. The quota config comes from override
+// (serve threads the host provider's quota, whose definition is not in the user
+// config.toml) or, when nil, the loaded user config's provider profile. name is
+// the counter key (the provider instance). A store-open failure is fail-closed:
+// it surfaces a typed quota.exceeded error rather than silently disabling the cap.
+func buildQuotaGate(ctx stdctx.Context, cfg config.Config, name string, override *config.QuotaConfig, warn func(string)) (engine.QuotaGate, func(), error) {
+	name = quotaProviderName(name, cfg.DefaultProvider)
+	q := override
+	if q == nil {
+		if prof, ok := cfg.Providers[name]; ok {
+			q = prof.Quota
+		}
+	}
+	if q == nil {
+		return nil, nil, nil
+	}
+	us, closeStore, err := openUsageStore(ctx, cfg)
+	if err != nil {
+		return nil, nil, &cli.CLIError{
+			Code:    "quota.exceeded",
+			Message: config.RedactString(fmt.Sprintf("provider %q has a quota but its counter store could not be opened (fail-closed): %v", name, err)),
+			Hint:    "fix the store backend or remove the provider quota",
+			Exit:    2,
+			Cause:   err,
+		}
+	}
+	return quota.New(us, name, q, nil, warn), closeStore, nil
 }
 
 // engineStoreFor wraps a concrete backend store in its engine.Store adapter. The

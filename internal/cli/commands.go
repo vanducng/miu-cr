@@ -596,6 +596,10 @@ func buildServeHostRepos(ctx stdctx.Context, cfg config.HostConfig, path string)
 	if err != nil {
 		return nil, 0, err
 	}
+	providerName := cfg.DefaultProvider
+	if providerName == "" {
+		providerName = config.Defaults().DefaultProvider
+	}
 	baseReview := mergeHostReview(config.HostReview{
 		Gate:         "high",
 		FilterMode:   "diff_context",
@@ -626,7 +630,7 @@ func buildServeHostRepos(ctx stdctx.Context, cfg config.HostConfig, path string)
 		enabled := hostEnabled && (repo.Enabled == nil || *repo.Enabled)
 		poll := hostPoll && (repo.Poll == nil || *repo.Poll)
 		review := mergeHostReview(hostReview, repo.Review)
-		opts, err := hostReviewOptions(provider, providerSecret, review)
+		opts, err := hostReviewOptions(providerName, provider, providerSecret, review)
 		if err != nil {
 			return nil, 0, err
 		}
@@ -691,23 +695,25 @@ func hostReviewAnalysisShape(review config.HostReview) any {
 	}
 }
 
-func hostReviewOptions(provider config.HostProvider, secret string, review config.HostReview) (serve.JobReviewOptions, error) {
+func hostReviewOptions(providerName string, provider config.HostProvider, secret string, review config.HostReview) (serve.JobReviewOptions, error) {
 	opts := serve.JobReviewOptions{
-		Post:         boolValue(review.Post),
-		Suggest:      boolValue(review.Suggest),
-		PatchRepair:  boolValue(review.PatchRepair),
-		Approval:     review.Approval,
-		Force:        boolValue(review.Force),
-		Conversation: boolValue(review.Conversation),
-		Gate:         review.Gate,
-		FilterMode:   review.FilterMode,
-		MinSeverity:  review.MinSeverity,
-		Format:       review.Format,
-		Mode:         review.Mode,
-		BaseURL:      provider.BaseURL,
-		Model:        provider.Model,
-		DeepContext:  boolValue(review.DeepContext),
-		Subagents:    review.Subagents,
+		Post:          boolValue(review.Post),
+		Suggest:       boolValue(review.Suggest),
+		PatchRepair:   boolValue(review.PatchRepair),
+		Approval:      review.Approval,
+		Force:         boolValue(review.Force),
+		Conversation:  boolValue(review.Conversation),
+		Gate:          review.Gate,
+		FilterMode:    review.FilterMode,
+		MinSeverity:   review.MinSeverity,
+		Format:        review.Format,
+		Mode:          review.Mode,
+		BaseURL:       provider.BaseURL,
+		Model:         provider.Model,
+		DeepContext:   boolValue(review.DeepContext),
+		Subagents:     review.Subagents,
+		Quota:         provider.Quota,
+		QuotaProvider: providerName,
 	}
 	if review.Expand != nil {
 		opts.ExpandWindow = *review.Expand
@@ -752,7 +758,7 @@ func hostProvider(cfg config.HostConfig) (config.HostProvider, error) {
 		return p, nil
 	}
 	if p, ok := defaults.Providers[name]; ok {
-		return config.HostProvider{Kind: p.Kind, BaseURL: p.BaseURL, Model: p.Model, AuthEnv: p.AuthEnv, AuthCommand: p.AuthCommand, Auth: p.Auth}, nil
+		return config.HostProvider{Kind: p.Kind, BaseURL: p.BaseURL, Model: p.Model, AuthEnv: p.AuthEnv, AuthCommand: p.AuthCommand, Auth: p.Auth, Quota: p.Quota}, nil
 	}
 	return config.HostProvider{}, &CLIError{Code: "agent.unknown_provider", Message: fmt.Sprintf("unknown host provider %q", name), Hint: "define it under providers in the host YAML", Exit: 2}
 }
@@ -1248,6 +1254,8 @@ func buildServeReviewFn(log *slog.Logger, gate string, st serve.ReviewStore, tra
 			BaseURL:        review.BaseURL,
 			AuthToken:      review.AuthToken,
 			Model:          review.Model,
+			Quota:          review.Quota,
+			QuotaProvider:  review.QuotaProvider,
 			Timeout:        timeout,
 			ExpandWindow:   review.ExpandWindow,
 			TokenBudget:    review.TokenBudget,
@@ -1265,6 +1273,16 @@ func buildServeReviewFn(log *slog.Logger, gate string, st serve.ReviewStore, tra
 			TraceSink:      traceSink,
 		})
 		if err != nil {
+			// A quota-exhausted provider is a terminal skip for THIS job, not a
+			// failure: returning err would retry it every poll until the window
+			// resets, spamming the provider. Mark done + log; a later push or
+			// comment re-triggers a fresh job that re-checks the quota.
+			var ce *CLIError
+			if errors.As(err, &ce) && ce.Code == "quota.exceeded" {
+				log.Warn("review skipped: provider quota exhausted", "ref", j.Ref, "err", config.RedactString(err.Error()))
+				persistFinalReview(log, st, j.ReviewID, "done", ReviewOutcome{})
+				return nil
+			}
 			log.Error("review failed", "ref", j.Ref, "err", config.RedactString(err.Error()))
 			persistFinalReview(log, st, j.ReviewID, "failed", ReviewOutcome{})
 			return err

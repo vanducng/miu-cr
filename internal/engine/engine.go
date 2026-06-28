@@ -385,6 +385,21 @@ type Request struct {
 	Owner    string
 	Repo     string
 	Number   int
+
+	// Quota optionally enforces the resolved provider's usage quota. nil = no
+	// quota. The wire layer builds it for the selected provider+window; the engine
+	// stays storage-agnostic. Check runs before the LLM call (fail-closed), Record
+	// after with the pass usage.
+	Quota QuotaGate
+}
+
+// QuotaGate meters a provider instance's usage against its configured quota.
+// Check returns a non-nil (typed quota.exceeded) error to hard-block the review
+// before any LLM call; Record adds the completed pass's usage to the counter.
+// Implemented by internal/quota, injected via Request.Quota.
+type QuotaGate interface {
+	Check(ctx stdctx.Context) error
+	Record(ctx stdctx.Context, usage Usage) error
 }
 
 // progress invokes the sink when set; a nil sink is a silent no-op.
@@ -477,6 +492,14 @@ func (e *Engine) Review(ctx stdctx.Context, req Request) (ReviewResult, error) {
 				"gate":           req.Gate,
 			},
 		}, nil
+	}
+
+	// Fail-closed quota gate, before any context assembly or LLM call: an
+	// over-quota (or unverifiable) provider blocks here doing almost no work.
+	if req.Quota != nil {
+		if err := req.Quota.Check(ctx); err != nil {
+			return ReviewResult{}, err
+		}
 	}
 
 	var trace *ReviewTrace
@@ -577,6 +600,15 @@ func (e *Engine) Review(ctx stdctx.Context, req Request) (ReviewResult, error) {
 	}
 	for k, v := range passStats {
 		stats[k] = v
+	}
+	if out.Usage.InputTokens > 0 || out.Usage.OutputTokens > 0 {
+		stats["input_tokens"] = float64(out.Usage.InputTokens)
+		stats["output_tokens"] = float64(out.Usage.OutputTokens)
+	}
+	if req.Quota != nil {
+		if rerr := req.Quota.Record(ctx, out.Usage); rerr != nil {
+			stats["quota_record_error"] = config.RedactString(rerr.Error())
+		}
 	}
 	addTraceStats(stats, trace)
 

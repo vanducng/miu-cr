@@ -33,13 +33,14 @@ type HostConfig struct {
 }
 
 type HostProvider struct {
-	Kind        Kind     `yaml:"kind" json:"kind,omitempty"`
-	BaseURL     string   `yaml:"base_url" json:"base_url,omitempty"`
-	Model       string   `yaml:"model" json:"model,omitempty"`
-	AuthToken   string   `yaml:"auth_token" json:"auth_token,omitempty"`
-	AuthEnv     string   `yaml:"auth_env" json:"auth_env,omitempty"`
-	AuthCommand []string `yaml:"auth_command" json:"auth_command,omitempty"`
-	Auth        string   `yaml:"auth" json:"auth,omitempty"`
+	Kind        Kind         `yaml:"kind" json:"kind,omitempty"`
+	BaseURL     string       `yaml:"base_url" json:"base_url,omitempty"`
+	Model       string       `yaml:"model" json:"model,omitempty"`
+	AuthToken   string       `yaml:"auth_token" json:"auth_token,omitempty"`
+	AuthEnv     string       `yaml:"auth_env" json:"auth_env,omitempty"`
+	AuthCommand []string     `yaml:"auth_command" json:"auth_command,omitempty"`
+	Auth        string       `yaml:"auth" json:"auth,omitempty"`
+	Quota       *QuotaConfig `yaml:"quota" json:"quota,omitempty"`
 }
 
 type HostStore struct {
@@ -243,6 +244,9 @@ func validateHostProviders(path string, providers map[string]HostProvider) error
 		}
 		if strings.TrimSpace(provider.AuthToken) != "" {
 			return invalidHost(path, "providers."+name+".auth_token", "<set>", "auth_env or auth_command")
+		}
+		if field, value, want := quotaProblem(provider.Quota); field != "" {
+			return invalidHost(path, "providers."+name+"."+field, value, want)
 		}
 	}
 	return nil
