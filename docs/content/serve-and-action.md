@@ -269,7 +269,8 @@ host:
     force: false
     suggest: true
     patch_repair: false
-    approve_clean: false
+    approval:
+      mode: off
 
 repos:
   - name: service-api
@@ -287,13 +288,39 @@ repos:
 Layering is intentionally simple: built-in defaults -> top-level `review` and
 `agent` -> `host.review` -> `repos[].review` / `repos[].agent`. Repo-level
 settings are where risky write behavior belongs (`post`, `force`, `suggest`,
-`patch_repair`, `approve_clean`) because they decide what the host may do for
-that repository.
+`patch_repair`, `approval`) because they decide what the host may do for that
+repository.
 
 `review.subagents` follows the same layering. Configure broad defaults at the
 top level, then override the scoped agents per repo when a project benefits from
 different prompts or globs. A required subagent failure marks the run degraded,
-so host `approve_clean` will not approve and checks-mode will not report success.
+so host approval will not approve and checks-mode will not report success.
+
+Approval is a nested policy, not a boolean. Keep it off at the host level unless
+all repos should share the same merge behavior, then enable it per repo:
+
+```yaml
+repos:
+  - name: low-risk-service
+    slug: example-org/low-risk-service
+    review:
+      approval:
+        mode: threshold
+        max_severity: low
+        note: on_findings
+
+  - name: strict-infra
+    slug: example-org/strict-infra
+    review:
+      approval:
+        mode: clean
+```
+
+`mode: clean` approves only zero-finding reviews. `mode: threshold` approves
+when the worst active finding is at or below `max_severity`; `note:
+on_findings` leaves clean approvals silent and adds a short approval body only
+when findings remain. The old clean-approval key is removed; use
+`review.approval` in host and repo configs.
 
 `review.pr_filter` also layers top-level -> `host.review` -> `repos[].review`.
 Draft PRs are skipped unless `include_drafts: true`. `default_action` defaults

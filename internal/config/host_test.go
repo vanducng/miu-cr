@@ -30,6 +30,10 @@ x:
   host_review: &host_review
     suggest: true
     patch_repair: true
+    approval:
+      mode: threshold
+      max_severity: low
+      note: on_findings
     pr_filter:
       comment_trigger_regexes:
         - '(^|\s)(/miucr review\b|@vanducng\b)'
@@ -96,6 +100,9 @@ repos:
 	}
 	if cfg.Host.Review.PatchRepair == nil || !*cfg.Host.Review.PatchRepair {
 		t.Fatalf("merged host review not loaded: %+v", cfg.Host.Review)
+	}
+	if cfg.Host.Review.Approval.Mode != "threshold" || cfg.Host.Review.Approval.MaxSeverity != "low" || cfg.Host.Review.Approval.Note != "on_findings" {
+		t.Fatalf("host approval not loaded: %+v", cfg.Host.Review.Approval)
 	}
 	if cfg.Host.Review.Subagents.Mode != "auto" || len(cfg.Host.Review.Subagents.Agents) != 1 {
 		t.Fatalf("host subagents not loaded: %+v", cfg.Host.Review.Subagents)
@@ -352,6 +359,40 @@ repos:
 	err := loadHostErr(path)
 	if !isConfigInvalid(err) || !strings.Contains(err.Error(), "host.review.timeout") || !strings.Contains(err.Error(), path) {
 		t.Fatalf("want host review path config.invalid, got %v", err)
+	}
+}
+
+func TestLoadHostRejectsBadApproval(t *testing.T) {
+	path := writeHostConfig(t, minimalHostYAML()+`
+  review:
+    approval:
+      mode: threshold
+      max_severity: minor
+repos:
+  - name: service-api
+    slug: example-org/service-api
+    git_url: https://github.com/example-org/service-api.git
+`)
+	err := loadHostErr(path)
+	if !isConfigInvalid(err) || !strings.Contains(err.Error(), "host.review.approval.max_severity") {
+		t.Fatalf("want host approval config.invalid, got %v", err)
+	}
+}
+
+func TestLoadHostRejectsApprovalSeverityOutsideThreshold(t *testing.T) {
+	path := writeHostConfig(t, minimalHostYAML()+`
+  review:
+    approval:
+      mode: clean
+      max_severity: low
+repos:
+  - name: service-api
+    slug: example-org/service-api
+    git_url: https://github.com/example-org/service-api.git
+`)
+	err := loadHostErr(path)
+	if !isConfigInvalid(err) || !strings.Contains(err.Error(), "host.review.approval.max_severity") {
+		t.Fatalf("want host approval max_severity config.invalid, got %v", err)
 	}
 }
 

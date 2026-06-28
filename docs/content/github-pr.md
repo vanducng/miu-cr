@@ -96,10 +96,10 @@ immediate blocker such as exploitable security, data loss, outage, auth bypass,
 or irreversible customer impact; P1 must be fixed before merge; P2 should be
 fixed soon; P3 can wait; P4 is optional FYI. The underlying severity (used for
 the gate and SARIF) is unchanged. By
-default the review uses `Event: COMMENT` and never
-approves or requests changes; two opt-in write-actions (`--suggest`,
-`--approve-clean`, both default OFF) are described under **Opt-in write-actions**
-below. miu-cr never requests changes and never pushes commits.
+default the review uses `Event: COMMENT` and never approves or requests changes;
+opt-in write-actions (`--suggest`, `--approval`, both default OFF) are described
+under **Opt-in write-actions** below. miu-cr never requests changes and never
+pushes commits.
 
 When a finding is motivated by one of your project rules, the inline comment cites
 it as `(per <rule>)`. The rule stem is validated against the rules actually loaded
@@ -202,7 +202,7 @@ re-run:
   commit.
 - Inline findings post as a PR **review** with an **empty body** (the summary moved out),
   so a no-inline-comment run never trips an empty-review 422 while the summary comment still
-  upserts (and `--approve-clean` still submits APPROVE).
+  upserts (and `--approval` can still submit APPROVE).
 - A **same-commit `--post` re-run short-circuits** after the summary has a completed-publish
   marker for that head. It skips the clone and model call; pass `--force` to review anyway.
 - Each **inline** comment carries a hidden fingerprint (`<!-- miucr:fp=... -->`), so a
@@ -225,7 +225,7 @@ but they may not have a prior local record to echo in the envelope.
 
 The review-shape hash includes the review settings that affect model context or
 published output, including prompts/instructions, model/profile knobs, context
-settings, filters, suggestions, patch repair, diagrams, and approve-clean. A
+settings, filters, suggestions, patch repair, diagrams, and approval policy. A
 same-head `/miucr review <prompt>` rerun therefore reviews again instead of
 reusing a prior automatic run.
 
@@ -359,7 +359,7 @@ Two write-actions extend `--post`. **Both default OFF**; without them the review
 is comment-only.
 
 ```sh
-miucr review --pr owner/repo#123 --post --suggest --approve-clean
+miucr review --pr owner/repo#123 --post --suggest --approval threshold --approval-max-severity low
 ```
 
 ### `--suggest`: native one-click suggestions
@@ -380,12 +380,17 @@ findings below the floor) falls back to a plain fenced hint (the safe default).
 Suggestions are **author-applied**: miu-cr never pushes or commits to the branch.
 The count emitted this run is reported as `suggestions_posted`.
 
-### `--approve-clean`: APPROVE only on a clean, trusted PR
+### `--approval`: approve by policy
 
-Submits `Event=APPROVE` instead of `COMMENT`, but **only** when every safety
-precondition holds: the latest review attempt has **zero findings**, no finding
-reaches the gate, the PR is **not a fork**, the author is **trusted**
-(`AuthorAssociation` not `NONE` /
+Submits `Event=APPROVE` instead of `COMMENT` when the configured policy and every
+safety precondition hold. `--approval clean` requires **zero findings**.
+`--approval threshold --approval-max-severity low` approves when the worst active
+finding is `low` or `info`; if findings remain, the approval review includes a
+short note. Threshold `max_severity` accepts `info|low|medium|high|critical` and
+defaults to `low`.
+
+All approval modes still require: no finding reaches the gate, the PR is **not a
+fork**, the author is **trusted** (`AuthorAssociation` not `NONE` /
 `FIRST_TIME_CONTRIBUTOR` / `FIRST_TIMER`), **at least one file was actually
 reviewed**, the **head SHA is unchanged** (re-fetched right before submitting),
 and no `APPROVED` review already exists at that SHA. Re-runs at the same head SHA
@@ -394,10 +399,10 @@ post **no second APPROVE**.
 Any missed precondition silently **degrades to `COMMENT`** with a reason; it
 **never fails the run**. The outcome is reported as `approve_action`
 (`approved` | `commented`) and `approve_reason` (e.g. `gate_failed`, `fork`,
-`findings_present`, `untrusted_author`, `nothing_reviewed`, `head_moved`,
-`already_approved`, `self_approve_forbidden`).
+`findings_above_approval_threshold`, `untrusted_author`, `nothing_reviewed`,
+`head_moved`, `already_approved`, `self_approve_forbidden`).
 
-> **`--approve-clean` is not advisory.** A review submitted by a **PAT satisfies
+> **`--approval` is not advisory.** A review submitted by a **PAT satisfies
 > branch-protection required-reviews** and can enable auto-merge, so a human does
 > **not** necessarily still own the merge. Use it only where the bot identity does
 > **not** count toward required reviews, or with auto-merge disabled, and ensure
@@ -409,8 +414,8 @@ Any missed precondition silently **degrades to `COMMENT`** with a reason; it
 
 `serve` inherits both flags **OFF**: a webhook daemon must not auto-suggest or
 auto-approve. The GitHub Action stays **comment-only** for now (a default-token
-APPROVE is a self-approve / supply-chain risk), so it exposes no
-`suggest`/`approve-clean` inputs.
+APPROVE is a self-approve / supply-chain risk), so it exposes no `suggest` or
+`approval` inputs.
 
 ## Fork PRs
 

@@ -96,7 +96,8 @@ host:
     force: false
     suggest: true
     patch_repair: false
-    approve_clean: false
+    approval:
+      mode: off
 
 repos:
   - <<: *repo_defaults

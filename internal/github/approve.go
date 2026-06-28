@@ -2,8 +2,12 @@ package github
 
 import (
 	stdctx "context"
+	"fmt"
 
 	gh "github.com/google/go-github/v84/github"
+
+	"github.com/vanducng/miu-cr/internal/config"
+	"github.com/vanducng/miu-cr/internal/engine"
 )
 
 // Approve reason codes recorded in PRResult when the resolver degrades APPROVE to
@@ -12,7 +16,7 @@ const (
 	approveReasonApproved              = "approved"
 	approveReasonNotRequested          = "not_requested"
 	approveReasonGateFailed            = "gate_failed"
-	approveReasonFindingsPresent       = "findings_present"
+	approveReasonThresholdFailed       = "findings_above_approval_threshold"
 	approveReasonFork                  = "fork"
 	approveReasonUntrusted             = "untrusted_author"
 	approveReasonNothingDone           = "nothing_reviewed"
@@ -23,6 +27,8 @@ const (
 	approveReasonRejected              = "approve_rejected"
 	approveReasonIdempotencyUnverified = "idempotency_unverified"
 )
+
+const defaultApprovalMaxSeverity = "low"
 
 // trustedAssociations are the only AuthorAssociation values we auto-approve. This
 // is a fail-CLOSED allowlist, not a denylist: an empty string (API didn't populate
@@ -41,19 +47,20 @@ func trustedAuthor(info PRInfo) bool {
 	return trustedAssociations[info.AuthorAssociation]
 }
 
-// resolveEvent decides the CreateReview Event. It returns APPROVE only when
-// approve-clean is requested AND every safety predicate holds; otherwise COMMENT
+// resolveEvent decides the CreateReview Event. It returns APPROVE only when the
+// configured approval policy and every safety predicate hold; otherwise COMMENT
 // with a reason. self_approve_forbidden is NOT decided here, it is a reactive
 // 422 catch in PostReview, so it never appears as a resolveEvent reason.
-func resolveEvent(opts PostReviewOptions, info PRInfo, gateClean bool, findingsCount int, reviewedFiles int, headUnchanged bool) (event, reason string) {
-	if !opts.ApproveClean {
+func resolveEvent(opts PostReviewOptions, info PRInfo, gateClean bool, findings []engine.Finding, reviewedFiles int, headUnchanged bool) (event, reason string) {
+	policy := normalizeApprovalPolicy(opts.Approval)
+	if policy.Mode == "" || policy.Mode == "off" {
 		return "COMMENT", approveReasonNotRequested
 	}
 	if !gateClean {
 		return "COMMENT", approveReasonGateFailed
 	}
-	if findingsCount > 0 {
-		return "COMMENT", approveReasonFindingsPresent
+	if !approvalFindingsAllowed(policy, findings) {
+		return "COMMENT", approveReasonThresholdFailed
 	}
 	if info.IsFork {
 		return "COMMENT", approveReasonFork
@@ -76,9 +83,54 @@ func resolveEvent(opts PostReviewOptions, info PRInfo, gateClean bool, findingsC
 	return "APPROVE", approveReasonApproved
 }
 
-// ApproveCleanWouldApprove exposes the dry approval decision for reuse checks.
-func ApproveCleanWouldApprove(info PRInfo, gateClean bool, findingsCount int, reviewedFiles int) bool {
-	event, _ := resolveEvent(PostReviewOptions{ApproveClean: true}, info, gateClean, findingsCount, reviewedFiles, true)
+func normalizeApprovalPolicy(policy config.ApprovalPolicy) config.ApprovalPolicy {
+	switch policy.Mode {
+	case "", "off":
+		return config.ApprovalPolicy{}
+	case "clean":
+		policy.MaxSeverity = ""
+	case "threshold":
+		if policy.MaxSeverity == "" {
+			policy.MaxSeverity = defaultApprovalMaxSeverity
+		}
+	default:
+		return config.ApprovalPolicy{}
+	}
+	if policy.Note == "" {
+		if policy.Mode == "threshold" {
+			policy.Note = "on_findings"
+		} else {
+			policy.Note = "none"
+		}
+	}
+	return policy
+}
+
+func approvalFindingsAllowed(policy config.ApprovalPolicy, findings []engine.Finding) bool {
+	switch policy.Mode {
+	case "clean":
+		return len(findings) == 0
+	case "threshold":
+		return engine.MaxSeverityRank(findings) <= engine.MaxSeverityRank([]engine.Finding{{Severity: policy.MaxSeverity}})
+	default:
+		return false
+	}
+}
+
+func approvalBody(policy config.ApprovalPolicy, findings []engine.Finding) string {
+	policy = normalizeApprovalPolicy(policy)
+	if policy.Note == "none" || (policy.Note == "on_findings" && len(findings) == 0) {
+		return ""
+	}
+	if policy.Mode == "threshold" && len(findings) > 0 {
+		return fmt.Sprintf("Approved: only findings at or below `%s` remain under the configured approval policy. Review the summary before merge.", policy.MaxSeverity)
+	}
+	return "Approved by the configured approval policy."
+}
+
+// ApprovalWouldApprove exposes the dry approval decision for reuse checks.
+func ApprovalWouldApprove(info PRInfo, policy config.ApprovalPolicy, gateClean bool, findings []engine.Finding, reviewedFiles int) bool {
+	event, _ := resolveEvent(PostReviewOptions{Approval: policy}, info, gateClean, findings, reviewedFiles, true)
 	return event == "APPROVE"
 }
 

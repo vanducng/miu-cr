@@ -116,7 +116,7 @@ type HostReview struct {
 	Force        *bool           `yaml:"force" json:"force,omitempty"`
 	Suggest      *bool           `yaml:"suggest" json:"suggest,omitempty"`
 	PatchRepair  *bool           `yaml:"patch_repair" json:"patch_repair,omitempty"`
-	ApproveClean *bool           `yaml:"approve_clean" json:"approve_clean,omitempty"`
+	Approval     ApprovalPolicy  `yaml:"approval" json:"approval"`
 	Subagents    ReviewSubagents `yaml:"subagents" json:"subagents"`
 	PRFilter     HostPRFilter    `yaml:"pr_filter" json:"pr_filter,omitempty"`
 }
@@ -425,6 +425,24 @@ func validateHostReview(path, field string, r HostReview) error {
 	}
 	if r.Mode != "" && r.Mode != "review" && r.Mode != "checks" {
 		return invalidHost(path, field+".mode", r.Mode, "review|checks")
+	}
+	switch r.Approval.Mode {
+	case "", "off", "clean", "threshold":
+	default:
+		return invalidHost(path, field+".approval.mode", r.Approval.Mode, "off|clean|threshold")
+	}
+	if r.Approval.MaxSeverity != "" {
+		if r.Approval.Mode != "threshold" {
+			return invalidHost(path, field+".approval.max_severity", r.Approval.MaxSeverity, "only used when approval.mode is \"threshold\"")
+		}
+		if !validApprovalSeverity(r.Approval.MaxSeverity) {
+			return invalidHost(path, field+".approval.max_severity", r.Approval.MaxSeverity, "info|low|medium|high|critical")
+		}
+	}
+	switch r.Approval.Note {
+	case "", "none", "on_findings", "always":
+	default:
+		return invalidHost(path, field+".approval.note", r.Approval.Note, "none|on_findings|always")
 	}
 	if r.Expand != nil && *r.Expand < 0 {
 		return invalidHost(path, field+".expand", strconv.Itoa(*r.Expand), ">= 0")

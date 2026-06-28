@@ -85,10 +85,10 @@ MIUCR_PG_DSN='postgres://miucr:miucr@localhost:55432/miucr?sslmode=disable' \
   `repos[].agent` can override it per repo. Rules are appended as trusted host
   context and can reference individual Markdown files or a non-recursive
   directory of `*.md` files.
-- The example sets `approve_clean: false` and never pushes code. When enabled,
-  approval only happens after a latest review attempt with zero findings and all
-  GitHub safety predicates satisfied. Posting review comments is controlled by
-  each effective `review.post` value.
+- The example sets `approval.mode: off` and never pushes code. Enable
+  `approval.mode: clean` for zero-finding approvals, or `approval.mode: threshold`
+  with `max_severity: low` to approve low-risk findings with a note. Posting
+  review comments is controlled by each effective `review.post` value.
 - Retention fields are intentionally explicit: V1 prunes stale DB sessions,
   job-attempt history, and cursors. Workspace-size limits are validated and
   reserved for the managed-workspace phase, rather than deleting arbitrary

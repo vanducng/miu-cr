@@ -603,7 +603,7 @@ func buildServeHostRepos(ctx stdctx.Context, cfg config.HostConfig, path string)
 		Post:         boolSetting(true),
 		Suggest:      boolSetting(false),
 		PatchRepair:  boolSetting(false),
-		ApproveClean: boolSetting(false),
+		Approval:     config.ApprovalPolicy{Mode: "off"},
 		Force:        boolSetting(false),
 		Conversation: boolSetting(false),
 		DeepContext:  boolSetting(false),
@@ -662,7 +662,7 @@ func hostReviewOptions(provider config.HostProvider, secret string, review confi
 		Post:         boolValue(review.Post),
 		Suggest:      boolValue(review.Suggest),
 		PatchRepair:  boolValue(review.PatchRepair),
-		ApproveClean: boolValue(review.ApproveClean),
+		Approval:     review.Approval,
 		Force:        boolValue(review.Force),
 		Conversation: boolValue(review.Conversation),
 		Gate:         review.Gate,
@@ -1087,9 +1087,7 @@ func mergeHostReview(base, over config.HostReview) config.HostReview {
 	if over.PatchRepair != nil {
 		out.PatchRepair = over.PatchRepair
 	}
-	if over.ApproveClean != nil {
-		out.ApproveClean = over.ApproveClean
-	}
+	out.Approval = config.MergeApprovalPolicy(base.Approval, over.Approval)
 	out.Subagents = config.MergeReviewSubagents(base.Subagents, over.Subagents)
 	out.PRFilter = config.MergePRFilter(base.PRFilter, over.PRFilter)
 	return out
@@ -1209,7 +1207,7 @@ func buildServeReviewFn(log *slog.Logger, gate string, st serve.ReviewStore, tra
 			Post:           review.Post,
 			Suggest:        review.Suggest,
 			PatchRepair:    review.PatchRepair,
-			ApproveClean:   review.ApproveClean,
+			Approval:       review.Approval,
 			Gate:           review.Gate,
 			Provider:       review.Provider,
 			APIKey:         review.APIKey,

@@ -57,6 +57,9 @@ func ValidateReview(r Review) error {
 	default:
 		return invalidReview("thinking", r.Thinking, "auto|off|low|medium|high")
 	}
+	if err := validateReviewApproval(r.Approval); err != nil {
+		return err
+	}
 	if r.Expand != nil && *r.Expand < 0 {
 		return invalidReview("expand", fmt.Sprint(*r.Expand), "an integer >= 0")
 	}
@@ -117,6 +120,37 @@ func validateReviewSubagents(s ReviewSubagents) error {
 		}
 	}
 	return nil
+}
+
+func validateReviewApproval(a ApprovalPolicy) error {
+	switch a.Mode {
+	case "", "off", "clean", "threshold":
+	default:
+		return invalidReview("approval.mode", a.Mode, "off|clean|threshold")
+	}
+	if a.MaxSeverity != "" {
+		if a.Mode != "threshold" {
+			return invalidReview("approval.max_severity", a.MaxSeverity, "only used when approval.mode is \"threshold\"")
+		}
+		if !validApprovalSeverity(a.MaxSeverity) {
+			return invalidReview("approval.max_severity", a.MaxSeverity, "info|low|medium|high|critical")
+		}
+	}
+	switch a.Note {
+	case "", "none", "on_findings", "always":
+	default:
+		return invalidReview("approval.note", a.Note, "none|on_findings|always")
+	}
+	return nil
+}
+
+func validApprovalSeverity(s string) bool {
+	switch s {
+	case "info", "low", "medium", "high", "critical":
+		return true
+	default:
+		return false
+	}
 }
 
 func invalidReview(field, value, want string) error {
