@@ -55,6 +55,13 @@ comment with a new marker); subsequent re-runs dedupe normally. On a
 first M5 review **manually** (or off-hours) to absorb the one-time re-post before
 the next scheduled run.
 
+## [0.63.0](https://github.com/vanducng/miu-cr/compare/v0.62.0...v0.63.0) (2026-06-28)
+
+
+### Features
+
+* **quota:** meter cache + patch-repair tokens, expose cache-hit ratio ([#190](https://github.com/vanducng/miu-cr/issues/190)) ([45c8221](https://github.com/vanducng/miu-cr/commit/45c8221c43bc76cc52801b0e5111563ae0a1badd))
+
 ## [0.62.0](https://github.com/vanducng/miu-cr/compare/v0.61.4...v0.62.0) (2026-06-28)
 
 
