@@ -314,8 +314,8 @@ review:
         title_regexes: ['^chore\(deps\):']
 
 repos:
-  - name: ab-infra
-    slug: AB-Spectrum/infra
+  - name: example-infra
+    slug: example-org/infra
     review:
       pr_filter:
         rules:
@@ -324,8 +324,8 @@ repos:
               - '^chore\(deps\):'
               - '^chore\(fluxcd\):'
 
-  - name: cnb-ds-dbt-order-form
-    slug: careernowbrands/cnb-ds-dbt-order-form
+  - name: example-dbt-project
+    slug: example-org/example-dbt-project
     review:
       pr_filter:
         default_action: exclude

@@ -113,9 +113,9 @@ repos:
       context_hops: 1
 
   - <<: *repo_defaults
-    name: cnb-ds-dbt-order-form
-    slug: careernowbrands/cnb-ds-dbt-order-form
-    git_url: https://github.com/careernowbrands/cnb-ds-dbt-order-form.git
+    name: example-dbt-project
+    slug: example-org/example-dbt-project
+    git_url: https://github.com/example-org/example-dbt-project.git
     github_account: personal-pat
     review:
       pr_filter:

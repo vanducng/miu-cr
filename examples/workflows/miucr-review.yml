@@ -16,10 +16,10 @@
 # self-gates: the `if:` pre-filters PR-only + non-bot + a plausible
 # association, and the FIRST comment-path step authoritatively verifies the
 # commenter has write|admin via the API (author_association alone is insufficient
-# — read-only externals report COLLABORATOR). The comment body is passed via the
-# BODY env var and never inline-interpolated into a `run:` line (injection). The
-# comment path uses the released binary only (no build-from-source) so fork head
-# code is never compiled/run with secrets present.
+# — read-only externals report COLLABORATOR). The comment body is read inside
+# github-script and never inline-interpolated into a `run:` line (injection).
+# The comment path uses the released binary only (no build-from-source) so fork
+# head code is never compiled/run with secrets present.
 
 name: miucr review
 
