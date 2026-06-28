@@ -11,7 +11,7 @@ self-contained — read its header comment, copy it into your repo, and adjust.
 | [`rules/python-data.md`](rules/python-data.md) | Review context for Python data/ML pipelines — correctness, reproducibility. |
 | [`github-action/code-review.yml`](github-action/code-review.yml) | Reusable workflow that reviews every PR via the composite action (fork-safe). |
 | [`github-action/code-review-sarif.yml`](github-action/code-review-sarif.yml) | Inline review **plus** a SARIF 2.1.0 upload to the code-scanning Security tab. |
-| [`workflows/miucr-review.yml`](workflows/miucr-review.yml) | Dual-trigger workflow: reviews every PR **and** lets a write-collaborator post `/miucr review <prompt>` to steer a re-review (gated, ack'd, injection-safe). |
+| [`workflows/miucr-review.yml`](workflows/miucr-review.yml) | Dual-trigger workflow: reviews every PR **and** lets a write-collaborator post `/miucr review <prompt>` or a configurable mention pattern to steer a re-review (gated, ack'd, injection-safe). |
 | [`mcp-setup/`](mcp-setup/README-mcp.md) | Wire `miucr mcp` into Claude Code, Cursor, or Codex CLI. |
 | [`review-host/`](review-host/README.md) | Postgres-backed `miucr serve --host` example for multi-repo polling with YAML config, prompts, rules, and retention. Ships the `Dockerfile` (pure-Go `CGO_ENABLED=0`, nonroot, `git`) and a `docker-compose.yml` for the full stack. |
 
@@ -41,10 +41,12 @@ runs fork code.
 
 For the conversational `/miucr review <prompt>` comment flow, copy
 `workflows/miucr-review.yml` instead. It adds an `issue_comment` trigger that a
-write-collaborator uses to steer a re-review with free text. The job self-gates
-(write|admin via API, not `author_association` alone), acks with a 👀 reaction,
-guards against bot/echo loops, and passes the comment body via an env var so it
-can never be injected into a shell line.
+write-collaborator uses to steer a re-review with free text. Configure trigger
+regexes in `[review.pr_filter].comment_trigger_regexes` or
+`review.pr_filter.comment_trigger_regexes`; the default matches `/miucr review`
+and `@vanducng`. The job self-gates (write|admin via API, not
+`author_association` alone), acks with an `eyes` reaction, guards against
+bot/echo loops, and never interpolates the comment body into a shell line.
 
 ## MCP
 

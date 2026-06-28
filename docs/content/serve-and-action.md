@@ -306,6 +306,8 @@ review:
   pr_filter:
     default_action: include
     include_drafts: false
+    comment_trigger_regexes:
+      - '(^|\s)(/miucr review\b|@vanducng\b)'
     rules:
       - action: exclude
         author_types: ["Bot"]
@@ -340,7 +342,9 @@ block when a repo should be a strict allowlist.
 Supported matchers are `authors` (exact login), `author_types` (`Bot`, `User`,
 `Organization`), `author_associations` (`OWNER`, `MEMBER`, etc.),
 `title_regexes`, `labels`, `requested_reviewers`, `base_branches`, and
-`head_branches`.
+`head_branches`. `comment_trigger_regexes` are used by the GitHub Action
+comment-trigger workflow, not by `serve --host poll_source: pulls`, because PR
+list polling does not include issue comment bodies.
 
 ### Accounts, prompts, and rules
 
@@ -432,6 +436,15 @@ trace records between workflow runs for the same PR. Same-head `--post` rerun
 skipping does not depend on the cache: miucr also writes a hidden completed-publish
 marker into the PR summary comment, and only reuses it when the head SHA and
 review-shape hash match.
+
+For on-demand reviews, use
+[`examples/workflows/miucr-review.yml`](https://github.com/vanducng/miu-cr/blob/main/examples/workflows/miucr-review.yml).
+It adds an `issue_comment` trigger. By default, a write collaborator can comment
+`/miucr review ...`, `@vanducng review ...`, or just `@vanducng` to run a
+review. Configure include regexes in `[review.pr_filter].comment_trigger_regexes`
+or `review.pr_filter.comment_trigger_regexes`; the workflow reads trusted
+base-branch config before matching. Repo variable `MIUCR_COMMENT_TRIGGER_PATTERN`
+is only an override.
 
 ### Inputs
 

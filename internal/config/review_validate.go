@@ -2,6 +2,7 @@ package config
 
 import (
 	"fmt"
+	"regexp"
 	"time"
 
 	"github.com/vanducng/miu-cr/internal/cli/clierr"
@@ -64,6 +65,14 @@ func ValidateReview(r Review) error {
 	}
 	if err := validateReviewSubagents(r.Subagents); err != nil {
 		return err
+	}
+	for i, v := range r.PRFilter.CommentTriggerRegexes {
+		if v == "" {
+			return invalidReview(fmt.Sprintf("pr_filter.comment_trigger_regexes[%d]", i), "", "a non-empty regexp")
+		}
+		if _, err := regexp.Compile(v); err != nil {
+			return invalidReview(fmt.Sprintf("pr_filter.comment_trigger_regexes[%d]", i), v, "valid regexp")
+		}
 	}
 	return nil
 }

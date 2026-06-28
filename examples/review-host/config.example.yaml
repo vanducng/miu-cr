@@ -63,6 +63,8 @@ review:
   pr_filter:
     default_action: include
     include_drafts: false
+    comment_trigger_regexes:
+      - '(^|\s)(/miucr review\b|@vanducng\b)'
     rules:
       - action: exclude
         author_types: ["Bot"]

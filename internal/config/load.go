@@ -167,9 +167,23 @@ func mergeReview(base, file Review) Review {
 		out.PatchRepair = file.PatchRepair
 	}
 	out.Subagents = MergeReviewSubagents(base.Subagents, file.Subagents)
+	out.PRFilter = MergePRFilter(base.PRFilter, file.PRFilter)
 	if len(file.CategoryURLs) > 0 {
 		out.CategoryURLs = file.CategoryURLs
 	}
+	return out
+}
+
+func MergePRFilter(base, over HostPRFilter) HostPRFilter {
+	out := base
+	if over.DefaultAction != "" {
+		out.DefaultAction = over.DefaultAction
+	}
+	if over.IncludeDrafts != nil {
+		out.IncludeDrafts = over.IncludeDrafts
+	}
+	out.CommentTriggerRegexes = append(append([]string(nil), base.CommentTriggerRegexes...), over.CommentTriggerRegexes...)
+	out.Rules = append(append([]HostPRFilterRule(nil), base.Rules...), over.Rules...)
 	return out
 }
 

@@ -53,6 +53,8 @@ func TestValidateReview(t *testing.T) {
 		{"subagents bad mode", Review{Subagents: ReviewSubagents{Mode: "sometimes", Agents: []ReviewSubagent{{Name: "go", Include: []string{"**/*.go"}}}}}, true},
 		{"subagents empty include", Review{Subagents: ReviewSubagents{Mode: "always", Agents: []ReviewSubagent{{Name: "go"}}}}, true},
 		{"subagents duplicate name", Review{Subagents: ReviewSubagents{Mode: "always", Agents: []ReviewSubagent{{Name: "go", Include: []string{"**/*.go"}}, {Name: "go", Include: []string{"**/*.ts"}}}}}, true},
+		{"comment trigger regex valid", Review{PRFilter: HostPRFilter{CommentTriggerRegexes: []string{`(^|\s)(/miucr review\b|@vanducng\b)`}}}, false},
+		{"comment trigger regex invalid", Review{PRFilter: HostPRFilter{CommentTriggerRegexes: []string{"["}}}, true},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {

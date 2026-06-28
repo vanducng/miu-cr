@@ -1087,13 +1087,7 @@ func mergeHostReview(base, over config.HostReview) config.HostReview {
 		out.ApproveClean = over.ApproveClean
 	}
 	out.Subagents = config.MergeReviewSubagents(base.Subagents, over.Subagents)
-	if over.PRFilter.DefaultAction != "" {
-		out.PRFilter.DefaultAction = over.PRFilter.DefaultAction
-	}
-	if over.PRFilter.IncludeDrafts != nil {
-		out.PRFilter.IncludeDrafts = over.PRFilter.IncludeDrafts
-	}
-	out.PRFilter.Rules = append(append([]config.HostPRFilterRule(nil), base.PRFilter.Rules...), over.PRFilter.Rules...)
+	out.PRFilter = config.MergePRFilter(base.PRFilter, over.PRFilter)
 	return out
 }
 

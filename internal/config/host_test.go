@@ -31,6 +31,8 @@ x:
     suggest: true
     patch_repair: true
     pr_filter:
+      comment_trigger_regexes:
+        - '(^|\s)(/miucr review\b|@vanducng\b)'
       include_drafts: false
       rules:
         - action: exclude
@@ -98,7 +100,7 @@ repos:
 	if cfg.Host.Review.Subagents.Mode != "auto" || len(cfg.Host.Review.Subagents.Agents) != 1 {
 		t.Fatalf("host subagents not loaded: %+v", cfg.Host.Review.Subagents)
 	}
-	if cfg.Host.Review.PRFilter.IncludeDrafts == nil || *cfg.Host.Review.PRFilter.IncludeDrafts || len(cfg.Host.Review.PRFilter.Rules) != 1 {
+	if cfg.Host.Review.PRFilter.IncludeDrafts == nil || *cfg.Host.Review.PRFilter.IncludeDrafts || len(cfg.Host.Review.PRFilter.Rules) != 1 || len(cfg.Host.Review.PRFilter.CommentTriggerRegexes) != 1 {
 		t.Fatalf("host PR filter not loaded: %+v", cfg.Host.Review.PRFilter)
 	}
 	if len(repo.Rules) != 1 || repo.Rules[0] != "rules/service.md" {
@@ -406,6 +408,22 @@ repos:
 	}
 	if got := cfg.Review.PRFilter.Rules[0].RequestedReviewers; len(got) != 1 || got[0] != "vanducng" {
 		t.Fatalf("requested reviewers not loaded: %+v", cfg.Review.PRFilter)
+	}
+}
+
+func TestLoadHostRejectsBadCommentTriggerRegex(t *testing.T) {
+	path := writeHostConfig(t, minimalHostYAML()+`
+review:
+  pr_filter:
+    comment_trigger_regexes: ["["]
+repos:
+  - name: service-api
+    slug: example-org/service-api
+    git_url: https://github.com/example-org/service-api.git
+`)
+	err := loadHostErr(path)
+	if !isConfigInvalid(err) || !strings.Contains(err.Error(), "comment_trigger_regexes") {
+		t.Fatalf("want comment_trigger_regexes config.invalid, got %v", err)
 	}
 }
 
