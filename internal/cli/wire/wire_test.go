@@ -30,8 +30,9 @@ type fakeGitHub struct {
 	createIssueN  int
 	editN         int
 
-	headSHA         string                       // re-fetched head SHA returned by GetPR (defaults to "headsha")
-	reviews         []*gh.PullRequestReview      // existing reviews returned by ListReviews
+	headSHA         string                  // re-fetched head SHA returned by GetPR (defaults to "headsha")
+	reviews         []*gh.PullRequestReview // existing reviews returned by ListReviews
+	reviewThreads   []mgithub.ReviewThread
 	lastReviewed    *gh.PullRequestReviewRequest // last CreateReview request, for Event assertions
 	lastCheck       *gh.CreateCheckRunOptions    // last CreateCheckRun opts, for --mode checks assertions
 	checkRunN       int
@@ -76,6 +77,10 @@ func (f *fakeGitHub) CreateReview(_ stdctx.Context, _, _ string, _ int, r *gh.Pu
 func (f *fakeGitHub) ListReviewComments(stdctx.Context, string, string, int, *gh.PullRequestListCommentsOptions) ([]*gh.PullRequestComment, *gh.Response, error) {
 	f.order = append(f.order, "list_review")
 	return f.reviewComments, &gh.Response{}, nil
+}
+func (f *fakeGitHub) ReviewThreads(stdctx.Context, string, string, int) ([]mgithub.ReviewThread, error) {
+	f.order = append(f.order, "review_threads")
+	return f.reviewThreads, nil
 }
 
 func (f *fakeGitHub) ListIssueComments(stdctx.Context, string, string, int, *gh.IssueListCommentsOptions) ([]*gh.IssueComment, *gh.Response, error) {
@@ -310,6 +315,60 @@ func TestPublishReviewLedgerResolvesAcrossRuns(t *testing.T) {
 	}
 	if !strings.Contains(body2, "Resolved (1)") {
 		t.Fatalf("run2 summary must render a Resolved section:\n%s", body2)
+	}
+}
+
+func TestPublishReviewResolvedGitHubThreadSuppressesLedgerOpen(t *testing.T) {
+	runner := gitcmd.New()
+	dir, base, head := setupRepo(t, runner)
+
+	fake := &fakeGitHub{}
+	restore := newGitHubClient
+	newGitHubClient = func(string) mgithub.Client { return fake }
+	t.Cleanup(func() { newGitHubClient = restore })
+	client := newGitHubClient("")
+
+	finding := engine.Finding{File: "foo.go", Line: 4, Severity: "low", Category: "bug", Rationale: "boom", QuotedCode: "func B() {}", Title: "Last-team-wins for clients on multiple teams"}
+	info := &mgithub.PRInfo{Owner: "o", Repo: "r", Number: 7, HeadSHA: head, BaseSHA: base, BaseBranch: "main", ReviewCount: 1}
+	res := engine.ReviewResult{
+		Findings: []engine.Finding{finding},
+		Stats:    map[string]any{"truncation_level": "full", "files_reviewed": float64(1)},
+	}
+	pr := &cli.PRResult{SummaryAction: "none"}
+	if err := publishReview(stdctx.Background(), client, runner, dir, info, res, pr, cli.PRReviewRequest{Gate: "low"}, nil, embedWriter{}, nil, nil, ""); err != nil {
+		t.Fatalf("run1: %v", err)
+	}
+	led1 := mgithub.ParseLedger(fake.issueComments[0].GetBody())
+	if len(led1) != 1 || led1[0].Status != "open" {
+		t.Fatalf("run1 ledger must hold one open finding, got %+v", led1)
+	}
+
+	info.PriorLedger = led1
+	info.ReviewCount = 2
+	fake.reviewThreads = []mgithub.ReviewThread{{
+		Resolved: true,
+		Comments: []mgithub.ReviewThreadComment{{
+			Body: "prior bot finding\n\n<!-- miucr:fp=" + mgithub.Fingerprint(finding) + " -->",
+		}},
+	}}
+
+	pr2 := &cli.PRResult{SummaryAction: "none"}
+	if err := publishReview(stdctx.Background(), client, runner, dir, info, res, pr2, cli.PRReviewRequest{Gate: "low"}, nil, embedWriter{}, nil, nil, ""); err != nil {
+		t.Fatalf("run2: %v", err)
+	}
+	if pr2.PostedInline != 0 {
+		t.Fatalf("resolved GitHub thread must suppress reposting, got %d inline", pr2.PostedInline)
+	}
+	body2 := fake.issueComments[0].GetBody()
+	led2 := mgithub.ParseLedger(body2)
+	if len(led2) != 1 || led2[0].Status != "resolved" {
+		t.Fatalf("resolved GitHub thread must flip ledger entry to resolved, got %+v", led2)
+	}
+	if strings.Contains(body2, "Open (1)") {
+		t.Fatalf("resolved GitHub thread must not remain in the Open table:\n%s", body2)
+	}
+	if !strings.Contains(body2, "Resolved (1)") {
+		t.Fatalf("resolved GitHub thread must render in the Resolved table:\n%s", body2)
 	}
 }
 

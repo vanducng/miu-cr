@@ -242,7 +242,7 @@ func TestPublishNoStoreUnchanged(t *testing.T) {
 	if err := publishReview(stdctx.Background(), client, runner, dir, info, res, pr, cli.PRReviewRequest{Gate: "high"}, nil, embedWriter{}, nil, nil, ""); err != nil {
 		t.Fatalf("run 1: %v", err)
 	}
-	wantOrder1 := []string{"list_review", "list_issue", "create_issue", "create_review", "list_issue", "edit_issue"}
+	wantOrder1 := []string{"list_review", "review_threads", "list_issue", "create_issue", "create_review", "list_issue", "edit_issue"}
 	if !equalStr(fake.order, wantOrder1) {
 		t.Fatalf("run 1 call order = %v, want %v", fake.order, wantOrder1)
 	}
@@ -255,7 +255,7 @@ func TestPublishNoStoreUnchanged(t *testing.T) {
 	if err := publishReview(stdctx.Background(), client, runner, dir, info, res, pr2, cli.PRReviewRequest{Gate: "high"}, nil, embedWriter{}, nil, nil, ""); err != nil {
 		t.Fatalf("run 2: %v", err)
 	}
-	wantOrder2 := []string{"list_review", "list_issue", "edit_issue", "list_issue", "edit_issue"}
+	wantOrder2 := []string{"list_review", "review_threads", "list_issue", "edit_issue", "list_issue", "edit_issue"}
 	if !equalStr(fake.order, wantOrder2) {
 		t.Fatalf("run 2 call order = %v, want %v", fake.order, wantOrder2)
 	}

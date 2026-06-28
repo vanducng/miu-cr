@@ -784,6 +784,11 @@ func publishReview(ctx stdctx.Context, client mgithub.Client, runner *gitcmd.Run
 	if err != nil {
 		return err
 	}
+	resolvedThreadFPs, err := mgithub.ResolvedThreadFingerprints(ctx, client, info)
+	if err != nil {
+		slog.Warn("resolved review thread fetch failed, proceeding without suppression: " + config.RedactString(err.Error()))
+	}
+	publishFindings := mgithub.FilterResolvedThreadFindings(res.Findings, resolvedThreadFPs)
 
 	// skip is the dedupe set passed to PostReview, built from the keys of `existing`
 	// (fp -> inline comment URL). With no store it is exactly the M2/M9
@@ -827,7 +832,7 @@ func publishReview(ctx stdctx.Context, client mgithub.Client, runner *gitcmd.Run
 		Suggest:       req.Suggest,
 		ApproveClean:  req.ApproveClean,
 		Gate:          req.Gate,
-		GateClean:     !engine.GateFailed(res.Findings, req.Gate) && !engine.SubagentsDegraded(res.Stats),
+		GateClean:     !engine.GateFailed(publishFindings, req.Gate) && !engine.SubagentsDegraded(res.Stats),
 		ReviewedFiles: reviewedFilesFromStats(res.Stats),
 		FilterMode:    filterModeOf(req.FilterMode),
 		MinSeverity:   req.MinSeverity,
@@ -845,13 +850,13 @@ func publishReview(ctx stdctx.Context, client mgithub.Client, runner *gitcmd.Run
 	// renders in lifecycle mode on the PR path. now stamps both the ledger
 	// timestamps and the footer "Last reviewed".
 	now := time.Now()
-	ledger := mgithub.MergeLedger(info.PriorLedger, res.Findings, info.HeadSHA, diffPathSet(diffs), now)
+	ledger := mgithub.MergeLedger(info.PriorLedger, publishFindings, info.HeadSHA, diffPathSet(diffs), now)
 
 	// renderSummary builds the summary body for a given omitted set. info.ReviewCount
 	// is already this run's number (FetchPR did the +1); the body's runs token seeds
 	// the next read.
 	renderSummary := func(omitted int, omittedFindings []engine.Finding, published bool) string {
-		return mgithub.RenderSummaryFull(info, res.Findings, res.Stats, omitted, omittedFindings, categoryURLs, mgithub.SummaryOptions{
+		return mgithub.RenderSummaryFull(info, publishFindings, res.Stats, omitted, omittedFindings, categoryURLs, mgithub.SummaryOptions{
 			Diffs:         diffs,
 			ReviewID:      res.ID,
 			Walkthrough:   res.Walkthrough,
@@ -882,7 +887,7 @@ func publishReview(ctx stdctx.Context, client mgithub.Client, runner *gitcmd.Run
 
 	// nil summaryFn: inline comments only, NO review body (the summary is the upserted
 	// issue comment), so a re-run edits one comment instead of stacking a review.
-	pr, err := mgithub.PostReview(ctx, client, info, res.Findings, diffs, nil, skip, opts)
+	pr, err := mgithub.PostReview(ctx, client, info, publishFindings, diffs, nil, skip, opts)
 	if err != nil {
 		return err
 	}
@@ -907,7 +912,7 @@ func publishReview(ctx stdctx.Context, client mgithub.Client, runner *gitcmd.Run
 	if prStore != nil {
 		// PostReview already succeeded: the review is live. A store write failure must
 		// not discard that outcome: log (redacted), continue.
-		if terr := trackResolution(ctx, prStore, prKey, prior, res.Findings, diffs, pr.PostedFindings); terr != nil {
+		if terr := trackResolution(ctx, prStore, prKey, prior, publishFindings, diffs, pr.PostedFindings); terr != nil {
 			slog.Warn("pr-thread store tracking failed: " + config.RedactString(terr.Error()))
 		}
 	}
@@ -915,7 +920,7 @@ func publishReview(ctx stdctx.Context, client mgithub.Client, runner *gitcmd.Run
 	// M7 write path (gated by [embedding].enabled+postgres, independent of the
 	// PR-thread store): embed the actually-posted findings' scrubbed code anchors.
 	// Best-effort, never affects the published review.
-	ew.write(ctx, pr.PostedFindings, res.Findings, res.Stats)
+	ew.write(ctx, pr.PostedFindings, publishFindings, res.Stats)
 
 	prResult.Posted = true
 	prResult.PostedInline = pr.Posted
