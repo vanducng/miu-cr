@@ -55,6 +55,13 @@ comment with a new marker); subsequent re-runs dedupe normally. On a
 first M5 review **manually** (or off-hours) to absorb the one-time re-post before
 the next scheduled run.
 
+## [0.58.0](https://github.com/vanducng/miu-cr/compare/v0.57.0...v0.58.0) (2026-06-28)
+
+
+### Features
+
+* **host:** add pull request filter rules ([c3aa767](https://github.com/vanducng/miu-cr/commit/c3aa767389d2f58ff98abfdb58840c9ef9e2a3dc))
+
 ## [0.57.0](https://github.com/vanducng/miu-cr/compare/v0.56.3...v0.57.0) (2026-06-27)
 
 
