@@ -55,6 +55,13 @@ comment with a new marker); subsequent re-runs dedupe normally. On a
 first M5 review **manually** (or off-hours) to absorb the one-time re-post before
 the next scheduled run.
 
+## [0.66.0](https://github.com/vanducng/miu-cr/compare/v0.65.0...v0.66.0) (2026-06-28)
+
+
+### Features
+
+* **review:** injection-safe XML prompt format (default) + reasoning capture ([#197](https://github.com/vanducng/miu-cr/issues/197)) ([65e8df7](https://github.com/vanducng/miu-cr/commit/65e8df74b3b752c1ae7f5306dd0e1fa3e7d7633e))
+
 ## [0.65.0](https://github.com/vanducng/miu-cr/compare/v0.64.0...v0.65.0) (2026-06-28)
 
 
