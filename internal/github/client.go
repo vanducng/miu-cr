@@ -53,17 +53,22 @@ type Client interface {
 // ghClient wraps *github.Client. An empty token yields an anonymous client (fine
 // for public-repo reads); a non-empty token authenticates via WithAuthToken so we
 // avoid pulling in an external auth-transport dependency.
-type ghClient struct{ c *gh.Client }
+type ghClient struct {
+	c     *gh.Client
+	hc    *http.Client
+	token string
+}
 
 // NewClient returns a Client. token=="" → anonymous; else WithAuthToken (PAT). The
 // underlying http.Client carries a 30s timeout so a stalled connection (DNS/TLS) can
 // never hang indefinitely even if a caller forgets to bound the context.
 func NewClient(token string) Client {
-	c := gh.NewClient(&http.Client{Timeout: 30 * time.Second})
+	hc := &http.Client{Timeout: 30 * time.Second}
+	c := gh.NewClient(hc)
 	if token != "" {
 		c = c.WithAuthToken(token)
 	}
-	return ghClient{c: c}
+	return ghClient{c: c, hc: hc, token: token}
 }
 
 func (g ghClient) GetPR(ctx stdctx.Context, owner, repo string, number int) (*gh.PullRequest, error) {
