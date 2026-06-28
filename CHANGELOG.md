@@ -55,6 +55,13 @@ comment with a new marker); subsequent re-runs dedupe normally. On a
 first M5 review **manually** (or off-hours) to absorb the one-time re-post before
 the next scheduled run.
 
+## [0.61.3](https://github.com/vanducng/miu-cr/compare/v0.61.2...v0.61.3) (2026-06-28)
+
+
+### Bug Fixes
+
+* **host:** heartbeat running review leases ([#184](https://github.com/vanducng/miu-cr/issues/184)) ([ad743be](https://github.com/vanducng/miu-cr/commit/ad743be3e520551ed2101845083e41ea312a8eae))
+
 ## [0.61.2](https://github.com/vanducng/miu-cr/compare/v0.61.1...v0.61.2) (2026-06-28)
 
 
