@@ -213,6 +213,16 @@ token_budget = 0
 	}
 }
 
+func TestConfigShowIncludesReviewPRFilter(t *testing.T) {
+	writeUserConfig(t, `[review.pr_filter]
+comment_trigger_regexes = ['(^|\s)(/miucr review\b|@vanducng\b)']
+`)
+	out := runConfigShow(t, true)
+	if !strings.Contains(out, "comment_trigger_regexes") || !strings.Contains(out, "/miucr review") {
+		t.Fatalf("config show should include review pr_filter, got %s", out)
+	}
+}
+
 // TestReviewBadConfigGateIsTypedConfigInvalid: a bad [review] enum → config.invalid.
 func TestReviewBadConfigFilterModeIsTypedConfigInvalid(t *testing.T) {
 	writeUserConfig(t, `[review]

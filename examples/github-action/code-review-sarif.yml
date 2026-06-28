@@ -32,6 +32,8 @@ jobs:
     runs-on: ubuntu-latest
     if: |
       github.actor != 'dependabot[bot]' &&
+      !startsWith(github.head_ref, 'release-please--') &&
+      !startsWith(github.event.pull_request.title, 'chore(main): release ') &&
       !contains(github.event.pull_request.title, '[skip review]')
 
     steps:

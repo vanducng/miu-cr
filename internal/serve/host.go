@@ -9,6 +9,8 @@ import (
 	"fmt"
 	"log/slog"
 	"math"
+	"regexp"
+	"strings"
 	"sync"
 	"time"
 
@@ -23,6 +25,7 @@ const hostFailedRetryBase = 5 * time.Minute
 const hostFailedRetryCap = time.Hour
 
 var runHostDrainGrace = 10 * time.Second
+var hostPRFilterRegexCache sync.Map
 
 var ErrHostRunnerStopTimeout = errors.New("host runner did not stop before drain deadline")
 
@@ -74,6 +77,7 @@ type HostRepoConfig struct {
 	RulesHash     string
 	ReviewTimeout time.Duration
 	Review        JobReviewOptions
+	PRFilter      config.HostPRFilter
 }
 
 type HostRunner struct {
@@ -437,12 +441,15 @@ func (h *HostRunner) pollRepo(ctx stdctx.Context, snap hostRunnerSnapshot, repo 
 		if number <= 0 {
 			continue
 		}
-		// Still "open" even with an empty head, so reconcile doesn't close it;
-		// we just can't enqueue a review without a head SHA.
-		openNumbers = append(openNumbers, number)
-		if head == "" {
+		if !hostPRFilterAllows(repo.PRFilter, pr) {
+			h.log.Debug("host: PR ignored by filter", "repo", repo.Slug, "pr", number)
 			continue
 		}
+		if head == "" {
+			openNumbers = append(openNumbers, number)
+			continue
+		}
+		openNumbers = append(openNumbers, number)
 		session, err := h.store.UpsertHostPRSession(ctx, store.HostPRSessionInput{
 			RepoID:  repoID,
 			Number:  number,
@@ -480,6 +487,98 @@ func (h *HostRunner) pollRepo(ctx stdctx.Context, snap hostRunnerSnapshot, repo 
 		h.log.Info("host: reconciled closed PRs", "repo", repo.Slug, "sessions_closed", res.SessionsClosed, "jobs_canceled", res.JobsCanceled)
 	}
 	return pollFloor, nil
+}
+
+func hostPRFilterAllows(filter config.HostPRFilter, pr *github.PullRequest) bool {
+	if pr.GetDraft() && (filter.IncludeDrafts == nil || !*filter.IncludeDrafts) {
+		return false
+	}
+	allow := filter.DefaultAction != "exclude"
+	for _, rule := range filter.Rules {
+		if hostPRFilterRuleMatches(rule, pr) {
+			allow = rule.Action == "include"
+		}
+	}
+	return allow
+}
+
+func hostPRFilterRuleMatches(rule config.HostPRFilterRule, pr *github.PullRequest) bool {
+	return anyEqualFold(rule.Authors, pr.GetUser().GetLogin()) &&
+		anyEqualFold(rule.AuthorTypes, pr.GetUser().GetType()) &&
+		anyEqualFold(rule.AuthorAssociations, pr.GetAuthorAssociation()) &&
+		anyRegexp(rule.TitleRegexes, pr.GetTitle()) &&
+		anyLabel(rule.Labels, pr.Labels) &&
+		anyUser(rule.RequestedReviewers, pr.RequestedReviewers) &&
+		anyEqualFold(rule.BaseBranches, pr.GetBase().GetRef()) &&
+		anyEqualFold(rule.HeadBranches, pr.GetHead().GetRef())
+}
+
+func anyEqualFold(wants []string, got string) bool {
+	if len(wants) == 0 {
+		return true
+	}
+	for _, want := range wants {
+		if strings.EqualFold(want, got) {
+			return true
+		}
+	}
+	return false
+}
+
+func anyRegexp(patterns []string, got string) bool {
+	if len(patterns) == 0 {
+		return true
+	}
+	for _, pattern := range patterns {
+		re, err := cachedHostPRFilterRegex(pattern)
+		if err != nil {
+			continue
+		}
+		if re.MatchString(got) {
+			return true
+		}
+	}
+	return false
+}
+
+func cachedHostPRFilterRegex(pattern string) (*regexp.Regexp, error) {
+	if cached, ok := hostPRFilterRegexCache.Load(pattern); ok {
+		return cached.(*regexp.Regexp), nil
+	}
+	re, err := regexp.Compile(pattern)
+	if err != nil {
+		return nil, err
+	}
+	actual, _ := hostPRFilterRegexCache.LoadOrStore(pattern, re)
+	return actual.(*regexp.Regexp), nil
+}
+
+func anyLabel(wants []string, labels []*github.Label) bool {
+	if len(wants) == 0 {
+		return true
+	}
+	for _, label := range labels {
+		for _, want := range wants {
+			if strings.EqualFold(want, label.GetName()) {
+				return true
+			}
+		}
+	}
+	return false
+}
+
+func anyUser(wants []string, users []*github.User) bool {
+	if len(wants) == 0 {
+		return true
+	}
+	for _, user := range users {
+		for _, want := range wants {
+			if strings.EqualFold(want, user.GetLogin()) {
+				return true
+			}
+		}
+	}
+	return false
 }
 
 func (h *HostRunner) listOpenPRs(ctx stdctx.Context, getter notifGetter, repo HostRepoConfig) ([]*github.PullRequest, time.Duration, error) {

@@ -124,6 +124,7 @@ type Review struct {
 	Suggest      *bool             `toml:"suggest,omitempty"`
 	PatchRepair  *bool             `toml:"patch_repair,omitempty"`
 	Subagents    ReviewSubagents   `toml:"subagents,omitempty"`
+	PRFilter     HostPRFilter      `toml:"pr_filter,omitempty"`
 	CategoryURLs map[string]string `toml:"category_urls,omitempty"`
 }
 

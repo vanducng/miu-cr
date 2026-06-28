@@ -3,8 +3,9 @@
 # Dual trigger:
 #   - pull_request: reviews every PR push (fork PRs are skipped — the diff is
 #     read via the API, but the released-binary path here does not run fork code).
-#   - issue_comment: a write-collaborator posts "/miucr review <prompt>" on a PR
-#     to steer a re-review with free text.
+#   - issue_comment: a write-collaborator posts a matching comment on a PR
+#     to steer a re-review with free text. The trigger regexes come from
+#     [review.pr_filter].comment_trigger_regexes or the built-in default.
 #
 # Prerequisites:
 #   1. Add ANTHROPIC_API_KEY to your repo secrets (Settings → Secrets → Actions).
@@ -12,13 +13,13 @@
 #
 # SECURITY (issue_comment): this event runs the BASE-branch workflow with full
 # secrets even on fork PRs, and ANYONE can post a comment. The job therefore
-# self-gates: the `if:` pre-filters PR-only + the command + non-bot + a plausible
+# self-gates: the `if:` pre-filters PR-only + non-bot + a plausible
 # association, and the FIRST comment-path step authoritatively verifies the
 # commenter has write|admin via the API (author_association alone is insufficient
-# — read-only externals report COLLABORATOR). The comment body is passed via the
-# BODY env var and never inline-interpolated into a `run:` line (injection). The
-# comment path uses the released binary only (no build-from-source) so fork head
-# code is never compiled/run with secrets present.
+# — read-only externals report COLLABORATOR). The comment body is read inside
+# github-script and never inline-interpolated into a `run:` line (injection).
+# The comment path uses the released binary only (no build-from-source) so fork
+# head code is never compiled/run with secrets present.
 
 name: miucr review
 
@@ -30,6 +31,7 @@ on:
 
 permissions:
   pull-requests: write
+  issues: write
   contents: read
 
 concurrency:
@@ -41,11 +43,12 @@ jobs:
     runs-on: ubuntu-latest
     if: >-
       (github.event_name == 'pull_request' &&
-       github.event.pull_request.head.repo.fork != true) ||
+       github.event.pull_request.head.repo.fork != true &&
+       !startsWith(github.head_ref, 'release-please--') &&
+       !startsWith(github.event.pull_request.title, 'chore(main): release ')) ||
       (github.event_name == 'issue_comment' &&
        github.event.issue.pull_request &&
        github.event.comment.user.type != 'Bot' &&
-       startsWith(github.event.comment.body, '/miucr review') &&
        contains(fromJSON('["OWNER","MEMBER","COLLABORATOR"]'),
                 github.event.comment.author_association))
     steps:
@@ -53,8 +56,82 @@ jobs:
         if: github.event_name == 'issue_comment'
         id: gate
         uses: actions/github-script@v7
+        env:
+          MIUCR_COMMENT_TRIGGER_PATTERN: ${{ vars.MIUCR_COMMENT_TRIGGER_PATTERN }}
         with:
           script: |
+            const body = context.payload.comment.body || '';
+            const defaultPatterns = [String.raw`(^|\s)(/miucr review\b|@vanducng\b)`];
+            const configPaths = [
+              '.miu/cr/config.toml',
+              'miucr.toml',
+              'config.toml',
+              '.miu/cr/config.yaml',
+              '.miu/cr/config.yml',
+              '.miu/cr/host.yaml',
+              '.miu/cr/host.yml',
+              'miucr-host.yaml',
+              'miucr-host.yml',
+              'config.yaml',
+              'config.yml',
+            ];
+            function cleanPattern(value) {
+              return value.trim().replace(/,$/, '').replace(/^['"]|['"]$/g, '').trim();
+            }
+            function parseArrayItems(value) {
+              const quoted = [...value.matchAll(/(['"])(.*?)\1/g)].map(match => cleanPattern(match[2]));
+              if (quoted.length) return quoted.filter(Boolean);
+              return value.split(',').map(cleanPattern).filter(Boolean);
+            }
+            function extractConfigPatterns(raw) {
+              const out = [];
+              const yamlBlock = raw.match(/(?:^|\n)\s*comment_trigger_regexes:\s*\n((?:[ \t]+-\s+.*(?:\n|$))+)/);
+              if (yamlBlock) {
+                out.push(...yamlBlock[1].split(/\r?\n/).map(line => line.trim().replace(/^-\s+/, '')).map(cleanPattern).filter(Boolean));
+              }
+              const yamlInline = raw.match(/(?:^|\n)\s*comment_trigger_regexes:\s*\[([^\]]*)\]/);
+              if (yamlInline) out.push(...parseArrayItems(yamlInline[1]));
+              const toml = raw.match(/(?:^|\n)\s*comment_trigger_regexes\s*=\s*\[([\s\S]*?)\]/);
+              if (toml) out.push(...parseArrayItems(toml[1]));
+              return out;
+            }
+            async function readRepoFile(path) {
+              try {
+                const res = await github.rest.repos.getContent({
+                  owner: context.repo.owner,
+                  repo: context.repo.repo,
+                  path,
+                  ref: context.payload.repository.default_branch,
+                });
+                if (Array.isArray(res.data) || res.data.type !== 'file') return '';
+                return Buffer.from(res.data.content, res.data.encoding || 'base64').toString('utf8');
+              } catch (err) {
+                if (err.status === 404) return '';
+                throw err;
+              }
+            }
+            async function loadPatterns() {
+              const override = (process.env.MIUCR_COMMENT_TRIGGER_PATTERN || '').trim();
+              if (override) return [override];
+              const configured = [];
+              for (const path of configPaths) {
+                const raw = await readRepoFile(path);
+                if (raw) configured.push(...extractConfigPatterns(raw));
+              }
+              return [...new Set(configured.length ? configured : defaultPatterns)];
+            }
+            let matched = false;
+            try {
+              matched = (await loadPatterns()).some(pattern => new RegExp(pattern, 'i').test(body));
+            } catch (err) {
+              core.setFailed(`miucr: invalid comment_trigger_regexes: ${err.message}`);
+              return;
+            }
+            if (!matched) {
+              core.notice('miucr: comment ignored; trigger pattern did not match');
+              core.setOutput('should_run', 'false');
+              return;
+            }
             const r = await github.rest.repos.getCollaboratorPermissionLevel({
               owner: context.repo.owner,
               repo: context.repo.repo,
@@ -69,10 +146,20 @@ jobs:
               repo: context.repo.repo,
               pull_number: context.payload.issue.number,
             });
+            if (pr.data.head.ref.startsWith('release-please--') || pr.data.title.startsWith('chore(main): release ')) {
+              core.notice('miucr: comment trigger skipped for release automation PR');
+              core.setOutput('should_run', 'false');
+              return;
+            }
+            const first = body.split(/\r?\n/)[0].trim();
+            const slash = first.match(/(?:^|\s)\/miucr\s+review\b\s*(.*)$/i);
+            const mention = first.match(/(?:^|\s)@vanducng\s+review\b\s*(.*)$/i);
+            core.setOutput('instruction', ((slash && slash[1]) || (mention && mention[1]) || '').trim());
             core.setOutput('head_sha', pr.data.head.sha);
+            core.setOutput('should_run', 'true');
 
       - name: Ack reaction (comment path)
-        if: github.event_name == 'issue_comment'
+        if: github.event_name == 'issue_comment' && steps.gate.outputs.should_run == 'true'
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
@@ -80,38 +167,26 @@ jobs:
             "repos/${{ github.repository }}/issues/comments/${{ github.event.comment.id }}/reactions" \
             -f content=eyes
 
-      - name: Parse command (comment path)
-        if: github.event_name == 'issue_comment'
-        id: cmd
-        env:
-          BODY: ${{ github.event.comment.body }}
-        run: |
-          set -euo pipefail
-          first=$(printf '%s' "$BODY" | head -n1)
-          prompt=$(printf '%s' "$first" | sed -E 's#^/miucr review[[:space:]]*##')
-          {
-            echo "instruction<<MIUCR_EOF"
-            echo "$prompt"
-            echo MIUCR_EOF
-          } >> "$GITHUB_OUTPUT"
-
       # Pin the checkout to the PR head SHA (comment path) instead of a mutable
       # ref so the agent's file_read/grep tools read the EXACT reviewed revision;
       # the released binary still reads the diff via the API, so fork head code is
       # never compiled/run with secrets present.
       - uses: actions/checkout@v4
+        if: github.event_name != 'issue_comment' || steps.gate.outputs.should_run == 'true'
         with:
           ref: ${{ github.event_name == 'issue_comment' && steps.gate.outputs.head_sha || github.sha }}
 
       - name: Cache miucr state
+        if: github.event_name != 'issue_comment' || steps.gate.outputs.should_run == 'true'
         uses: actions/cache@v4
         with:
           path: ~/.config/miu/cr
           key: miucr-${{ runner.os }}-${{ github.repository_id }}-${{ github.event.issue.number || github.event.pull_request.number }}
 
       - uses: vanducng/miu-cr@vX.Y.Z   # pin to a real release tag or an exact SHA
+        if: github.event_name != 'issue_comment' || steps.gate.outputs.should_run == 'true'
         with:
           api-key: ${{ secrets.ANTHROPIC_API_KEY }}
           gate: high
           pr-number: ${{ github.event_name == 'issue_comment' && github.event.issue.number || github.event.pull_request.number }}
-          instruction: ${{ steps.cmd.outputs.instruction }}
+          instruction: ${{ steps.gate.outputs.instruction }}

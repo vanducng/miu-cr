@@ -138,6 +138,9 @@ func reviewEqual(a, b Review) bool {
 	if (a.PatchRepair == nil) != (b.PatchRepair == nil) || (a.PatchRepair != nil && *a.PatchRepair != *b.PatchRepair) {
 		return false
 	}
+	if !reflect.DeepEqual(a.Subagents, b.Subagents) || !reflect.DeepEqual(a.PRFilter, b.PRFilter) {
+		return false
+	}
 	if len(a.CategoryURLs) != len(b.CategoryURLs) {
 		return false
 	}

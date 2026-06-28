@@ -65,6 +65,9 @@ func ValidateReview(r Review) error {
 	if err := validateReviewSubagents(r.Subagents); err != nil {
 		return err
 	}
+	if err := validateHostPRFilter(FilePathOrEmpty(), "review.pr_filter", r.PRFilter); err != nil {
+		return err
+	}
 	return nil
 }
 

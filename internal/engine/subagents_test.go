@@ -38,7 +38,7 @@ func (f *subagentFake) Review(_ stdctx.Context, rc engine.AgentContext) (engine.
 	rc.Trace.SetFinalResponse(`{"findings":[]}`)
 	return engine.ReviewOutput{
 		Findings:      findings,
-		Walkthrough:   "reviewed scoped files",
+		Walkthrough:   "- reviewed scoped files",
 		FileSummaries: map[string]string{"summary.txt": "scoped"},
 	}, nil
 }
@@ -97,6 +97,12 @@ func TestReviewSubagentsFanOutAndMerge(t *testing.T) {
 	}
 	if !containsInstruction(seen, `Subagent "backend"`) || !containsInstruction(seen, `Subagent "frontend"`) {
 		t.Fatalf("missing scoped subagent instructions: %#v", seen)
+	}
+	if !strings.Contains(res.Walkthrough, "- backend: reviewed scoped files") {
+		t.Fatalf("walkthrough missing bullet-prefixed subagent label:\n%s", res.Walkthrough)
+	}
+	if strings.Contains(res.Walkthrough, "backend: - reviewed scoped files") {
+		t.Fatalf("walkthrough has awkward label-before-bullet format:\n%s", res.Walkthrough)
 	}
 }
 

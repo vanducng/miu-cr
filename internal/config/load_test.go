@@ -101,6 +101,9 @@ auth_command = ["gopass", "show", "-o", "ai/zai"]
 [providers.openai]
 model = "gpt-4o-mini"
 auth = "oauth"
+
+[review.pr_filter]
+comment_trigger_regexes = ['(^|\s)(/miucr review\b|@vanducng\b)']
 `
 	cfgDir := filepath.Join(dir, ".config", "miu", "cr")
 	if err := os.MkdirAll(cfgDir, 0o755); err != nil {
@@ -127,6 +130,9 @@ auth = "oauth"
 	}
 	if cfg.Providers["openai"].Model != "gpt-4o-mini" || cfg.Providers["openai"].Auth != "oauth" || cfg.Providers["openai"].Kind != KindOpenAI {
 		t.Fatalf("openai overlay wrong: %+v", cfg.Providers["openai"])
+	}
+	if got := cfg.Review.PRFilter.CommentTriggerRegexes; len(got) != 1 || got[0] == "" {
+		t.Fatalf("review pr_filter not loaded: %+v", cfg.Review.PRFilter)
 	}
 }
 

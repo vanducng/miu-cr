@@ -9,6 +9,7 @@ import (
 	"net/url"
 	"os"
 	"path/filepath"
+	"regexp"
 	"strconv"
 	"strings"
 	"time"
@@ -116,6 +117,26 @@ type HostReview struct {
 	PatchRepair  *bool           `yaml:"patch_repair" json:"patch_repair,omitempty"`
 	ApproveClean *bool           `yaml:"approve_clean" json:"approve_clean,omitempty"`
 	Subagents    ReviewSubagents `yaml:"subagents" json:"subagents"`
+	PRFilter     HostPRFilter    `yaml:"pr_filter" json:"pr_filter,omitempty"`
+}
+
+type HostPRFilter struct {
+	DefaultAction         string             `toml:"default_action,omitempty" yaml:"default_action" json:"default_action,omitempty"`
+	IncludeDrafts         *bool              `toml:"include_drafts,omitempty" yaml:"include_drafts" json:"include_drafts,omitempty"`
+	CommentTriggerRegexes []string           `toml:"comment_trigger_regexes,omitempty" yaml:"comment_trigger_regexes" json:"comment_trigger_regexes,omitempty"`
+	Rules                 []HostPRFilterRule `toml:"rules,omitempty" yaml:"rules,omitempty" json:"rules,omitempty"`
+}
+
+type HostPRFilterRule struct {
+	Action             string   `toml:"action,omitempty" yaml:"action" json:"action,omitempty"`
+	Authors            []string `toml:"authors,omitempty" yaml:"authors" json:"authors,omitempty"`
+	AuthorTypes        []string `toml:"author_types,omitempty" yaml:"author_types" json:"author_types,omitempty"`
+	AuthorAssociations []string `toml:"author_associations,omitempty" yaml:"author_associations" json:"author_associations,omitempty"`
+	TitleRegexes       []string `toml:"title_regexes,omitempty" yaml:"title_regexes" json:"title_regexes,omitempty"`
+	Labels             []string `toml:"labels,omitempty" yaml:"labels" json:"labels,omitempty"`
+	RequestedReviewers []string `toml:"requested_reviewers,omitempty" yaml:"requested_reviewers" json:"requested_reviewers,omitempty"`
+	BaseBranches       []string `toml:"base_branches,omitempty" yaml:"base_branches" json:"base_branches,omitempty"`
+	HeadBranches       []string `toml:"head_branches,omitempty" yaml:"head_branches" json:"head_branches,omitempty"`
 }
 
 type HostRepo struct {
@@ -412,6 +433,77 @@ func validateHostReview(path, field string, r HostReview) error {
 	}
 	if err := validateHostSubagents(path, field+".subagents", r.Subagents); err != nil {
 		return err
+	}
+	if err := validateHostPRFilter(path, field+".pr_filter", r.PRFilter); err != nil {
+		return err
+	}
+	return nil
+}
+
+func validateHostPRFilter(path, field string, f HostPRFilter) error {
+	switch f.DefaultAction {
+	case "", "include", "exclude":
+	default:
+		return invalidHost(path, field+".default_action", f.DefaultAction, "include|exclude")
+	}
+	for i, v := range f.CommentTriggerRegexes {
+		if strings.TrimSpace(v) == "" {
+			return invalidHost(path, fmt.Sprintf("%s.comment_trigger_regexes[%d]", field, i), "", "non-empty")
+		}
+		if _, err := regexp.Compile(v); err != nil {
+			return invalidHost(path, fmt.Sprintf("%s.comment_trigger_regexes[%d]", field, i), v, "valid regexp")
+		}
+	}
+	for i, r := range f.Rules {
+		prefix := fmt.Sprintf("%s.rules[%d]", field, i)
+		switch r.Action {
+		case "include", "exclude":
+		default:
+			return invalidHost(path, prefix+".action", r.Action, "include|exclude")
+		}
+		if countSlice(r.Authors)+countSlice(r.AuthorTypes)+countSlice(r.AuthorAssociations)+countSlice(r.TitleRegexes)+countSlice(r.Labels)+countSlice(r.RequestedReviewers)+countSlice(r.BaseBranches)+countSlice(r.HeadBranches) == 0 {
+			return invalidHost(path, prefix, "", "at least one matcher")
+		}
+		for j, v := range r.Authors {
+			if strings.TrimSpace(v) == "" {
+				return invalidHost(path, fmt.Sprintf("%s.authors[%d]", prefix, j), "", "non-empty")
+			}
+		}
+		for j, v := range r.AuthorTypes {
+			if strings.TrimSpace(v) == "" {
+				return invalidHost(path, fmt.Sprintf("%s.author_types[%d]", prefix, j), "", "non-empty")
+			}
+		}
+		for j, v := range r.AuthorAssociations {
+			if strings.TrimSpace(v) == "" {
+				return invalidHost(path, fmt.Sprintf("%s.author_associations[%d]", prefix, j), "", "non-empty")
+			}
+		}
+		for j, v := range r.TitleRegexes {
+			if _, err := regexp.Compile(v); err != nil {
+				return invalidHost(path, fmt.Sprintf("%s.title_regexes[%d]", prefix, j), v, "valid regexp")
+			}
+		}
+		for j, v := range r.Labels {
+			if strings.TrimSpace(v) == "" {
+				return invalidHost(path, fmt.Sprintf("%s.labels[%d]", prefix, j), "", "non-empty")
+			}
+		}
+		for j, v := range r.RequestedReviewers {
+			if strings.TrimSpace(v) == "" {
+				return invalidHost(path, fmt.Sprintf("%s.requested_reviewers[%d]", prefix, j), "", "non-empty")
+			}
+		}
+		for j, v := range r.BaseBranches {
+			if strings.TrimSpace(v) == "" {
+				return invalidHost(path, fmt.Sprintf("%s.base_branches[%d]", prefix, j), "", "non-empty")
+			}
+		}
+		for j, v := range r.HeadBranches {
+			if strings.TrimSpace(v) == "" {
+				return invalidHost(path, fmt.Sprintf("%s.head_branches[%d]", prefix, j), "", "non-empty")
+			}
+		}
 	}
 	return nil
 }

@@ -79,7 +79,21 @@ inputs:
 runs:
   using: composite
   steps:
+    - name: Detect release automation PR
+      id: skip_release_pr
+      shell: bash
+      env:
+        PR_TITLE: ${{ github.event.pull_request.title }}
+      run: |
+        set -euo pipefail
+        skip=false
+        case "${GITHUB_HEAD_REF:-}" in release-please--*) skip=true ;; esac
+        case "${PR_TITLE:-}" in chore\(*\):\ release\ *) skip=true ;; esac
+        if [ "$skip" = true ]; then echo "::notice::miucr review skipped: release automation PR"; fi
+        echo "skip=$skip" >> "$GITHUB_OUTPUT"
+
     - name: Install miucr
+      if: ${{ steps.skip_release_pr.outputs.skip != 'true' }}
       shell: bash
       env:
         MIUCR_VERSION: ${{ inputs.version }}
@@ -101,6 +115,7 @@ runs:
         command -v miucr
 
     - name: Review PR
+      if: ${{ steps.skip_release_pr.outputs.skip != 'true' }}
       # One LLM review run posts the inline review AND (when sarif-file is set)
       # writes the SARIF report via --sarif-out — no second pass. miucr writes the
       # file only on a successful review, so a failed review leaves no file and the
