@@ -214,10 +214,20 @@ func greenChip(text string) string {
 		text, strings.ReplaceAll(text, " ", "_"))
 }
 
+// greenResultBadge renders one all-green two-segment shields badge
+// ("label | message"). labelColor forces the label half green too, so the whole
+// pill reads as a single success badge instead of two separate chips.
+func greenResultBadge(label, msg string) string {
+	enc := func(s string) string { return strings.ReplaceAll(s, " ", "_") }
+	return fmt.Sprintf("<sub><sub>![%s](https://img.shields.io/badge/%s-%s-brightgreen?style=flat&labelColor=brightgreen)</sub></sub>",
+		label+" "+msg, enc(label), enc(msg))
+}
+
 // ledgerResultLine builds the **Result:** lead for ledger mode: open-severity
-// count chips when findings are open, else a green "Review passed" chip (plus a
-// "N resolved" chip when any) in the SAME <sub><sub> shields-chip style as the
-// severity chips, so the all-clear line is visually consistent and baseline-aligned.
+// count chips when findings are open, else one combined all-green "Review passed
+// | N resolved" badge (or just "Review passed" when nothing was resolved) in the
+// SAME <sub><sub> shields-chip style as the severity chips, so the all-clear line
+// is visually consistent and baseline-aligned.
 func ledgerResultLine(entries []LedgerEntry) string {
 	counts := map[string]int{}
 	open, resolved := 0, 0
@@ -231,11 +241,10 @@ func ledgerResultLine(entries []LedgerEntry) string {
 	}
 
 	if open == 0 {
-		chips := []string{greenChip("Review passed")}
 		if resolved > 0 {
-			chips = append(chips, greenChip(fmt.Sprintf("%d resolved", resolved)))
+			return greenResultBadge("Review passed", fmt.Sprintf("%d resolved", resolved))
 		}
-		return strings.Join(chips, " ")
+		return greenChip("Review passed")
 	}
 	// Just the per-severity chips. The open total is NOT appended — it already
 	// shows in the "⚠️ Open (N)" tracking-table heading below.

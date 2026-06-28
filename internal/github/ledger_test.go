@@ -293,20 +293,23 @@ func TestRenderSummaryLedgerNoMarkerWithoutDiff(t *testing.T) {
 }
 
 func TestLedgerResultLineAllClearShowsStats(t *testing.T) {
-	// All findings resolved (0 open): the all-clear Result line shows a Review passed
-	// chip plus a "N resolved" chip, both in the <sub><sub> shields-chip style.
+	// All findings resolved (0 open): the all-clear Result line is ONE combined
+	// all-green badge — "Review passed | N resolved" — not two separate chips.
 	ledger := []LedgerEntry{
 		{FP: "aaaaaaaaaaaaaaaa", Path: "a.go", Status: statusResolved, Sev: "high", FirstSev: "high", OpenSHA: "aaaaaa1", ResSHA: "bbbbbb2"},
 	}
 	line := ledgerResultLine(ledger)
-	for _, want := range []string{"<sub><sub>![Review passed]", "Review_passed-brightgreen", "<sub><sub>![1 resolved]", "1_resolved-brightgreen"} {
-		if !strings.Contains(line, want) {
-			t.Fatalf("all-clear Result line missing %q, got %q", want, line)
-		}
+	want := "<sub><sub>![Review passed 1 resolved](https://img.shields.io/badge/Review_passed-1_resolved-brightgreen?style=flat&labelColor=brightgreen)</sub></sub>"
+	if line != want {
+		t.Fatalf("all-clear Result line should be one combined badge\n got: %q\nwant: %q", line, want)
 	}
-	// No code-span pills or trailing emoji — pure chips, like the open-findings line.
+	// Exactly one badge image, not two separate chips.
+	if n := strings.Count(line, "img.shields.io"); n != 1 {
+		t.Fatalf("all-clear line should render exactly one badge, got %d in %q", n, line)
+	}
+	// No code-span pills or trailing emoji — pure chip, like the open-findings line.
 	if strings.Contains(line, "`0 open`") || strings.Contains(line, "🎉") {
-		t.Fatalf("all-clear line should be pure chips (no code-span/emoji), got %q", line)
+		t.Fatalf("all-clear line should be a pure chip (no code-span/emoji), got %q", line)
 	}
 }
 
