@@ -84,8 +84,10 @@ func TestCheckFailClosedOnReadError(t *testing.T) {
 	f := &fakeUsage{readErr: errors.New("db down")}
 	g := newGate(t, f, config.QuotaConfig{Limit: 1000, Window: "5h"}, nil)
 	err := g.Check(stdctx.Background())
-	if err == nil || codeOf(err) != "quota.exceeded" {
-		t.Fatalf("unreadable counter must fail-closed, got %v", err)
+	// Fail-closed (blocks) but as a RETRYABLE store.unavailable, not quota.exceeded,
+	// so a transient DB blip is retried by serve, not terminally skipped.
+	if err == nil || codeOf(err) != "store.unavailable" {
+		t.Fatalf("unreadable counter must fail-closed with store.unavailable, got %v", err)
 	}
 }
 

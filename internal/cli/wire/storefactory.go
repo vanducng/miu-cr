@@ -178,8 +178,9 @@ func quotaProviderName(name, defaultProvider string) string {
 // when the resolved provider has no quota. The quota config comes from override
 // (serve threads the host provider's quota, whose definition is not in the user
 // config.toml) or, when nil, the loaded user config's provider profile. name is
-// the counter key (the provider instance). A store-open failure is fail-closed:
-// it surfaces a typed quota.exceeded error rather than silently disabling the cap.
+// the counter key (the provider instance). A store-open failure is fail-closed
+// but RETRYABLE: it surfaces a typed store.unavailable (not quota.exceeded) so the
+// serve path retries the job instead of marking it terminally skipped.
 func buildQuotaGate(ctx stdctx.Context, cfg config.Config, name string, override *config.QuotaConfig, warn func(string)) (engine.QuotaGate, func(), error) {
 	name = quotaProviderName(name, cfg.DefaultProvider)
 	q := override
@@ -194,11 +195,12 @@ func buildQuotaGate(ctx stdctx.Context, cfg config.Config, name string, override
 	us, closeStore, err := openUsageStore(ctx, cfg)
 	if err != nil {
 		return nil, nil, &cli.CLIError{
-			Code:    "quota.exceeded",
-			Message: config.RedactString(fmt.Sprintf("provider %q has a quota but its counter store could not be opened (fail-closed): %v", name, err)),
-			Hint:    "fix the store backend or remove the provider quota",
-			Exit:    2,
-			Cause:   err,
+			Code:      "store.unavailable",
+			Message:   config.RedactString(fmt.Sprintf("provider %q has a quota but its counter store could not be opened (fail-closed): %v", name, err)),
+			Hint:      "fix the store backend or remove the provider quota",
+			Exit:      1,
+			SafeRetry: true,
+			Cause:     err,
 		}
 	}
 	return quota.New(us, name, q, nil, warn), closeStore, nil

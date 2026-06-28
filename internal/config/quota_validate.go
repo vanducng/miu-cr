@@ -2,6 +2,7 @@ package config
 
 import (
 	"fmt"
+	"sort"
 	"strconv"
 	"time"
 
@@ -42,8 +43,13 @@ func quotaProblem(q *QuotaConfig) (field, value, want string) {
 // ValidateProviderQuotas rejects an invalid [providers.X].quota in the user
 // config with a typed config.invalid CLIError (Exit 2). A nil quota = no quota.
 func ValidateProviderQuotas(providers map[string]Provider) error {
-	for name, p := range providers {
-		if field, value, want := quotaProblem(p.Quota); field != "" {
+	names := make([]string, 0, len(providers))
+	for name := range providers {
+		names = append(names, name)
+	}
+	sort.Strings(names) // deterministic first-error across multiple bad quotas
+	for _, name := range names {
+		if field, value, want := quotaProblem(providers[name].Quota); field != "" {
 			return &clierr.CLIError{
 				Code:    "config.invalid",
 				Message: fmt.Sprintf("config providers.%s.%s %q is invalid: want %s", name, field, RedactString(value), want),

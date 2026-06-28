@@ -596,10 +596,7 @@ func buildServeHostRepos(ctx stdctx.Context, cfg config.HostConfig, path string)
 	if err != nil {
 		return nil, 0, err
 	}
-	providerName := cfg.DefaultProvider
-	if providerName == "" {
-		providerName = config.Defaults().DefaultProvider
-	}
+	providerName := hostProviderName(cfg)
 	baseReview := mergeHostReview(config.HostReview{
 		Gate:         "high",
 		FilterMode:   "diff_context",
@@ -748,12 +745,20 @@ func hostProviderSecret(ctx stdctx.Context, provider config.HostProvider) (strin
 	return hostSecret(ctx, provider.AuthEnv, "", provider.AuthCommand)
 }
 
-func hostProvider(cfg config.HostConfig) (config.HostProvider, error) {
-	defaults := config.Defaults()
+// hostProviderName resolves the configured default provider instance name (the
+// quota counter key), falling back to the built-in default. Single source so the
+// serve dispatch and hostProvider agree on the name.
+func hostProviderName(cfg config.HostConfig) string {
 	name := strings.TrimSpace(cfg.DefaultProvider)
 	if name == "" {
-		name = defaults.DefaultProvider
+		name = config.Defaults().DefaultProvider
 	}
+	return name
+}
+
+func hostProvider(cfg config.HostConfig) (config.HostProvider, error) {
+	defaults := config.Defaults()
+	name := hostProviderName(cfg)
 	if p, ok := cfg.Providers[name]; ok {
 		return p, nil
 	}

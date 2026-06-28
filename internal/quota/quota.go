@@ -46,27 +46,31 @@ func New(s store.ProviderUsageStore, provider string, cfg *config.QuotaConfig, n
 
 // Check blocks (fail-closed) when the accumulated usage for the current period is
 // at/over the limit, warning once at >=80%. A store read error blocks too (a
-// quota that can't be verified must not let usage through).
+// quota that can't be verified must not let usage through), but surfaces as a
+// retryable store.unavailable — NOT quota.exceeded — so the serve path retries the
+// job after a transient DB blip instead of marking it terminally skipped.
 func (g *Gate) Check(ctx stdctx.Context) error {
 	period := PeriodKey(g.cfg.Window, g.now())
 	c, err := g.store.ProviderUsage(ctx, g.provider, period)
 	if err != nil {
 		return &clierr.CLIError{
-			Code:    "quota.exceeded",
-			Message: fmt.Sprintf("provider %q quota check failed (fail-closed): %v", g.provider, err),
-			Hint:    "retry, or fix the store backing the quota counter",
-			Exit:    2,
-			Cause:   err,
+			Code:      "store.unavailable",
+			Message:   config.RedactString(fmt.Sprintf("provider %q quota check failed (fail-closed): %v", g.provider, err)),
+			Hint:      "retry once the quota counter store is reachable",
+			Exit:      1,
+			SafeRetry: true,
+			Cause:     err,
 		}
 	}
 	used := g.used(c)
 	if used >= g.cfg.Limit {
 		return g.exceeded(period, used)
 	}
-	if g.warn != nil && !g.warned && used*100 >= g.cfg.Limit*int64(warnThresholdPct) {
+	// float64 avoids the int64 overflow of used*100 / Limit*pct at huge counters.
+	if g.warn != nil && !g.warned && float64(used) >= float64(g.cfg.Limit)*(float64(warnThresholdPct)/100) {
 		g.warned = true
 		g.warn(fmt.Sprintf("provider %q quota at %d%% (%d/%d %s used, period %s)",
-			g.provider, used*100/g.cfg.Limit, used, g.cfg.Limit, g.cfg.QuotaDimension(), period))
+			g.provider, int(float64(used)*100/float64(g.cfg.Limit)), used, g.cfg.Limit, g.cfg.QuotaDimension(), period))
 	}
 	return nil
 }
