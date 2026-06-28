@@ -102,25 +102,41 @@ type HostRetention struct {
 }
 
 type HostReview struct {
-	Gate                 string          `yaml:"gate" json:"gate,omitempty"`
-	FilterMode           string          `yaml:"filter_mode" json:"filter_mode,omitempty"`
-	MinSeverity          string          `yaml:"min_severity" json:"min_severity,omitempty"`
-	Format               string          `yaml:"format" json:"format,omitempty"`
-	Timeout              string          `yaml:"timeout" json:"timeout,omitempty"`
-	Expand               *int            `yaml:"expand" json:"expand,omitempty"`
-	TokenBudget          *int            `yaml:"token_budget" json:"token_budget,omitempty"`
-	ContextHops          *int            `yaml:"context_hops" json:"context_hops,omitempty"`
-	Mode                 string          `yaml:"mode" json:"mode,omitempty"`
-	DeepContext          *bool           `yaml:"deep_context" json:"deep_context,omitempty"`
-	Conversation         *bool           `yaml:"conversation" json:"conversation,omitempty"`
-	Post                 *bool           `yaml:"post" json:"post,omitempty"`
-	Force                *bool           `yaml:"force" json:"force,omitempty"`
-	Suggest              *bool           `yaml:"suggest" json:"suggest,omitempty"`
-	PatchRepair          *bool           `yaml:"patch_repair" json:"patch_repair,omitempty"`
-	ThreadResolutionSync *bool           `yaml:"thread_resolution_sync" json:"thread_resolution_sync,omitempty"`
-	Approval             ApprovalPolicy  `yaml:"approval" json:"approval"`
-	Subagents            ReviewSubagents `yaml:"subagents" json:"subagents"`
-	PRFilter             HostPRFilter    `yaml:"pr_filter" json:"pr_filter,omitempty"`
+	Gate                 string                     `yaml:"gate" json:"gate,omitempty"`
+	FilterMode           string                     `yaml:"filter_mode" json:"filter_mode,omitempty"`
+	MinSeverity          string                     `yaml:"min_severity" json:"min_severity,omitempty"`
+	Format               string                     `yaml:"format" json:"format,omitempty"`
+	Timeout              string                     `yaml:"timeout" json:"timeout,omitempty"`
+	Expand               *int                       `yaml:"expand" json:"expand,omitempty"`
+	TokenBudget          *int                       `yaml:"token_budget" json:"token_budget,omitempty"`
+	ContextHops          *int                       `yaml:"context_hops" json:"context_hops,omitempty"`
+	Mode                 string                     `yaml:"mode" json:"mode,omitempty"`
+	DeepContext          *bool                      `yaml:"deep_context" json:"deep_context,omitempty"`
+	Conversation         *bool                      `yaml:"conversation" json:"conversation,omitempty"`
+	Post                 *bool                      `yaml:"post" json:"post,omitempty"`
+	Force                *bool                      `yaml:"force" json:"force,omitempty"`
+	Suggest              *bool                      `yaml:"suggest" json:"suggest,omitempty"`
+	PatchRepair          *bool                      `yaml:"patch_repair" json:"patch_repair,omitempty"`
+	ThreadResolutionSync ThreadResolutionSyncConfig `yaml:"thread_resolution_sync" json:"thread_resolution_sync,omitempty"`
+	Approval             ApprovalPolicy             `yaml:"approval" json:"approval"`
+	Subagents            ReviewSubagents            `yaml:"subagents" json:"subagents"`
+	PRFilter             HostPRFilter               `yaml:"pr_filter" json:"pr_filter,omitempty"`
+}
+
+type ThreadResolutionSyncConfig struct {
+	Mode     string `yaml:"mode" json:"mode,omitempty"`
+	Interval string `yaml:"interval" json:"interval,omitempty"`
+}
+
+func MergeThreadResolutionSyncConfig(base, over ThreadResolutionSyncConfig) ThreadResolutionSyncConfig {
+	out := base
+	if over.Mode != "" {
+		out.Mode = over.Mode
+	}
+	if over.Interval != "" {
+		out.Interval = over.Interval
+	}
+	return out
 }
 
 type HostPRFilter struct {

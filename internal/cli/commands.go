@@ -604,7 +604,7 @@ func buildServeHostRepos(ctx stdctx.Context, cfg config.HostConfig, path string)
 		Post:                 boolSetting(true),
 		Suggest:              boolSetting(false),
 		PatchRepair:          boolSetting(false),
-		ThreadResolutionSync: boolSetting(false),
+		ThreadResolutionSync: config.ThreadResolutionSyncConfig{Mode: "off", Interval: "5m"},
 		Approval:             config.ApprovalPolicy{Mode: "off"},
 		Force:                boolSetting(false),
 		Conversation:         boolSetting(false),
@@ -632,6 +632,10 @@ func buildServeHostRepos(ctx stdctx.Context, cfg config.HostConfig, path string)
 		if err != nil {
 			return nil, 0, err
 		}
+		threadResolutionSync, err := hostThreadResolutionSync(review.ThreadResolutionSync)
+		if err != nil {
+			return nil, 0, err
+		}
 		operatorPrompt, promptHash, rulesHash, err := hostOperatorPrompt(baseDir, cfg.Agent, repo.Agent, repo.Rules)
 		if err != nil {
 			return nil, 0, err
@@ -652,7 +656,7 @@ func buildServeHostRepos(ctx stdctx.Context, cfg config.HostConfig, path string)
 			PromptHash:           promptHash,
 			RulesHash:            rulesHash,
 			ReviewTimeout:        durationOrDefault(review.Timeout, reviewTO),
-			ThreadResolutionSync: boolValue(review.ThreadResolutionSync),
+			ThreadResolutionSync: threadResolutionSync,
 			Review:               opts,
 			PRFilter:             review.PRFilter,
 		})
@@ -1134,13 +1138,33 @@ func mergeHostReview(base, over config.HostReview) config.HostReview {
 	if over.PatchRepair != nil {
 		out.PatchRepair = over.PatchRepair
 	}
-	if over.ThreadResolutionSync != nil {
-		out.ThreadResolutionSync = over.ThreadResolutionSync
-	}
+	out.ThreadResolutionSync = config.MergeThreadResolutionSyncConfig(base.ThreadResolutionSync, over.ThreadResolutionSync)
 	out.Approval = config.MergeApprovalPolicy(base.Approval, over.Approval)
 	out.Subagents = config.MergeReviewSubagents(base.Subagents, over.Subagents)
 	out.PRFilter = config.MergePRFilter(base.PRFilter, over.PRFilter)
 	return out
+}
+
+func hostThreadResolutionSync(raw config.ThreadResolutionSyncConfig) (serve.HostThreadResolutionSync, error) {
+	mode := strings.ToLower(strings.TrimSpace(raw.Mode))
+	if mode == "" {
+		mode = "off"
+	}
+	switch mode {
+	case "off":
+	case "poll":
+	default:
+		return serve.HostThreadResolutionSync{}, &CLIError{Code: "config.invalid", Message: fmt.Sprintf("unknown thread_resolution_sync mode %q", raw.Mode), Hint: "use mode: off or mode: poll", Exit: 2}
+	}
+	interval := 5 * time.Minute
+	if strings.TrimSpace(raw.Interval) != "" {
+		d, err := time.ParseDuration(raw.Interval)
+		if err != nil || d <= 0 {
+			return serve.HostThreadResolutionSync{}, &CLIError{Code: "config.invalid", Message: fmt.Sprintf("invalid thread_resolution_sync interval %q", raw.Interval), Hint: "use a positive Go duration like 5m", Exit: 2}
+		}
+		interval = d
+	}
+	return serve.HostThreadResolutionSync{Mode: mode, Interval: interval}, nil
 }
 
 func boolValue(v *bool) bool { return v != nil && *v }

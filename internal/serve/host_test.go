@@ -147,16 +147,17 @@ func TestHostRunnerSkipsDraftPRsByDefault(t *testing.T) {
 func TestHostRunnerThreadResolutionSyncThrottleIsPerPR(t *testing.T) {
 	r := &HostRunner{threadSyncLast: map[string]time.Time{}}
 	now := time.Date(2026, 6, 28, 10, 0, 0, 0, time.UTC)
-	if !r.shouldSyncThreadResolution("octo/hello", 1, now) {
+	interval := 2 * time.Minute
+	if !r.shouldSyncThreadResolution("octo/hello", 1, interval, now) {
 		t.Fatal("first sync should run")
 	}
-	if r.shouldSyncThreadResolution("octo/hello", 1, now.Add(30*time.Second)) {
+	if r.shouldSyncThreadResolution("octo/hello", 1, interval, now.Add(30*time.Second)) {
 		t.Fatal("same PR should be throttled inside interval")
 	}
-	if !r.shouldSyncThreadResolution("octo/hello", 2, now.Add(30*time.Second)) {
+	if !r.shouldSyncThreadResolution("octo/hello", 2, interval, now.Add(30*time.Second)) {
 		t.Fatal("different PR should not share throttle state")
 	}
-	if !r.shouldSyncThreadResolution("octo/hello", 1, now.Add(threadResolutionSyncMinInterval)) {
+	if !r.shouldSyncThreadResolution("octo/hello", 1, interval, now.Add(interval)) {
 		t.Fatal("same PR should run again after interval")
 	}
 }

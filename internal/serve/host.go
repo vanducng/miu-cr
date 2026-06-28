@@ -26,7 +26,7 @@ const defaultHostJobLeaseDuration = 2 * time.Minute
 const hostJobHeartbeatInterval = 30 * time.Second
 const hostFailedRetryBase = 5 * time.Minute
 const hostFailedRetryCap = time.Hour
-const threadResolutionSyncMinInterval = 5 * time.Minute
+const defaultThreadResolutionSyncInterval = 5 * time.Minute
 
 var runHostDrainGrace = 10 * time.Second
 var hostPRFilterRegexCache sync.Map
@@ -65,6 +65,15 @@ type HostReload struct {
 	JanitorInterval time.Duration
 }
 
+type HostThreadResolutionSync struct {
+	Mode     string
+	Interval time.Duration
+}
+
+func (c HostThreadResolutionSync) Enabled() bool {
+	return c.Mode != "" && c.Mode != "off"
+}
+
 type HostRepoConfig struct {
 	Name                 string
 	Owner                string
@@ -80,7 +89,7 @@ type HostRepoConfig struct {
 	PromptHash           string
 	RulesHash            string
 	ReviewTimeout        time.Duration
-	ThreadResolutionSync bool
+	ThreadResolutionSync HostThreadResolutionSync
 	Review               JobReviewOptions
 	PRFilter             config.HostPRFilter
 }
@@ -487,7 +496,7 @@ func (h *HostRunner) pollRepo(ctx stdctx.Context, snap hostRunnerSnapshot, repo 
 			h.log.Warn("host: failed to enqueue PR review", "repo", repo.Slug, "pr", number, "error", config.RedactString(err.Error()))
 			continue
 		}
-		if repo.ThreadResolutionSync && h.shouldSyncThreadResolution(repo.Slug, number, now) {
+		if repo.ThreadResolutionSync.Enabled() && h.shouldSyncThreadResolution(repo.Slug, number, repo.ThreadResolutionSync.Interval, now) {
 			if threadSyncClient == nil {
 				threadSyncClient = mgithub.NewClient(token)
 			}
@@ -503,11 +512,14 @@ func (h *HostRunner) pollRepo(ctx stdctx.Context, snap hostRunnerSnapshot, repo 
 	return pollFloor, nil
 }
 
-func (h *HostRunner) shouldSyncThreadResolution(slug string, number int64, now time.Time) bool {
+func (h *HostRunner) shouldSyncThreadResolution(slug string, number int64, interval time.Duration, now time.Time) bool {
+	if interval <= 0 {
+		interval = defaultThreadResolutionSyncInterval
+	}
 	key := fmt.Sprintf("%s#%d", slug, number)
 	h.mu.Lock()
 	defer h.mu.Unlock()
-	if last, ok := h.threadSyncLast[key]; ok && now.Sub(last) < threadResolutionSyncMinInterval {
+	if last, ok := h.threadSyncLast[key]; ok && now.Sub(last) < interval {
 		return false
 	}
 	h.threadSyncLast[key] = now

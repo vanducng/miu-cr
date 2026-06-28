@@ -269,7 +269,9 @@ host:
     force: false
     suggest: true
     patch_repair: false
-    thread_resolution_sync: false
+    thread_resolution_sync:
+      mode: off
+      interval: 5m
     approval:
       mode: off
 
@@ -324,13 +326,19 @@ on_findings` leaves clean approvals silent and adds a short approval body only
 when findings remain. The old clean-approval key is removed; use
 `review.approval` in host and repo configs.
 
-`thread_resolution_sync` is off by default. When enabled for host polling, miucr
-does a metadata-only sync against GitHub review-thread state: if a miucr inline
-conversation is manually resolved, the existing summary row moves to Resolved
-with `conversation resolved`; if that same conversation is later unresolved, only
-that conversation-resolved row reopens. This never starts an LLM review and never
-feeds approval decisions, so use it only for repos where you want the summary to
-mirror GitHub conversation status between commits.
+`thread_resolution_sync.mode` is `off` by default. Set `mode: poll` for repos
+where the host should periodically mirror GitHub review-thread state into the
+summary table. If a miucr inline conversation is manually resolved, the existing
+summary row moves to Resolved with `conversation resolved`; if that same
+conversation is later unresolved, only that conversation-resolved row reopens.
+`interval` controls the per-PR polling cadence and defaults to `5m`. This never
+starts an LLM review and never feeds approval decisions.
+
+GitHub also exposes
+[`pull_request_review_thread`](https://docs.github.com/en/webhooks/webhook-events-and-payloads#pull_request_review_thread)
+webhooks for resolved and unresolved conversations. The reserved future mode for
+event-driven sync is `mode: webhook`, but current host mode supports only `off`
+and `poll`.
 
 `review.pr_filter` also layers top-level -> `host.review` -> `repos[].review`.
 Draft PRs are skipped unless `include_drafts: true`. `default_action` defaults

@@ -95,7 +95,9 @@ host:
     force: false
     suggest: true
     patch_repair: false
-    thread_resolution_sync: false
+    thread_resolution_sync:
+      mode: off
+      interval: 5m
     approval:
       mode: off
 

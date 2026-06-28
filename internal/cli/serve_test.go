@@ -464,10 +464,8 @@ func TestBuildServeHostReposAllowsZeroReviewOverrides(t *testing.T) {
 }
 
 func TestBuildServeHostReposThreadResolutionSyncLayering(t *testing.T) {
-	on := true
-	off := false
 	cfg := config.HostConfig{
-		Host: config.HostRuntime{Review: config.HostReview{ThreadResolutionSync: &off}},
+		Host: config.HostRuntime{Review: config.HostReview{ThreadResolutionSync: config.ThreadResolutionSyncConfig{Mode: "off", Interval: "10m"}}},
 		Repos: []config.HostRepo{{
 			Name:          "service-api",
 			Slug:          "example-org/service-api",
@@ -475,15 +473,36 @@ func TestBuildServeHostReposThreadResolutionSyncLayering(t *testing.T) {
 			Repo:          "service-api",
 			GitURL:        "https://github.com/example-org/service-api.git",
 			GithubAccount: "pat",
-			Review:        config.HostReview{ThreadResolutionSync: &on},
+			Review:        config.HostReview{ThreadResolutionSync: config.ThreadResolutionSyncConfig{Mode: "poll", Interval: "2m"}},
 		}},
 	}
 	repos, _, err := buildServeHostRepos(stdctx.Background(), cfg, filepath.Join(t.TempDir(), "host.yaml"))
 	if err != nil {
 		t.Fatalf("buildServeHostRepos: %v", err)
 	}
-	if !repos[0].ThreadResolutionSync {
+	if repos[0].ThreadResolutionSync.Mode != "poll" || repos[0].ThreadResolutionSync.Interval != 2*time.Minute {
 		t.Fatalf("repo override did not enable thread resolution sync: %+v", repos[0])
+	}
+}
+
+func TestBuildServeHostReposRejectsInvalidThreadResolutionSync(t *testing.T) {
+	cfg := config.HostConfig{
+		Host: config.HostRuntime{Review: config.HostReview{ThreadResolutionSync: config.ThreadResolutionSyncConfig{Mode: "webhook"}}},
+		Repos: []config.HostRepo{{
+			Name:          "service-api",
+			Slug:          "example-org/service-api",
+			Owner:         "example-org",
+			Repo:          "service-api",
+			GitURL:        "https://github.com/example-org/service-api.git",
+			GithubAccount: "pat",
+		}},
+	}
+	if _, _, err := buildServeHostRepos(stdctx.Background(), cfg, filepath.Join(t.TempDir(), "host.yaml")); err == nil {
+		t.Fatal("expected invalid thread resolution sync mode to fail")
+	}
+	cfg.Host.Review.ThreadResolutionSync = config.ThreadResolutionSyncConfig{Mode: "poll", Interval: "soon"}
+	if _, _, err := buildServeHostRepos(stdctx.Background(), cfg, filepath.Join(t.TempDir(), "host.yaml")); err == nil {
+		t.Fatal("expected invalid thread resolution sync interval to fail")
 	}
 }
 
