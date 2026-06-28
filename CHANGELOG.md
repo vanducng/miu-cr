@@ -55,6 +55,13 @@ comment with a new marker); subsequent re-runs dedupe normally. On a
 first M5 review **manually** (or off-hours) to absorb the one-time re-post before
 the next scheduled run.
 
+## [0.62.0](https://github.com/vanducng/miu-cr/compare/v0.61.4...v0.62.0) (2026-06-28)
+
+
+### Features
+
+* **quota:** per-provider usage quota config ([#186](https://github.com/vanducng/miu-cr/issues/186)) ([1261997](https://github.com/vanducng/miu-cr/commit/1261997320ef1ebbe2ecc80856cd6ca3f7c7881d))
+
 ## [0.61.4](https://github.com/vanducng/miu-cr/compare/v0.61.3...v0.61.4) (2026-06-28)
 
 
