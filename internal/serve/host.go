@@ -114,7 +114,6 @@ type HostRunner struct {
 	now             func() time.Time
 	threadSyncLast  map[string]time.Time
 	threadSyncSem   chan struct{}
-	threadSyncWG    sync.WaitGroup
 	threadSyncStop  bool
 }
 
@@ -567,7 +566,6 @@ func (h *HostRunner) enqueueThreadResolutionSync(ctx stdctx.Context, client mgit
 	}
 	select {
 	case h.threadSyncSem <- struct{}{}:
-		h.threadSyncWG.Add(1)
 	default:
 		delete(h.threadSyncLast, key)
 		h.mu.Unlock()
@@ -576,7 +574,6 @@ func (h *HostRunner) enqueueThreadResolutionSync(ctx stdctx.Context, client mgit
 	}
 	h.mu.Unlock()
 	go func() {
-		defer h.threadSyncWG.Done()
 		defer func() { <-h.threadSyncSem }()
 		h.syncThreadResolution(ctx, client, repo, pr, now)
 	}()
@@ -1004,7 +1001,7 @@ func RunHost(ctx stdctx.Context, pool *Pool, runner *HostRunner) error {
 		case <-done:
 			return drain()
 		case <-time.After(runHostDrainGrace):
-			runner.waitThreadResolutionSync(0)
+			runner.waitThreadResolutionSync(runHostDrainGrace)
 			return ErrHostRunnerStopTimeout
 		}
 	}
@@ -1014,20 +1011,28 @@ func (h *HostRunner) waitThreadResolutionSync(timeout time.Duration) bool {
 	h.mu.Lock()
 	h.threadSyncStop = true
 	h.mu.Unlock()
-	done := make(chan struct{})
-	go func() {
-		h.threadSyncWG.Wait()
-		close(done)
-	}()
-	if timeout <= 0 {
-		<-done
+	if h.threadSyncSem == nil || len(h.threadSyncSem) == 0 {
 		return true
 	}
-	select {
-	case <-done:
+	if timeout <= 0 {
+		for len(h.threadSyncSem) > 0 {
+			time.Sleep(10 * time.Millisecond)
+		}
 		return true
-	case <-time.After(timeout):
-		return false
+	}
+	deadline := time.NewTimer(timeout)
+	defer deadline.Stop()
+	tick := time.NewTicker(10 * time.Millisecond)
+	defer tick.Stop()
+	for {
+		if len(h.threadSyncSem) == 0 {
+			return true
+		}
+		select {
+		case <-deadline.C:
+			return len(h.threadSyncSem) == 0
+		case <-tick.C:
+		}
 	}
 }
 
