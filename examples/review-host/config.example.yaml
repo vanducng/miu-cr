@@ -60,6 +60,13 @@ review:
       - name: web
         include: ["**/*.ts", "**/*.tsx", "**/*.js", "**/*.jsx"]
         system_prompt: "Focus on user-facing behavior, state flow, accessibility, and API contracts."
+  pr_filter:
+    default_action: include
+    include_drafts: false
+    rules:
+      - action: exclude
+        author_types: ["Bot"]
+        title_regexes: ['^chore\(deps\):']
 
 agent:
   system_prompt_file: prompts/default-reviewer.md
@@ -102,6 +109,20 @@ repos:
     review:
       min_severity: medium
       context_hops: 1
+
+  - <<: *repo_defaults
+    name: cnb-ds-dbt-order-form
+    slug: careernowbrands/cnb-ds-dbt-order-form
+    git_url: https://github.com/careernowbrands/cnb-ds-dbt-order-form.git
+    github_account: personal-pat
+    review:
+      pr_filter:
+        default_action: exclude
+        rules:
+          - action: include
+            authors: ["vanducng"]
+          - action: include
+            requested_reviewers: ["vanducng"]
 
   - <<: *repo_defaults
     name: data-platform

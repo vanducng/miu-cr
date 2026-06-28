@@ -462,6 +462,44 @@ func TestBuildServeHostReposAllowsZeroReviewOverrides(t *testing.T) {
 	}
 }
 
+func TestBuildServeHostReposMergesPRFilterRules(t *testing.T) {
+	cfg := config.HostConfig{
+		Review: config.HostReview{PRFilter: config.HostPRFilter{
+			DefaultAction: "include",
+			Rules: []config.HostPRFilterRule{{
+				Action:      "exclude",
+				AuthorTypes: []string{"Bot"},
+			}},
+		}},
+		Repos: []config.HostRepo{{
+			Name:          "service-api",
+			Slug:          "example-org/service-api",
+			Owner:         "example-org",
+			Repo:          "service-api",
+			GitURL:        "https://github.com/example-org/service-api.git",
+			GithubAccount: "pat",
+			Review: config.HostReview{PRFilter: config.HostPRFilter{
+				DefaultAction: "exclude",
+				Rules: []config.HostPRFilterRule{{
+					Action:       "include",
+					TitleRegexes: []string{`^chore\(deps\):`},
+				}},
+			}},
+		}},
+	}
+	repos, _, err := buildServeHostRepos(stdctx.Background(), cfg, filepath.Join(t.TempDir(), "host.yaml"))
+	if err != nil {
+		t.Fatalf("buildServeHostRepos: %v", err)
+	}
+	rules := repos[0].PRFilter.Rules
+	if len(rules) != 2 || rules[0].Action != "exclude" || rules[1].Action != "include" {
+		t.Fatalf("merged filter rules = %+v", rules)
+	}
+	if repos[0].PRFilter.DefaultAction != "exclude" {
+		t.Fatalf("merged default action = %q, want exclude", repos[0].PRFilter.DefaultAction)
+	}
+}
+
 func TestHostProviderDefaultFallbackDoesNotCopyAuthToken(t *testing.T) {
 	provider, err := hostProvider(config.HostConfig{DefaultProvider: string(config.KindAnthropic)})
 	if err != nil {

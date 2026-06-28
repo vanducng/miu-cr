@@ -26,9 +26,11 @@ jobs:
   miucr-review:
     name: miucr review
     runs-on: ubuntu-latest
-    # Skip dependabot PRs and any PR with [skip review] in the title.
+    # Skip dependency/release automation and explicit opt-outs.
     if: |
       github.actor != 'dependabot[bot]' &&
+      !startsWith(github.head_ref, 'release-please--') &&
+      !startsWith(github.event.pull_request.title, 'chore(main): release ') &&
       !contains(github.event.pull_request.title, '[skip review]')
 
     steps:

@@ -12,6 +12,7 @@ import (
 
 	"github.com/google/go-github/v84/github"
 
+	"github.com/vanducng/miu-cr/internal/config"
 	"github.com/vanducng/miu-cr/internal/store"
 )
 
@@ -94,6 +95,161 @@ func TestHostRunnerPollsAllPRPages(t *testing.T) {
 	}
 	if disp.count() != 2 {
 		t.Fatalf("submitted jobs = %d, want 2", disp.count())
+	}
+}
+
+func TestHostRunnerSkipsIgnoredPRsBeforeQueue(t *testing.T) {
+	cfg := hostRunnerConfig(t)
+	cfg.Repos[0].PRFilter = config.HostPRFilter{Rules: []config.HostPRFilterRule{{
+		Action:       "exclude",
+		TitleRegexes: []string{`^chore\(deps\):`},
+	}}}
+	cfg.NewNotifGetter = func(string) notifGetter {
+		return &fakeNotifGetter{prs: map[string][]*github.PullRequest{"octo/hello": {
+			prWithMeta(1, "sha-A", "chore(deps): update redis", "renovate[bot]", "Bot", nil, nil, false),
+			prWithMeta(2, "sha-B", "fix: keep service alive", "vanducng", "User", nil, nil, false),
+		}}}
+	}
+	disp := cfg.Dispatcher.(*pollDispatcher)
+	r, err := NewHostRunner(cfg)
+	if err != nil {
+		t.Fatalf("NewHostRunner: %v", err)
+	}
+	if err := r.Tick(stdctx.Background()); err != nil {
+		t.Fatalf("Tick: %v", err)
+	}
+	if disp.count() != 1 {
+		t.Fatalf("submitted jobs = %d, want 1", disp.count())
+	}
+}
+
+func TestHostRunnerSkipsDraftPRsByDefault(t *testing.T) {
+	cfg := hostRunnerConfig(t)
+	cfg.NewNotifGetter = func(string) notifGetter {
+		return &fakeNotifGetter{prs: map[string][]*github.PullRequest{"octo/hello": {
+			prWithMeta(1, "sha-A", "fix: still drafting", "vanducng", "User", nil, nil, true),
+			prWithMeta(2, "sha-B", "fix: ready", "vanducng", "User", nil, nil, false),
+		}}}
+	}
+	disp := cfg.Dispatcher.(*pollDispatcher)
+	r, err := NewHostRunner(cfg)
+	if err != nil {
+		t.Fatalf("NewHostRunner: %v", err)
+	}
+	if err := r.Tick(stdctx.Background()); err != nil {
+		t.Fatalf("Tick: %v", err)
+	}
+	if disp.count() != 1 {
+		t.Fatalf("submitted jobs = %d, want 1", disp.count())
+	}
+}
+
+func TestHostPRFilterLastMatchWins(t *testing.T) {
+	filter := config.HostPRFilter{Rules: []config.HostPRFilterRule{
+		{Action: "exclude", AuthorTypes: []string{"Bot"}},
+		{Action: "include", Authors: []string{"renovate[bot]"}, Labels: []string{"review"}, BaseBranches: []string{"main"}},
+	}}
+	if !hostPRFilterAllows(filter, prWithMeta(1, "sha-A", "chore(deps): update redis", "renovate[bot]", "Bot", nil, []string{"review"}, false)) {
+		t.Fatal("repo include rule should override prior bot exclude")
+	}
+	if hostPRFilterAllows(filter, prWithMeta(2, "sha-B", "chore(deps): update redis", "renovate[bot]", "Bot", nil, nil, false)) {
+		t.Fatal("bot exclude should hold when later include does not match")
+	}
+}
+
+func TestHostPRFilterCanIncludeByAuthorOrRequestedReviewer(t *testing.T) {
+	filter := config.HostPRFilter{
+		DefaultAction: "exclude",
+		Rules: []config.HostPRFilterRule{
+			{Action: "include", Authors: []string{"vanducng"}},
+			{Action: "include", RequestedReviewers: []string{"vanducng"}},
+		},
+	}
+	if !hostPRFilterAllows(filter, prWithMeta(1, "sha-A", "fix: mine", "vanducng", "User", nil, nil, false)) {
+		t.Fatal("author include should review")
+	}
+	if !hostPRFilterAllows(filter, prWithMeta(2, "sha-B", "fix: please review", "teammate", "User", []string{"vanducng"}, nil, false)) {
+		t.Fatal("requested reviewer include should review")
+	}
+	if hostPRFilterAllows(filter, prWithMeta(3, "sha-C", "fix: unrelated", "teammate", "User", nil, nil, false)) {
+		t.Fatal("unmatched PR should stay excluded")
+	}
+}
+
+func TestHostPRFilterProbeCases(t *testing.T) {
+	includeDrafts := true
+	cases := []struct {
+		name   string
+		filter config.HostPRFilter
+		pr     *github.PullRequest
+		want   bool
+	}{
+		{
+			name: "default includes ready PR",
+			pr:   prWithMeta(1, "sha-A", "fix: ready", "vanducng", "User", nil, nil, false),
+			want: true,
+		},
+		{
+			name: "default skips draft PR",
+			pr:   prWithMeta(1, "sha-A", "fix: draft", "vanducng", "User", nil, nil, true),
+		},
+		{
+			name:   "include drafts allows draft PR",
+			filter: config.HostPRFilter{IncludeDrafts: &includeDrafts},
+			pr:     prWithMeta(1, "sha-A", "fix: draft", "vanducng", "User", nil, nil, true),
+			want:   true,
+		},
+		{
+			name:   "default action exclude blocks unmatched PR",
+			filter: config.HostPRFilter{DefaultAction: "exclude"},
+			pr:     prWithMeta(1, "sha-A", "fix: unrelated", "teammate", "User", nil, nil, false),
+		},
+		{
+			name:   "title regex excludes release PR",
+			filter: config.HostPRFilter{Rules: []config.HostPRFilterRule{{Action: "exclude", TitleRegexes: []string{`^chore\(main\): release `}}}},
+			pr:     prWithMeta(1, "sha-A", "chore(main): release 0.57.0", "app/munmiu", "Bot", nil, nil, false),
+		},
+		{
+			name:   "author type excludes bot",
+			filter: config.HostPRFilter{Rules: []config.HostPRFilterRule{{Action: "exclude", AuthorTypes: []string{"Bot"}}}},
+			pr:     prWithMeta(1, "sha-A", "chore: generated", "renovate[bot]", "Bot", nil, nil, false),
+		},
+		{
+			name:   "author association includes owner",
+			filter: config.HostPRFilter{DefaultAction: "exclude", Rules: []config.HostPRFilterRule{{Action: "include", AuthorAssociations: []string{"OWNER"}}}},
+			pr:     prWithAssociation(prWithMeta(1, "sha-A", "fix: owner", "vanducng", "User", nil, nil, false), "OWNER"),
+			want:   true,
+		},
+		{
+			name:   "label includes PR",
+			filter: config.HostPRFilter{DefaultAction: "exclude", Rules: []config.HostPRFilterRule{{Action: "include", Labels: []string{"miucr-review"}}}},
+			pr:     prWithMeta(1, "sha-A", "fix: label", "teammate", "User", nil, []string{"miucr-review"}, false),
+			want:   true,
+		},
+		{
+			name:   "requested reviewer includes PR",
+			filter: config.HostPRFilter{DefaultAction: "exclude", Rules: []config.HostPRFilterRule{{Action: "include", RequestedReviewers: []string{"vanducng"}}}},
+			pr:     prWithMeta(1, "sha-A", "fix: review me", "teammate", "User", []string{"vanducng"}, nil, false),
+			want:   true,
+		},
+		{
+			name:   "base and head branches include PR",
+			filter: config.HostPRFilter{DefaultAction: "exclude", Rules: []config.HostPRFilterRule{{Action: "include", BaseBranches: []string{"main"}, HeadBranches: []string{"release-please--branches--main"}}}},
+			pr:     prWithBranches(prWithMeta(1, "sha-A", "chore(main): release 0.57.0", "app/munmiu", "Bot", nil, nil, false), "main", "release-please--branches--main"),
+			want:   true,
+		},
+		{
+			name:   "rule matchers are conjunctive",
+			filter: config.HostPRFilter{DefaultAction: "exclude", Rules: []config.HostPRFilterRule{{Action: "include", Authors: []string{"vanducng"}, Labels: []string{"miucr-review"}}}},
+			pr:     prWithMeta(1, "sha-A", "fix: mine without label", "vanducng", "User", nil, nil, false),
+		},
+	}
+	for _, tt := range cases {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := hostPRFilterAllows(tt.filter, tt.pr); got != tt.want {
+				t.Fatalf("hostPRFilterAllows = %v, want %v", got, tt.want)
+			}
+		})
 	}
 }
 
@@ -534,6 +690,34 @@ func hostRunnerConfig(t *testing.T) HostRunnerConfig {
 		},
 		Now: time.Now,
 	}
+}
+
+func prWithMeta(number int, sha, title, login, userType string, reviewers, labels []string, draft bool) *github.PullRequest {
+	pr := prWithHead(number, sha)
+	pr.Title = github.Ptr(title)
+	pr.User = &github.User{Login: github.Ptr(login), Type: github.Ptr(userType)}
+	pr.AuthorAssociation = github.Ptr("MEMBER")
+	pr.Draft = github.Ptr(draft)
+	pr.Base = &github.PullRequestBranch{Ref: github.Ptr("main"), SHA: github.Ptr("base")}
+	pr.Head = &github.PullRequestBranch{Ref: github.Ptr("branch"), SHA: github.Ptr(sha)}
+	for _, reviewer := range reviewers {
+		pr.RequestedReviewers = append(pr.RequestedReviewers, &github.User{Login: github.Ptr(reviewer)})
+	}
+	for _, label := range labels {
+		pr.Labels = append(pr.Labels, &github.Label{Name: github.Ptr(label)})
+	}
+	return pr
+}
+
+func prWithAssociation(pr *github.PullRequest, association string) *github.PullRequest {
+	pr.AuthorAssociation = github.Ptr(association)
+	return pr
+}
+
+func prWithBranches(pr *github.PullRequest, base, head string) *github.PullRequest {
+	pr.Base.Ref = github.Ptr(base)
+	pr.Head.Ref = github.Ptr(head)
+	return pr
 }
 
 type countTokenSource struct {

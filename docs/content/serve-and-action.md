@@ -294,6 +294,54 @@ top level, then override the scoped agents per repo when a project benefits from
 different prompts or globs. A required subagent failure marks the run degraded,
 so host `approve_clean` will not approve and checks-mode will not report success.
 
+`review.pr_filter` also layers top-level -> `host.review` -> `repos[].review`.
+Draft PRs are skipped unless `include_drafts: true`. `default_action` defaults
+to `include`, so normal configs review every ready PR except ones matched by an
+`exclude` rule. Set `default_action: exclude` for allowlist repos. Rules are
+evaluated in order and the last matching rule wins, so repo-level `include`
+rules can override global excludes:
+
+```yaml
+review:
+  pr_filter:
+    default_action: include
+    include_drafts: false
+    rules:
+      - action: exclude
+        author_types: ["Bot"]
+        title_regexes: ['^chore\(deps\):']
+
+repos:
+  - name: ab-infra
+    slug: AB-Spectrum/infra
+    review:
+      pr_filter:
+        rules:
+          - action: exclude
+            title_regexes:
+              - '^chore\(deps\):'
+              - '^chore\(fluxcd\):'
+
+  - name: cnb-ds-dbt-order-form
+    slug: careernowbrands/cnb-ds-dbt-order-form
+    review:
+      pr_filter:
+        default_action: exclude
+        rules:
+          - action: include
+            authors: ["vanducng"]
+          - action: include
+            requested_reviewers: ["vanducng"]
+```
+
+Because rules append across layers, keep broad `include` rules out of the global
+block when a repo should be a strict allowlist.
+
+Supported matchers are `authors` (exact login), `author_types` (`Bot`, `User`,
+`Organization`), `author_associations` (`OWNER`, `MEMBER`, etc.),
+`title_regexes`, `labels`, `requested_reviewers`, `base_branches`, and
+`head_branches`.
+
 ### Accounts, prompts, and rules
 
 - `github.accounts` can mix PATs and GitHub App installations. PATs support
@@ -360,8 +408,13 @@ permissions:
 jobs:
   review:
     runs-on: ubuntu-latest
-    # Never run the secrets-bearing reviewer on fork PR code.
-    if: ${{ github.event.pull_request.head.repo.fork != true }}
+    # Never run on fork code or release automation PRs.
+    if: >-
+      ${{
+        github.event.pull_request.head.repo.fork != true &&
+        !startsWith(github.head_ref, 'release-please--') &&
+        !startsWith(github.event.pull_request.title, 'chore(main): release ')
+      }}
     steps:
       - uses: actions/checkout@v4
       - uses: actions/cache@v4

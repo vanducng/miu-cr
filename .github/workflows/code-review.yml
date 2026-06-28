@@ -12,6 +12,14 @@ permissions:
 
 jobs:
   review:
+    if: >-
+      ${{
+        github.event_name != 'pull_request_target' ||
+        (
+          !startsWith(github.head_ref, 'release-please--') &&
+          !startsWith(github.event.pull_request.title, 'chore(main): release ')
+        )
+      }}
     # Explicit secrets (not `inherit`): the reusable workflow lives in a different
     # account (dataplanelabs), and `secrets: inherit` does not cross owners.
     uses: dataplanelabs/workflows/.github/workflows/code-review.yml@main
