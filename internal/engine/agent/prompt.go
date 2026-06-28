@@ -285,9 +285,9 @@ func buildUserPromptXML(parts PromptParts) string {
 	}
 	if strings.TrimSpace(parts.SemanticContext) != "" {
 		sb.WriteString(semanticAdvisoryHeader)
-		sb.WriteString("\n")
-		sb.WriteString(parts.SemanticContext)
-		sb.WriteString("\n\n")
+		sb.WriteString("\n<advisory_context>\n")
+		sb.WriteString(xmlEscape(parts.SemanticContext))
+		sb.WriteString("\n</advisory_context>\n\n")
 	}
 	if strings.TrimSpace(parts.RelatedContext) != "" {
 		sb.WriteString("<related_context>\n")

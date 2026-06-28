@@ -108,7 +108,18 @@ func assembleSectionXML(blocks []string) string {
 
 func renderRuleXML(r Rule, allowContextFiles bool, totalContext *int) string {
 	var sb strings.Builder
-	sb.WriteString(fmt.Sprintf("<rule stem=%q provenance=%q>\n", xmlEscAttr(r.Stem), xmlEscAttr(r.Provenance.String())))
+	untrusted := !r.Provenance.Trusted()
+	trust := "trusted"
+	if untrusted {
+		trust = "untrusted"
+	}
+	sb.WriteString(fmt.Sprintf("<rule stem=%q provenance=%q trust=%q>\n", xmlEscAttr(r.Stem), xmlEscAttr(r.Provenance.String()), trust))
+	if untrusted {
+		// Mirror the markdown path's semantic fence: structural escaping stops a
+		// break-out, but the model still needs telling not to obey an untrusted rule.
+		sb.WriteString(xmlEsc(untrustedFence))
+		sb.WriteString("\n")
+	}
 	if r.FM.Description != "" {
 		sb.WriteString(xmlEsc(r.FM.Description))
 		sb.WriteString("\n")
@@ -119,7 +130,7 @@ func renderRuleXML(r Rule, allowContextFiles bool, totalContext *int) string {
 	}
 	if allowContextFiles {
 		for _, cf := range r.FM.ContextFiles {
-			sb.WriteString(inlineContextFile(r, cf, totalContext))
+			sb.WriteString(inlineContextFile(r, cf, totalContext, true))
 		}
 	}
 	sb.WriteString("</rule>\n")
@@ -145,7 +156,7 @@ func renderRule(r Rule, allowContextFiles bool, totalContext *int) string {
 	}
 	if allowContextFiles {
 		for _, cf := range r.FM.ContextFiles {
-			sb.WriteString(inlineContextFile(r, cf, totalContext))
+			sb.WriteString(inlineContextFile(r, cf, totalContext, false))
 		}
 	}
 	if untrusted {
@@ -164,26 +175,26 @@ func renderRule(r Rule, allowContextFiles bool, totalContext *int) string {
 // complete. Missing or rejected files become a one-line warning comment, never
 // carrying an absolute path, so the model knows the hint was attempted but
 // skipped.
-func inlineContextFile(r Rule, cf string, totalContext *int) string {
+func inlineContextFile(r Rule, cf string, totalContext *int, xml bool) string {
 	if cf == "" {
 		return ""
 	}
 	if filepath.IsAbs(cf) {
-		return skipContext(cf, "absolute path rejected")
+		return skipContext(cf, "absolute path rejected", xml)
 	}
 	clean := filepath.Clean(cf)
 	if clean == ".." || strings.HasPrefix(clean, ".."+string(filepath.Separator)) {
-		return skipContext(cf, "path escapes the rule directory")
+		return skipContext(cf, "path escapes the rule directory", xml)
 	}
 
 	base := filepath.Dir(r.Path)
 	full := filepath.Join(base, clean)
 	if !withinBase(base, full) {
-		return skipContext(cf, "path escapes the rule directory")
+		return skipContext(cf, "path escapes the rule directory", xml)
 	}
 
 	if *totalContext >= maxContextTotalBytes {
-		return skipContext(cf, "total context byte cap reached")
+		return skipContext(cf, "total context byte cap reached", xml)
 	}
 
 	// openNoFollow refuses a symlinked final component (atomically on unix), so a
@@ -192,21 +203,21 @@ func inlineContextFile(r Rule, cf string, totalContext *int) string {
 	if err != nil {
 		switch {
 		case errors.Is(err, errSymlink):
-			return skipContext(cf, "symlink not allowed")
+			return skipContext(cf, "symlink not allowed", xml)
 		case os.IsNotExist(err):
-			return skipContext(cf, "missing")
+			return skipContext(cf, "missing", xml)
 		default:
-			return skipContext(cf, "unreadable")
+			return skipContext(cf, "unreadable", xml)
 		}
 	}
 	defer f.Close()
 
 	fi, err := f.Stat()
 	if err != nil {
-		return skipContext(cf, "unreadable")
+		return skipContext(cf, "unreadable", xml)
 	}
 	if !fi.Mode().IsRegular() {
-		return skipContext(cf, "not a regular file")
+		return skipContext(cf, "not a regular file", xml)
 	}
 
 	// Budget bounded by both the per-file cap and the remaining total cap. An
@@ -217,21 +228,32 @@ func inlineContextFile(r Rule, cf string, totalContext *int) string {
 		budget = rem
 	}
 	if fi.Size() > int64(budget) {
-		return skipContext(cf, "exceeds byte cap")
+		return skipContext(cf, "exceeds byte cap", xml)
 	}
 
 	// LimitReader at budget+1 guards against a post-stat grow: if more than budget
 	// bytes are readable, reject rather than truncate.
 	content, err := io.ReadAll(io.LimitReader(f, int64(budget)+1))
 	if err != nil {
-		return skipContext(cf, "unreadable")
+		return skipContext(cf, "unreadable", xml)
 	}
 	if len(content) > budget {
-		return skipContext(cf, "exceeds byte cap")
+		return skipContext(cf, "exceeds byte cap", xml)
 	}
 	*totalContext += len(content)
 
 	var sb strings.Builder
+	if xml {
+		// Untrusted file content must be entity-escaped so a planted </rule> /
+		// <file> can't forge a boundary in the xml prompt.
+		sb.WriteString(fmt.Sprintf("<context_file name=%q>\n", xmlEscAttr(clean)))
+		sb.WriteString(xmlEsc(string(content)))
+		if len(content) > 0 && content[len(content)-1] != '\n' {
+			sb.WriteString("\n")
+		}
+		sb.WriteString("</context_file>\n")
+		return sb.String()
+	}
 	sb.WriteString(fmt.Sprintf("--- context_file: %s ---\n", clean))
 	sb.Write(content)
 	if len(content) > 0 && content[len(content)-1] != '\n' {
@@ -241,8 +263,12 @@ func inlineContextFile(r Rule, cf string, totalContext *int) string {
 }
 
 // skipContext renders a uniform skip note that never embeds an absolute path,
-// so a server-side directory layout can't leak into the prompt.
-func skipContext(cf, reason string) string {
+// so a server-side directory layout can't leak into the prompt. On the xml path
+// the (untrusted) path is entity-escaped so it can't break out of the element.
+func skipContext(cf, reason string, xml bool) string {
+	if xml {
+		return fmt.Sprintf("[context_file %q skipped: %s]\n", xmlEscAttr(cf), reason)
+	}
 	return fmt.Sprintf("[context_file %q skipped: %s]\n", cf, reason)
 }
 

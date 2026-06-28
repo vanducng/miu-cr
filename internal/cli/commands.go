@@ -698,6 +698,7 @@ func hostReviewAnalysisShape(review config.HostReview) any {
 		Force:        review.Force,
 		PatchRepair:  review.PatchRepair,
 		Subagents:    review.Subagents,
+		PromptFormat: review.PromptFormat,
 	}
 }
 
