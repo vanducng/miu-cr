@@ -330,13 +330,18 @@ func renderLedger(b *strings.Builder, info *PRInfo, entries []LedgerEntry, inlin
 	}
 }
 
+// ledgerResolvedCell renders the "Resolved" column. A commit resolution shows the
+// fix-commit transition (open → resolved SHA). A CONVERSATION resolution has no fix
+// commit — the open-SHA shown there only misleads (it reads as if a commit fixed
+// it) — so it renders one clean 💬 marker, visually distinct from commit rows; the
+// Location cell already links the discussion thread.
 func ledgerResolvedCell(info *PRInfo, e LedgerEntry) string {
+	if e.ResKind == resolutionConversation {
+		return "💬 conversation"
+	}
 	cell := shaLink(info, e.ResSHA)
 	if e.OpenSHA != "" && e.ResSHA != "" && e.OpenSHA != e.ResSHA {
 		cell = shaLink(info, e.OpenSHA) + " → " + cell
-	}
-	if e.ResKind == resolutionConversation {
-		cell += " · conversation resolved"
 	}
 	return cell
 }

@@ -90,7 +90,7 @@ func TestReplaceSummaryLedgerBodyPreservesSummarySections(t *testing.T) {
 	if !ok {
 		t.Fatal("replaceSummaryLedgerBody returned false")
 	}
-	for _, want := range []string{"**What changed:**", "changed a thing", "conversation resolved", "<summary>Important Files Changed", "<summary>Review reference", "Last reviewed commit", "miu-cr-published:"} {
+	for _, want := range []string{"**What changed:**", "changed a thing", "💬 conversation", "<summary>Important Files Changed", "<summary>Review reference", "Last reviewed commit", "miu-cr-published:"} {
 		if !strings.Contains(out, want) {
 			t.Fatalf("want %q preserved in body:\n%s", want, out)
 		}
@@ -121,7 +121,7 @@ func TestReplaceSummaryLedgerBodyAcceptsResultLineWithoutSpace(t *testing.T) {
 	if !ok {
 		t.Fatal("replaceSummaryLedgerBody returned false")
 	}
-	if !strings.Contains(out, "conversation resolved") {
+	if !strings.Contains(out, "💬 conversation") {
 		t.Fatalf("body missing conversation resolution:\n%s", out)
 	}
 }
@@ -145,7 +145,7 @@ func TestReplaceSummaryLedgerBodyIgnoresInlineResultText(t *testing.T) {
 	if !strings.Contains(out, "model text mentions **Result:** before the summary") {
 		t.Fatalf("untrusted result text was modified:\n%s", out)
 	}
-	if !strings.Contains(out, "\n**Result:** <sub") || !strings.Contains(out, "conversation resolved") {
+	if !strings.Contains(out, "\n**Result:** <sub") || !strings.Contains(out, "💬 conversation") {
 		t.Fatalf("summary result line not updated:\n%s", out)
 	}
 }
@@ -167,7 +167,7 @@ func TestReplaceSummaryLedgerBodyUpdatesWhenResultLineUnchanged(t *testing.T) {
 	if !ok {
 		t.Fatal("replaceSummaryLedgerBody returned false")
 	}
-	if strings.Contains(out, "conversation resolved") {
+	if strings.Contains(out, "💬 conversation") {
 		t.Fatalf("summary kept stale conversation marker:\n%s", out)
 	}
 	parsed := ParseLedger(out)
@@ -199,11 +199,11 @@ func TestSyncSummaryConversationResolvedEditsExistingComment(t *testing.T) {
 	if res.Action != UpsertEdited || res.Reason != "updated" || res.Resolved != 1 || client.editedID != 7 {
 		t.Fatalf("unexpected result/action: res=%+v editedID=%d", res, client.editedID)
 	}
-	if !strings.Contains(client.editedBody, "conversation resolved") {
+	if !strings.Contains(client.editedBody, "💬 conversation") {
 		t.Fatalf("edited body missing conversation marker:\n%s", client.editedBody)
 	}
-	if !strings.Contains(client.editedBody, "`aaaaaa1`") || strings.Contains(client.editedBody, "`bbbbbb2` · conversation resolved") {
-		t.Fatalf("conversation resolution should keep the reviewed commit:\n%s", client.editedBody)
+	if strings.Contains(client.editedBody, "· conversation resolved") {
+		t.Fatalf("conversation row should not carry a commit SHA + old suffix:\n%s", client.editedBody)
 	}
 }
 
@@ -228,7 +228,7 @@ func TestSyncSummaryConversationResolvedContinuesWithoutInlineURLs(t *testing.T)
 	if res.Action != UpsertEdited || res.Reason != "updated_without_inline_urls" || client.editedID != 7 {
 		t.Fatalf("unexpected result/action: res=%+v editedID=%d", res, client.editedID)
 	}
-	if !strings.Contains(client.editedBody, "conversation resolved") || !strings.Contains(client.editedBody, "a.go:5") {
+	if !strings.Contains(client.editedBody, "💬 conversation") || !strings.Contains(client.editedBody, "a.go:5") {
 		t.Fatalf("edited body missing fallback location:\n%s", client.editedBody)
 	}
 	if !strings.Contains(client.editedBody, "/blob/bbbbbb2/a.go#L5") || strings.Contains(client.editedBody, "/blob/cccccc3/a.go#L5") {

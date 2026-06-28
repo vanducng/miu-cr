@@ -470,11 +470,11 @@ func TestRenderLedgerConversationResolvedCell(t *testing.T) {
 	out := RenderSummaryFull(info, nil, nil, 0, nil, nil, SummaryOptions{
 		Ledger: []LedgerEntry{{FP: fpStr(1), Path: "a.go", Title: "x", Status: statusResolved, Sev: "low", FirstSev: "low", OpenSHA: "0519d5d", ResSHA: "0519d5d", ResKind: resolutionConversation, ResAt: now.Format(time.RFC3339)}},
 	})
-	if !strings.Contains(out, "conversation resolved") {
-		t.Fatalf("conversation-resolved row missing label:\n%s", out)
+	if !strings.Contains(out, "💬 conversation") {
+		t.Fatalf("conversation-resolved row missing clean marker:\n%s", out)
 	}
-	if !strings.Contains(out, "`0519d5d`") {
-		t.Fatalf("conversation-resolved row should keep the commit link:\n%s", out)
+	if strings.Contains(out, "`0519d5d`") {
+		t.Fatalf("conversation-resolved row must not show the misleading open-SHA as a fix commit:\n%s", out)
 	}
 }
 
