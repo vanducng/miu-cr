@@ -176,6 +176,17 @@ func TestHostPRFilterCanIncludeByAuthorOrRequestedReviewer(t *testing.T) {
 	}
 }
 
+func TestHostPRFilterCachesRegexes(t *testing.T) {
+	hostPRFilterRegexCache = sync.Map{}
+	pattern := `^chore\(deps\):`
+	if !anyRegexp([]string{pattern}, "chore(deps): update redis") {
+		t.Fatal("expected title regex match")
+	}
+	if _, ok := hostPRFilterRegexCache.Load(pattern); !ok {
+		t.Fatal("expected compiled regex to be cached")
+	}
+}
+
 func TestHostPRFilterProbeCases(t *testing.T) {
 	includeDrafts := true
 	cases := []struct {

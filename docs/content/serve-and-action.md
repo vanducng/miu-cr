@@ -344,7 +344,9 @@ Supported matchers are `authors` (exact login), `author_types` (`Bot`, `User`,
 `title_regexes`, `labels`, `requested_reviewers`, `base_branches`, and
 `head_branches`. `comment_trigger_regexes` are used by the GitHub Action
 comment-trigger workflow, not by `serve --host poll_source: pulls`, because PR
-list polling does not include issue comment bodies.
+list polling does not include issue comment bodies. A PR excluded by the filter
+is treated as no longer tracked by the host poller, so any prior open session or
+pending job for that PR is closed/canceled on the next reconcile.
 
 ### Accounts, prompts, and rules
 

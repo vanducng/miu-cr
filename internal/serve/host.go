@@ -25,6 +25,7 @@ const hostFailedRetryBase = 5 * time.Minute
 const hostFailedRetryCap = time.Hour
 
 var runHostDrainGrace = 10 * time.Second
+var hostPRFilterRegexCache sync.Map
 
 var ErrHostRunnerStopTimeout = errors.New("host runner did not stop before drain deadline")
 
@@ -529,11 +530,27 @@ func anyRegexp(patterns []string, got string) bool {
 		return true
 	}
 	for _, pattern := range patterns {
-		if ok, _ := regexp.MatchString(pattern, got); ok {
+		re, err := cachedHostPRFilterRegex(pattern)
+		if err != nil {
+			continue
+		}
+		if re.MatchString(got) {
 			return true
 		}
 	}
 	return false
+}
+
+func cachedHostPRFilterRegex(pattern string) (*regexp.Regexp, error) {
+	if cached, ok := hostPRFilterRegexCache.Load(pattern); ok {
+		return cached.(*regexp.Regexp), nil
+	}
+	re, err := regexp.Compile(pattern)
+	if err != nil {
+		return nil, err
+	}
+	actual, _ := hostPRFilterRegexCache.LoadOrStore(pattern, re)
+	return actual.(*regexp.Regexp), nil
 }
 
 func anyLabel(wants []string, labels []*github.Label) bool {
