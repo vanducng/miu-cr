@@ -1015,10 +1015,7 @@ func (h *HostRunner) waitThreadResolutionSync(timeout time.Duration) bool {
 		return true
 	}
 	if timeout <= 0 {
-		for len(h.threadSyncSem) > 0 {
-			time.Sleep(10 * time.Millisecond)
-		}
-		return true
+		return len(h.threadSyncSem) == 0
 	}
 	deadline := time.NewTimer(timeout)
 	defer deadline.Stop()
