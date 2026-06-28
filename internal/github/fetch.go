@@ -169,7 +169,7 @@ func priorRunsCount(ctx stdctx.Context, client Client, info *PRInfo) int {
 	return parseRunsCount(lowestMarkedCommentBody(ctx, client, info))
 }
 
-var reviewedCommitRe = regexp.MustCompile("Reviewed commit (?:\\[`|`)?([0-9a-fA-F]{7,40})")
+var reviewedCommitRe = regexp.MustCompile("(?:Last reviewed commit|Reviewed commit) (?:\\[`|`)?([0-9a-fA-F]{7,40})")
 
 func parseReviewedCommit(body string) string {
 	m := reviewedCommitRe.FindStringSubmatch(body)

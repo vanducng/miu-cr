@@ -223,10 +223,13 @@ func TestPublishReviewWireFlow(t *testing.T) {
 	if !strings.Contains(summary, ":"+testReuseKey+" -->") {
 		t.Fatalf("successful first-run summary must carry the supplied publish key:\n%s", summary)
 	}
-	// Lifecycle mode: the Open table, the footer timestamp, and a parseable embedded
+	// Lifecycle mode: the Open table, the footer commit, and a parseable embedded
 	// ledger marker carrying this run's finding as open.
-	if !strings.Contains(summary, "⚠️ Open") || !strings.Contains(summary, "Last reviewed") {
-		t.Fatalf("first-run summary must render the ledger Open table + Last reviewed footer:\n%s", summary)
+	if !strings.Contains(summary, "⚠️ Open") || !strings.Contains(summary, "Last reviewed commit") {
+		t.Fatalf("first-run summary must render the ledger Open table + Last reviewed commit footer:\n%s", summary)
+	}
+	if strings.Contains(summary, " UTC") {
+		t.Fatalf("summary footer must not include a reviewed timestamp:\n%s", summary)
 	}
 	if led := mgithub.ParseLedger(summary); len(led) != 1 || led[0].Status != "open" {
 		t.Fatalf("embedded ledger must carry the finding as open, got %+v", led)

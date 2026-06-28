@@ -486,7 +486,7 @@ func TestPostReviewSummaryIsReviewBody(t *testing.T) {
 	if !strings.Contains(r.GetBody(), ReviewMarker) {
 		t.Errorf("review body must contain the marker:\n%s", r.GetBody())
 	}
-	if !strings.Contains(r.GetBody(), "Reviewed commit `deadbee`") {
+	if !strings.Contains(r.GetBody(), "Last reviewed commit `deadbee`") {
 		t.Errorf("review body must contain the reviewed-commit footer:\n%s", r.GetBody())
 	}
 	if c.createIssueN != 0 || c.editN != 0 {

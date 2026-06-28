@@ -191,7 +191,7 @@ func TestRenderSummaryHeaderNoFindings(t *testing.T) {
 
 func TestRenderSummaryFooterReviewedCommit(t *testing.T) {
 	out := RenderSummaryFull(&PRInfo{HeadSHA: "deadbeef"}, nil, nil, 0, nil, nil, SummaryOptions{})
-	if !strings.Contains(out, "<sub>Reviewed commit `deadbee` · Posted by [miu-cr](https://github.com/vanducng/miu-cr)</sub>") {
+	if !strings.Contains(out, "<sub>Last reviewed commit `deadbee` · Posted by [miu-cr](https://github.com/vanducng/miu-cr)</sub>") {
 		t.Fatalf("want the per-SHA reviewed-commit attribution footer with the miu-cr repo link:\n%s", out)
 	}
 	// The old upsert footer line must be gone.
@@ -242,7 +242,7 @@ func TestRenderSummaryFullOrder(t *testing.T) {
 		"**Result:**", // result line lead
 		"this is the walkthrough lead prose",
 		"<summary>Review reference</summary>",
-		"<sub>Reviewed commit",
+		"<sub>Last reviewed commit",
 	})
 }
 

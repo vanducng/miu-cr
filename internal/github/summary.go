@@ -5,7 +5,6 @@ import (
 	"net/url"
 	"regexp"
 	"strings"
-	"time"
 
 	"github.com/vanducng/miu-cr/internal/engine"
 	"github.com/vanducng/miu-cr/internal/engine/diff"
@@ -155,9 +154,6 @@ type SummaryOptions struct {
 	// the next run to read. Nil (the zero value) preserves the legacy
 	// current-run-only rendering byte-for-byte.
 	Ledger []LedgerEntry
-	// Now stamps the footer "Last reviewed" time (UTC); the zero time omits the
-	// stamp (legacy byte-for-byte). Injected so renders stay deterministic in tests.
-	Now time.Time
 	// InlineURLs maps a finding fingerprint to its inline-comment HTML URL (the
 	// #discussion_r… thread anchor). When set, the ledger Location cell links to
 	// the inline review thread instead of the file blob. nil → blob links.
@@ -263,11 +259,7 @@ func RenderSummaryFull(info *PRInfo, findings []engine.Finding, stats map[string
 	if v := strings.TrimSpace(opts.Version); v != "" {
 		ver = fmt.Sprintf(" [%s](https://github.com/vanducng/miu-cr/releases/tag/%s)", mdInline(v), url.PathEscape(v))
 	}
-	reviewedAt := ""
-	if !opts.Now.IsZero() {
-		reviewedAt = " · Last reviewed " + opts.Now.UTC().Format("2006-01-02 15:04 UTC")
-	}
-	fmt.Fprintf(&b, "\n<sub>Reviewed commit %s%s%s · Posted by [miu-cr](https://github.com/vanducng/miu-cr)%s</sub>", commitRef(info), handoff, reviewedAt, ver)
+	fmt.Fprintf(&b, "\n<sub>Last reviewed commit %s%s · Posted by [miu-cr](https://github.com/vanducng/miu-cr)%s</sub>", commitRef(info), handoff, ver)
 	if opts.Ledger != nil {
 		b.WriteString("\n" + renderLedgerMarker(opts.Ledger))
 	}

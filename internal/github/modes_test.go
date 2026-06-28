@@ -61,7 +61,7 @@ func TestRenderSummaryMinimalStripsChrome(t *testing.T) {
 		"<!-- miu-cr-runs:",
 		"**Result:** 1 finding",
 		"→ Review the 1 inline comment below.",
-		"<sub>Reviewed commit",
+		"<sub>Last reviewed commit",
 	} {
 		if !strings.Contains(out, required) {
 			t.Fatalf("minimal output must contain %q:\n%s", required, out)
