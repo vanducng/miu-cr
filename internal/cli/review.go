@@ -80,7 +80,7 @@ type ReviewRequest struct {
 	WantDiagram     bool   // opt into the mermaid change diagram (default off)
 	Instruction     string // optional per-review developer steer; injected fenced/context-only into the USER turn
 	OperatorPrompt  string
-	PromptFormat    string       // "markdown" (default) | "xml"
+	PromptFormat    string       // "xml" (default) | "markdown"
 	NoSave          bool         // opt out of persisting this run to the local history store
 	Progress        func(string) // nil = silent; stderr milestones, never the stdout envelope
 	// TraceSink, when non-nil, streams each captured trace step (system prompt, diff
@@ -219,7 +219,7 @@ type PRReviewRequest struct {
 	WantDiagram     bool   // opt into the mermaid change diagram (default off)
 	Instruction     string // optional per-review developer steer; injected fenced/context-only into the USER turn
 	OperatorPrompt  string
-	PromptFormat    string       // "markdown" (default) | "xml"
+	PromptFormat    string       // "xml" (default) | "markdown"
 	Conversation    bool         // opt into fetching the prior PR conversation; injected fenced/context-only, Untrusted, dropped on fork PRs
 	Mode            string       // review (default: inline+summary) | checks (GitHub Checks-API reporter)
 	NoSave          bool         // opt out of persisting this run to the local history store
@@ -563,7 +563,7 @@ func reviewCommand(opts *options) *cobra.Command {
 	f.StringVar(&filterMode, "filter-mode", "diff_context", "Inline-eligibility filter on --pr: added|diff_context|file|nofilter (default diff_context; file/nofilter route off-diff findings to the summary/SARIF/local output, never inline)")
 	f.StringVar(&minSeverity, "min-severity", "", "Minimum severity posted INLINE on --pr: none|info|low|medium|high|critical (default keeps current behavior; below-threshold findings still appear in the summary histogram + SARIF, never inline)")
 	f.StringVar(&format, "format", "", "Review-comment presentation on --pr: full (default) | minimal (minimal drops the summary section + severity/priority badges, keeping inline findings)")
-	f.StringVar(&promptFormat, "prompt-format", "", "Review prompt format: markdown (default, fenced) | xml (XML-tagged elements)")
+	f.StringVar(&promptFormat, "prompt-format", "", "Review prompt format: xml (default, injection-hardened) | markdown (fenced)")
 	f.BoolVar(&wantDiagram, "walkthrough-diagram", false, "Ask the model to also emit an optional mermaid change diagram in the summary (opt-in; diagram quality varies; a malformed/omitted diagram degrades to a plain note)")
 	f.StringVar(&instruction, "instruction", "", "Extra free-text steer for THIS review (e.g. 'focus on the auth changes'); injected fenced, context-only, and length-capped, so it never redefines the finding schema")
 	f.BoolVar(&conversation, "conversation", false, "On --pr, fetch the prior PR conversation (miucr summary + review overviews + finding threads + developer replies) and inject it fenced/context-only as UNTRUSTED context (dropped on fork PRs); one extra read pass, no extra LLM call (default OFF)")
@@ -939,7 +939,7 @@ func validatePromptFormat(f string) error {
 	return &CLIError{
 		Code:    "flags.invalid_prompt_format",
 		Message: fmt.Sprintf("unknown --prompt-format %q", f),
-		Hint:    "use markdown (default) or xml",
+		Hint:    "use xml (default) or markdown",
 		Exit:    2,
 	}
 }

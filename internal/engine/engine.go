@@ -267,9 +267,9 @@ type AgentContext struct {
 	// Conversation is the optional fetched PR conversation (Untrusted, fenced,
 	// byte-capped, context-only). LOCKSTEP: mirror Instruction at every hop.
 	Conversation string
-	// PromptFormat selects the prompt serialization: "" or "markdown" → markdown fenced
-	// format (default, byte-identical); "xml" → XML-tagged format. LOCKSTEP: mirror
-	// Conversation at every hop or xml is silently dropped.
+	// PromptFormat selects the prompt serialization: "" or "xml" → XML-tagged format
+	// (the default, resolved in Engine.Review); "markdown" → fenced format. LOCKSTEP:
+	// mirror Conversation at every hop or the format is silently dropped.
 	PromptFormat   string
 	OperatorPrompt string
 	RepoDir        string
@@ -381,8 +381,8 @@ type Request struct {
 	// drops it on fork PRs. Threaded onto AgentContext so it rides the USER turn; empty
 	// is byte-identical. LOCKSTEP: mirror Instruction at every hop.
 	Conversation string
-	// PromptFormat selects the prompt serialization: "" or "markdown" → markdown (default,
-	// byte-identical); "xml" → XML-tagged. LOCKSTEP: mirror Conversation at every hop.
+	// PromptFormat selects the prompt serialization: "" or "xml" → XML-tagged (default);
+	// "markdown" → fenced. LOCKSTEP: mirror Conversation at every hop.
 	PromptFormat string
 	// OperatorPrompt is trusted host policy. LOCKSTEP: mirror Conversation at every hop.
 	OperatorPrompt string
@@ -508,6 +508,12 @@ func gateRank(gate string) (int, bool) {
 // the max severity rank for the gate decision. An empty diff set yields an empty
 // findings list (not an error).
 func (e *Engine) Review(ctx stdctx.Context, req Request) (ReviewResult, error) {
+	// xml is the default prompt format; an unset value resolves here so every
+	// downstream dispatch (and inherited subagent requests) sees it. markdown is
+	// opt-out via an explicit "markdown".
+	if req.PromptFormat == "" {
+		req.PromptFormat = "xml"
+	}
 	diffs, err := diff.GetDiff(ctx, req.Mode, req.RepoDir, req.From, req.To, req.Commit, e.Runner)
 	if err != nil {
 		return ReviewResult{}, err

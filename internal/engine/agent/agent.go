@@ -62,8 +62,9 @@ type Context struct {
 	// Conversation is the optional fetched PR conversation (UNTRUSTED). LOCKSTEP:
 	// mirror Instruction in ALL three backends or it is silently dropped.
 	Conversation string
-	// PromptFormat selects the prompt serialization: "" or "markdown" → markdown (default,
-	// byte-identical); "xml" → XML-tagged. LOCKSTEP: mirror Conversation in ALL backends.
+	// PromptFormat selects the prompt serialization: "xml" → XML-tagged; "" or "markdown"
+	// → fenced. The product default is xml (Engine.Review resolves "" → "xml" before this,
+	// so "" reaches here only in direct unit tests). LOCKSTEP: mirror in ALL backends.
 	PromptFormat string
 	// OperatorPrompt is trusted host policy. LOCKSTEP: mirror Conversation in ALL backends.
 	OperatorPrompt string

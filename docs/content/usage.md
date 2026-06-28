@@ -87,14 +87,14 @@ Set it per-invocation (`--format minimal`) or as a default in `[review].format` 
 
 ### `--prompt-format`
 
-`--prompt-format` (default `markdown`) selects the **structure of the prompt sent to the model** — orthogonal to `--format`, which is the posted-comment presentation. It does not change which findings surface.
+`--prompt-format` (default `xml`) selects the **structure of the prompt sent to the model** — orthogonal to `--format`, which is the posted-comment presentation. It does not change which findings surface.
 
 | Prompt format | Structure |
 |--------|-----------|
-| `markdown` (default) | The current fenced form: `=== File: <path> ===` / `--- Diff ---` / `--- New content ---` delimiters with triple-backtick fences around untrusted blocks. Byte-identical to prior releases. |
-| `xml` | Untrusted payloads (diffs, new-content, project-context files, repo rules, conversation) are wrapped in entity-escaped XML tags (`<file path="…"><diff>…</diff>…`). A planted `</file>` or `=== File: ===` inside a diff is escaped to inert text, so attacker-controlled content in a fork PR cannot forge a file boundary or smuggle instructions. |
+| `xml` (default) | Untrusted payloads (diffs, new-content, project-context files, repo rules, conversation) are wrapped in entity-escaped XML tags (`<file path="…"><diff>…</diff>…`). A planted `</file>` or `=== File: ===` inside a diff is escaped to inert text, so attacker-controlled content in a fork PR cannot forge a file boundary or smuggle instructions. |
+| `markdown` | The prior fenced form: `=== File: <path> ===` / `--- Diff ---` / `--- New content ---` delimiters with triple-backtick fences around untrusted blocks. Byte-identical to releases ≤ 0.65; available as opt-out. |
 
-`xml` is **opt-in** injection-hardening: on the labeled eval suite it holds parity with `markdown`, and a unit test proves a forged delimiter stays inert. Set per-invocation (`--prompt-format xml`) or as a default in `[review].prompt_format` / host `review.prompt_format`. An out-of-set value is rejected with `flags.invalid_prompt_format` / `config.invalid` (exit 2).
+`xml` is the default for **injection-hardening**: on the labeled eval suite it holds parity with `markdown` (no quality regression), and a unit test proves a forged delimiter stays inert. Pin the prior form with `--prompt-format markdown` or `[review].prompt_format = markdown` (also `review.prompt_format` on the host). An out-of-set value is rejected with `flags.invalid_prompt_format` / `config.invalid` (exit 2).
 
 The default JSON is a **stable v1 envelope** (`api_version: "miucr.cli/v1"`) so a host agent can branch without parsing prose:
 

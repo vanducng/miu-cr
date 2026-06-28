@@ -122,8 +122,9 @@ type PromptParts struct {
 	// fenced/context-only so it can never redefine the finding schema. Empty (after
 	// TrimSpace) => byte-identical; rides the USER turn only, after the instruction.
 	Conversation string
-	// Format selects the prompt serialization: "" or "markdown" → markdown fenced form
-	// (byte-identical default); "xml" → XML-tagged wrapping for untrusted parts.
+	// Format selects the prompt serialization: "xml" → XML-tagged wrapping for untrusted
+	// parts; "" or "markdown" → markdown fenced form. The product default is xml, resolved
+	// in Engine.Review; this builder sees "" only in direct unit tests.
 	Format string
 }
 
