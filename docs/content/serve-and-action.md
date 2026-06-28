@@ -292,7 +292,8 @@ Layering is intentionally simple: built-in defaults -> top-level `review` and
 `agent` -> `host.review` -> `repos[].review` / `repos[].agent`. Repo-level
 settings are where risky write behavior belongs (`post`, `force`, `suggest`,
 `patch_repair`, `thread_resolution_sync`, `approval`) because they decide what
-the host may do for that repository.
+the host may do for that repository. `review.tools` follows the same
+layering, but it is read-only and only controls scan/output limits.
 
 `review.subagents` follows the same layering. Configure broad defaults at the
 top level, then override the scoped agents per repo when a project benefits from
@@ -317,6 +318,17 @@ repos:
     review:
       approval:
         mode: clean
+```
+
+Symbol context bounds in host mode:
+
+```yaml
+review:
+  tools:
+    symbol_context:
+      max_bytes: 16000
+      max_files: 2000
+      max_parallel: 8
 ```
 
 `mode: clean` approves only zero-finding reviews. `mode: threshold` approves

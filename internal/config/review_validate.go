@@ -64,6 +64,9 @@ func ValidateReview(r Review) error {
 	if err := validateReviewApproval(r.Approval); err != nil {
 		return err
 	}
+	if err := validateReviewTools("tools", r.Tools, invalidReview); err != nil {
+		return err
+	}
 	if r.Expand != nil && *r.Expand < 0 {
 		return invalidReview("expand", fmt.Sprint(*r.Expand), "an integer >= 0")
 	}
@@ -78,6 +81,23 @@ func ValidateReview(r Review) error {
 	}
 	if err := validateHostPRFilter(FilePathOrEmpty(), "review.pr_filter", r.PRFilter); err != nil {
 		return err
+	}
+	return nil
+}
+
+func validateReviewTools(field string, tools ReviewTools, invalid func(string, string, string) error) error {
+	return validateSymbolContext(field+".symbol_context", tools.SymbolContext, invalid)
+}
+
+func validateSymbolContext(field string, s SymbolContext, invalid func(string, string, string) error) error {
+	if s.MaxBytes < 0 {
+		return invalid(field+".max_bytes", fmt.Sprint(s.MaxBytes), "an integer >= 0")
+	}
+	if s.MaxFiles < 0 {
+		return invalid(field+".max_files", fmt.Sprint(s.MaxFiles), "an integer >= 0")
+	}
+	if s.MaxParallel < 0 {
+		return invalid(field+".max_parallel", fmt.Sprint(s.MaxParallel), "an integer >= 0")
 	}
 	return nil
 }

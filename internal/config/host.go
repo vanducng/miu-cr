@@ -118,6 +118,7 @@ type HostReview struct {
 	Force                *bool                      `yaml:"force" json:"force,omitempty"`
 	Suggest              *bool                      `yaml:"suggest" json:"suggest,omitempty"`
 	PatchRepair          *bool                      `yaml:"patch_repair" json:"patch_repair,omitempty"`
+	Tools                ReviewTools                `yaml:"tools" json:"tools,omitempty"`
 	ThreadResolutionSync ThreadResolutionSyncConfig `yaml:"thread_resolution_sync" json:"thread_resolution_sync,omitempty"`
 	Approval             ApprovalPolicy             `yaml:"approval" json:"approval"`
 	Subagents            ReviewSubagents            `yaml:"subagents" json:"subagents"`
@@ -477,6 +478,11 @@ func validateHostReview(path, field string, r HostReview) error {
 	}
 	if r.TokenBudget != nil && *r.TokenBudget < 0 {
 		return invalidHost(path, field+".token_budget", strconv.Itoa(*r.TokenBudget), ">= 0")
+	}
+	if err := validateReviewTools(field+".tools", r.Tools, func(f, v, want string) error {
+		return invalidHost(path, f, v, want)
+	}); err != nil {
+		return err
 	}
 	if err := validateHostSubagents(path, field+".subagents", r.Subagents); err != nil {
 		return err

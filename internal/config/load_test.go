@@ -104,6 +104,11 @@ auth = "oauth"
 
 [review.pr_filter]
 comment_trigger_regexes = ['(^|\s)(/miucr review\b|@vanducng\b)']
+
+[review.tools.symbol_context]
+max_bytes = 12000
+max_files = 700
+max_parallel = 6
 `
 	cfgDir := filepath.Join(dir, ".config", "miu", "cr")
 	if err := os.MkdirAll(cfgDir, 0o755); err != nil {
@@ -133,6 +138,9 @@ comment_trigger_regexes = ['(^|\s)(/miucr review\b|@vanducng\b)']
 	}
 	if got := cfg.Review.PRFilter.CommentTriggerRegexes; len(got) != 1 || got[0] == "" {
 		t.Fatalf("review pr_filter not loaded: %+v", cfg.Review.PRFilter)
+	}
+	if cfg.Review.Tools.SymbolContext.MaxBytes != 12000 || cfg.Review.Tools.SymbolContext.MaxFiles != 700 || cfg.Review.Tools.SymbolContext.MaxParallel != 6 {
+		t.Fatalf("review tools not loaded: %+v", cfg.Review.Tools)
 	}
 }
 

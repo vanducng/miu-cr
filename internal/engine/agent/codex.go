@@ -16,6 +16,7 @@ import (
 	"github.com/vanducng/miu-cr/internal/config"
 	"github.com/vanducng/miu-cr/internal/engine"
 	"github.com/vanducng/miu-cr/internal/engine/gitcmd"
+	enginetools "github.com/vanducng/miu-cr/internal/engine/tools"
 )
 
 // codexAgent speaks the codex backend (chatgpt.com/backend-api/codex) Responses
@@ -132,35 +133,21 @@ type codexResp struct {
 }
 
 func codexTools() []codexTool {
-	return []codexTool{
-		{
+	specs := enginetools.Specs()
+	out := make([]codexTool, 0, len(specs))
+	for _, spec := range specs {
+		out = append(out, codexTool{
 			Type:        "function",
-			Name:        "file_read",
-			Description: "Read a line range of a file at the reviewed revision.",
+			Name:        spec.Name,
+			Description: spec.Description,
 			Parameters: map[string]any{
-				"type": "object",
-				"properties": map[string]any{
-					"file":  map[string]any{"type": "string", "description": "path to read"},
-					"start": map[string]any{"type": "integer", "description": "1-based start line"},
-					"end":   map[string]any{"type": "integer", "description": "1-based end line"},
-				},
-				"required": []string{"file"},
+				"type":       "object",
+				"properties": spec.Properties,
+				"required":   spec.Required,
 			},
-		},
-		{
-			Type:        "function",
-			Name:        "grep",
-			Description: "Search the reviewed revision for a fixed string.",
-			Parameters: map[string]any{
-				"type": "object",
-				"properties": map[string]any{
-					"pattern": map[string]any{"type": "string", "description": "fixed string to search for"},
-					"file":    map[string]any{"type": "string", "description": "optional file path to limit the search"},
-				},
-				"required": []string{"pattern"},
-			},
-		},
+		})
 	}
+	return out
 }
 
 // RepairPatch issues one tools-less, code-only Responses completion over the

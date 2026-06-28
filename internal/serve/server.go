@@ -87,6 +87,7 @@ type JobReviewOptions struct {
 	DeepContext    bool
 	ContextHops    int
 	Subagents      config.ReviewSubagents
+	SymbolContext  config.SymbolContext
 	// Quota is the host provider's usage quota (nil = none); QuotaProvider is the
 	// counter key (the provider instance name, since Provider above carries the
 	// kind). Threaded to the review path because the host config provider quota is

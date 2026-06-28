@@ -43,7 +43,7 @@ func TestValidateReview(t *testing.T) {
 		wantErr bool
 	}{
 		{"empty ok", Review{}, false},
-		{"all valid", Review{Gate: "high", FilterMode: "file", MinSeverity: "low", Timeout: "5m", Expand: intPtr(20), TokenBudget: intPtr(0), DeepContext: boolPtr(true), ContextHops: intPtr(5), Conversation: boolPtr(true), Suggest: boolPtr(true), Approval: ApprovalPolicy{Mode: "threshold", MaxPriority: "P3", Note: "on_findings"}}, false},
+		{"all valid", Review{Gate: "high", FilterMode: "file", MinSeverity: "low", Timeout: "5m", Expand: intPtr(20), TokenBudget: intPtr(0), DeepContext: boolPtr(true), ContextHops: intPtr(5), Conversation: boolPtr(true), Suggest: boolPtr(true), Tools: ReviewTools{SymbolContext: SymbolContext{MaxBytes: 12000, MaxFiles: 500, MaxParallel: 6}}, Approval: ApprovalPolicy{Mode: "threshold", MaxPriority: "P3", Note: "on_findings"}}, false},
 		{"bad gate", Review{Gate: "huge"}, true},
 		{"bad filter_mode", Review{FilterMode: "bogus"}, true},
 		{"bad min_severity", Review{MinSeverity: "meh"}, true},
@@ -62,6 +62,9 @@ func TestValidateReview(t *testing.T) {
 		{"bad approval priority", Review{Approval: ApprovalPolicy{Mode: "threshold", MaxPriority: "P9"}}, true},
 		{"approval priority outside threshold", Review{Approval: ApprovalPolicy{Mode: "clean", MaxPriority: "P3"}}, true},
 		{"bad approval note", Review{Approval: ApprovalPolicy{Mode: "clean", Note: "verbose"}}, true},
+		{"bad symbol max bytes", Review{Tools: ReviewTools{SymbolContext: SymbolContext{MaxBytes: -1}}}, true},
+		{"bad symbol max files", Review{Tools: ReviewTools{SymbolContext: SymbolContext{MaxFiles: -1}}}, true},
+		{"bad symbol max parallel", Review{Tools: ReviewTools{SymbolContext: SymbolContext{MaxParallel: -1}}}, true},
 		{"subagents valid", Review{Subagents: ReviewSubagents{Mode: "auto", MaxParallel: 2, MinFiles: 4, Agents: []ReviewSubagent{{Name: "go", Include: []string{"**/*.go"}}}}}, false},
 		{"subagents bad mode", Review{Subagents: ReviewSubagents{Mode: "sometimes", Agents: []ReviewSubagent{{Name: "go", Include: []string{"**/*.go"}}}}}, true},
 		{"subagents empty include", Review{Subagents: ReviewSubagents{Mode: "always", Agents: []ReviewSubagent{{Name: "go"}}}}, true},
@@ -90,7 +93,7 @@ func TestValidateReview(t *testing.T) {
 
 func TestMergeReviewMergesNewFields(t *testing.T) {
 	base := Review{Approval: ApprovalPolicy{Mode: "clean"}}
-	file := Review{Gate: "low", FilterMode: "file", MinSeverity: "medium", PromptFormat: "markdown", Timeout: "120s", Expand: intPtr(12), TokenBudget: intPtr(0), DeepContext: boolPtr(true), ContextHops: intPtr(3), Conversation: boolPtr(true), Suggest: boolPtr(false), Approval: ApprovalPolicy{Mode: "threshold", MaxPriority: "P3"}, Subagents: ReviewSubagents{Mode: "auto", Agents: []ReviewSubagent{{Name: "go", Include: []string{"**/*.go"}}}}}
+	file := Review{Gate: "low", FilterMode: "file", MinSeverity: "medium", PromptFormat: "markdown", Timeout: "120s", Expand: intPtr(12), TokenBudget: intPtr(0), DeepContext: boolPtr(true), ContextHops: intPtr(3), Conversation: boolPtr(true), Suggest: boolPtr(false), Tools: ReviewTools{SymbolContext: SymbolContext{MaxBytes: 12000}}, Approval: ApprovalPolicy{Mode: "threshold", MaxPriority: "P3"}, Subagents: ReviewSubagents{Mode: "auto", Agents: []ReviewSubagent{{Name: "go", Include: []string{"**/*.go"}}}}}
 	out := mergeReview(base, file)
 	if out.Gate != "low" || out.FilterMode != "file" || out.MinSeverity != "medium" || out.PromptFormat != "markdown" || out.Timeout != "120s" {
 		t.Fatalf("scalar review fields not merged: %+v", out)
@@ -100,6 +103,9 @@ func TestMergeReviewMergesNewFields(t *testing.T) {
 	}
 	if out.Suggest == nil || *out.Suggest != false {
 		t.Fatalf("Suggest not merged: %+v", out.Suggest)
+	}
+	if out.Tools.SymbolContext.MaxBytes != 12000 {
+		t.Fatalf("Tools not merged: %+v", out.Tools)
 	}
 	if out.Approval.Mode != "threshold" || out.Approval.MaxPriority != "P3" || out.Approval.Note != "" {
 		t.Fatalf("Approval not merged: %+v", out.Approval)

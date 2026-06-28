@@ -169,11 +169,32 @@ func mergeReview(base, file Review) Review {
 	if file.PatchRepair != nil {
 		out.PatchRepair = file.PatchRepair
 	}
+	out.Tools = MergeReviewTools(base.Tools, file.Tools)
 	out.Approval = MergeApprovalPolicy(base.Approval, file.Approval)
 	out.Subagents = MergeReviewSubagents(base.Subagents, file.Subagents)
 	out.PRFilter = MergePRFilter(base.PRFilter, file.PRFilter)
 	if len(file.CategoryURLs) > 0 {
 		out.CategoryURLs = file.CategoryURLs
+	}
+	return out
+}
+
+func MergeReviewTools(base, over ReviewTools) ReviewTools {
+	out := base
+	out.SymbolContext = MergeSymbolContext(base.SymbolContext, over.SymbolContext)
+	return out
+}
+
+func MergeSymbolContext(base, over SymbolContext) SymbolContext {
+	out := base
+	if over.MaxBytes != 0 {
+		out.MaxBytes = over.MaxBytes
+	}
+	if over.MaxFiles != 0 {
+		out.MaxFiles = over.MaxFiles
+	}
+	if over.MaxParallel != 0 {
+		out.MaxParallel = over.MaxParallel
 	}
 	return out
 }
