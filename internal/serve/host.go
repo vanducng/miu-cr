@@ -528,29 +528,10 @@ func (d hostPRFilterDecision) logAttrs() []any {
 }
 
 func appendHostPRFilterRuleAttrs(attrs []any, rule config.HostPRFilterRule) []any {
-	if len(rule.Authors) > 0 {
-		attrs = append(attrs, "rule_authors", rule.Authors)
-	}
-	if len(rule.AuthorTypes) > 0 {
-		attrs = append(attrs, "rule_author_types", rule.AuthorTypes)
-	}
-	if len(rule.AuthorAssociations) > 0 {
-		attrs = append(attrs, "rule_author_associations", rule.AuthorAssociations)
-	}
-	if len(rule.TitleRegexes) > 0 {
-		attrs = append(attrs, "rule_title_regexes", rule.TitleRegexes)
-	}
-	if len(rule.Labels) > 0 {
-		attrs = append(attrs, "rule_labels", rule.Labels)
-	}
-	if len(rule.RequestedReviewers) > 0 {
-		attrs = append(attrs, "rule_requested_reviewers", rule.RequestedReviewers)
-	}
-	if len(rule.BaseBranches) > 0 {
-		attrs = append(attrs, "rule_base_branches", rule.BaseBranches)
-	}
-	if len(rule.HeadBranches) > 0 {
-		attrs = append(attrs, "rule_head_branches", rule.HeadBranches)
+	for _, field := range hostPRFilterRuleFields(rule) {
+		if len(field.values) > 0 {
+			attrs = append(attrs, field.attrKey, field.values)
+		}
 	}
 	return attrs
 }
@@ -593,31 +574,31 @@ func hostPRFilterRuleMatches(rule config.HostPRFilterRule, pr *github.PullReques
 
 func hostPRFilterRuleReason(i int, rule config.HostPRFilterRule) string {
 	parts := []string{fmt.Sprintf("rule[%d].%s", i, rule.Action)}
-	if len(rule.Authors) > 0 {
-		parts = append(parts, "authors="+strings.Join(rule.Authors, ","))
-	}
-	if len(rule.AuthorTypes) > 0 {
-		parts = append(parts, "author_types="+strings.Join(rule.AuthorTypes, ","))
-	}
-	if len(rule.AuthorAssociations) > 0 {
-		parts = append(parts, "author_associations="+strings.Join(rule.AuthorAssociations, ","))
-	}
-	if len(rule.TitleRegexes) > 0 {
-		parts = append(parts, "title_regexes="+strings.Join(rule.TitleRegexes, ","))
-	}
-	if len(rule.Labels) > 0 {
-		parts = append(parts, "labels="+strings.Join(rule.Labels, ","))
-	}
-	if len(rule.RequestedReviewers) > 0 {
-		parts = append(parts, "requested_reviewers="+strings.Join(rule.RequestedReviewers, ","))
-	}
-	if len(rule.BaseBranches) > 0 {
-		parts = append(parts, "base_branches="+strings.Join(rule.BaseBranches, ","))
-	}
-	if len(rule.HeadBranches) > 0 {
-		parts = append(parts, "head_branches="+strings.Join(rule.HeadBranches, ","))
+	for _, field := range hostPRFilterRuleFields(rule) {
+		if len(field.values) > 0 {
+			parts = append(parts, field.reasonKey+"="+strings.Join(field.values, ","))
+		}
 	}
 	return strings.Join(parts, " ")
+}
+
+type hostPRFilterRuleField struct {
+	reasonKey string
+	attrKey   string
+	values    []string
+}
+
+func hostPRFilterRuleFields(rule config.HostPRFilterRule) []hostPRFilterRuleField {
+	return []hostPRFilterRuleField{
+		{"authors", "rule_authors", rule.Authors},
+		{"author_types", "rule_author_types", rule.AuthorTypes},
+		{"author_associations", "rule_author_associations", rule.AuthorAssociations},
+		{"title_regexes", "rule_title_regexes", rule.TitleRegexes},
+		{"labels", "rule_labels", rule.Labels},
+		{"requested_reviewers", "rule_requested_reviewers", rule.RequestedReviewers},
+		{"base_branches", "rule_base_branches", rule.BaseBranches},
+		{"head_branches", "rule_head_branches", rule.HeadBranches},
+	}
 }
 
 func anyEqualFold(wants []string, got string) bool {
