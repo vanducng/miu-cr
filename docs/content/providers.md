@@ -91,7 +91,12 @@ mode = "auto"                  # off|auto|always
 max_parallel = 2               # default 2, capped at 8
 min_files = 8                  # auto threshold; 0 uses default
 min_context_bytes = 60000      # auto threshold; 0 uses default
-require_all = true             # failed subagent prevents approve_clean/check success
+require_all = true             # failed subagent prevents approval/check success
+
+[review.approval]              # optional default for --approval on PR --post
+mode = "off"                   # off|clean|threshold
+max_severity = "low"           # threshold mode only; info|low|medium|high|critical
+note = "on_findings"           # none|on_findings|always
 
 [[review.subagents.agents]]
 name = "go"
@@ -103,7 +108,7 @@ system_prompt = "Focus on correctness, concurrency, error handling, and API comp
 "security" = "https://example.com/docs/security"
 ```
 
-Only these review attributes can be defaulted from config; there is intentionally **no** `post`, `force`, or `approve_clean` config (write-action and repeat-spend defaults are footguns).
+Only these review attributes can be defaulted from config; there is intentionally **no** `post` or `force` config because write-action and repeat-spend defaults are footguns. Approval remains explicit as a policy object so host configs can choose strict clean approval or a severity threshold per repo.
 
 ### Viewing and editing config (`config show` / `set` / `edit`)
 

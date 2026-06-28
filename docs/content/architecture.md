@@ -294,9 +294,11 @@ flowchart TD
     Clean -->|"no"| Hint
     Clean -->|"yes"| Native["native suggestion fence<br/>author clicks Commit suggestion"]
 
-    Pub --> App{"--approve-clean set?"}
-    App -->|"no"| Comment["Event = COMMENT (default)"]
-    App -->|"yes"| Pre{"every precondition holds?"}
+    Pub --> App{"approval policy enabled?"}
+    App -->|"off"| Comment["Event = COMMENT (default)"]
+    App -->|"clean or threshold"| Pol{"findings allowed by policy?"}
+    Pol -->|"no"| Degrade
+    Pol -->|"yes"| Pre{"every safety precondition holds?"}
     Pre -->|"miss"| Degrade["degrade to COMMENT<br/>never errors + approve_reason"]
     Pre -->|"all hold"| Approve["Event = APPROVE"]
 ```
@@ -317,22 +319,23 @@ ranges (`EndLine > Line`) still require a proven contiguous one-hunk RIGHT range
 Anything else degrades to the safe plain hint. Suggestions are **author-applied**:
 miucr never pushes or commits to the PR branch.
 
-**`--approve-clean`** submits `Event=APPROVE` instead of the default `COMMENT` only
-when **every** precondition holds: zero findings in the latest review attempt,
-gate clean, **not a fork**, **trusted author**
+**`--approval`** submits `Event=APPROVE` instead of the default `COMMENT` only
+when the findings satisfy the policy (`clean` requires zero findings;
+`threshold` allows findings at or below `approval.max_severity`) and **every**
+safety precondition holds: gate clean, **not a fork**, **trusted author**
 (`AuthorAssociation` ∉ `{NONE, FIRST_TIME_CONTRIBUTOR, FIRST_TIMER}`), **≥1 file
 actually reviewed**, **head unchanged** (the head SHA is re-fetched immediately
-before submitting the review), and **not already approved** at the current head SHA. A
-self-approve 422 is caught reactively and degrades to `COMMENT`. A precondition miss
-**degrades to COMMENT, never errors**: a CI run is never failed by an
-approve-precondition. Outcomes surface in the `data.pr` envelope block
+before submitting the review), and **not already approved** at the current head
+SHA. A self-approve 422 is caught reactively and degrades to `COMMENT`. A
+precondition miss **degrades to COMMENT, never errors**: a CI run is never failed
+by an approve-precondition. Outcomes surface in the `data.pr` envelope block
 (`approve_action`, `approve_reason`, `suggestions_posted`).
 
 `serve` inherits both flags **OFF** (a webhook daemon must not auto-suggest or
 auto-approve) and the **GitHub Action stays comment-only** (a default token APPROVE
 is a self-approve / supply-chain risk). One caveat: a PAT-submitted APPROVE
 **satisfies branch-protection required reviews** and can enable auto-merge, so "the
-human still owns merge" is not an invariant of `--approve-clean`; use a bot identity
+human still owns merge" is not an invariant of `--approval`; use a bot identity
 distinct from the author (GitHub Apps are self-approval-safe by construction), or
 leave it OFF.
 

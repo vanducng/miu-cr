@@ -110,6 +110,11 @@ default_provider = "anthropic"
 # suggest      = false           # emit GitHub one-click suggestions on --post (default off)
 # patch_repair = false           # 2nd-pass recovery of one-click suggestions; only effective with suggest=true (default off)
 #
+# [review.approval]
+# mode = "off"                   # off|clean|threshold
+# max_severity = "low"           # threshold mode only; info|low|medium|high|critical
+# note = "on_findings"           # none|on_findings|always
+#
 # # Optional in-process subagent fanout. Candidate findings from each scoped pass
 # # still flow through the same deterministic anchoring, dedupe, gate, and publish
 # # pipeline. Use "auto" for large reviews, "always" to force fanout, or "off".
@@ -118,7 +123,7 @@ default_provider = "anthropic"
 # max_parallel = 2               # default 2, capped at 8
 # min_files = 8                  # auto threshold; 0 uses default
 # min_context_bytes = 60000      # auto threshold; 0 uses default
-# require_all = true             # failed subagent prevents approve_clean/check success
+# require_all = true             # failed subagent prevents approval/check success
 #
 # [[review.subagents.agents]]
 # name = "go"

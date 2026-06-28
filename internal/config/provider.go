@@ -124,9 +124,16 @@ type Review struct {
 	Conversation *bool             `toml:"conversation,omitempty"`
 	Suggest      *bool             `toml:"suggest,omitempty"`
 	PatchRepair  *bool             `toml:"patch_repair,omitempty"`
+	Approval     ApprovalPolicy    `toml:"approval"`
 	Subagents    ReviewSubagents   `toml:"subagents,omitempty"`
 	PRFilter     HostPRFilter      `toml:"pr_filter,omitempty"`
 	CategoryURLs map[string]string `toml:"category_urls,omitempty"`
+}
+
+type ApprovalPolicy struct {
+	Mode        string `toml:"mode,omitempty" yaml:"mode,omitempty" json:"mode,omitempty"`
+	MaxSeverity string `toml:"max_severity,omitempty" yaml:"max_severity,omitempty" json:"max_severity,omitempty"`
+	Note        string `toml:"note,omitempty" yaml:"note,omitempty" json:"note,omitempty"`
 }
 
 type ReviewSubagents struct {

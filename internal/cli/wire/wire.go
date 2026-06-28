@@ -341,7 +341,7 @@ func (prReviewer) ReviewPR(ctx stdctx.Context, req cli.PRReviewRequest) (cli.Rev
 	// blocks. See skipUnchanged.
 	if prior, ok := skipUnchanged(ctx, hist, info, req.Force, req.Post, req.Mode, reuseKey); ok {
 		rec, haveRec := loadPriorReview(ctx, hist, prior.ID)
-		if req.Post && req.ApproveClean && !approveCleanReuseOK(ctx, client, info, rec, haveRec, req.Gate) {
+		if req.Post && !approvalReuseOK(ctx, client, info, rec, haveRec, req.Approval, req.Gate) {
 			if req.Progress != nil {
 				req.Progress("same-head review found, but approval is not confirmed; reviewing")
 			}
@@ -547,7 +547,7 @@ type reviewReuseShape struct {
 	Post            bool
 	Suggest         bool
 	PatchRepair     bool
-	ApproveClean    bool
+	Approval        config.ApprovalPolicy
 	Gate            string
 	Provider        string
 	BaseURL         string
@@ -627,7 +627,7 @@ func newReviewReuseShape(req cli.PRReviewRequest, cfg config.Config, providerNam
 		Post:            req.Post,
 		Suggest:         req.Suggest,
 		PatchRepair:     req.PatchRepair,
-		ApproveClean:    req.ApproveClean,
+		Approval:        req.Approval,
 		Gate:            req.Gate,
 		Provider:        req.Provider,
 		BaseURL:         req.BaseURL,
@@ -734,35 +734,34 @@ func loadPriorReview(ctx stdctx.Context, hist store.Store, id string) (store.Rev
 	return rec, true
 }
 
-func approveCleanReuseOK(ctx stdctx.Context, client mgithub.Client, info *mgithub.PRInfo, rec store.ReviewRecord, haveRec bool, gate string) bool {
-	findingsCount, reviewedFiles, gateClean := priorReviewShape(info, rec, haveRec, gate)
-	if !mgithub.ApproveCleanWouldApprove(*info, gateClean, findingsCount, reviewedFiles) {
+func approvalReuseOK(ctx stdctx.Context, client mgithub.Client, info *mgithub.PRInfo, rec store.ReviewRecord, haveRec bool, policy config.ApprovalPolicy, gate string) bool {
+	findings, reviewedFiles, gateClean := priorReviewShape(info, rec, haveRec, gate)
+	if !mgithub.ApprovalWouldApprove(*info, policy, gateClean, findings, reviewedFiles) {
 		return true
 	}
 	approved, err := mgithub.HasApprovedReview(ctx, client, info)
 	if err != nil {
-		slog.Warn("approve-clean reuse check failed, reviewing: " + config.RedactString(err.Error()))
+		slog.Warn("approval reuse check failed, reviewing: " + config.RedactString(err.Error()))
 		return false
 	}
 	return approved
 }
 
-func priorReviewShape(info *mgithub.PRInfo, rec store.ReviewRecord, haveRec bool, gate string) (findingsCount, reviewedFiles int, gateClean bool) {
+func priorReviewShape(info *mgithub.PRInfo, rec store.ReviewRecord, haveRec bool, gate string) (findings []engine.Finding, reviewedFiles int, gateClean bool) {
 	if haveRec {
-		return len(rec.Findings), reviewedFilesFromStats(rec.Stats), !engine.GateFailed(rec.Findings, gate) && !engine.SubagentsDegraded(rec.Stats)
+		return rec.Findings, reviewedFilesFromStats(rec.Stats), !engine.GateFailed(rec.Findings, gate) && !engine.SubagentsDegraded(rec.Stats)
 	}
-	open := openLedgerCount(info.PriorLedger)
-	return open, len(info.Files), open == 0
-}
-
-func openLedgerCount(entries []mgithub.LedgerEntry) int {
-	n := 0
-	for _, e := range entries {
-		if e.Status == "open" || e.Status == "reopened" {
-			n++
+	for _, e := range info.PriorLedger {
+		if e.Status != "open" && e.Status != "reopened" {
+			continue
 		}
+		severity := e.Sev
+		if severity == "" {
+			severity = "critical"
+		}
+		findings = append(findings, engine.Finding{Severity: severity})
 	}
-	return n
+	return findings, len(info.Files), !engine.GateFailed(findings, gate)
 }
 
 // publishReview posts the review THIS run: inline review comments first (skipping
@@ -832,7 +831,7 @@ func publishReview(ctx stdctx.Context, client mgithub.Client, runner *gitcmd.Run
 
 	opts := mgithub.PostReviewOptions{
 		Suggest:       req.Suggest,
-		ApproveClean:  req.ApproveClean,
+		Approval:      req.Approval,
 		Gate:          req.Gate,
 		GateClean:     !engine.GateFailed(publishFindings, req.Gate) && !engine.SubagentsDegraded(res.Stats),
 		ReviewedFiles: reviewedFilesFromStats(res.Stats),

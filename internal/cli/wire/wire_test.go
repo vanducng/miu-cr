@@ -12,6 +12,7 @@ import (
 	gh "github.com/google/go-github/v84/github"
 
 	"github.com/vanducng/miu-cr/internal/cli"
+	"github.com/vanducng/miu-cr/internal/config"
 	"github.com/vanducng/miu-cr/internal/engine"
 	"github.com/vanducng/miu-cr/internal/engine/gitcmd"
 	mgithub "github.com/vanducng/miu-cr/internal/github"
@@ -528,7 +529,7 @@ func cleanReviewResult() engine.ReviewResult {
 	}
 }
 
-func TestPublishReviewApproveClean(t *testing.T) {
+func TestPublishReviewApprovalClean(t *testing.T) {
 	runner := gitcmd.New()
 	dir, base, head := setupRepo(t, runner)
 
@@ -541,7 +542,7 @@ func TestPublishReviewApproveClean(t *testing.T) {
 	// Clean, non-fork, trusted author → APPROVE.
 	info := &mgithub.PRInfo{Owner: "o", Repo: "r", Number: 7, HeadSHA: head, BaseSHA: base, BaseBranch: "main", AuthorAssociation: "MEMBER"}
 	pr := &cli.PRResult{SummaryAction: "none"}
-	if err := publishReview(stdctx.Background(), client, runner, dir, info, cleanReviewResult(), pr, cli.PRReviewRequest{Gate: "high", ApproveClean: true}, nil, embedWriter{}, nil, nil, ""); err != nil {
+	if err := publishReview(stdctx.Background(), client, runner, dir, info, cleanReviewResult(), pr, cli.PRReviewRequest{Gate: "high", Approval: config.ApprovalPolicy{Mode: "clean"}}, nil, embedWriter{}, nil, nil, ""); err != nil {
 		t.Fatalf("publishReview: %v", err)
 	}
 	if pr.ApproveAction != "approved" || pr.ApproveReason != "approved" {
@@ -559,6 +560,37 @@ func TestPublishReviewApproveClean(t *testing.T) {
 	}
 }
 
+func TestPublishReviewApprovalThreshold(t *testing.T) {
+	runner := gitcmd.New()
+	dir, base, head := setupRepo(t, runner)
+
+	fake := &fakeGitHub{headSHA: head}
+	restore := newGitHubClient
+	newGitHubClient = func(string) mgithub.Client { return fake }
+	t.Cleanup(func() { newGitHubClient = restore })
+	client := newGitHubClient("")
+
+	info := &mgithub.PRInfo{Owner: "o", Repo: "r", Number: 7, HeadSHA: head, BaseSHA: base, BaseBranch: "main", AuthorAssociation: "MEMBER"}
+	res := engine.ReviewResult{
+		Findings: []engine.Finding{{File: "foo.go", Line: 4, Severity: "low", Category: "style", Rationale: "minor issue", QuotedCode: "func B() {}"}},
+		Stats:    map[string]any{"truncation_level": "full", "files_reviewed": float64(1)},
+	}
+	req := cli.PRReviewRequest{Gate: "high", Approval: config.ApprovalPolicy{Mode: "threshold", MaxSeverity: "low", Note: "on_findings"}}
+	pr := &cli.PRResult{SummaryAction: "none"}
+	if err := publishReview(stdctx.Background(), client, runner, dir, info, res, pr, req, nil, embedWriter{}, nil, nil, ""); err != nil {
+		t.Fatalf("publishReview: %v", err)
+	}
+	if pr.ApproveAction != "approved" || pr.ApproveReason != "approved" {
+		t.Fatalf("threshold-approved PR must APPROVE, got action=%q reason=%q", pr.ApproveAction, pr.ApproveReason)
+	}
+	if fake.lastReviewed == nil || fake.lastReviewed.GetEvent() != "APPROVE" {
+		t.Fatalf("CreateReview Event must be APPROVE, got %v", fake.lastReviewed)
+	}
+	if !strings.Contains(fake.lastReviewed.GetBody(), "at or below `low`") {
+		t.Fatalf("threshold approval must include a review body note, got:\n%s", fake.lastReviewed.GetBody())
+	}
+}
+
 func TestPublishReviewApproveDegradesSubagentFailure(t *testing.T) {
 	runner := gitcmd.New()
 	dir, base, head := setupRepo(t, runner)
@@ -573,7 +605,7 @@ func TestPublishReviewApproveDegradesSubagentFailure(t *testing.T) {
 	res.Stats["subagents_degraded"] = true
 	info := &mgithub.PRInfo{Owner: "o", Repo: "r", Number: 7, HeadSHA: head, BaseSHA: base, BaseBranch: "main", AuthorAssociation: "MEMBER"}
 	pr := &cli.PRResult{SummaryAction: "none"}
-	if err := publishReview(stdctx.Background(), client, runner, dir, info, res, pr, cli.PRReviewRequest{Gate: "high", ApproveClean: true}, nil, embedWriter{}, nil, nil, ""); err != nil {
+	if err := publishReview(stdctx.Background(), client, runner, dir, info, res, pr, cli.PRReviewRequest{Gate: "high", Approval: config.ApprovalPolicy{Mode: "clean"}}, nil, embedWriter{}, nil, nil, ""); err != nil {
 		t.Fatalf("publishReview: %v", err)
 	}
 	if pr.ApproveAction != "commented" || pr.ApproveReason != "gate_failed" {
@@ -594,7 +626,7 @@ func TestPublishReviewApproveDegradesFork(t *testing.T) {
 	// Fork → COMMENT with reason "fork", never APPROVE.
 	info := &mgithub.PRInfo{Owner: "o", Repo: "r", Number: 7, HeadSHA: head, BaseSHA: base, BaseBranch: "main", AuthorAssociation: "MEMBER", IsFork: true}
 	pr := &cli.PRResult{SummaryAction: "none"}
-	if err := publishReview(stdctx.Background(), client, runner, dir, info, cleanReviewResult(), pr, cli.PRReviewRequest{Gate: "high", ApproveClean: true}, nil, embedWriter{}, nil, nil, ""); err != nil {
+	if err := publishReview(stdctx.Background(), client, runner, dir, info, cleanReviewResult(), pr, cli.PRReviewRequest{Gate: "high", Approval: config.ApprovalPolicy{Mode: "clean"}}, nil, embedWriter{}, nil, nil, ""); err != nil {
 		t.Fatalf("publishReview: %v", err)
 	}
 	if pr.ApproveAction != "commented" || pr.ApproveReason != "fork" {
@@ -617,7 +649,7 @@ func TestPublishReviewApproveDegradesUntrusted(t *testing.T) {
 
 	info := &mgithub.PRInfo{Owner: "o", Repo: "r", Number: 7, HeadSHA: head, BaseSHA: base, BaseBranch: "main", AuthorAssociation: "FIRST_TIME_CONTRIBUTOR"}
 	pr := &cli.PRResult{SummaryAction: "none"}
-	if err := publishReview(stdctx.Background(), client, runner, dir, info, cleanReviewResult(), pr, cli.PRReviewRequest{Gate: "high", ApproveClean: true}, nil, embedWriter{}, nil, nil, ""); err != nil {
+	if err := publishReview(stdctx.Background(), client, runner, dir, info, cleanReviewResult(), pr, cli.PRReviewRequest{Gate: "high", Approval: config.ApprovalPolicy{Mode: "clean"}}, nil, embedWriter{}, nil, nil, ""); err != nil {
 		t.Fatalf("publishReview: %v", err)
 	}
 	if pr.ApproveAction != "commented" || pr.ApproveReason != "untrusted_author" {
@@ -635,7 +667,7 @@ func TestPublishReviewApproveDefaultOff(t *testing.T) {
 	t.Cleanup(func() { newGitHubClient = restore })
 	client := newGitHubClient("")
 
-	// Even a clean trusted non-fork PR is COMMENT when --approve-clean is OFF.
+	// Even a clean trusted non-fork PR is COMMENT when approval is OFF.
 	info := &mgithub.PRInfo{Owner: "o", Repo: "r", Number: 7, HeadSHA: head, BaseSHA: base, BaseBranch: "main", AuthorAssociation: "MEMBER"}
 	pr := &cli.PRResult{SummaryAction: "none"}
 	if err := publishReview(stdctx.Background(), client, runner, dir, info, cleanReviewResult(), pr, cli.PRReviewRequest{Gate: "high"}, nil, embedWriter{}, nil, nil, ""); err != nil {

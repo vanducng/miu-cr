@@ -55,7 +55,7 @@ type JobReviewOptions struct {
 	Post           bool
 	Suggest        bool
 	PatchRepair    bool
-	ApproveClean   bool
+	Approval       config.ApprovalPolicy
 	Force          bool
 	Conversation   bool
 	Gate           string

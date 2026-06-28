@@ -166,10 +166,35 @@ func mergeReview(base, file Review) Review {
 	if file.PatchRepair != nil {
 		out.PatchRepair = file.PatchRepair
 	}
+	out.Approval = MergeApprovalPolicy(base.Approval, file.Approval)
 	out.Subagents = MergeReviewSubagents(base.Subagents, file.Subagents)
 	out.PRFilter = MergePRFilter(base.PRFilter, file.PRFilter)
 	if len(file.CategoryURLs) > 0 {
 		out.CategoryURLs = file.CategoryURLs
+	}
+	return out
+}
+
+func MergeApprovalPolicy(base, over ApprovalPolicy) ApprovalPolicy {
+	out := base
+	if over.Mode != "" {
+		out.Mode = over.Mode
+		if over.Mode != "threshold" {
+			out.MaxSeverity = ""
+			out.Note = ""
+		}
+	}
+	if over.MaxSeverity != "" {
+		out.MaxSeverity = over.MaxSeverity
+	}
+	if over.Note != "" {
+		out.Note = over.Note
+	}
+	if out.Mode != "threshold" {
+		out.MaxSeverity = ""
+	}
+	if out.Mode == "" || out.Mode == "off" {
+		out.Note = ""
 	}
 	return out
 }

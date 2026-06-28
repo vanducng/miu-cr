@@ -191,36 +191,38 @@ func TestReviewReuseKeyChangesForReviewShape(t *testing.T) {
 	}
 }
 
-func TestApproveCleanReuseRequiresApprovalWhenEligible(t *testing.T) {
+func TestApprovalReuseRequiresApprovalWhenEligible(t *testing.T) {
 	ctx := stdctx.Background()
 	info := prInfo("sha-1")
 	info.AuthorAssociation = "MEMBER"
 	rec := store.ReviewRecord{Stats: map[string]any{"files_reviewed": float64(1)}}
-	if approveCleanReuseOK(ctx, &fakeGitHub{}, info, rec, true, "high") {
-		t.Fatal("eligible clean approve-clean rerun must not skip without an approval")
+	policy := config.ApprovalPolicy{Mode: "clean"}
+	if approvalReuseOK(ctx, &fakeGitHub{}, info, rec, true, policy, "high") {
+		t.Fatal("eligible clean approval rerun must not skip without an approval")
 	}
 	approved := &fakeGitHub{reviews: []*gh.PullRequestReview{{State: gh.Ptr("APPROVED"), CommitID: gh.Ptr("sha-1")}}}
-	if !approveCleanReuseOK(ctx, approved, info, rec, true, "high") {
-		t.Fatal("eligible clean approve-clean rerun may skip once approval exists at the head")
+	if !approvalReuseOK(ctx, approved, info, rec, true, policy, "high") {
+		t.Fatal("eligible clean approval rerun may skip once approval exists at the head")
 	}
 }
 
-func TestApproveCleanReuseSkipsWhenPriorSubagentsDegraded(t *testing.T) {
+func TestApprovalReuseSkipsWhenPriorSubagentsDegraded(t *testing.T) {
 	ctx := stdctx.Background()
 	info := prInfo("sha-1")
 	info.AuthorAssociation = "MEMBER"
 	rec := store.ReviewRecord{Stats: map[string]any{"files_reviewed": float64(1), "subagents_degraded": true}}
-	if !approveCleanReuseOK(ctx, &fakeGitHub{}, info, rec, true, "high") {
+	if !approvalReuseOK(ctx, &fakeGitHub{}, info, rec, true, config.ApprovalPolicy{Mode: "clean"}, "high") {
 		t.Fatal("degraded prior subagent run should reuse; approval is not expected")
 	}
 }
 
-func TestApproveCleanReuseSkipsWhenApprovalNotExpected(t *testing.T) {
+func TestApprovalReuseSkipsWhenApprovalNotExpected(t *testing.T) {
 	ctx := stdctx.Background()
 	info := prInfo("sha-1")
 	info.AuthorAssociation = "FIRST_TIME_CONTRIBUTOR"
 	clean := store.ReviewRecord{Stats: map[string]any{"files_reviewed": float64(1)}}
-	if !approveCleanReuseOK(ctx, &fakeGitHub{}, info, clean, true, "high") {
+	cleanPolicy := config.ApprovalPolicy{Mode: "clean"}
+	if !approvalReuseOK(ctx, &fakeGitHub{}, info, clean, true, cleanPolicy, "high") {
 		t.Fatal("untrusted clean PR should reuse; approval is not expected")
 	}
 	info.AuthorAssociation = "MEMBER"
@@ -228,26 +230,78 @@ func TestApproveCleanReuseSkipsWhenApprovalNotExpected(t *testing.T) {
 		Findings: []engine.Finding{{Severity: "low", File: "a.go", Line: 1}},
 		Stats:    map[string]any{"files_reviewed": float64(1)},
 	}
-	if !approveCleanReuseOK(ctx, &fakeGitHub{}, info, withFinding, true, "high") {
+	if !approvalReuseOK(ctx, &fakeGitHub{}, info, withFinding, true, cleanPolicy, "high") {
 		t.Fatal("PR with findings should reuse; approval is not expected")
 	}
 	info.PriorLedger = []mgithub.LedgerEntry{{Status: "open"}}
-	if !approveCleanReuseOK(ctx, &fakeGitHub{}, info, store.ReviewRecord{}, false, "high") {
+	if !approvalReuseOK(ctx, &fakeGitHub{}, info, store.ReviewRecord{}, false, cleanPolicy, "high") {
 		t.Fatal("storeless PR summary with open findings should reuse; approval is not expected")
 	}
 }
 
-func TestApproveCleanStorelessReuseRequiresApprovalWhenClean(t *testing.T) {
+func TestApprovalStorelessReuseRequiresApprovalWhenClean(t *testing.T) {
 	ctx := stdctx.Background()
 	info := prInfo("sha-1")
 	info.AuthorAssociation = "MEMBER"
 	info.Files = []string{"a.go"}
-	if approveCleanReuseOK(ctx, &fakeGitHub{}, info, store.ReviewRecord{}, false, "high") {
-		t.Fatal("storeless clean eligible approve-clean rerun must not skip without approval")
+	policy := config.ApprovalPolicy{Mode: "clean"}
+	if approvalReuseOK(ctx, &fakeGitHub{}, info, store.ReviewRecord{}, false, policy, "high") {
+		t.Fatal("storeless clean eligible approval rerun must not skip without approval")
 	}
 	approved := &fakeGitHub{reviews: []*gh.PullRequestReview{{State: gh.Ptr("APPROVED"), CommitID: gh.Ptr("sha-1")}}}
-	if !approveCleanReuseOK(ctx, approved, info, store.ReviewRecord{}, false, "high") {
-		t.Fatal("storeless clean eligible approve-clean rerun may skip once approval exists")
+	if !approvalReuseOK(ctx, approved, info, store.ReviewRecord{}, false, policy, "high") {
+		t.Fatal("storeless clean eligible approval rerun may skip once approval exists")
+	}
+}
+
+func TestApprovalReuseThresholdRequiresApprovalForLowFinding(t *testing.T) {
+	ctx := stdctx.Background()
+	info := prInfo("sha-1")
+	info.AuthorAssociation = "MEMBER"
+	policy := config.ApprovalPolicy{Mode: "threshold", MaxSeverity: "low"}
+	rec := store.ReviewRecord{
+		Findings: []engine.Finding{{Severity: "low", File: "a.go", Line: 1}},
+		Stats:    map[string]any{"files_reviewed": float64(1)},
+	}
+	if approvalReuseOK(ctx, &fakeGitHub{}, info, rec, true, policy, "high") {
+		t.Fatal("threshold-eligible rerun must not skip without an approval")
+	}
+	approved := &fakeGitHub{reviews: []*gh.PullRequestReview{{State: gh.Ptr("APPROVED"), CommitID: gh.Ptr("sha-1")}}}
+	if !approvalReuseOK(ctx, approved, info, rec, true, policy, "high") {
+		t.Fatal("threshold-eligible rerun may skip once approval exists")
+	}
+
+	rec.Findings = []engine.Finding{{Severity: "medium", File: "a.go", Line: 1}}
+	if !approvalReuseOK(ctx, &fakeGitHub{}, info, rec, true, policy, "high") {
+		t.Fatal("medium finding above low threshold should reuse; approval is not expected")
+	}
+}
+
+func TestApprovalStorelessReuseUsesLedgerSeverity(t *testing.T) {
+	ctx := stdctx.Background()
+	info := prInfo("sha-1")
+	info.AuthorAssociation = "MEMBER"
+	info.Files = []string{"a.go"}
+	policy := config.ApprovalPolicy{Mode: "threshold", MaxSeverity: "low"}
+
+	info.PriorLedger = []mgithub.LedgerEntry{{Status: "open", Sev: "low"}}
+	if approvalReuseOK(ctx, &fakeGitHub{}, info, store.ReviewRecord{}, false, policy, "high") {
+		t.Fatal("storeless low finding eligible for threshold approval must not skip without approval")
+	}
+
+	approved := &fakeGitHub{reviews: []*gh.PullRequestReview{{State: gh.Ptr("APPROVED"), CommitID: gh.Ptr("sha-1")}}}
+	if !approvalReuseOK(ctx, approved, info, store.ReviewRecord{}, false, policy, "high") {
+		t.Fatal("storeless low finding may skip once approval exists")
+	}
+
+	info.PriorLedger = []mgithub.LedgerEntry{{Status: "open", Sev: "high"}}
+	if !approvalReuseOK(ctx, &fakeGitHub{}, info, store.ReviewRecord{}, false, policy, "high") {
+		t.Fatal("storeless high finding should reuse; approval is not expected")
+	}
+
+	info.PriorLedger = []mgithub.LedgerEntry{{Status: "open"}}
+	if !approvalReuseOK(ctx, &fakeGitHub{}, info, store.ReviewRecord{}, false, policy, "high") {
+		t.Fatal("storeless missing severity should be conservative; approval is not expected")
 	}
 }
 

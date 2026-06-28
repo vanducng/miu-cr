@@ -3,53 +3,66 @@ package github
 import (
 	stdctx "context"
 	"net/http"
+	"strings"
 	"testing"
 
 	gh "github.com/google/go-github/v84/github"
 
+	"github.com/vanducng/miu-cr/internal/config"
 	"github.com/vanducng/miu-cr/internal/engine"
 	"github.com/vanducng/miu-cr/internal/engine/diff"
 )
 
 func TestResolveEvent(t *testing.T) {
 	base := PRInfo{Owner: "o", Repo: "r", Number: 1, HeadSHA: "h", AuthorAssociation: "MEMBER"}
-	on := PostReviewOptions{ApproveClean: true}
+	on := PostReviewOptions{Approval: config.ApprovalPolicy{Mode: "clean"}}
 
 	tests := []struct {
 		name          string
 		opts          PostReviewOptions
 		info          PRInfo
 		gateClean     bool
-		findingsCount int
+		findings      []engine.Finding
 		reviewedFiles int
 		headUnchanged bool
 		wantEvent     string
 		wantReason    string
 	}{
-		{"approve all pass", on, base, true, 0, 3, true, "APPROVE", approveReasonApproved},
-		{"trusted owner", on, withAssoc(base, "OWNER"), true, 0, 3, true, "APPROVE", approveReasonApproved},
-		{"trusted collaborator", on, withAssoc(base, "COLLABORATOR"), true, 0, 3, true, "APPROVE", approveReasonApproved},
-		{"not requested", PostReviewOptions{}, base, true, 0, 3, true, "COMMENT", approveReasonNotRequested},
-		{"gate failed", on, base, false, 1, 3, true, "COMMENT", approveReasonGateFailed},
-		{"below-gate findings present", on, base, true, 1, 3, true, "COMMENT", approveReasonFindingsPresent},
-		{"fork", on, withFork(base), true, 0, 3, true, "COMMENT", approveReasonFork},
-		{"untrusted none", on, withAssoc(base, "NONE"), true, 0, 3, true, "COMMENT", approveReasonUntrusted},
-		{"untrusted first-timer", on, withAssoc(base, "FIRST_TIMER"), true, 0, 3, true, "COMMENT", approveReasonUntrusted},
-		{"untrusted first-time-contrib", on, withAssoc(base, "FIRST_TIME_CONTRIBUTOR"), true, 0, 3, true, "COMMENT", approveReasonUntrusted},
-		{"untrusted contributor", on, withAssoc(base, "CONTRIBUTOR"), true, 0, 3, true, "COMMENT", approveReasonUntrusted},
-		{"untrusted empty fails closed", on, withAssoc(base, ""), true, 0, 3, true, "COMMENT", approveReasonUntrusted},
-		{"untrusted unknown tier", on, withAssoc(base, "MANNEQUIN"), true, 0, 3, true, "COMMENT", approveReasonUntrusted},
-		{"nothing reviewed", on, base, true, 0, 0, true, "COMMENT", approveReasonNothingDone},
-		{"head moved", on, base, true, 0, 3, false, "COMMENT", approveReasonHeadMoved},
-		{"head unknown beats unchanged", on, withHead(base, ""), true, 0, 3, true, "COMMENT", approveReasonHeadUnknown},
+		{"approve all pass", on, base, true, nil, 3, true, "APPROVE", approveReasonApproved},
+		{"trusted owner", on, withAssoc(base, "OWNER"), true, nil, 3, true, "APPROVE", approveReasonApproved},
+		{"trusted collaborator", on, withAssoc(base, "COLLABORATOR"), true, nil, 3, true, "APPROVE", approveReasonApproved},
+		{"not requested", PostReviewOptions{}, base, true, nil, 3, true, "COMMENT", approveReasonNotRequested},
+		{"gate failed", on, base, false, []engine.Finding{{Severity: "high"}}, 3, true, "COMMENT", approveReasonGateFailed},
+		{"below-gate findings present", on, base, true, []engine.Finding{{Severity: "low"}}, 3, true, "COMMENT", approveReasonThresholdFailed},
+		{"fork", on, withFork(base), true, nil, 3, true, "COMMENT", approveReasonFork},
+		{"untrusted none", on, withAssoc(base, "NONE"), true, nil, 3, true, "COMMENT", approveReasonUntrusted},
+		{"untrusted first-timer", on, withAssoc(base, "FIRST_TIMER"), true, nil, 3, true, "COMMENT", approveReasonUntrusted},
+		{"untrusted first-time-contrib", on, withAssoc(base, "FIRST_TIME_CONTRIBUTOR"), true, nil, 3, true, "COMMENT", approveReasonUntrusted},
+		{"untrusted contributor", on, withAssoc(base, "CONTRIBUTOR"), true, nil, 3, true, "COMMENT", approveReasonUntrusted},
+		{"untrusted empty fails closed", on, withAssoc(base, ""), true, nil, 3, true, "COMMENT", approveReasonUntrusted},
+		{"untrusted unknown tier", on, withAssoc(base, "MANNEQUIN"), true, nil, 3, true, "COMMENT", approveReasonUntrusted},
+		{"nothing reviewed", on, base, true, nil, 0, true, "COMMENT", approveReasonNothingDone},
+		{"head moved", on, base, true, nil, 3, false, "COMMENT", approveReasonHeadMoved},
+		{"head unknown beats unchanged", on, withHead(base, ""), true, nil, 3, true, "COMMENT", approveReasonHeadUnknown},
 	}
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
-			ev, rs := resolveEvent(tc.opts, tc.info, tc.gateClean, tc.findingsCount, tc.reviewedFiles, tc.headUnchanged)
+			ev, rs := resolveEvent(tc.opts, tc.info, tc.gateClean, tc.findings, tc.reviewedFiles, tc.headUnchanged)
 			if ev != tc.wantEvent || rs != tc.wantReason {
 				t.Fatalf("got (%q,%q), want (%q,%q)", ev, rs, tc.wantEvent, tc.wantReason)
 			}
 		})
+	}
+}
+
+func TestResolveEventThreshold(t *testing.T) {
+	info := PRInfo{Owner: "o", Repo: "r", Number: 1, HeadSHA: "h", AuthorAssociation: "MEMBER"}
+	opts := PostReviewOptions{Approval: config.ApprovalPolicy{Mode: "threshold", MaxSeverity: "low"}}
+	if ev, rs := resolveEvent(opts, info, true, []engine.Finding{{Severity: "low"}}, 1, true); ev != "APPROVE" || rs != approveReasonApproved {
+		t.Fatalf("low finding should approve under low threshold, got (%q,%q)", ev, rs)
+	}
+	if ev, rs := resolveEvent(opts, info, true, []engine.Finding{{Severity: "medium"}}, 1, true); ev != "COMMENT" || rs != approveReasonThresholdFailed {
+		t.Fatalf("medium finding should not approve under low threshold, got (%q,%q)", ev, rs)
 	}
 }
 
@@ -66,7 +79,7 @@ func approveInfo() *PRInfo {
 }
 
 func approveOpts() PostReviewOptions {
-	return PostReviewOptions{ApproveClean: true, GateClean: true, ReviewedFiles: 2}
+	return PostReviewOptions{Approval: config.ApprovalPolicy{Mode: "clean"}, GateClean: true, ReviewedFiles: 2}
 }
 
 func TestPostReviewApprovesCleanPR(t *testing.T) {
@@ -125,18 +138,38 @@ func TestPostReviewApproveDegradesGateFailedToComment(t *testing.T) {
 	}
 }
 
-func TestPostReviewApproveDegradesFindingsPresentToComment(t *testing.T) {
+func TestPostReviewCleanApprovalDegradesFindingsPresentToComment(t *testing.T) {
 	c := &recordClient{}
 	finding := engine.Finding{File: "p.go", Line: 2, Severity: "low", Category: "style", Rationale: "minor issue"}
 	res, err := PostReview(stdctx.Background(), c, approveInfo(), []engine.Finding{finding}, sampleDiffs(), staticSummary("review"), nil, approveOpts())
 	if err != nil {
 		t.Fatalf("PostReview: %v", err)
 	}
-	if res.Event != "COMMENT" || res.Reason != approveReasonFindingsPresent {
+	if res.Event != "COMMENT" || res.Reason != approveReasonThresholdFailed {
 		t.Fatalf("finding-present must degrade, got (%q,%q)", res.Event, res.Reason)
 	}
 	if c.gotReview.GetEvent() == "APPROVE" {
 		t.Fatal("must not APPROVE when the latest review has findings")
+	}
+}
+
+func TestPostReviewThresholdApprovesLowFindingWithNote(t *testing.T) {
+	c := &recordClient{}
+	finding := engine.Finding{File: "p.go", Line: 2, Severity: "low", Category: "style", Rationale: "minor issue"}
+	opts := approveOpts()
+	opts.Approval = config.ApprovalPolicy{Mode: "threshold", MaxSeverity: "low", Note: "on_findings"}
+	res, err := PostReview(stdctx.Background(), c, approveInfo(), []engine.Finding{finding}, sampleDiffs(), staticSummary("review"), nil, opts)
+	if err != nil {
+		t.Fatalf("PostReview: %v", err)
+	}
+	if res.Event != "APPROVE" || res.Reason != approveReasonApproved {
+		t.Fatalf("low finding should approve under low threshold, got (%q,%q)", res.Event, res.Reason)
+	}
+	if c.gotReview.GetEvent() != "APPROVE" {
+		t.Fatalf("CreateReview Event must be APPROVE, got %q", c.gotReview.GetEvent())
+	}
+	if !strings.Contains(c.gotReview.GetBody(), "at or below `low`") {
+		t.Fatalf("threshold approval should include a note, got:\n%s", c.gotReview.GetBody())
 	}
 }
 

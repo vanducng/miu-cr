@@ -178,19 +178,19 @@ func SetReviewer(r Reviewer) { reviewer = r }
 // in-memory-only GitHub token (PAT) and whether to post. The LLM-credential
 // fields mirror ReviewRequest (findings still require the LLM).
 type PRReviewRequest struct {
-	Ref          string
-	Token        string
-	Post         bool
-	Suggest      bool
-	PatchRepair  bool
-	ApproveClean bool
-	Gate         string
-	Provider     string
-	APIKey       string
-	BaseURL      string
-	AuthToken    string
-	Model        string
-	Timeout      time.Duration
+	Ref         string
+	Token       string
+	Post        bool
+	Suggest     bool
+	PatchRepair bool
+	Approval    config.ApprovalPolicy
+	Gate        string
+	Provider    string
+	APIKey      string
+	BaseURL     string
+	AuthToken   string
+	Model       string
+	Timeout     time.Duration
 
 	IncludeGlobs    []string
 	ExcludeGlobs    []string
@@ -329,7 +329,7 @@ func reviewCommand(opts *options) *cobra.Command {
 		noPost       bool
 		suggest      bool
 		patchRepair  bool
-		approveClean bool
+		approval     config.ApprovalPolicy
 		noSave       bool
 		force        bool
 		verbose      bool
@@ -364,8 +364,11 @@ func reviewCommand(opts *options) *cobra.Command {
 			return validateReviewFlags(staged, from, to, commit, gate)
 		},
 		RunE: func(cmd *cobra.Command, args []string) error {
-			rcfg, err := loadReviewDefaults(cmd, &gate, &filterMode, &minSeverity, &format, &expand, &tokenBudget, &deepContext, &contextHops, &conversation, &suggest, &patchRepair)
+			rcfg, err := loadReviewDefaults(cmd, &gate, &filterMode, &minSeverity, &format, &expand, &tokenBudget, &deepContext, &contextHops, &conversation, &suggest, &patchRepair, &approval)
 			if err != nil {
+				return err
+			}
+			if err := validateApprovalPolicy(approval); err != nil {
 				return err
 			}
 			// Fail loud: --patch-repair only recovers one-click suggestions, so it is
@@ -405,7 +408,7 @@ func reviewCommand(opts *options) *cobra.Command {
 					post:            post && !noPost,
 					suggest:         suggest,
 					patchRepair:     patchRepair,
-					approveClean:    approveClean,
+					approval:        approval,
 					gate:            gate,
 					provider:        provider,
 					apiKey:          apiKey,
@@ -544,7 +547,9 @@ func reviewCommand(opts *options) *cobra.Command {
 	f.BoolVar(&noPost, "no-post", false, "Dry-run the PR review without posting (default for --pr)")
 	f.BoolVar(&suggest, "suggest", false, "Emit GitHub native one-click suggestions for proven single-line replacements; author-applied, never pushed. Requires --post (inert in dry-run) (default OFF; else a plain hint)")
 	f.BoolVar(&patchRepair, "patch-repair", false, "On --suggest, run a focused 2nd LLM pass per finding whose suggested patch was rejected, to recover a one-click suggestion (highest-severity-first, capped). Requires --suggest; one extra LLM call per repaired candidate (default OFF)")
-	f.BoolVar(&approveClean, "approve-clean", false, "Submit Event=APPROVE only on a clean, non-fork, trusted-author PR; skipped (→ COMMENT) otherwise, never errors. A PAT APPROVE counts toward required reviews. Requires --post (inert in dry-run) (default OFF)")
+	f.StringVar(&approval.Mode, "approval", "off", "Approval policy on --pr --post: off|clean|threshold. A PAT APPROVE counts toward required reviews. Requires --post (inert in dry-run)")
+	f.StringVar(&approval.MaxSeverity, "approval-max-severity", "", "For --approval threshold, approve only when the worst active finding is at or below this severity: info|low|medium|high|critical (default low)")
+	f.StringVar(&approval.Note, "approval-note", "", "Approval review body policy: none|on_findings|always (default none for clean, on_findings for threshold)")
 	f.BoolVar(&noSave, "no-save", false, "Do not persist this review to the local history store (default: every review is saved to ~/.config/miu/cr/state.db)")
 	f.BoolVar(&force, "force", false, "On --pr, re-review even when the head SHA is unchanged since the last saved review (default: an unchanged head SHA short-circuits with skipped_unchanged, no LLM pass)")
 	f.BoolVarP(&verbose, "verbose", "v", false, "Print progress to stderr (default when stderr is a terminal; stdout envelope unchanged)")
@@ -558,19 +563,19 @@ func reviewCommand(opts *options) *cobra.Command {
 
 // prRunArgs bundles the --pr invocation values RunE forwards to runPRReview.
 type prRunArgs struct {
-	ref          string
-	token        string
-	post         bool
-	suggest      bool
-	patchRepair  bool
-	approveClean bool
-	gate         string
-	provider     string
-	apiKey       string
-	baseURL      string
-	authToken    string
-	model        string
-	timeout      time.Duration
+	ref         string
+	token       string
+	post        bool
+	suggest     bool
+	patchRepair bool
+	approval    config.ApprovalPolicy
+	gate        string
+	provider    string
+	apiKey      string
+	baseURL     string
+	authToken   string
+	model       string
+	timeout     time.Duration
 
 	include         []string
 	exclude         []string
@@ -625,7 +630,7 @@ func runPRReview(cmd *cobra.Command, a prRunArgs) error {
 		Post:            a.post,
 		Suggest:         a.suggest,
 		PatchRepair:     a.patchRepair,
-		ApproveClean:    a.approveClean,
+		Approval:        a.approval,
 		Gate:            a.gate,
 		Provider:        a.provider,
 		APIKey:          a.apiKey,
@@ -714,7 +719,7 @@ func runPRReview(cmd *cobra.Command, a prRunArgs) error {
 // command line. An explicit flag always wins (cmd.Flags().Changed); a config
 // value only fills an unset flag. Returns the validated Review so the caller can
 // also derive the timeout default. A config-load error propagates (typed).
-func loadReviewDefaults(cmd *cobra.Command, gate, filterMode, minSeverity, format *string, expand, tokenBudget *int, deepContext *bool, contextHops *int, conversation, suggest, patchRepair *bool) (config.Review, error) {
+func loadReviewDefaults(cmd *cobra.Command, gate, filterMode, minSeverity, format *string, expand, tokenBudget *int, deepContext *bool, contextHops *int, conversation, suggest, patchRepair *bool, approval *config.ApprovalPolicy) (config.Review, error) {
 	cfg, err := config.Load()
 	if err != nil {
 		return config.Review{}, err
@@ -757,6 +762,15 @@ func loadReviewDefaults(cmd *cobra.Command, gate, filterMode, minSeverity, forma
 	if r.PatchRepair != nil && !f.Changed("patch-repair") {
 		*patchRepair = *r.PatchRepair
 	}
+	if r.Approval.Mode != "" && !f.Changed("approval") {
+		approval.Mode = r.Approval.Mode
+	}
+	if r.Approval.MaxSeverity != "" && !f.Changed("approval-max-severity") {
+		approval.MaxSeverity = r.Approval.MaxSeverity
+	}
+	if r.Approval.Note != "" && !f.Changed("approval-note") {
+		approval.Note = r.Approval.Note
+	}
 	return r, nil
 }
 
@@ -788,6 +802,27 @@ func validatePRFlags(post, noPost bool, token string) error {
 			Hint:    "create a PAT with repo scope; dry-run (--no-post) needs no token for public repos",
 			Exit:    2,
 		}
+	}
+	return nil
+}
+
+func validateApprovalPolicy(a config.ApprovalPolicy) error {
+	switch a.Mode {
+	case "", "off", "clean", "threshold":
+	default:
+		return &CLIError{Code: "config.invalid", Message: "--approval must be off|clean|threshold", Exit: 2}
+	}
+	if a.MaxSeverity != "" {
+		switch a.MaxSeverity {
+		case "info", "low", "medium", "high", "critical":
+		default:
+			return &CLIError{Code: "config.invalid", Message: "--approval-max-severity must be info|low|medium|high|critical", Exit: 2}
+		}
+	}
+	switch a.Note {
+	case "", "none", "on_findings", "always":
+	default:
+		return &CLIError{Code: "config.invalid", Message: "--approval-note must be none|on_findings|always", Exit: 2}
 	}
 	return nil
 }
