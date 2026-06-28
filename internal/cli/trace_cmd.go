@@ -3,6 +3,7 @@ package cli
 import (
 	"encoding/json"
 	"errors"
+	"fmt"
 	"io"
 	"strings"
 	"sync"
@@ -11,6 +12,7 @@ import (
 
 	"github.com/vanducng/miu-cr/internal/config"
 	"github.com/vanducng/miu-cr/internal/engine"
+	ghub "github.com/vanducng/miu-cr/internal/github"
 	"github.com/vanducng/miu-cr/internal/store"
 )
 
@@ -41,19 +43,31 @@ func newTraceSink(w io.Writer) func(step string, payload any) {
 // provider and never posted; secrets were redacted at persist.
 func traceCommand(_ *options) *cobra.Command {
 	cmd := &cobra.Command{
-		Use:   "trace <id>",
-		Short: "Show the full review trace of a saved review (system prompt, diff, rules, prompts, response)",
+		Use:   "trace <id|owner/repo#number>",
+		Short: "Show the full review trace of a saved review (by review id, or owner/repo#number for that PR's latest)",
 		Args:  cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			id := strings.TrimSpace(args[0])
 			if id == "" {
-				return &CLIError{Code: "trace.id_required", Message: "a non-empty review id is required", Hint: "miucr trace <id>", Exit: 2}
+				return &CLIError{Code: "trace.id_required", Message: "a non-empty review id is required", Hint: "miucr trace <id|owner/repo#number>", Exit: 2}
 			}
 			st, closeStore, err := openHistory(cmd.Context())
 			if err != nil {
 				return err
 			}
 			defer closeStore()
+			// A PR ref (owner/repo#number or a PR URL) resolves to that PR's most
+			// recent review; a bare review id fails ParseRef and falls through.
+			if ref, perr := ghub.ParseRef(id); perr == nil {
+				lr, found, lerr := st.LatestReviewForPR(cmd.Context(), store.PRKey{Owner: ref.Owner, Repo: ref.Repo, Number: ref.Number})
+				if lerr != nil {
+					return &CLIError{Code: "store.unavailable", Message: config.RedactString(lerr.Error()), Hint: "the review store could not be read — check the DB/config", Exit: 1, Details: map[string]any{"ref": id}}
+				}
+				if !found {
+					return &CLIError{Code: "trace.not_found", Message: fmt.Sprintf("no saved review for %s", id), Hint: "run `miucr history` to list ids", Exit: 2, Details: map[string]any{"ref": id}}
+				}
+				id = lr.ID
+			}
 			rec, err := st.GetReview(cmd.Context(), id)
 			if err != nil {
 				if errors.Is(err, store.ErrReviewNotFound) {

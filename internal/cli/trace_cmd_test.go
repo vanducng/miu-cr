@@ -164,6 +164,31 @@ func TestTraceShowMissingID(t *testing.T) {
 	}
 }
 
+func TestTraceResolvesPRRef(t *testing.T) {
+	s, err := sqlite.Open(filepath.Join(t.TempDir(), "state.db"))
+	if err != nil {
+		t.Fatalf("open store: %v", err)
+	}
+	t.Cleanup(func() { _ = s.Close() })
+	id, err := s.SaveReview(stdctx.Background(), store.ReviewRecord{
+		Mode: "pr", Status: "done", Owner: "acme", Repo: "widget", Number: 7,
+		TraceJSON: `{"system_prompt":"hi"}`,
+	})
+	if err != nil {
+		t.Fatalf("seed: %v", err)
+	}
+	out, err := runTrace(t, s, false, "acme/widget#7")
+	if err != nil {
+		t.Fatalf("trace by ref: %v", err)
+	}
+	if !strings.Contains(out, id) {
+		t.Fatalf("ref did not resolve to review %s:\n%s", id, out)
+	}
+	if _, err := runTrace(t, s, false, "acme/widget#999"); err == nil {
+		t.Fatal("unknown PR ref must error")
+	}
+}
+
 // sinkingReviewer fires req.TraceSink (when set) with two ordered steps before
 // returning, simulating the engine's live capture seams.
 type sinkingReviewer struct{ sawSink bool }
