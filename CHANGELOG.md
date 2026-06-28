@@ -55,6 +55,13 @@ comment with a new marker); subsequent re-runs dedupe normally. On a
 first M5 review **manually** (or off-hours) to absorb the one-time re-post before
 the next scheduled run.
 
+## [0.69.0](https://github.com/vanducng/miu-cr/compare/v0.68.0...v0.69.0) (2026-06-28)
+
+
+### Features
+
+* **summary:** clearer conversation-resolved row in the ledger ([#204](https://github.com/vanducng/miu-cr/issues/204)) ([f1e07e8](https://github.com/vanducng/miu-cr/commit/f1e07e860da4f317f43a9ecc0c14f3ce4390a43d))
+
 ## [0.68.0](https://github.com/vanducng/miu-cr/compare/v0.67.0...v0.68.0) (2026-06-28)
 
 
