@@ -206,24 +206,28 @@ func capLedger(entries []LedgerEntry) []LedgerEntry {
 }
 
 // ledgerResultLine builds the **Result:** lead for ledger mode: open-severity
-// count chips + "N open" when findings are open, else a friendly "Review passed
-// · all clear 🎉". The resolved count is NOT repeated here — it lives in the
-// "✅ Resolved (N)" table heading.
+// count chips when findings are open, else a full-size green "Review passed"
+// badge with at-a-glance open/resolved stats.
 func ledgerResultLine(entries []LedgerEntry) string {
 	counts := map[string]int{}
-	open := 0
+	open, resolved := 0, 0
 	for _, e := range entries {
 		if e.Status == statusResolved {
+			resolved++
 			continue
 		}
 		open++
 		counts[severityLabel(e.Sev)]++
 	}
 
-	// All clear: one friendly line. The resolved count is NOT repeated here — it
-	// already lives in the "✅ Resolved (N)" table heading below.
+	// All clear: a full-size green badge (the badge text IS the pass signal) plus
+	// a tally so it reads as "we checked and it's clean", not a bare stamp.
 	if open == 0 {
-		return "<sub><sub>![Review passed](https://img.shields.io/badge/Review_passed-brightgreen?style=flat)</sub></sub> · all clear 🎉"
+		line := "![Review passed](https://img.shields.io/badge/Review_passed-brightgreen?style=flat) · `0 open`"
+		if resolved > 0 {
+			line += fmt.Sprintf(" · `%d resolved`", resolved)
+		}
+		return line + " 🎉"
 	}
 	// Just the per-severity chips. The open total is NOT appended — it already
 	// shows in the "⚠️ Open (N)" tracking-table heading below.
@@ -257,7 +261,7 @@ func ledgerResultPlain(entries []LedgerEntry) string {
 // (attention, not alarm) and ✅ flags Resolved. Untrusted title/path text is
 // escaped; commit SHAs link to their commit page. inlineURLs (fp -> inline
 // comment URL) links the Location cell to the review thread when one exists.
-func renderLedger(b *strings.Builder, info *PRInfo, entries []LedgerEntry, inlineURLs map[string]string) {
+func renderLedger(b *strings.Builder, info *PRInfo, entries []LedgerEntry, inlineURLs map[string]string, offDiff map[string]bool) {
 	var open, resolved []LedgerEntry
 	for _, e := range entries {
 		if e.Status == statusResolved {
@@ -272,7 +276,7 @@ func renderLedger(b *strings.Builder, info *PRInfo, entries []LedgerEntry, inlin
 		fmt.Fprintf(b, "**⚠️ Open (%d)**\n\n", len(open))
 		b.WriteString("| Priority | Issue | Location | Opened |\n|----------|-------|----------|--------|\n")
 		for _, e := range open {
-			fmt.Fprintf(b, "| %s | %s | %s | %s |\n", ledgerSevCell(e, false), ledgerIssue(e), ledgerLocation(info, e, inlineURLs), shaLink(info, e.OpenSHA))
+			fmt.Fprintf(b, "| %s | %s | %s | %s |\n", ledgerSevCell(e, false), ledgerIssue(e, offDiff[e.FP]), ledgerLocation(info, e, inlineURLs), shaLink(info, e.OpenSHA))
 		}
 		b.WriteString("\n")
 	}
@@ -294,7 +298,7 @@ func renderLedger(b *strings.Builder, info *PRInfo, entries []LedgerEntry, inlin
 			if e.OpenSHA != "" && e.ResSHA != "" && e.OpenSHA != e.ResSHA {
 				resolvedCell = shaLink(info, e.OpenSHA) + " → " + resolvedCell
 			}
-			fmt.Fprintf(b, "| %s | %s | %s | %s |\n", ledgerSevCell(e, true), ledgerIssue(e), ledgerLocation(info, e, inlineURLs), resolvedCell)
+			fmt.Fprintf(b, "| %s | %s | %s | %s |\n", ledgerSevCell(e, true), ledgerIssue(e, false), ledgerLocation(info, e, inlineURLs), resolvedCell)
 		}
 		if extra > 0 {
 			fmt.Fprintf(b, "\n_+%d older resolved finding(s) tracked but not shown._\n", extra)
@@ -317,8 +321,10 @@ func ledgerSevCell(e LedgerEntry, resolved bool) string {
 }
 
 // ledgerIssue is the escaped Issue cell: title (or category fallback), prefixed
-// 🔁 when the finding was reopened.
-func ledgerIssue(e LedgerEntry) string {
+// 🔁 when the finding was reopened, suffixed (off-diff) when the finding's line
+// falls outside the reviewed diff (so GitHub can't carry it as an inline comment
+// and it lives only in this table). The suffix is static text — no escaping.
+func ledgerIssue(e LedgerEntry, offDiff bool) string {
 	t := mdInline(e.Title)
 	if t == "" {
 		t = mdInline(e.Category)
@@ -328,6 +334,9 @@ func ledgerIssue(e LedgerEntry) string {
 	}
 	if e.Reopens > 0 && e.Status != statusResolved {
 		t = "🔁 " + t
+	}
+	if offDiff {
+		t += " <sub>(off-diff)</sub>"
 	}
 	return t
 }

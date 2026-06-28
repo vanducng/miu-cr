@@ -247,26 +247,65 @@ func TestRenderSummaryLedgerReviewPassed(t *testing.T) {
 	now := time.Date(2026, 6, 26, 22, 51, 0, 0, time.UTC)
 	// Non-nil but empty ledger (clean review) → "Review passed", not "No findings".
 	out := RenderSummaryFull(&PRInfo{HeadSHA: "h"}, nil, nil, 0, nil, nil, SummaryOptions{Ledger: []LedgerEntry{}, Now: now})
-	if !strings.Contains(out, "Review_passed") || !strings.Contains(out, "all clear 🎉") {
-		t.Fatalf("clean ledger review should show the Review passed badge + a friendly all-clear note:\n%s", out)
+	if !strings.Contains(out, "Review_passed") || !strings.Contains(out, "`0 open`") || !strings.Contains(out, "🎉") {
+		t.Fatalf("clean ledger review should show the Review passed badge + open tally:\n%s", out)
+	}
+	if strings.Contains(out, "<sub><sub>![Review passed") {
+		t.Fatalf("the Review passed badge should render full-size, not shrunk via <sub>:\n%s", out)
 	}
 	if strings.Contains(out, "No_findings") {
 		t.Fatalf("ledger mode must not use the legacy No findings badge:\n%s", out)
 	}
 }
 
-func TestLedgerResultLineNoDuplicateResolvedCount(t *testing.T) {
-	// All findings resolved (0 open): the Result line must NOT repeat the resolved
-	// count (it lives in the "✅ Resolved (N)" heading); just the all-clear message.
+func TestRenderSummaryLedgerOffDiffMarker(t *testing.T) {
+	// A finding whose line is outside the reviewed diff can't be an inline comment,
+	// so the Open table tags it (off-diff); an on-diff finding is not tagged.
+	now := time.Date(2026, 6, 28, 0, 0, 0, 0, time.UTC)
+	findings := []engine.Finding{
+		{File: "p.go", Line: 2, Title: "on diff finding", Severity: "high", Category: "bug"},   // added line → on-diff
+		{File: "p.go", Line: 99, Title: "off diff finding", Severity: "high", Category: "bug"}, // off-hunk → off-diff
+	}
+	diffs := sampleDiffs()
+	ledger := MergeLedger(nil, findings, "headsha1", map[string]bool{"p.go": true}, now)
+	out := RenderSummaryFull(&PRInfo{Owner: "o", Repo: "r", Number: 1, HeadSHA: "headsha1"}, findings, map[string]any{"truncation_level": "full"}, 0, nil, nil, SummaryOptions{
+		Ledger: ledger,
+		Diffs:  diffs,
+		Now:    now,
+	})
+	if n := strings.Count(out, "(off-diff)"); n != 1 {
+		t.Fatalf("want exactly one (off-diff) marker, got %d:\n%s", n, out)
+	}
+	if !strings.Contains(out, "off diff finding <sub>(off-diff)</sub>") {
+		t.Fatalf("the off-diff finding row must carry the marker:\n%s", out)
+	}
+	if strings.Contains(out, "on diff finding <sub>(off-diff)</sub>") {
+		t.Fatalf("the on-diff finding row must NOT carry the marker:\n%s", out)
+	}
+}
+
+func TestRenderSummaryLedgerNoMarkerWithoutDiff(t *testing.T) {
+	// With no diff to compare against, off-diff is undeterminable → no marker.
+	now := time.Date(2026, 6, 28, 0, 0, 0, 0, time.UTC)
+	findings := []engine.Finding{{File: "p.go", Line: 99, Title: "lonely", Severity: "high"}}
+	ledger := MergeLedger(nil, findings, "h", map[string]bool{"p.go": true}, now)
+	out := RenderSummaryFull(&PRInfo{Owner: "o", Repo: "r", Number: 1, HeadSHA: "h"}, findings, map[string]any{"truncation_level": "full"}, 0, nil, nil, SummaryOptions{Ledger: ledger, Now: now})
+	if strings.Contains(out, "(off-diff)") {
+		t.Fatalf("no diffs → no off-diff marker:\n%s", out)
+	}
+}
+
+func TestLedgerResultLineAllClearShowsStats(t *testing.T) {
+	// All findings resolved (0 open): the all-clear Result line shows the at-a-glance
+	// open/resolved tally beside the full-size green Review passed badge.
 	ledger := []LedgerEntry{
 		{FP: "aaaaaaaaaaaaaaaa", Path: "a.go", Status: statusResolved, Sev: "high", FirstSev: "high", OpenSHA: "aaaaaa1", ResSHA: "bbbbbb2"},
 	}
 	line := ledgerResultLine(ledger)
-	if strings.Contains(line, "resolved") {
-		t.Fatalf("Result line must not duplicate the resolved count, got %q", line)
-	}
-	if !strings.Contains(line, "Review_passed") {
-		t.Fatalf("0-open Result line should be the Review passed message, got %q", line)
+	for _, want := range []string{"Review_passed", "`0 open`", "`1 resolved`", "🎉"} {
+		if !strings.Contains(line, want) {
+			t.Fatalf("all-clear Result line missing %q, got %q", want, line)
+		}
 	}
 }
 
