@@ -172,6 +172,19 @@ func oauthResolver() func(stdctx.Context) (agent.OAuthCredential, bool, error) {
 	}
 }
 
+// quotaWarn routes the quota gate's one-shot >=80% warning to the review's
+// milestone sink when present, else to slog (stderr). The message carries only
+// counts/period, never secrets.
+func quotaWarn(progress func(string)) func(string) {
+	return func(msg string) {
+		if progress != nil {
+			progress(msg)
+		} else {
+			slog.Warn(msg)
+		}
+	}
+}
+
 type engineReviewer struct{}
 
 func (engineReviewer) Review(ctx stdctx.Context, req cli.ReviewRequest) (cli.ReviewOutcome, error) {
@@ -206,6 +219,14 @@ func (engineReviewer) Review(ctx stdctx.Context, req cli.ReviewRequest) (cli.Rev
 		eng.Store = engineStoreFor(hist)
 	}
 
+	gate, closeGate, qerr := buildQuotaGate(ctx, cfg, req.Provider, nil, quotaWarn(req.Progress))
+	if qerr != nil {
+		return cli.ReviewOutcome{}, qerr
+	}
+	if closeGate != nil {
+		defer closeGate()
+	}
+
 	res, err := eng.Review(ctx, engine.Request{
 		Mode:            modeFor(req),
 		Staged:          req.Staged,
@@ -225,6 +246,7 @@ func (engineReviewer) Review(ctx stdctx.Context, req cli.ReviewRequest) (cli.Rev
 		Subagents:       engineSubagents(req.Subagents),
 		Provider:        string(creds.Kind),
 		Model:           creds.Model,
+		Quota:           gate,
 
 		Rules:            loadRules(req.RepoDir, true),
 		RulesFork:        false,
@@ -407,6 +429,13 @@ func (prReviewer) ReviewPR(ctx stdctx.Context, req cli.PRReviewRequest) (cli.Rev
 	if hist != nil {
 		eng.Store = engineStoreFor(hist)
 	}
+	gate, closeGate, qerr := buildQuotaGate(ctx, cfg, firstNonEmpty(req.QuotaProvider, req.Provider), req.Quota, quotaWarn(req.Progress))
+	if qerr != nil {
+		return cli.ReviewOutcome{}, qerr
+	}
+	if closeGate != nil {
+		defer closeGate()
+	}
 	// Hoisted so the same loaded (fork-dropped) rule set feeds BOTH the engine
 	// (injection) and the publish-layer citation map (validation/linking).
 	loaded := loadRules(dir, !info.IsFork)
@@ -434,6 +463,7 @@ func (prReviewer) ReviewPR(ctx stdctx.Context, req cli.PRReviewRequest) (cli.Rev
 		Subagents:       engineSubagents(req.Subagents),
 		Provider:        string(creds.Kind),
 		Model:           creds.Model,
+		Quota:           gate,
 		Owner:           info.Owner,
 		Repo:            info.Repo,
 		Number:          info.Number,

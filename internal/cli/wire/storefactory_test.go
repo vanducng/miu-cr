@@ -178,3 +178,18 @@ func assertUnavailableRedacted(t *testing.T, err error) {
 		t.Fatalf("DSN secret leaked into error: %q", ce.Message)
 	}
 }
+
+func TestQuotaProviderName(t *testing.T) {
+	tests := []struct{ name, defaultProvider, want string }{
+		{"", "anthropic", "anthropic"},     // unset flag -> default
+		{"auto", "anthropic", "anthropic"}, // --provider default sentinel -> default
+		{"auto", "zai", "zai"},             // resolves to whatever default_provider is
+		{"zai", "anthropic", "zai"},        // explicit instance wins
+		{"openai", "zai", "openai"},        // explicit instance wins
+	}
+	for _, tt := range tests {
+		if got := quotaProviderName(tt.name, tt.defaultProvider); got != tt.want {
+			t.Errorf("quotaProviderName(%q, %q) = %q, want %q", tt.name, tt.defaultProvider, got, tt.want)
+		}
+	}
+}

@@ -320,6 +320,8 @@ func mergeSubagentOutputs(results []subagentRunResult) (ReviewOutput, error, int
 			out.Confidence = r.out.Confidence
 			out.ConfidenceReason = r.out.ConfidenceReason
 		}
+		out.Usage.InputTokens += r.out.Usage.InputTokens
+		out.Usage.OutputTokens += r.out.Usage.OutputTokens
 	}
 	out.Walkthrough = strings.Join(parts, "\n\n")
 	if len(out.FileSummaries) == 0 {

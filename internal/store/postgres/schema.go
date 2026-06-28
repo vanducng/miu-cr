@@ -37,6 +37,21 @@ CREATE TABLE IF NOT EXISTS pr_findings (
 	last_seen   TEXT NOT NULL,
 	PRIMARY KEY (owner, repo, number, fingerprint)
 );
+` + ProviderUsageSchemaSQL
+
+// ProviderUsageSchemaSQL is the per-provider usage-counter table. Split into its
+// own const so it can also run as the 0004 migration (SchemaSQL=0001 won't re-run
+// on an existing DB), while staying part of SchemaSQL for the schema-parity test.
+const ProviderUsageSchemaSQL = `
+CREATE TABLE IF NOT EXISTS provider_usage (
+	provider      TEXT NOT NULL,
+	period        TEXT NOT NULL,
+	input_tokens  BIGINT NOT NULL DEFAULT 0,
+	output_tokens BIGINT NOT NULL DEFAULT 0,
+	requests      BIGINT NOT NULL DEFAULT 0,
+	updated_at    TEXT NOT NULL,
+	PRIMARY KEY (provider, period)
+);
 `
 
 const HostSchemaSQL = `

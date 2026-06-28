@@ -192,6 +192,14 @@ type PRReviewRequest struct {
 	Model       string
 	Timeout     time.Duration
 
+	// Quota is the resolved provider's usage quota (nil = none). Threaded by the
+	// serve host whose host-config provider quota is not in the user config.toml;
+	// the CLI --pr path leaves it nil and wire looks it up from the loaded config.
+	// QuotaProvider is the counter key (the provider instance name) — set by serve
+	// (where Provider carries the kind); empty on the CLI path (wire uses Provider).
+	Quota         *config.QuotaConfig
+	QuotaProvider string
+
 	IncludeGlobs    []string
 	ExcludeGlobs    []string
 	Extensions      []string
@@ -726,6 +734,9 @@ func loadReviewDefaults(cmd *cobra.Command, gate, filterMode, minSeverity, forma
 	}
 	r := cfg.Review
 	if err := config.ValidateReview(r); err != nil {
+		return r, err
+	}
+	if err := config.ValidateProviderQuotas(cfg.Providers); err != nil {
 		return r, err
 	}
 	f := cmd.Flags()

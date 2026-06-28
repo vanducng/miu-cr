@@ -334,5 +334,8 @@ func mergeProvider(base, file Provider) Provider {
 	if file.Auth != "" {
 		out.Auth = file.Auth
 	}
+	if file.Quota != nil {
+		out.Quota = file.Quota
+	}
 	return out
 }

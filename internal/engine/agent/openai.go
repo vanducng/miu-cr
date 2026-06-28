@@ -185,6 +185,7 @@ func (a *openaiAgent) Review(ctx stdctx.Context, rc Context) (engine.ReviewOutpu
 	}
 
 	emptyRounds := 0
+	var usage engine.Usage
 	for turn := 0; turn < maxToolTurns; turn++ {
 		if err := ctx.Err(); err != nil {
 			return engine.ReviewOutput{}, err
@@ -206,11 +207,14 @@ func (a *openaiAgent) Review(ctx stdctx.Context, rc Context) (engine.ReviewOutpu
 		if len(resp.Choices) == 0 {
 			return engine.ReviewOutput{}, fmt.Errorf("agent: empty completion (no choices)")
 		}
+		usage.InputTokens += resp.Usage.PromptTokens
+		usage.OutputTokens += resp.Usage.CompletionTokens
 		msg := resp.Choices[0].Message
 		params.Messages = append(params.Messages, msg.ToParam())
 
 		if len(msg.ToolCalls) == 0 {
 			if out, ok := parseFindings(msg.Content); ok {
+				out.Usage = usage
 				rc.Trace.SetFinalResponse(msg.Content)
 				return out, nil
 			}

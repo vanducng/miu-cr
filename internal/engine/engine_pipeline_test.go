@@ -32,6 +32,8 @@ type fakeAgent struct {
 	gotRelated     string
 	gotInstruction string
 	gotProgress    bool
+	reviewCalls    int          // incremented on each Review (quota-block tests assert 0)
+	usage          engine.Usage // returned on ReviewOutput.Usage (quota tests)
 
 	// repair drives RepairPatch; nil => default "" (no usable replacement). It
 	// records every call so tests can assert call count / order / skip.
@@ -40,6 +42,7 @@ type fakeAgent struct {
 }
 
 func (f *fakeAgent) Review(_ stdctx.Context, rc engine.AgentContext) (engine.ReviewOutput, error) {
+	f.reviewCalls++
 	f.gotRev = rc.Rev
 	f.gotRules = rc.Rules
 	f.gotSemantic = rc.SemanticContext
@@ -62,6 +65,7 @@ func (f *fakeAgent) Review(_ stdctx.Context, rc engine.AgentContext) (engine.Rev
 		Findings:      findings,
 		Walkthrough:   "Sample walkthrough: this change updates the example handler.",
 		FileSummaries: map[string]string{"app.go": "Adds a sample handler."},
+		Usage:         f.usage,
 	}, nil
 }
 

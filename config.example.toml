@@ -57,6 +57,16 @@ default_provider = "anthropic"
 # # auth_command = ["gopass", "show", "-o", "ai/zai"]  # argv only; stdout is the token
 # # auth_token = "<token>"               # discouraged: plaintext on disk — prefer auth_env
 
+# ── Optional: cap a provider instance's usage (no quota by default) ──
+# Per-instance, aggregating across every review/repo that uses the provider —
+# handy to bound a pricier provider everywhere at once. Fail-closed: at/over the
+# limit a review is blocked with a typed `quota.exceeded` error (on the serve
+# host the PR is skipped+logged). Counters persist in state.db / Postgres.
+# [providers.openai.quota]
+# dimension = "tokens"                   # tokens (default; input+output) | requests (one per review)
+# limit     = 2_000_000                  # cap in the chosen dimension; must be > 0
+# window    = "5h"                       # Go duration (1h, 5h, 24h, 168h) OR "monthly" (calendar UTC)
+
 # ── Example: a generic OpenAI-compatible gateway (DeepSeek, Moonshot, self-hosted, …) ──
 # Any endpoint speaking the OpenAI chat-completions API. The credential is sent
 # as the API key. Select it with:  miucr review --staged --provider my-gateway
