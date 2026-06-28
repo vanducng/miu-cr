@@ -39,8 +39,10 @@ func SyncSummaryConversationResolved(ctx stdctx.Context, client Client, info *PR
 		return result, nil
 	}
 	inlineURLs, err := ExistingFingerprints(ctx, client, info)
+	updateReason := "updated"
 	if err != nil {
-		return ThreadResolutionSyncResult{Reason: "inline_fetch_failed", Entries: len(next), Resolved: delta.Resolved, Reopened: delta.Reopened}, err
+		inlineURLs = nil
+		updateReason = "updated_without_inline_urls"
 	}
 	nextBody, ok := replaceSummaryLedgerBody(body, info, next, inlineURLs)
 	if !ok {
@@ -50,7 +52,7 @@ func SyncSummaryConversationResolved(ctx stdctx.Context, client Client, info *PR
 		return ThreadResolutionSyncResult{Reason: "summary_edit_failed", Entries: len(next), Resolved: delta.Resolved, Reopened: delta.Reopened}, mapWriteError("github.thread_resolution_sync_failed", "editing summary comment", err)
 	}
 	result.Action = UpsertEdited
-	result.Reason = "updated"
+	result.Reason = updateReason
 	return result, nil
 }
 
@@ -141,16 +143,25 @@ func replaceSummaryLedgerBody(body string, info *PRInfo, ledger []LedgerEntry, i
 }
 
 func replaceResultLine(body, result string) string {
-	start := strings.Index(body, "**Result:**")
-	if start < 0 {
-		return body
+	start := 0
+	for start <= len(body) {
+		end := strings.IndexByte(body[start:], '\n')
+		lineEnd := len(body)
+		if end >= 0 {
+			lineEnd = start + end
+		}
+		if strings.HasPrefix(body[start:lineEnd], "**Result:**") {
+			if end < 0 {
+				return body[:start] + "**Result:** " + result
+			}
+			return body[:start] + "**Result:** " + result + body[lineEnd:]
+		}
+		if end < 0 {
+			break
+		}
+		start = lineEnd + 1
 	}
-	endRel := strings.IndexByte(body[start:], '\n')
-	if endRel < 0 {
-		return body[:start] + "**Result:** " + result
-	}
-	end := start + endRel
-	return body[:start] + "**Result:** " + result + body[end:]
+	return body
 }
 
 func renderLedgerTables(info *PRInfo, ledger []LedgerEntry, inlineURLs map[string]string) string {

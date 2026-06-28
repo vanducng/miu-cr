@@ -3,6 +3,8 @@ package serve
 import (
 	stdctx "context"
 	"errors"
+	"io"
+	"log/slog"
 	"net/http"
 	"os"
 	"strings"
@@ -159,6 +161,47 @@ func TestHostRunnerThreadResolutionSyncThrottleIsPerPR(t *testing.T) {
 	}
 	if !r.shouldSyncThreadResolution("octo/hello", 1, interval, now.Add(interval)) {
 		t.Fatal("same PR should run again after interval")
+	}
+}
+
+func TestHostRunnerPrunesThreadResolutionSyncThrottleKeys(t *testing.T) {
+	now := time.Date(2026, 6, 28, 10, 0, 0, 0, time.UTC)
+	r := &HostRunner{threadSyncLast: map[string]time.Time{
+		"octo/hello#1": now,
+		"octo/hello#2": now,
+		"octo/other#1": now,
+		"bad-key":      now,
+	}}
+
+	r.pruneThreadResolutionSync("octo/hello", []int64{2})
+
+	if _, ok := r.threadSyncLast["octo/hello#1"]; ok {
+		t.Fatal("closed PR key was not pruned")
+	}
+	if _, ok := r.threadSyncLast["octo/hello#2"]; !ok {
+		t.Fatal("open PR key was pruned")
+	}
+	if _, ok := r.threadSyncLast["octo/other#1"]; !ok {
+		t.Fatal("different repo key was pruned")
+	}
+	if _, ok := r.threadSyncLast["bad-key"]; !ok {
+		t.Fatal("different prefix key was pruned")
+	}
+}
+
+func TestHostRunnerThreadResolutionSyncDropClearsThrottle(t *testing.T) {
+	now := time.Date(2026, 6, 28, 10, 0, 0, 0, time.UTC)
+	r := &HostRunner{
+		threadSyncLast: map[string]time.Time{"octo/hello#1": now},
+		threadSyncSem:  make(chan struct{}, 1),
+		log:            slog.New(slog.NewTextHandler(io.Discard, nil)),
+	}
+	r.threadSyncSem <- struct{}{}
+
+	r.enqueueThreadResolutionSync(stdctx.Background(), nil, HostRepoConfig{Slug: "octo/hello"}, prWithHead(1, "sha-A"), now)
+
+	if _, ok := r.threadSyncLast["octo/hello#1"]; ok {
+		t.Fatal("dropped sync kept throttle reservation")
 	}
 }
 

@@ -21,6 +21,14 @@ func (c *syncRecordClient) ReviewThreads(stdctx.Context, string, string, int) ([
 	return c.threads, nil
 }
 
+type syncRecordClientWithExistingError struct {
+	syncRecordClient
+}
+
+func (c *syncRecordClientWithExistingError) ListReviewComments(stdctx.Context, string, string, int, *gh.PullRequestListCommentsOptions) ([]*gh.PullRequestComment, *gh.Response, error) {
+	return nil, nil, stdctx.DeadlineExceeded
+}
+
 func TestSyncLedgerConversationResolvedMarksOpen(t *testing.T) {
 	now := time.Date(2026, 6, 28, 10, 0, 0, 0, time.UTC)
 	entries := []LedgerEntry{{FP: fpStr(1), Path: "a.go", Status: statusOpen, Sev: "low", FirstSev: "low", OpenSHA: "aaaaaa1"}}
@@ -112,6 +120,30 @@ func TestReplaceSummaryLedgerBodyAcceptsResultLineWithoutSpace(t *testing.T) {
 	}
 }
 
+func TestReplaceSummaryLedgerBodyIgnoresInlineResultText(t *testing.T) {
+	now := time.Date(2026, 6, 28, 10, 0, 0, 0, time.UTC)
+	info := &PRInfo{Owner: "o", Repo: "r", Number: 1, HeadSHA: "bbbbbb2", HTMLBase: "https://github.com/o/r"}
+	f := engine.Finding{File: "a.go", Line: 5, Severity: "low", Category: "bug", Title: "thing", QuotedCode: "x"}
+	ledger := MergeLedger(nil, []engine.Finding{f}, "aaaaaa1", map[string]bool{"a.go": true}, now)
+	body := "model text mentions **Result:** before the summary\n" + RenderSummaryFull(info, []engine.Finding{f}, nil, 0, nil, nil, SummaryOptions{Ledger: ledger})
+	next := append([]LedgerEntry(nil), ledger...)
+	next[0].Status = statusResolved
+	next[0].ResSHA = "bbbbbb2"
+	next[0].ResKind = resolutionConversation
+	next[0].ResAt = now.Add(time.Hour).Format(time.RFC3339)
+
+	out, ok := replaceSummaryLedgerBody(body, info, next, nil)
+	if !ok {
+		t.Fatal("replaceSummaryLedgerBody returned false")
+	}
+	if !strings.Contains(out, "model text mentions **Result:** before the summary") {
+		t.Fatalf("untrusted result text was modified:\n%s", out)
+	}
+	if !strings.Contains(out, "\n**Result:** <sub") || !strings.Contains(out, "conversation resolved") {
+		t.Fatalf("summary result line not updated:\n%s", out)
+	}
+}
+
 func TestSyncSummaryConversationResolvedEditsExistingComment(t *testing.T) {
 	now := time.Date(2026, 6, 28, 10, 0, 0, 0, time.UTC)
 	info := &PRInfo{Owner: "o", Repo: "r", Number: 1, HeadSHA: "bbbbbb2", HTMLBase: "https://github.com/o/r", ReviewCount: 1}
@@ -137,5 +169,30 @@ func TestSyncSummaryConversationResolvedEditsExistingComment(t *testing.T) {
 	}
 	if !strings.Contains(client.editedBody, "conversation resolved") {
 		t.Fatalf("edited body missing conversation marker:\n%s", client.editedBody)
+	}
+}
+
+func TestSyncSummaryConversationResolvedContinuesWithoutInlineURLs(t *testing.T) {
+	now := time.Date(2026, 6, 28, 10, 0, 0, 0, time.UTC)
+	info := &PRInfo{Owner: "o", Repo: "r", Number: 1, HeadSHA: "bbbbbb2", HTMLBase: "https://github.com/o/r", ReviewCount: 1}
+	f := engine.Finding{File: "a.go", Line: 5, Severity: "low", Category: "bug", Title: "thing", QuotedCode: "x"}
+	fp := Fingerprint(f)
+	body := RenderSummaryFull(info, []engine.Finding{f}, nil, 0, nil, nil, SummaryOptions{
+		Ledger: MergeLedger(nil, []engine.Finding{f}, "aaaaaa1", map[string]bool{"a.go": true}, now),
+	})
+	client := &syncRecordClientWithExistingError{syncRecordClient: syncRecordClient{
+		recordClient: recordClient{issueStore: []*gh.IssueComment{{ID: gh.Ptr(int64(7)), Body: gh.Ptr(body)}}},
+		threads:      []ReviewThread{{Resolved: true, Comments: []ReviewThreadComment{{Body: fpMarker(fp)}}}},
+	}}
+
+	res, err := SyncSummaryConversationResolved(stdctx.Background(), client, info, now.Add(time.Hour))
+	if err != nil {
+		t.Fatalf("SyncSummaryConversationResolved: %v", err)
+	}
+	if res.Action != UpsertEdited || res.Reason != "updated_without_inline_urls" || client.editedID != 7 {
+		t.Fatalf("unexpected result/action: res=%+v editedID=%d", res, client.editedID)
+	}
+	if !strings.Contains(client.editedBody, "conversation resolved") || !strings.Contains(client.editedBody, "a.go:5") {
+		t.Fatalf("edited body missing fallback location:\n%s", client.editedBody)
 	}
 }

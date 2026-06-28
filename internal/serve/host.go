@@ -10,6 +10,7 @@ import (
 	"log/slog"
 	"math"
 	"regexp"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -27,6 +28,7 @@ const hostJobHeartbeatInterval = 30 * time.Second
 const hostFailedRetryBase = 5 * time.Minute
 const hostFailedRetryCap = time.Hour
 const defaultThreadResolutionSyncInterval = 5 * time.Minute
+const maxThreadResolutionSyncWorkers = 2
 
 var runHostDrainGrace = 10 * time.Second
 var hostPRFilterRegexCache sync.Map
@@ -111,6 +113,7 @@ type HostRunner struct {
 	janitorInterval time.Duration
 	now             func() time.Time
 	threadSyncLast  map[string]time.Time
+	threadSyncSem   chan struct{}
 }
 
 type hostRunnerSnapshot struct {
@@ -177,6 +180,7 @@ func NewHostRunner(cfg HostRunnerConfig) (*HostRunner, error) {
 		janitorInterval: cfg.JanitorInterval,
 		now:             cfg.Now,
 		threadSyncLast:  map[string]time.Time{},
+		threadSyncSem:   make(chan struct{}, maxThreadResolutionSyncWorkers),
 	}, nil
 }
 
@@ -500,10 +504,11 @@ func (h *HostRunner) pollRepo(ctx stdctx.Context, snap hostRunnerSnapshot, repo 
 			if threadSyncClient == nil {
 				threadSyncClient = mgithub.NewClient(token)
 			}
-			h.syncThreadResolution(ctx, threadSyncClient, repo, pr, now)
+			h.enqueueThreadResolutionSync(ctx, threadSyncClient, repo, pr, now)
 		}
 	}
 	res, err := h.store.ReconcileHostClosedPRs(ctx, store.HostClosedPRsInput{RepoID: repoID, OpenNumbers: openNumbers, Now: now})
+	h.pruneThreadResolutionSync(repo.Slug, openNumbers)
 	if err != nil {
 		h.log.Warn("host: failed to reconcile closed PRs", "repo", repo.Slug, "error", config.RedactString(err.Error()))
 	} else if res.SessionsClosed > 0 || res.JobsCanceled > 0 {
@@ -524,6 +529,50 @@ func (h *HostRunner) shouldSyncThreadResolution(slug string, number int64, inter
 	}
 	h.threadSyncLast[key] = now
 	return true
+}
+
+func (h *HostRunner) pruneThreadResolutionSync(slug string, openNumbers []int64) {
+	open := make(map[int64]struct{}, len(openNumbers))
+	for _, number := range openNumbers {
+		open[number] = struct{}{}
+	}
+	prefix := slug + "#"
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	for key := range h.threadSyncLast {
+		if !strings.HasPrefix(key, prefix) {
+			continue
+		}
+		number, err := strconv.ParseInt(strings.TrimPrefix(key, prefix), 10, 64)
+		if err != nil {
+			delete(h.threadSyncLast, key)
+			continue
+		}
+		if _, ok := open[number]; !ok {
+			delete(h.threadSyncLast, key)
+		}
+	}
+}
+
+func (h *HostRunner) enqueueThreadResolutionSync(ctx stdctx.Context, client mgithub.Client, repo HostRepoConfig, pr *github.PullRequest, now time.Time) {
+	select {
+	case h.threadSyncSem <- struct{}{}:
+	default:
+		h.clearThreadResolutionSync(repo.Slug, int64(pr.GetNumber()))
+		h.log.Warn("host: conversation resolution sync dropped; workers busy", "repo", repo.Slug, "pr", pr.GetNumber(), "head_sha", pr.GetHead().GetSHA())
+		return
+	}
+	go func() {
+		defer func() { <-h.threadSyncSem }()
+		h.syncThreadResolution(ctx, client, repo, pr, now)
+	}()
+}
+
+func (h *HostRunner) clearThreadResolutionSync(slug string, number int64) {
+	key := fmt.Sprintf("%s#%d", slug, number)
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	delete(h.threadSyncLast, key)
 }
 
 func (h *HostRunner) syncThreadResolution(ctx stdctx.Context, client mgithub.Client, repo HostRepoConfig, pr *github.PullRequest, now time.Time) {
