@@ -24,11 +24,12 @@ const (
 	approveReasonHeadMoved             = "head_moved"
 	approveReasonAlreadyDone           = "already_approved"
 	approveReasonSelfForbidden         = "self_approve_forbidden"
+	approveReasonForbidden             = "approve_forbidden"
 	approveReasonRejected              = "approve_rejected"
 	approveReasonIdempotencyUnverified = "idempotency_unverified"
 )
 
-const defaultApprovalMaxSeverity = "low"
+const defaultApprovalMaxPriority = "P4"
 
 // trustedAssociations are the only AuthorAssociation values we auto-approve. This
 // is a fail-CLOSED allowlist, not a denylist: an empty string (API didn't populate
@@ -88,10 +89,10 @@ func normalizeApprovalPolicy(policy config.ApprovalPolicy) config.ApprovalPolicy
 	case "", "off":
 		return config.ApprovalPolicy{}
 	case "clean":
-		policy.MaxSeverity = ""
+		policy.MaxPriority = ""
 	case "threshold":
-		if policy.MaxSeverity == "" {
-			policy.MaxSeverity = defaultApprovalMaxSeverity
+		if policy.MaxPriority == "" {
+			policy.MaxPriority = defaultApprovalMaxPriority
 		}
 	default:
 		return config.ApprovalPolicy{}
@@ -111,9 +112,26 @@ func approvalFindingsAllowed(policy config.ApprovalPolicy, findings []engine.Fin
 	case "clean":
 		return len(findings) == 0
 	case "threshold":
-		return engine.MaxSeverityRank(findings) <= engine.MaxSeverityRank([]engine.Finding{{Severity: policy.MaxSeverity}})
+		return engine.MaxSeverityRank(findings) <= approvalPriorityRank(policy.MaxPriority)
 	default:
 		return false
+	}
+}
+
+func approvalPriorityRank(priority string) int {
+	switch priority {
+	case "P0":
+		return engine.MaxSeverityRank([]engine.Finding{{Severity: "critical"}})
+	case "P1":
+		return engine.MaxSeverityRank([]engine.Finding{{Severity: "high"}})
+	case "P2":
+		return engine.MaxSeverityRank([]engine.Finding{{Severity: "medium"}})
+	case "P3":
+		return engine.MaxSeverityRank([]engine.Finding{{Severity: "low"}})
+	case "P4":
+		return engine.MaxSeverityRank([]engine.Finding{{Severity: "info"}})
+	default:
+		return -1
 	}
 }
 
@@ -123,7 +141,7 @@ func approvalBody(policy config.ApprovalPolicy, findings []engine.Finding) strin
 		return ""
 	}
 	if policy.Mode == "threshold" && len(findings) > 0 {
-		return fmt.Sprintf("Approved: only findings at or below `%s` remain under the configured approval policy. Review the summary before merge.", policy.MaxSeverity)
+		return fmt.Sprintf("Approved: only findings at or below `%s` remain under the configured approval policy. Review the summary before merge.", policy.MaxPriority)
 	}
 	return "Approved by the configured approval policy."
 }

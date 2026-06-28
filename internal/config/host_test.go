@@ -32,7 +32,7 @@ x:
     patch_repair: true
     approval:
       mode: threshold
-      max_severity: low
+      max_priority: P3
       note: on_findings
     pr_filter:
       comment_trigger_regexes:
@@ -101,7 +101,7 @@ repos:
 	if cfg.Host.Review.PatchRepair == nil || !*cfg.Host.Review.PatchRepair {
 		t.Fatalf("merged host review not loaded: %+v", cfg.Host.Review)
 	}
-	if cfg.Host.Review.Approval.Mode != "threshold" || cfg.Host.Review.Approval.MaxSeverity != "low" || cfg.Host.Review.Approval.Note != "on_findings" {
+	if cfg.Host.Review.Approval.Mode != "threshold" || cfg.Host.Review.Approval.MaxPriority != "P3" || cfg.Host.Review.Approval.Note != "on_findings" {
 		t.Fatalf("host approval not loaded: %+v", cfg.Host.Review.Approval)
 	}
 	if cfg.Host.Review.Subagents.Mode != "auto" || len(cfg.Host.Review.Subagents.Agents) != 1 {
@@ -367,32 +367,32 @@ func TestLoadHostRejectsBadApproval(t *testing.T) {
   review:
     approval:
       mode: threshold
-      max_severity: minor
+      max_priority: P9
 repos:
   - name: service-api
     slug: example-org/service-api
     git_url: https://github.com/example-org/service-api.git
 `)
 	err := loadHostErr(path)
-	if !isConfigInvalid(err) || !strings.Contains(err.Error(), "host.review.approval.max_severity") {
+	if !isConfigInvalid(err) || !strings.Contains(err.Error(), "host.review.approval.max_priority") {
 		t.Fatalf("want host approval config.invalid, got %v", err)
 	}
 }
 
-func TestLoadHostRejectsApprovalSeverityOutsideThreshold(t *testing.T) {
+func TestLoadHostRejectsApprovalPriorityOutsideThreshold(t *testing.T) {
 	path := writeHostConfig(t, minimalHostYAML()+`
   review:
     approval:
       mode: clean
-      max_severity: low
+      max_priority: P3
 repos:
   - name: service-api
     slug: example-org/service-api
     git_url: https://github.com/example-org/service-api.git
 `)
 	err := loadHostErr(path)
-	if !isConfigInvalid(err) || !strings.Contains(err.Error(), "host.review.approval.max_severity") {
-		t.Fatalf("want host approval max_severity config.invalid, got %v", err)
+	if !isConfigInvalid(err) || !strings.Contains(err.Error(), "host.review.approval.max_priority") {
+		t.Fatalf("want host approval max_priority config.invalid, got %v", err)
 	}
 }
 

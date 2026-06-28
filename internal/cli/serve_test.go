@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"os"
 	"path/filepath"
+	"reflect"
 	"strings"
 	"testing"
 	"time"
@@ -497,6 +498,78 @@ func TestBuildServeHostReposMergesPRFilterRules(t *testing.T) {
 	}
 	if repos[0].PRFilter.DefaultAction != "exclude" {
 		t.Fatalf("merged default action = %q, want exclude", repos[0].PRFilter.DefaultAction)
+	}
+}
+
+func TestBuildServeHostReposPolicyHashIgnoresPublishOnlyFields(t *testing.T) {
+	baseReview := config.HostReview{
+		Gate:        "high",
+		FilterMode:  "diff_context",
+		MinSeverity: "low",
+		Format:      "full",
+		Post:        boolSetting(true),
+		Suggest:     boolSetting(false),
+		Approval:    config.ApprovalPolicy{Mode: "off"},
+		PRFilter: config.HostPRFilter{Rules: []config.HostPRFilterRule{{
+			Action:       "exclude",
+			TitleRegexes: []string{`^chore\(deps\):`},
+		}}},
+	}
+	cfg := config.HostConfig{
+		Review: baseReview,
+		Repos: []config.HostRepo{{
+			Name:          "service-api",
+			Slug:          "example-org/service-api",
+			Owner:         "example-org",
+			Repo:          "service-api",
+			GitURL:        "https://github.com/example-org/service-api.git",
+			GithubAccount: "pat",
+		}},
+	}
+	base, _, err := buildServeHostRepos(stdctx.Background(), cfg, filepath.Join(t.TempDir(), "host.yaml"))
+	if err != nil {
+		t.Fatalf("buildServeHostRepos base: %v", err)
+	}
+	cfg.Review.Format = "minimal"
+	cfg.Review.Suggest = boolSetting(true)
+	cfg.Review.Approval = config.ApprovalPolicy{Mode: "threshold", MaxPriority: "P3", Note: "on_findings"}
+	cfg.Review.PRFilter.Rules = append(cfg.Review.PRFilter.Rules, config.HostPRFilterRule{Action: "exclude", TitleRegexes: []string{`^chore\(main\): release `}})
+	got, _, err := buildServeHostRepos(stdctx.Background(), cfg, filepath.Join(t.TempDir(), "host.yaml"))
+	if err != nil {
+		t.Fatalf("buildServeHostRepos changed: %v", err)
+	}
+	if got[0].PolicyHash != base[0].PolicyHash {
+		t.Fatalf("publish-only fields changed policy hash: base=%s got=%s", base[0].PolicyHash, got[0].PolicyHash)
+	}
+	cfg.Review.Gate = "critical"
+	changed, _, err := buildServeHostRepos(stdctx.Background(), cfg, filepath.Join(t.TempDir(), "host.yaml"))
+	if err != nil {
+		t.Fatalf("buildServeHostRepos analysis changed: %v", err)
+	}
+	if changed[0].PolicyHash == base[0].PolicyHash {
+		t.Fatal("analysis field change should change policy hash")
+	}
+}
+
+func TestHostReviewAnalysisShapeClassifiesEveryField(t *testing.T) {
+	hashed := map[string]bool{}
+	shape := reflect.TypeOf(hostReviewAnalysisFields{})
+	for i := 0; i < shape.NumField(); i++ {
+		hashed[shape.Field(i).Name] = true
+	}
+	ignored := map[string]bool{
+		"Format":   true,
+		"Post":     true,
+		"Suggest":  true,
+		"Approval": true,
+		"PRFilter": true,
+	}
+	review := reflect.TypeOf(config.HostReview{})
+	for i := 0; i < review.NumField(); i++ {
+		name := review.Field(i).Name
+		if !hashed[name] && !ignored[name] {
+			t.Fatalf("HostReview.%s must be added to hostReviewAnalysisFields or explicitly ignored", name)
+		}
 	}
 }
 

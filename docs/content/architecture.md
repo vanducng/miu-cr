@@ -321,7 +321,7 @@ miucr never pushes or commits to the PR branch.
 
 **`--approval`** submits `Event=APPROVE` instead of the default `COMMENT` only
 when the findings satisfy the policy (`clean` requires zero findings;
-`threshold` allows findings at or below `approval.max_severity`) and **every**
+`threshold` allows findings at or below `approval.max_priority`) and **every**
 safety precondition holds: gate clean, **not a fork**, **trusted author**
 (`AuthorAssociation` ∉ `{NONE, FIRST_TIME_CONTRIBUTOR, FIRST_TIMER}`), **≥1 file
 actually reviewed**, **head unchanged** (the head SHA is re-fetched immediately

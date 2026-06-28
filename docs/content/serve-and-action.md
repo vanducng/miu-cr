@@ -306,7 +306,7 @@ repos:
     review:
       approval:
         mode: threshold
-        max_severity: low
+        max_priority: P3
         note: on_findings
 
   - name: strict-infra
@@ -317,7 +317,8 @@ repos:
 ```
 
 `mode: clean` approves only zero-finding reviews. `mode: threshold` approves
-when the worst active finding is at or below `max_severity`; `note:
+when the worst active finding is at or below `max_priority`. For example,
+`max_priority: P3` allows P3/P4 findings and blocks approval for P0-P2. `note:
 on_findings` leaves clean approvals silent and adds a short approval body only
 when findings remain. The old clean-approval key is removed; use
 `review.approval` in host and repo configs.

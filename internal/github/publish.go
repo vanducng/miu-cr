@@ -7,6 +7,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"log/slog"
 	"os"
 	"regexp"
 	"sort"
@@ -462,9 +463,9 @@ type PostedFinding struct {
 // the head SHA with comfort-fade inline comments (Side=RIGHT/Line only, never
 // Position). The Event is COMMENT unless opts.Approval and all approval
 // predicates hold, in which case it is APPROVE.
-// A failed APPROVE degrades to COMMENT on a 422 precondition miss:
-// self_approve_forbidden (bot is the author) or approve_rejected (any other 422).
-// A non-422 API failure surfaces as an error and never reports a phantom approval.
+// A failed APPROVE degrades to COMMENT on expected approval-only rejection:
+// self_approve_forbidden, approve_rejected, or approve_forbidden.
+// Other API failures surface as errors and never report a phantom approval.
 // summaryFn is an optional review-body hook given the inline-omitted set (known only
 // after the cap is applied). In the current model the summary is a separate upserted
 // issue comment (UpsertSummaryComment), so the production caller passes nil and the
@@ -573,27 +574,30 @@ func PostReview(ctx stdctx.Context, client Client, info *PRInfo, findings []engi
 				out = os.Stdout
 			}
 			result.Fallback = emitWorkflowAnnotations(out, toPost)
-			// A fork token that 403s on CreateReview also can't APPROVE (same call);
-			// the fallback only emits annotations, so the resolved event degrades to
-			// COMMENT regardless of opts.Approval: intentional, not a dropped approval.
+			if event == "APPROVE" {
+				result.Reason = approveReasonForbidden
+				slog.Warn("approval rejected; degrading to comment", "reason", result.Reason)
+			}
 			result.Posted, result.Event, result.PostedFindings = 0, "COMMENT", nil
 			return result, nil
 		}
 		if event != "APPROVE" {
 			return PostReviewResult{Omitted: omitted, Event: "COMMENT"}, mapWriteError("github.create_review_failed", "creating review", err)
 		}
-		// APPROVE failed. A 422 is a precondition miss: self-approve (bot==author)
-		// or any other 422 (stale head, branch protection, …) → degrade to COMMENT,
-		// never a run failure. A non-422 error is a real API failure: surface it,
-		// and never claim a phantom approval (returned Event stays COMMENT).
+		// APPROVE failed. Expected approval-only rejection degrades to COMMENT,
+		// never a run failure. A non-expected error surfaces and never claims a
+		// phantom approval (returned Event stays COMMENT).
 		switch {
 		case isSelfApprove422(err):
 			result.Event, result.Reason = "COMMENT", approveReasonSelfForbidden
 		case is422(err):
 			result.Event, result.Reason = "COMMENT", approveReasonRejected
+		case is403(err) || is401(err):
+			result.Event, result.Reason = "COMMENT", approveReasonForbidden
 		default:
 			return PostReviewResult{Omitted: omitted, Event: "COMMENT"}, mapWriteError("github.create_review_failed", "creating review", err)
 		}
+		slog.Warn("approval rejected; degrading to comment", "reason", result.Reason)
 		// Re-apply the empty-review guard once the event is COMMENT: don't submit a
 		// review with no inline comments and no body: GitHub 422s an empty COMMENT.
 		if len(comments) == 0 && strings.TrimSpace(summary) == "" {
@@ -668,6 +672,11 @@ func is422(err error) bool {
 func is403(err error) bool {
 	var er *gh.ErrorResponse
 	return errors.As(err, &er) && er.Response != nil && er.Response.StatusCode == 403
+}
+
+func is401(err error) bool {
+	var er *gh.ErrorResponse
+	return errors.As(err, &er) && er.Response != nil && er.Response.StatusCode == 401
 }
 
 // inGitHubActions reports whether we're running inside a GitHub Actions runner.

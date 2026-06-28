@@ -128,12 +128,12 @@ func validateReviewApproval(a ApprovalPolicy) error {
 	default:
 		return invalidReview("approval.mode", a.Mode, "off|clean|threshold")
 	}
-	if a.MaxSeverity != "" {
+	if a.MaxPriority != "" {
 		if a.Mode != "threshold" {
-			return invalidReview("approval.max_severity", a.MaxSeverity, "only used when approval.mode is \"threshold\"")
+			return invalidReview("approval.max_priority", a.MaxPriority, "only used when approval.mode is \"threshold\"")
 		}
-		if !validApprovalSeverity(a.MaxSeverity) {
-			return invalidReview("approval.max_severity", a.MaxSeverity, "info|low|medium|high|critical")
+		if !validApprovalPriority(a.MaxPriority) {
+			return invalidReview("approval.max_priority", a.MaxPriority, "P0|P1|P2|P3|P4")
 		}
 	}
 	switch a.Note {
@@ -144,9 +144,9 @@ func validateReviewApproval(a ApprovalPolicy) error {
 	return nil
 }
 
-func validApprovalSeverity(s string) bool {
+func validApprovalPriority(s string) bool {
 	switch s {
-	case "info", "low", "medium", "high", "critical":
+	case "P0", "P1", "P2", "P3", "P4":
 		return true
 	default:
 		return false
