@@ -220,7 +220,11 @@ WHERE id=$1
 	if err != nil {
 		return err
 	}
-	if affected, err := res.RowsAffected(); err == nil && affected == 0 {
+	affected, err := res.RowsAffected()
+	if err != nil {
+		return err
+	}
+	if affected == 0 {
 		return store.ErrHostStaleAttempt
 	}
 	return nil
