@@ -85,7 +85,7 @@ func TestValidateReview(t *testing.T) {
 }
 
 func TestMergeReviewMergesNewFields(t *testing.T) {
-	base := Review{Approval: ApprovalPolicy{Mode: "clean", Note: "none"}}
+	base := Review{Approval: ApprovalPolicy{Mode: "clean"}}
 	file := Review{Gate: "low", FilterMode: "file", MinSeverity: "medium", Timeout: "120s", Expand: intPtr(12), TokenBudget: intPtr(0), DeepContext: boolPtr(true), ContextHops: intPtr(3), Conversation: boolPtr(true), Suggest: boolPtr(false), Approval: ApprovalPolicy{Mode: "threshold", MaxSeverity: "low"}, Subagents: ReviewSubagents{Mode: "auto", Agents: []ReviewSubagent{{Name: "go", Include: []string{"**/*.go"}}}}}
 	out := mergeReview(base, file)
 	if out.Gate != "low" || out.FilterMode != "file" || out.MinSeverity != "medium" || out.Timeout != "120s" {
@@ -107,9 +107,28 @@ func TestMergeReviewMergesNewFields(t *testing.T) {
 	if pr.PatchRepair == nil || *pr.PatchRepair != true {
 		t.Fatalf("PatchRepair not merged: %+v", pr.PatchRepair)
 	}
-	// An empty file inherits base.
 	keep := mergeReview(Review{Gate: "high"}, Review{})
 	if keep.Gate != "high" {
 		t.Fatalf("empty file should inherit base gate, got %q", keep.Gate)
+	}
+}
+
+func TestMergeApprovalPolicy(t *testing.T) {
+	base := ApprovalPolicy{Mode: "threshold", MaxSeverity: "high", Note: "always"}
+	inherit := MergeApprovalPolicy(base, ApprovalPolicy{Mode: "threshold"})
+	if inherit != base {
+		t.Fatalf("threshold mode should inherit base subfields: %+v", inherit)
+	}
+	clean := MergeApprovalPolicy(base, ApprovalPolicy{Mode: "clean"})
+	if clean != (ApprovalPolicy{Mode: "clean"}) {
+		t.Fatalf("clean mode should drop threshold subfields: %+v", clean)
+	}
+	off := MergeApprovalPolicy(base, ApprovalPolicy{Mode: "off"})
+	if off != (ApprovalPolicy{Mode: "off"}) {
+		t.Fatalf("off mode should drop approval subfields: %+v", off)
+	}
+	override := MergeApprovalPolicy(base, ApprovalPolicy{MaxSeverity: "low", Note: "on_findings"})
+	if override != (ApprovalPolicy{Mode: "threshold", MaxSeverity: "low", Note: "on_findings"}) {
+		t.Fatalf("subfields should override inherited threshold policy: %+v", override)
 	}
 }

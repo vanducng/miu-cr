@@ -176,15 +176,25 @@ func mergeReview(base, file Review) Review {
 }
 
 func MergeApprovalPolicy(base, over ApprovalPolicy) ApprovalPolicy {
-	if over.Mode != "" {
-		return over
-	}
 	out := base
+	if over.Mode != "" {
+		out.Mode = over.Mode
+		if over.Mode != "threshold" {
+			out.MaxSeverity = ""
+			out.Note = ""
+		}
+	}
 	if over.MaxSeverity != "" {
 		out.MaxSeverity = over.MaxSeverity
 	}
 	if over.Note != "" {
 		out.Note = over.Note
+	}
+	if out.Mode != "threshold" {
+		out.MaxSeverity = ""
+	}
+	if out.Mode == "" || out.Mode == "off" {
+		out.Note = ""
 	}
 	return out
 }
