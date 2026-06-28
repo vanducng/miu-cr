@@ -10,6 +10,7 @@ import (
 	"log/slog"
 	"math"
 	"regexp"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -17,6 +18,7 @@ import (
 	"github.com/google/go-github/v84/github"
 
 	"github.com/vanducng/miu-cr/internal/config"
+	mgithub "github.com/vanducng/miu-cr/internal/github"
 	"github.com/vanducng/miu-cr/internal/store"
 )
 
@@ -25,6 +27,8 @@ const defaultHostJobLeaseDuration = 2 * time.Minute
 const hostJobHeartbeatInterval = 30 * time.Second
 const hostFailedRetryBase = 5 * time.Minute
 const hostFailedRetryCap = time.Hour
+const defaultThreadResolutionSyncInterval = 5 * time.Minute
+const maxThreadResolutionSyncWorkers = 2
 
 var runHostDrainGrace = 10 * time.Second
 var hostPRFilterRegexCache sync.Map
@@ -63,41 +67,55 @@ type HostReload struct {
 	JanitorInterval time.Duration
 }
 
+type HostThreadResolutionSync struct {
+	Mode     string
+	Interval time.Duration
+}
+
+func (c HostThreadResolutionSync) Enabled() bool {
+	return c.Mode != "" && c.Mode != "off"
+}
+
 type HostRepoConfig struct {
-	Name          string
-	Owner         string
-	Repo          string
-	Slug          string
-	GitURL        string
-	DefaultBranch string
-	GithubAccount string
-	Enabled       bool
-	Poll          bool
-	ConfigHash    string
-	PolicyHash    string
-	PromptHash    string
-	RulesHash     string
-	ReviewTimeout time.Duration
-	Review        JobReviewOptions
-	PRFilter      config.HostPRFilter
+	Name                 string
+	Owner                string
+	Repo                 string
+	Slug                 string
+	GitURL               string
+	DefaultBranch        string
+	GithubAccount        string
+	Enabled              bool
+	Poll                 bool
+	ConfigHash           string
+	PolicyHash           string
+	PromptHash           string
+	RulesHash            string
+	ReviewTimeout        time.Duration
+	ThreadResolutionSync HostThreadResolutionSync
+	Review               JobReviewOptions
+	PRFilter             config.HostPRFilter
 }
 
 type HostRunner struct {
-	mu              sync.Mutex
-	store           store.HostStore
-	repos           []HostRepoConfig
-	tokens          map[string]HostTokenSource
-	reload          HostReloadFunc
-	src             pollSource
-	interval        time.Duration
-	disp            Dispatcher
-	log             *slog.Logger
-	reviewTO        time.Duration
-	workerID        string
-	newGetter       func(string) notifGetter
-	prune           HostPruneConfig
-	janitorInterval time.Duration
-	now             func() time.Time
+	mu               sync.Mutex
+	store            store.HostStore
+	repos            []HostRepoConfig
+	tokens           map[string]HostTokenSource
+	reload           HostReloadFunc
+	src              pollSource
+	interval         time.Duration
+	disp             Dispatcher
+	log              *slog.Logger
+	reviewTO         time.Duration
+	workerID         string
+	newGetter        func(string) notifGetter
+	prune            HostPruneConfig
+	janitorInterval  time.Duration
+	now              func() time.Time
+	threadSyncLast   map[string]time.Time
+	threadSyncActive int
+	threadSyncDone   chan struct{}
+	threadSyncStop   bool
 }
 
 type hostRunnerSnapshot struct {
@@ -163,6 +181,7 @@ func NewHostRunner(cfg HostRunnerConfig) (*HostRunner, error) {
 		prune:           cfg.Prune,
 		janitorInterval: cfg.JanitorInterval,
 		now:             cfg.Now,
+		threadSyncLast:  map[string]time.Time{},
 	}, nil
 }
 
@@ -432,6 +451,7 @@ func (h *HostRunner) pollRepo(ctx stdctx.Context, snap hostRunnerSnapshot, repo 
 	if err != nil {
 		return pollFloor, err
 	}
+	var threadSyncClient mgithub.Client
 	now := h.now().UTC()
 	if err := h.store.UpsertHostPollCursor(ctx, store.HostPollCursorInput{RepoID: repoID, Source: string(sourcePulls), Cursor: now.Format(time.RFC3339Nano), LastPolledAt: now}); err != nil {
 		return pollFloor, err
@@ -481,6 +501,12 @@ func (h *HostRunner) pollRepo(ctx stdctx.Context, snap hostRunnerSnapshot, repo 
 			h.log.Warn("host: failed to enqueue PR review", "repo", repo.Slug, "pr", number, "error", config.RedactString(err.Error()))
 			continue
 		}
+		if repo.ThreadResolutionSync.Enabled() {
+			if threadSyncClient == nil {
+				threadSyncClient = mgithub.NewClient(token)
+			}
+			h.enqueueThreadResolutionSync(ctx, threadSyncClient, repo, pr, now)
+		}
 	}
 	res, err := h.store.ReconcileHostClosedPRs(ctx, store.HostClosedPRsInput{RepoID: repoID, OpenNumbers: openNumbers, Now: now})
 	if err != nil {
@@ -488,7 +514,128 @@ func (h *HostRunner) pollRepo(ctx stdctx.Context, snap hostRunnerSnapshot, repo 
 	} else if res.SessionsClosed > 0 || res.JobsCanceled > 0 {
 		h.log.Info("host: reconciled closed PRs", "repo", repo.Slug, "sessions_closed", res.SessionsClosed, "jobs_canceled", res.JobsCanceled)
 	}
+	h.pruneThreadResolutionSync(repo.Slug, openNumbers)
 	return pollFloor, nil
+}
+
+func (h *HostRunner) reserveThreadResolutionSync(slug string, number int64, interval time.Duration, now time.Time) (bool, string) {
+	if interval <= 0 {
+		interval = defaultThreadResolutionSyncInterval
+	}
+	key := fmt.Sprintf("%s#%d", slug, number)
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	if h.threadSyncStop {
+		delete(h.threadSyncLast, key)
+		return false, "stopping"
+	}
+	if last, ok := h.threadSyncLast[key]; ok && now.Sub(last) < interval {
+		return false, "throttled"
+	}
+	if h.threadSyncActive >= maxThreadResolutionSyncWorkers {
+		delete(h.threadSyncLast, key)
+		return false, "workers_busy"
+	}
+	h.threadSyncLast[key] = now
+	if h.threadSyncActive == 0 {
+		h.threadSyncDone = make(chan struct{})
+	}
+	h.threadSyncActive++
+	return true, ""
+}
+
+func (h *HostRunner) pruneThreadResolutionSync(slug string, openNumbers []int64) {
+	open := make(map[int64]struct{}, len(openNumbers))
+	for _, number := range openNumbers {
+		open[number] = struct{}{}
+	}
+	prefix := slug + "#"
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	for key := range h.threadSyncLast {
+		if !strings.HasPrefix(key, prefix) {
+			continue
+		}
+		number, err := strconv.ParseInt(strings.TrimPrefix(key, prefix), 10, 64)
+		if err != nil {
+			delete(h.threadSyncLast, key)
+			continue
+		}
+		if _, ok := open[number]; !ok {
+			delete(h.threadSyncLast, key)
+		}
+	}
+}
+
+func (h *HostRunner) enqueueThreadResolutionSync(ctx stdctx.Context, client mgithub.Client, repo HostRepoConfig, pr *github.PullRequest, now time.Time) {
+	snap := threadResolutionSyncPR{
+		Number:   pr.GetNumber(),
+		HeadSHA:  pr.GetHead().GetSHA(),
+		BaseSHA:  pr.GetBase().GetSHA(),
+		HTMLBase: pr.GetBase().GetRepo().GetHTMLURL(),
+	}
+	if snap.HTMLBase == "" && repo.Slug != "" {
+		snap.HTMLBase = "https://github.com/" + repo.Slug
+	}
+	ok, reason := h.reserveThreadResolutionSync(repo.Slug, int64(snap.Number), repo.ThreadResolutionSync.Interval, now)
+	if !ok {
+		if reason == "stopping" {
+			h.log.Warn("host: conversation resolution sync dropped; host stopping", "repo", repo.Slug, "pr", snap.Number, "head_sha", snap.HeadSHA)
+		}
+		if reason == "workers_busy" {
+			h.log.Warn("host: conversation resolution sync dropped; workers busy", "repo", repo.Slug, "pr", snap.Number, "head_sha", snap.HeadSHA)
+		}
+		return
+	}
+	go func() {
+		defer h.finishThreadResolutionSync()
+		syncCtx, cancel := stdctx.WithTimeout(stdctx.WithoutCancel(ctx), runHostDrainGrace)
+		defer cancel()
+		h.syncThreadResolution(syncCtx, client, repo, snap, now)
+	}()
+}
+
+type threadResolutionSyncPR struct {
+	Number   int
+	HeadSHA  string
+	BaseSHA  string
+	HTMLBase string
+}
+
+func (h *HostRunner) finishThreadResolutionSync() {
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	if h.threadSyncActive <= 0 {
+		return
+	}
+	h.threadSyncActive--
+	if h.threadSyncActive == 0 && h.threadSyncDone != nil {
+		close(h.threadSyncDone)
+		h.threadSyncDone = nil
+	}
+}
+
+func (h *HostRunner) syncThreadResolution(ctx stdctx.Context, client mgithub.Client, repo HostRepoConfig, pr threadResolutionSyncPR, now time.Time) {
+	info := &mgithub.PRInfo{
+		Owner:    repo.Owner,
+		Repo:     repo.Repo,
+		Number:   pr.Number,
+		HeadSHA:  pr.HeadSHA,
+		BaseSHA:  pr.BaseSHA,
+		HTMLBase: pr.HTMLBase,
+	}
+	res, err := mgithub.SyncSummaryConversationResolved(ctx, client, info, now)
+	attrs := []any{"repo", repo.Slug, "pr", pr.Number, "head_sha", info.HeadSHA, "reason", res.Reason, "resolved", res.Resolved, "reopened", res.Reopened, "entries", res.Entries}
+	if err != nil {
+		attrs = append(attrs, "error", config.RedactString(err.Error()))
+		h.log.Warn("host: conversation resolution sync failed", attrs...)
+		return
+	}
+	if res.Action == mgithub.UpsertEdited {
+		h.log.Info("host: conversation resolution sync updated summary", attrs...)
+		return
+	}
+	h.log.Debug("host: conversation resolution sync skipped", attrs...)
 }
 
 func hostPRFilterLogAttrs(repo HostRepoConfig, pr *github.PullRequest, decision hostPRFilterDecision) []any {
@@ -860,6 +1007,16 @@ func hostFailedRetryDelay(attempts int) time.Duration {
 }
 
 func RunHost(ctx stdctx.Context, pool *Pool, runner *HostRunner) error {
+	drain := func() error {
+		syncDone := runner.waitThreadResolutionSync(runHostDrainGrace)
+		if pool != nil {
+			pool.Drain()
+		}
+		if !syncDone {
+			return ErrHostRunnerStopTimeout
+		}
+		return nil
+	}
 	done := make(chan struct{})
 	go func() {
 		runner.Run(ctx)
@@ -868,21 +1025,40 @@ func RunHost(ctx stdctx.Context, pool *Pool, runner *HostRunner) error {
 	<-ctx.Done()
 	select {
 	case <-done:
+		return drain()
 	case <-time.After(runHostDrainGrace):
-		if pool != nil {
-			pool.Drain()
+		if err := drain(); err != nil {
+			return err
 		}
 		select {
 		case <-done:
 			return nil
-		case <-time.After(runHostDrainGrace):
+		default:
 			return ErrHostRunnerStopTimeout
 		}
 	}
-	if pool != nil {
-		pool.Drain()
+}
+
+func (h *HostRunner) waitThreadResolutionSync(timeout time.Duration) bool {
+	h.mu.Lock()
+	h.threadSyncStop = true
+	active := h.threadSyncActive
+	done := h.threadSyncDone
+	h.mu.Unlock()
+	if active == 0 {
+		return true
 	}
-	return nil
+	if timeout <= 0 || done == nil {
+		return false
+	}
+	deadline := time.NewTimer(timeout)
+	defer deadline.Stop()
+	select {
+	case <-done:
+		return true
+	case <-deadline.C:
+		return false
+	}
 }
 
 func HashJSON(v any) string {

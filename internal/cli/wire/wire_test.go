@@ -322,7 +322,7 @@ func TestPublishReviewLedgerResolvesAcrossRuns(t *testing.T) {
 	}
 }
 
-func TestPublishReviewResolvedGitHubThreadSuppressesLedgerOpen(t *testing.T) {
+func TestPublishReviewResolvedGitHubThreadDoesNotSuppressLedgerOpen(t *testing.T) {
 	runner := gitcmd.New()
 	dir, base, head := setupRepo(t, runner)
 
@@ -361,18 +361,18 @@ func TestPublishReviewResolvedGitHubThreadSuppressesLedgerOpen(t *testing.T) {
 		t.Fatalf("run2: %v", err)
 	}
 	if pr2.PostedInline != 0 {
-		t.Fatalf("resolved GitHub thread must suppress reposting, got %d inline", pr2.PostedInline)
+		t.Fatalf("existing fingerprint should still dedupe inline reposts, got %d inline", pr2.PostedInline)
 	}
 	body2 := fake.issueComments[0].GetBody()
 	led2 := mgithub.ParseLedger(body2)
-	if len(led2) != 1 || led2[0].Status != "resolved" {
-		t.Fatalf("resolved GitHub thread must flip ledger entry to resolved, got %+v", led2)
+	if len(led2) != 1 || led2[0].Status != "open" {
+		t.Fatalf("normal review must not resolve from GitHub conversation state, got %+v", led2)
 	}
-	if strings.Contains(body2, "Open (1)") {
-		t.Fatalf("resolved GitHub thread must not remain in the Open table:\n%s", body2)
+	if !strings.Contains(body2, "Open (1)") {
+		t.Fatalf("finding must remain in the Open table:\n%s", body2)
 	}
-	if !strings.Contains(body2, "Resolved (1)") {
-		t.Fatalf("resolved GitHub thread must render in the Resolved table:\n%s", body2)
+	if strings.Contains(body2, "Resolved (1)") {
+		t.Fatalf("conversation state must not render as resolved during normal review:\n%s", body2)
 	}
 }
 

@@ -269,6 +269,9 @@ host:
     force: false
     suggest: true
     patch_repair: false
+    thread_resolution_sync:
+      mode: off
+      interval: 5m
     approval:
       mode: off
 
@@ -288,8 +291,8 @@ repos:
 Layering is intentionally simple: built-in defaults -> top-level `review` and
 `agent` -> `host.review` -> `repos[].review` / `repos[].agent`. Repo-level
 settings are where risky write behavior belongs (`post`, `force`, `suggest`,
-`patch_repair`, `approval`) because they decide what the host may do for that
-repository.
+`patch_repair`, `thread_resolution_sync`, `approval`) because they decide what
+the host may do for that repository.
 
 `review.subagents` follows the same layering. Configure broad defaults at the
 top level, then override the scoped agents per repo when a project benefits from
@@ -322,6 +325,20 @@ when the worst active finding is at or below `max_priority`. For example,
 on_findings` leaves clean approvals silent and adds a short approval body only
 when findings remain. The old clean-approval key is removed; use
 `review.approval` in host and repo configs.
+
+`thread_resolution_sync.mode` is `off` by default. Set `mode: poll` for repos
+where the host should periodically mirror GitHub review-thread state into the
+summary table. If a miucr inline conversation is manually resolved, the existing
+summary row moves to Resolved with `conversation resolved`; if that same
+conversation is later unresolved, only that conversation-resolved row reopens.
+`interval` controls the per-PR polling cadence and defaults to `5m`. This never
+starts an LLM review and never feeds approval decisions.
+
+GitHub also exposes
+[`pull_request_review_thread`](https://docs.github.com/en/webhooks/webhook-events-and-payloads#pull_request_review_thread)
+webhooks for resolved and unresolved conversations. The reserved future mode for
+event-driven sync is `mode: webhook`, but current host mode supports only `off`
+and `poll`.
 
 `review.pr_filter` also layers top-level -> `host.review` -> `repos[].review`.
 Draft PRs are skipped unless `include_drafts: true`. `default_action` defaults
