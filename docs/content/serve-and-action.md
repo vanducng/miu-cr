@@ -515,6 +515,11 @@ is only an override.
 | `model`        | no       | `""`               | Optional model override.                                   |
 | `sarif-file`   | no       | `""`               | When set, also write a SARIF 2.1.0 report to this path (see below). Unset keeps inline-review-only behavior. |
 | `filter-mode`  | no       | `diff_context`     | Inline-eligibility filter: `added`\|`diff_context`\|`file`\|`nofilter`. |
+| `suggest`      | no       | `true`             | Emit native GitHub one-click suggestions when a fix is proven. |
+| `patch-repair` | no       | `false`            | Repair near-miss suggestions with a focused second pass; requires `suggest`. |
+| `build-from-source` | no  | `false`            | Build the checked-out source instead of installing a release. Used for miu-cr dogfood. |
+| `pr-number`    | no       | event PR number    | Override the PR number to review.                          |
+| `instruction`  | no       | `""`               | Extra free-text steer passed to `miucr review --instruction`. |
 
 All credentials are passed to the binary **via environment variables, never on
 the command line**, so they don't appear in process listings or step logs.
