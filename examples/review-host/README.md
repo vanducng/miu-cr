@@ -89,6 +89,9 @@ MIUCR_PG_DSN='postgres://miucr:miucr@localhost:55432/miucr?sslmode=disable' \
   `approval.mode: clean` for zero-finding approvals, or `approval.mode: threshold`
   with `max_priority: P3` to approve low-risk findings with a note. Posting
   review comments is controlled by each effective `review.post` value.
+- `thread_resolution_sync` defaults to `false`. Enable it per repo when you want
+  the summary table to reflect manually resolved GitHub review conversations
+  between commits; it is metadata-only and does not trigger approval.
 - Retention fields are intentionally explicit: V1 prunes stale DB sessions,
   job-attempt history, and cursors. Workspace-size limits are validated and
   reserved for the managed-workspace phase, rather than deleting arbitrary

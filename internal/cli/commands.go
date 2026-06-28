@@ -598,18 +598,19 @@ func buildServeHostRepos(ctx stdctx.Context, cfg config.HostConfig, path string)
 	}
 	providerName := hostProviderName(cfg)
 	baseReview := mergeHostReview(config.HostReview{
-		Gate:         "high",
-		FilterMode:   "diff_context",
-		Timeout:      "900s",
-		Post:         boolSetting(true),
-		Suggest:      boolSetting(false),
-		PatchRepair:  boolSetting(false),
-		Approval:     config.ApprovalPolicy{Mode: "off"},
-		Force:        boolSetting(false),
-		Conversation: boolSetting(false),
-		DeepContext:  boolSetting(false),
-		Expand:       intSetting(5),
-		ContextHops:  intSetting(0),
+		Gate:                 "high",
+		FilterMode:           "diff_context",
+		Timeout:              "900s",
+		Post:                 boolSetting(true),
+		Suggest:              boolSetting(false),
+		PatchRepair:          boolSetting(false),
+		ThreadResolutionSync: boolSetting(false),
+		Approval:             config.ApprovalPolicy{Mode: "off"},
+		Force:                boolSetting(false),
+		Conversation:         boolSetting(false),
+		DeepContext:          boolSetting(false),
+		Expand:               intSetting(5),
+		ContextHops:          intSetting(0),
 	}, cfg.Review)
 	hostReview := mergeHostReview(baseReview, cfg.Host.Review)
 	reviewTO := durationOrDefault(hostReview.Timeout, 15*time.Minute)
@@ -694,23 +695,24 @@ func hostReviewAnalysisShape(review config.HostReview) any {
 
 func hostReviewOptions(providerName string, provider config.HostProvider, secret string, review config.HostReview) (serve.JobReviewOptions, error) {
 	opts := serve.JobReviewOptions{
-		Post:          boolValue(review.Post),
-		Suggest:       boolValue(review.Suggest),
-		PatchRepair:   boolValue(review.PatchRepair),
-		Approval:      review.Approval,
-		Force:         boolValue(review.Force),
-		Conversation:  boolValue(review.Conversation),
-		Gate:          review.Gate,
-		FilterMode:    review.FilterMode,
-		MinSeverity:   review.MinSeverity,
-		Format:        review.Format,
-		Mode:          review.Mode,
-		BaseURL:       provider.BaseURL,
-		Model:         provider.Model,
-		DeepContext:   boolValue(review.DeepContext),
-		Subagents:     review.Subagents,
-		Quota:         provider.Quota,
-		QuotaProvider: providerName,
+		Post:                 boolValue(review.Post),
+		Suggest:              boolValue(review.Suggest),
+		PatchRepair:          boolValue(review.PatchRepair),
+		ThreadResolutionSync: boolValue(review.ThreadResolutionSync),
+		Approval:             review.Approval,
+		Force:                boolValue(review.Force),
+		Conversation:         boolValue(review.Conversation),
+		Gate:                 review.Gate,
+		FilterMode:           review.FilterMode,
+		MinSeverity:          review.MinSeverity,
+		Format:               review.Format,
+		Mode:                 review.Mode,
+		BaseURL:              provider.BaseURL,
+		Model:                provider.Model,
+		DeepContext:          boolValue(review.DeepContext),
+		Subagents:            review.Subagents,
+		Quota:                provider.Quota,
+		QuotaProvider:        providerName,
 	}
 	if review.Expand != nil {
 		opts.ExpandWindow = *review.Expand
@@ -1131,6 +1133,9 @@ func mergeHostReview(base, over config.HostReview) config.HostReview {
 	}
 	if over.PatchRepair != nil {
 		out.PatchRepair = over.PatchRepair
+	}
+	if over.ThreadResolutionSync != nil {
+		out.ThreadResolutionSync = over.ThreadResolutionSync
 	}
 	out.Approval = config.MergeApprovalPolicy(base.Approval, over.Approval)
 	out.Subagents = config.MergeReviewSubagents(base.Subagents, over.Subagents)

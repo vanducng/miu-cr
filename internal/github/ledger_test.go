@@ -464,6 +464,29 @@ func TestRenderLedgerSameCommitNoArrow(t *testing.T) {
 	}
 }
 
+func TestRenderLedgerConversationResolvedCell(t *testing.T) {
+	info := &PRInfo{HeadSHA: "deadbeef", HTMLBase: "https://github.com/o/r"}
+	now := time.Date(2026, 6, 26, 22, 0, 0, 0, time.UTC)
+	out := RenderSummaryFull(info, nil, nil, 0, nil, nil, SummaryOptions{
+		Ledger: []LedgerEntry{{FP: fpStr(1), Path: "a.go", Title: "x", Status: statusResolved, Sev: "low", FirstSev: "low", OpenSHA: "0519d5d", ResSHA: "0519d5d", ResKind: resolutionConversation, ResAt: now.Format(time.RFC3339)}},
+	})
+	if !strings.Contains(out, "conversation resolved") {
+		t.Fatalf("conversation-resolved row missing label:\n%s", out)
+	}
+	if !strings.Contains(out, "`0519d5d`") {
+		t.Fatalf("conversation-resolved row should keep the commit link:\n%s", out)
+	}
+}
+
+func TestMergeLedgerConversationResolvedUpgradesToCommitResolution(t *testing.T) {
+	now := time.Date(2026, 6, 26, 22, 0, 0, 0, time.UTC)
+	prior := []LedgerEntry{{FP: fpStr(1), Path: "a.go", Title: "x", Status: statusResolved, Sev: "low", FirstSev: "low", OpenSHA: "aaaaaa1", ResSHA: "aaaaaa1", ResKind: resolutionConversation, ResAt: now.Format(time.RFC3339)}}
+	got := MergeLedger(prior, nil, "bbbbbb2", map[string]bool{"a.go": true}, now.Add(time.Hour))
+	if got[0].Status != statusResolved || got[0].ResKind != "" || got[0].ResSHA != "bbbbbb2" {
+		t.Fatalf("conversation resolution was not upgraded to commit resolution: %+v", got[0])
+	}
+}
+
 func TestRenderLedgerReopenPrefix(t *testing.T) {
 	info := &PRInfo{HeadSHA: "deadbeef", HTMLBase: "https://github.com/o/r"}
 	now := time.Date(2026, 6, 26, 22, 0, 0, 0, time.UTC)

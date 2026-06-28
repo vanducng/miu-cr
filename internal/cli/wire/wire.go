@@ -807,11 +807,7 @@ func publishReview(ctx stdctx.Context, client mgithub.Client, runner *gitcmd.Run
 	if err != nil {
 		return err
 	}
-	resolvedThreadFPs, err := mgithub.ResolvedThreadFingerprints(ctx, client, info)
-	if err != nil {
-		slog.Warn("resolved review thread fetch failed, proceeding without suppression: " + config.RedactString(err.Error()))
-	}
-	publishFindings := mgithub.FilterResolvedThreadFindings(res.Findings, resolvedThreadFPs)
+	publishFindings := res.Findings
 
 	// skip is the dedupe set passed to PostReview, built from the keys of `existing`
 	// (fp -> inline comment URL). With no store it is exactly the M2/M9

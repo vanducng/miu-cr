@@ -55,28 +55,29 @@ type Job struct {
 }
 
 type JobReviewOptions struct {
-	Post           bool
-	Suggest        bool
-	PatchRepair    bool
-	Approval       config.ApprovalPolicy
-	Force          bool
-	Conversation   bool
-	Gate           string
-	FilterMode     string
-	MinSeverity    string
-	Format         string
-	Mode           string
-	Provider       string
-	APIKey         string
-	BaseURL        string
-	AuthToken      string
-	Model          string
-	OperatorPrompt string
-	ExpandWindow   int
-	TokenBudget    int
-	DeepContext    bool
-	ContextHops    int
-	Subagents      config.ReviewSubagents
+	Post                 bool
+	Suggest              bool
+	PatchRepair          bool
+	ThreadResolutionSync bool
+	Approval             config.ApprovalPolicy
+	Force                bool
+	Conversation         bool
+	Gate                 string
+	FilterMode           string
+	MinSeverity          string
+	Format               string
+	Mode                 string
+	Provider             string
+	APIKey               string
+	BaseURL              string
+	AuthToken            string
+	Model                string
+	OperatorPrompt       string
+	ExpandWindow         int
+	TokenBudget          int
+	DeepContext          bool
+	ContextHops          int
+	Subagents            config.ReviewSubagents
 	// Quota is the host provider's usage quota (nil = none); QuotaProvider is the
 	// counter key (the provider instance name, since Provider above carries the
 	// kind). Threaded to the review path because the host config provider quota is

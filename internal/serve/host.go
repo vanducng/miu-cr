@@ -17,6 +17,7 @@ import (
 	"github.com/google/go-github/v84/github"
 
 	"github.com/vanducng/miu-cr/internal/config"
+	mgithub "github.com/vanducng/miu-cr/internal/github"
 	"github.com/vanducng/miu-cr/internal/store"
 )
 
@@ -465,6 +466,9 @@ func (h *HostRunner) pollRepo(ctx stdctx.Context, snap hostRunnerSnapshot, repo 
 			h.log.Warn("host: failed to upsert PR session", "repo", repo.Slug, "pr", number, "error", config.RedactString(err.Error()))
 			continue
 		}
+		if repo.Review.ThreadResolutionSync {
+			h.syncThreadResolution(ctx, token, repo, pr, now)
+		}
 		_, _, err = h.store.EnqueueHostJob(ctx, store.HostJobInput{
 			RepoID:      repoID,
 			SessionID:   session.ID,
@@ -489,6 +493,32 @@ func (h *HostRunner) pollRepo(ctx stdctx.Context, snap hostRunnerSnapshot, repo 
 		h.log.Info("host: reconciled closed PRs", "repo", repo.Slug, "sessions_closed", res.SessionsClosed, "jobs_canceled", res.JobsCanceled)
 	}
 	return pollFloor, nil
+}
+
+func (h *HostRunner) syncThreadResolution(ctx stdctx.Context, token string, repo HostRepoConfig, pr *github.PullRequest, now time.Time) {
+	info := &mgithub.PRInfo{
+		Owner:    repo.Owner,
+		Repo:     repo.Repo,
+		Number:   pr.GetNumber(),
+		HeadSHA:  pr.GetHead().GetSHA(),
+		BaseSHA:  pr.GetBase().GetSHA(),
+		HTMLBase: pr.GetBase().GetRepo().GetHTMLURL(),
+	}
+	if info.HTMLBase == "" && repo.Slug != "" {
+		info.HTMLBase = "https://github.com/" + repo.Slug
+	}
+	res, err := mgithub.SyncSummaryConversationResolved(ctx, mgithub.NewClient(token), info, now)
+	attrs := []any{"repo", repo.Slug, "pr", pr.GetNumber(), "head_sha", info.HeadSHA, "reason", res.Reason, "resolved", res.Resolved, "reopened", res.Reopened, "entries", res.Entries}
+	if err != nil {
+		attrs = append(attrs, "error", config.RedactString(err.Error()))
+		h.log.Warn("host: conversation resolution sync failed", attrs...)
+		return
+	}
+	if res.Action == mgithub.UpsertEdited {
+		h.log.Info("host: conversation resolution sync updated summary", attrs...)
+		return
+	}
+	h.log.Debug("host: conversation resolution sync skipped", attrs...)
 }
 
 func hostPRFilterLogAttrs(repo HostRepoConfig, pr *github.PullRequest, decision hostPRFilterDecision) []any {

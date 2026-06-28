@@ -95,6 +95,7 @@ host:
     force: false
     suggest: true
     patch_repair: false
+    thread_resolution_sync: false
     approval:
       mode: off
 

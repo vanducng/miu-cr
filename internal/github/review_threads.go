@@ -8,8 +8,6 @@ import (
 	"io"
 	"net/http"
 	"strings"
-
-	"github.com/vanducng/miu-cr/internal/engine"
 )
 
 type ReviewThread struct {
@@ -46,22 +44,6 @@ func ResolvedThreadFingerprints(ctx stdctx.Context, client Client, info *PRInfo)
 		}
 	}
 	return fps, nil
-}
-
-func FilterResolvedThreadFindings(findings []engine.Finding, resolved map[string]bool) []engine.Finding {
-	if len(findings) == 0 || len(resolved) == 0 {
-		return findings
-	}
-	out := make([]engine.Finding, 0, len(findings))
-	for _, f := range findings {
-		if !resolved[Fingerprint(f)] {
-			out = append(out, f)
-		}
-	}
-	if len(out) == len(findings) {
-		return findings
-	}
-	return out
 }
 
 func (g ghClient) ReviewThreads(ctx stdctx.Context, owner, repo string, number int) ([]ReviewThread, error) {
