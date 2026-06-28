@@ -221,6 +221,11 @@ func TestHostPRFilterProbeCases(t *testing.T) {
 			pr:     prWithMeta(1, "sha-A", "chore(main): release 0.57.0", "app/munmiu", "Bot", nil, nil, false),
 		},
 		{
+			name:   "title regex excludes human-authored generated PR",
+			filter: config.HostPRFilter{Rules: []config.HostPRFilterRule{{Action: "exclude", TitleRegexes: []string{`^chore\(deps\):`}}}},
+			pr:     prWithMeta(1, "sha-A", "chore(deps): update redis", "vanducng", "User", nil, nil, false),
+		},
+		{
 			name:   "author type excludes bot",
 			filter: config.HostPRFilter{Rules: []config.HostPRFilterRule{{Action: "exclude", AuthorTypes: []string{"Bot"}}}},
 			pr:     prWithMeta(1, "sha-A", "chore: generated", "renovate[bot]", "Bot", nil, nil, false),
