@@ -1009,14 +1009,13 @@ func RunHost(ctx stdctx.Context, pool *Pool, runner *HostRunner) error {
 	case <-done:
 		return drain()
 	case <-time.After(runHostDrainGrace):
-		if pool != nil {
-			pool.Drain()
-		}
 		select {
 		case <-done:
 			return drain()
 		case <-time.After(runHostDrainGrace):
-			runner.waitThreadResolutionSync(runHostDrainGrace)
+			if err := drain(); err != nil {
+				return err
+			}
 			return ErrHostRunnerStopTimeout
 		}
 	}

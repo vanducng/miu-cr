@@ -31,7 +31,7 @@ func SyncSummaryConversationResolved(ctx stdctx.Context, client Client, info *PR
 	}
 	resolved, err := ResolvedThreadFingerprints(ctx, client, info)
 	if err != nil {
-		return ThreadResolutionSyncResult{Reason: "thread_fetch_failed"}, err
+		return ThreadResolutionSyncResult{Reason: "thread_fetch_failed"}, mapWriteError("github.thread_resolution_sync_failed", "listing review threads", err)
 	}
 	next, delta := SyncLedgerConversationResolved(prior, resolved, info.HeadSHA, now)
 	result := ThreadResolutionSyncResult{Reason: "unchanged", Entries: len(next), Resolved: delta.Resolved, Reopened: delta.Reopened}

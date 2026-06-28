@@ -2,22 +2,28 @@ package github
 
 import (
 	stdctx "context"
+	"errors"
 	"strings"
 	"testing"
 	"time"
 
 	gh "github.com/google/go-github/v84/github"
 
+	"github.com/vanducng/miu-cr/internal/cli/clierr"
 	"github.com/vanducng/miu-cr/internal/engine"
 	"github.com/vanducng/miu-cr/internal/engine/diff"
 )
 
 type syncRecordClient struct {
 	recordClient
-	threads []ReviewThread
+	threads   []ReviewThread
+	threadErr error
 }
 
 func (c *syncRecordClient) ReviewThreads(stdctx.Context, string, string, int) ([]ReviewThread, error) {
+	if c.threadErr != nil {
+		return nil, c.threadErr
+	}
 	return c.threads, nil
 }
 
@@ -220,5 +226,27 @@ func TestSyncSummaryConversationResolvedContinuesWithoutInlineURLs(t *testing.T)
 	}
 	if !strings.Contains(client.editedBody, "conversation resolved") || !strings.Contains(client.editedBody, "a.go:5") {
 		t.Fatalf("edited body missing fallback location:\n%s", client.editedBody)
+	}
+}
+
+func TestSyncSummaryConversationResolvedWrapsThreadFetchError(t *testing.T) {
+	now := time.Date(2026, 6, 28, 10, 0, 0, 0, time.UTC)
+	info := &PRInfo{Owner: "o", Repo: "r", Number: 1, HeadSHA: "bbbbbb2", HTMLBase: "https://github.com/o/r"}
+	f := engine.Finding{File: "a.go", Line: 5, Severity: "low", Category: "bug", Title: "thing", QuotedCode: "x"}
+	body := RenderSummaryFull(info, []engine.Finding{f}, nil, 0, nil, nil, SummaryOptions{
+		Ledger: MergeLedger(nil, []engine.Finding{f}, "aaaaaa1", map[string]bool{"a.go": true}, now),
+	})
+	client := &syncRecordClient{
+		recordClient: recordClient{issueStore: []*gh.IssueComment{{ID: gh.Ptr(int64(7)), Body: gh.Ptr(body)}}},
+		threadErr:    errors.New("boom"),
+	}
+
+	res, err := SyncSummaryConversationResolved(stdctx.Background(), client, info, now.Add(time.Hour))
+	if err == nil || res.Reason != "thread_fetch_failed" {
+		t.Fatalf("expected thread fetch error, res=%+v err=%v", res, err)
+	}
+	var ce *clierr.CLIError
+	if !errors.As(err, &ce) || ce.Code != "github.thread_resolution_sync_failed" {
+		t.Fatalf("error not wrapped as CLIError: %#v", err)
 	}
 }
