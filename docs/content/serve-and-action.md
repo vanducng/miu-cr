@@ -378,6 +378,12 @@ list polling does not include issue comment bodies. A PR excluded by the filter
 is treated as no longer tracked by the host poller, so any prior open session or
 pending job for that PR is closed/canceled on the next reconcile.
 
+At `MIUCR_LOG_LEVEL=debug`, filtered PRs log `host: PR ignored by filter` with
+structured fields for later debugging: `repo`, `pr`, `head_sha`, branches,
+author metadata, labels, requested reviewers, `reason_code`, a short `reason`,
+and matched rule fields such as `rule_index`, `rule_action`, and
+`rule_title_regexes`.
+
 ### Accounts, prompts, and rules
 
 - `github.accounts` can mix PATs and GitHub App installations. PATs support

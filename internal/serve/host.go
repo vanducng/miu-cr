@@ -441,8 +441,8 @@ func (h *HostRunner) pollRepo(ctx stdctx.Context, snap hostRunnerSnapshot, repo 
 		if number <= 0 {
 			continue
 		}
-		if !hostPRFilterAllows(repo.PRFilter, pr) {
-			h.log.Debug("host: PR ignored by filter", "repo", repo.Slug, "pr", number)
+		if decision := hostPRFilterAllows(repo.PRFilter, pr); !decision.Allowed {
+			h.log.Debug("host: PR ignored by filter", hostPRFilterLogAttrs(repo, pr, decision)...)
 			continue
 		}
 		if head == "" {
@@ -489,17 +489,95 @@ func (h *HostRunner) pollRepo(ctx stdctx.Context, snap hostRunnerSnapshot, repo 
 	return pollFloor, nil
 }
 
-func hostPRFilterAllows(filter config.HostPRFilter, pr *github.PullRequest) bool {
+func hostPRFilterLogAttrs(repo HostRepoConfig, pr *github.PullRequest, decision hostPRFilterDecision) []any {
+	attrs := []any{
+		"repo", repo.Slug,
+		"pr", pr.GetNumber(),
+		"title", pr.GetTitle(),
+		"draft", pr.GetDraft(),
+		"author", pr.GetUser().GetLogin(),
+		"author_type", pr.GetUser().GetType(),
+		"author_association", pr.GetAuthorAssociation(),
+		"base_branch", pr.GetBase().GetRef(),
+		"head_branch", pr.GetHead().GetRef(),
+		"base_sha", pr.GetBase().GetSHA(),
+		"head_sha", pr.GetHead().GetSHA(),
+		"labels", githubLabelNames(pr.Labels),
+		"requested_reviewers", githubUserLogins(pr.RequestedReviewers),
+	}
+	attrs = append(attrs, decision.logAttrs()...)
+	return attrs
+}
+
+type hostPRFilterDecision struct {
+	Allowed    bool
+	Reason     string
+	ReasonCode string
+	RuleIndex  int
+	RuleAction string
+	Rule       config.HostPRFilterRule
+}
+
+func (d hostPRFilterDecision) logAttrs() []any {
+	attrs := []any{"reason", d.Reason, "reason_code", d.ReasonCode}
+	if d.RuleIndex >= 0 {
+		attrs = append(attrs, "rule_index", d.RuleIndex, "rule_action", d.RuleAction)
+		attrs = appendHostPRFilterRuleAttrs(attrs, d.Rule)
+	}
+	return attrs
+}
+
+func appendHostPRFilterRuleAttrs(attrs []any, rule config.HostPRFilterRule) []any {
+	if len(rule.Authors) > 0 {
+		attrs = append(attrs, "rule_authors", rule.Authors)
+	}
+	if len(rule.AuthorTypes) > 0 {
+		attrs = append(attrs, "rule_author_types", rule.AuthorTypes)
+	}
+	if len(rule.AuthorAssociations) > 0 {
+		attrs = append(attrs, "rule_author_associations", rule.AuthorAssociations)
+	}
+	if len(rule.TitleRegexes) > 0 {
+		attrs = append(attrs, "rule_title_regexes", rule.TitleRegexes)
+	}
+	if len(rule.Labels) > 0 {
+		attrs = append(attrs, "rule_labels", rule.Labels)
+	}
+	if len(rule.RequestedReviewers) > 0 {
+		attrs = append(attrs, "rule_requested_reviewers", rule.RequestedReviewers)
+	}
+	if len(rule.BaseBranches) > 0 {
+		attrs = append(attrs, "rule_base_branches", rule.BaseBranches)
+	}
+	if len(rule.HeadBranches) > 0 {
+		attrs = append(attrs, "rule_head_branches", rule.HeadBranches)
+	}
+	return attrs
+}
+
+func hostPRFilterAllows(filter config.HostPRFilter, pr *github.PullRequest) hostPRFilterDecision {
 	if pr.GetDraft() && (filter.IncludeDrafts == nil || !*filter.IncludeDrafts) {
-		return false
+		return hostPRFilterDecision{Allowed: false, Reason: "draft PR and include_drafts=false", ReasonCode: "draft", RuleIndex: -1}
 	}
 	allow := filter.DefaultAction != "exclude"
-	for _, rule := range filter.Rules {
+	decision := hostPRFilterDecision{Allowed: allow, Reason: "default_action=exclude", ReasonCode: "default_action_exclude", RuleIndex: -1}
+	for i, rule := range filter.Rules {
 		if hostPRFilterRuleMatches(rule, pr) {
 			allow = rule.Action == "include"
+			decision = hostPRFilterDecision{
+				Allowed:    allow,
+				Reason:     hostPRFilterRuleReason(i, rule),
+				ReasonCode: "rule_" + rule.Action,
+				RuleIndex:  i,
+				RuleAction: rule.Action,
+				Rule:       rule,
+			}
 		}
 	}
-	return allow
+	if allow {
+		return hostPRFilterDecision{Allowed: true, RuleIndex: -1}
+	}
+	return decision
 }
 
 func hostPRFilterRuleMatches(rule config.HostPRFilterRule, pr *github.PullRequest) bool {
@@ -511,6 +589,35 @@ func hostPRFilterRuleMatches(rule config.HostPRFilterRule, pr *github.PullReques
 		anyUser(rule.RequestedReviewers, pr.RequestedReviewers) &&
 		anyEqualFold(rule.BaseBranches, pr.GetBase().GetRef()) &&
 		anyEqualFold(rule.HeadBranches, pr.GetHead().GetRef())
+}
+
+func hostPRFilterRuleReason(i int, rule config.HostPRFilterRule) string {
+	parts := []string{fmt.Sprintf("rule[%d].%s", i, rule.Action)}
+	if len(rule.Authors) > 0 {
+		parts = append(parts, "authors="+strings.Join(rule.Authors, ","))
+	}
+	if len(rule.AuthorTypes) > 0 {
+		parts = append(parts, "author_types="+strings.Join(rule.AuthorTypes, ","))
+	}
+	if len(rule.AuthorAssociations) > 0 {
+		parts = append(parts, "author_associations="+strings.Join(rule.AuthorAssociations, ","))
+	}
+	if len(rule.TitleRegexes) > 0 {
+		parts = append(parts, "title_regexes="+strings.Join(rule.TitleRegexes, ","))
+	}
+	if len(rule.Labels) > 0 {
+		parts = append(parts, "labels="+strings.Join(rule.Labels, ","))
+	}
+	if len(rule.RequestedReviewers) > 0 {
+		parts = append(parts, "requested_reviewers="+strings.Join(rule.RequestedReviewers, ","))
+	}
+	if len(rule.BaseBranches) > 0 {
+		parts = append(parts, "base_branches="+strings.Join(rule.BaseBranches, ","))
+	}
+	if len(rule.HeadBranches) > 0 {
+		parts = append(parts, "head_branches="+strings.Join(rule.HeadBranches, ","))
+	}
+	return strings.Join(parts, " ")
 }
 
 func anyEqualFold(wants []string, got string) bool {
@@ -567,6 +674,16 @@ func anyLabel(wants []string, labels []*github.Label) bool {
 	return false
 }
 
+func githubLabelNames(labels []*github.Label) []string {
+	out := make([]string, 0, len(labels))
+	for _, label := range labels {
+		if name := label.GetName(); name != "" {
+			out = append(out, name)
+		}
+	}
+	return out
+}
+
 func anyUser(wants []string, users []*github.User) bool {
 	if len(wants) == 0 {
 		return true
@@ -579,6 +696,16 @@ func anyUser(wants []string, users []*github.User) bool {
 		}
 	}
 	return false
+}
+
+func githubUserLogins(users []*github.User) []string {
+	out := make([]string, 0, len(users))
+	for _, user := range users {
+		if login := user.GetLogin(); login != "" {
+			out = append(out, login)
+		}
+	}
+	return out
 }
 
 func (h *HostRunner) listOpenPRs(ctx stdctx.Context, getter notifGetter, repo HostRepoConfig) ([]*github.PullRequest, time.Duration, error) {

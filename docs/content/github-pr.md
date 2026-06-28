@@ -145,12 +145,12 @@ most-important-first (files with findings, then biggest churn), the omitted-inli
 the `<details>` overflow block follow. The agent handoff (a copy-paste local re-run command +
 the `review_run` MCP pointer) and the review metrics (Files, Churn, Effort and Context badges,
 each with a one-line meaning) are combined into one **collapsed `<details>` "Review
-reference"** block near the bottom, closing with a footer: `<sub>Reviewed commit
-[\`<7-char-sha>\`](<repo>/commit/<full-sha>) · Review attempts: N · Last reviewed <YYYY-MM-DD HH:MM UTC> · Posted by
+reference"** block near the bottom, closing with a footer: `<sub>Last reviewed commit
+[\`<7-char-sha>\`](<repo>/commit/<full-sha>) · Review attempts: N · Posted by
 [miu-cr](https://github.com/vanducng/miu-cr) [v<version>](https://github.com/vanducng/miu-cr/releases/tag/v<version>)</sub>` (the short SHA is GitHub-standard 7 hex
-digits, the run count relocated here as "Review attempts: N", a UTC "Last reviewed" timestamp,
+digits, the run count relocated here as "Review attempts: N",
 and the running miucr version linked to its release tag, e.g. `v0.40.0`) — the footer is always
-the LATEST reviewed commit, time, and runtime version. The `review_id` is NOT
+the latest reviewed commit and runtime version. The `review_id` is NOT
 shown in the comment (it only resolves on the machine + store that ran the review; it stays in
 the JSON envelope). All model-supplied text is escaped at the render boundary. The lifecycle
 ledger state is persisted **storelessly** in a third hidden marker — `<!-- miu-cr-ledger:<base64> -->`,
@@ -185,7 +185,7 @@ a hidden marker that identifies the comment as miucr-authored:
 |----------|-------|----------|-------------------|
 | 🟠→✅ P1 | Path traversal | fs/read.go:12 | `a1b2c3d` → `e4f5a6b` |
 
-<sub>Reviewed commit `e4f5a6b` · Review attempts: 3 · Last reviewed 2026-06-27 00:04 UTC · Posted by miu-cr v0.45.0</sub>
+<sub>Last reviewed commit `e4f5a6b` · Review attempts: 3 · Posted by miu-cr v0.45.0</sub>
 <!-- miu-cr-ledger:<base64 lifecycle state> -->
 ```
 

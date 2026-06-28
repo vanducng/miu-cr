@@ -421,6 +421,8 @@ func TestParseReviewedCommit(t *testing.T) {
 		body string
 		want string
 	}{
+		{"new linked", "Last reviewed commit [`abcdef1`](<https://github.com/o/r/commit/abcdef1234567890>)", "abcdef1"},
+		{"new plain", "Last reviewed commit `ABCDEF1234567890` · Posted by", "abcdef1234567890"},
 		{"linked", "Reviewed commit [`abcdef1`](<https://github.com/o/r/commit/abcdef1234567890>)", "abcdef1"},
 		{"plain", "Reviewed commit `ABCDEF1234567890` · Posted by", "abcdef1234567890"},
 		{"missing", ReviewMarker + "\n## Code Review Summary", ""},
@@ -509,7 +511,7 @@ func TestPriorRunsCount(t *testing.T) {
 // body (a higher-id duplicate is ignored).
 func TestFetchPRSeedsPriorLedger(t *testing.T) {
 	entries := []LedgerEntry{{FP: "aaaaaaaaaaaaaaaa", Path: "a.go", Title: "X", Status: statusOpen, Sev: "high", FirstSev: "high", OpenSHA: "aaaaaa1", FirstAt: "2026-06-26T22:00:00Z"}}
-	lowest := ReviewMarker + "\n" + runsCountToken(2) + "\n" + publishedToken("abcdef1234567890", "0123456789abcdef") + "\n## Code Review Summary\n" + renderLedgerMarker(entries) + "\n<sub>Reviewed commit [`abcdef1`](<https://github.com/vanducng/miu-cr/commit/abcdef1234567890>)</sub>"
+	lowest := ReviewMarker + "\n" + runsCountToken(2) + "\n" + publishedToken("abcdef1234567890", "0123456789abcdef") + "\n## Code Review Summary\n" + renderLedgerMarker(entries) + "\n<sub>Last reviewed commit [`abcdef1`](<https://github.com/vanducng/miu-cr/commit/abcdef1234567890>)</sub>"
 	higher := ReviewMarker + "\n" + runsCountToken(9) + "\n" + renderLedgerMarker(nil) // higher id, must be ignored
 
 	c := &convClient{

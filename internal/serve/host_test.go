@@ -149,10 +149,10 @@ func TestHostPRFilterLastMatchWins(t *testing.T) {
 		{Action: "exclude", AuthorTypes: []string{"Bot"}},
 		{Action: "include", Authors: []string{"renovate[bot]"}, Labels: []string{"review"}, BaseBranches: []string{"main"}},
 	}}
-	if !hostPRFilterAllows(filter, prWithMeta(1, "sha-A", "chore(deps): update redis", "renovate[bot]", "Bot", nil, []string{"review"}, false)) {
+	if decision := hostPRFilterAllows(filter, prWithMeta(1, "sha-A", "chore(deps): update redis", "renovate[bot]", "Bot", nil, []string{"review"}, false)); !decision.Allowed {
 		t.Fatal("repo include rule should override prior bot exclude")
 	}
-	if hostPRFilterAllows(filter, prWithMeta(2, "sha-B", "chore(deps): update redis", "renovate[bot]", "Bot", nil, nil, false)) {
+	if decision := hostPRFilterAllows(filter, prWithMeta(2, "sha-B", "chore(deps): update redis", "renovate[bot]", "Bot", nil, nil, false)); decision.Allowed {
 		t.Fatal("bot exclude should hold when later include does not match")
 	}
 }
@@ -165,13 +165,13 @@ func TestHostPRFilterCanIncludeByAuthorOrRequestedReviewer(t *testing.T) {
 			{Action: "include", RequestedReviewers: []string{"vanducng"}},
 		},
 	}
-	if !hostPRFilterAllows(filter, prWithMeta(1, "sha-A", "fix: mine", "vanducng", "User", nil, nil, false)) {
+	if decision := hostPRFilterAllows(filter, prWithMeta(1, "sha-A", "fix: mine", "vanducng", "User", nil, nil, false)); !decision.Allowed {
 		t.Fatal("author include should review")
 	}
-	if !hostPRFilterAllows(filter, prWithMeta(2, "sha-B", "fix: please review", "teammate", "User", []string{"vanducng"}, nil, false)) {
+	if decision := hostPRFilterAllows(filter, prWithMeta(2, "sha-B", "fix: please review", "teammate", "User", []string{"vanducng"}, nil, false)); !decision.Allowed {
 		t.Fatal("requested reviewer include should review")
 	}
-	if hostPRFilterAllows(filter, prWithMeta(3, "sha-C", "fix: unrelated", "teammate", "User", nil, nil, false)) {
+	if decision := hostPRFilterAllows(filter, prWithMeta(3, "sha-C", "fix: unrelated", "teammate", "User", nil, nil, false)); decision.Allowed {
 		t.Fatal("unmatched PR should stay excluded")
 	}
 }
@@ -187,6 +187,47 @@ func TestHostPRFilterCachesRegexes(t *testing.T) {
 	}
 }
 
+func TestHostPRFilterDecisionLogAttrs(t *testing.T) {
+	pr := prWithMeta(1, "sha-A", "chore(deps): update redis", "renovate[bot]", "Bot", []string{"vanducng"}, []string{"deps"}, false)
+	decision := hostPRFilterAllows(
+		config.HostPRFilter{Rules: []config.HostPRFilterRule{{Action: "exclude", TitleRegexes: []string{`^chore\(deps\):`}, AuthorTypes: []string{"Bot"}}}},
+		pr,
+	)
+	if decision.Allowed {
+		t.Fatal("PR should be ignored by the exclude rule")
+	}
+	attrs := attrMap(hostPRFilterLogAttrs(HostRepoConfig{Slug: "octo/hello"}, pr, decision))
+	if attrs["reason_code"] != "rule_exclude" || attrs["rule_index"] != 0 || attrs["rule_action"] != "exclude" {
+		t.Fatalf("missing structured rule metadata: %#v", attrs)
+	}
+	if attrs["repo"] != "octo/hello" || attrs["pr"] != 1 || attrs["head_sha"] != "sha-A" || attrs["base_branch"] != "main" || attrs["head_branch"] != "branch" {
+		t.Fatalf("missing PR identity metadata: %#v", attrs)
+	}
+	if got, ok := attrs["rule_title_regexes"].([]string); !ok || len(got) != 1 || got[0] != `^chore\(deps\):` {
+		t.Fatalf("missing structured title regexes: %#v", attrs["rule_title_regexes"])
+	}
+	if got, ok := attrs["rule_author_types"].([]string); !ok || len(got) != 1 || got[0] != "Bot" {
+		t.Fatalf("missing structured author types: %#v", attrs["rule_author_types"])
+	}
+	if got, ok := attrs["labels"].([]string); !ok || len(got) != 1 || got[0] != "deps" {
+		t.Fatalf("missing PR labels: %#v", attrs["labels"])
+	}
+	if got, ok := attrs["requested_reviewers"].([]string); !ok || len(got) != 1 || got[0] != "vanducng" {
+		t.Fatalf("missing PR requested reviewers: %#v", attrs["requested_reviewers"])
+	}
+}
+
+func attrMap(attrs []any) map[string]any {
+	out := make(map[string]any, len(attrs)/2)
+	for i := 0; i+1 < len(attrs); i += 2 {
+		key, ok := attrs[i].(string)
+		if ok {
+			out[key] = attrs[i+1]
+		}
+	}
+	return out
+}
+
 func TestHostPRFilterProbeCases(t *testing.T) {
 	includeDrafts := true
 	cases := []struct {
@@ -194,6 +235,8 @@ func TestHostPRFilterProbeCases(t *testing.T) {
 		filter config.HostPRFilter
 		pr     *github.PullRequest
 		want   bool
+		code   string
+		reason string
 	}{
 		{
 			name: "default includes ready PR",
@@ -201,8 +244,10 @@ func TestHostPRFilterProbeCases(t *testing.T) {
 			want: true,
 		},
 		{
-			name: "default skips draft PR",
-			pr:   prWithMeta(1, "sha-A", "fix: draft", "vanducng", "User", nil, nil, true),
+			name:   "default skips draft PR",
+			pr:     prWithMeta(1, "sha-A", "fix: draft", "vanducng", "User", nil, nil, true),
+			code:   "draft",
+			reason: "draft PR and include_drafts=false",
 		},
 		{
 			name:   "include drafts allows draft PR",
@@ -214,21 +259,29 @@ func TestHostPRFilterProbeCases(t *testing.T) {
 			name:   "default action exclude blocks unmatched PR",
 			filter: config.HostPRFilter{DefaultAction: "exclude"},
 			pr:     prWithMeta(1, "sha-A", "fix: unrelated", "teammate", "User", nil, nil, false),
+			code:   "default_action_exclude",
+			reason: "default_action=exclude",
 		},
 		{
 			name:   "title regex excludes release PR",
 			filter: config.HostPRFilter{Rules: []config.HostPRFilterRule{{Action: "exclude", TitleRegexes: []string{`^chore\(main\): release `}}}},
 			pr:     prWithMeta(1, "sha-A", "chore(main): release 0.57.0", "app/munmiu", "Bot", nil, nil, false),
+			code:   "rule_exclude",
+			reason: `rule[0].exclude title_regexes=^chore\(main\): release `,
 		},
 		{
 			name:   "title regex excludes human-authored generated PR",
 			filter: config.HostPRFilter{Rules: []config.HostPRFilterRule{{Action: "exclude", TitleRegexes: []string{`^chore\(deps\):`}}}},
 			pr:     prWithMeta(1, "sha-A", "chore(deps): update redis", "vanducng", "User", nil, nil, false),
+			code:   "rule_exclude",
+			reason: `rule[0].exclude title_regexes=^chore\(deps\):`,
 		},
 		{
 			name:   "author type excludes bot",
 			filter: config.HostPRFilter{Rules: []config.HostPRFilterRule{{Action: "exclude", AuthorTypes: []string{"Bot"}}}},
 			pr:     prWithMeta(1, "sha-A", "chore: generated", "renovate[bot]", "Bot", nil, nil, false),
+			code:   "rule_exclude",
+			reason: "rule[0].exclude author_types=Bot",
 		},
 		{
 			name:   "author association includes owner",
@@ -258,12 +311,21 @@ func TestHostPRFilterProbeCases(t *testing.T) {
 			name:   "rule matchers are conjunctive",
 			filter: config.HostPRFilter{DefaultAction: "exclude", Rules: []config.HostPRFilterRule{{Action: "include", Authors: []string{"vanducng"}, Labels: []string{"miucr-review"}}}},
 			pr:     prWithMeta(1, "sha-A", "fix: mine without label", "vanducng", "User", nil, nil, false),
+			code:   "default_action_exclude",
+			reason: "default_action=exclude",
 		},
 	}
 	for _, tt := range cases {
 		t.Run(tt.name, func(t *testing.T) {
-			if got := hostPRFilterAllows(tt.filter, tt.pr); got != tt.want {
-				t.Fatalf("hostPRFilterAllows = %v, want %v", got, tt.want)
+			decision := hostPRFilterAllows(tt.filter, tt.pr)
+			if decision.Allowed != tt.want {
+				t.Fatalf("hostPRFilterAllows = %v, want %v", decision.Allowed, tt.want)
+			}
+			if !decision.Allowed && decision.ReasonCode != tt.code {
+				t.Fatalf("filter reason code = %q, want %q", decision.ReasonCode, tt.code)
+			}
+			if !decision.Allowed && decision.Reason != tt.reason {
+				t.Fatalf("filter reason = %q, want %q", decision.Reason, tt.reason)
 			}
 		})
 	}

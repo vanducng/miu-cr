@@ -200,7 +200,7 @@ func TestRenderSummaryLedgerGroupedTables(t *testing.T) {
 	// thread (end-to-end: SummaryOptions → renderLedger → ledgerLocation). The
 	// resolved finding has no inline URL → blob fallback.
 	inlineURLs := map[string]string{"aaaaaaaaaaaaaaaa": "https://github.com/o/r/pull/1#discussion_r123"}
-	out := RenderSummaryFull(info, nil, nil, 0, nil, nil, SummaryOptions{Ledger: ledger, Now: now, Version: "v0.44.0", Walkthrough: "- adds a thing\n- removes another", InlineURLs: inlineURLs})
+	out := RenderSummaryFull(info, nil, nil, 0, nil, nil, SummaryOptions{Ledger: ledger, Version: "v0.44.0", Walkthrough: "- adds a thing\n- removes another", InlineURLs: inlineURLs})
 
 	for _, want := range []string{
 		"**⚠️ Open (1)**",    // bold (not H3), calm warning marker
@@ -208,11 +208,11 @@ func TestRenderSummaryLedgerGroupedTables(t *testing.T) {
 		"| Priority |",       // column renamed from Sev
 		"SQL injection",
 		"Path traversal",
-		"#discussion_r123",                   // open finding Location links to its inline thread
-		"Last reviewed 2026-06-26 22:51 UTC", // footer timestamp
-		"/commit/a1b2c3d4",                   // linked origin commit
-		"/commit/e4f5a6b7",                   // linked resolved commit (distinct → "opened → resolved")
-		"<!-- " + ledgerPrefix,               // embedded ledger marker for the next run
+		"#discussion_r123",     // open finding Location links to its inline thread
+		"Last reviewed commit", // footer commit label
+		"/commit/a1b2c3d4",     // linked origin commit
+		"/commit/e4f5a6b7",     // linked resolved commit (distinct → "opened → resolved")
+		"<!-- " + ledgerPrefix, // embedded ledger marker for the next run
 	} {
 		if !strings.Contains(out, want) {
 			t.Fatalf("rendered ledger summary missing %q:\n%s", want, out)
@@ -244,9 +244,8 @@ func TestRenderSummaryLedgerGroupedTables(t *testing.T) {
 }
 
 func TestRenderSummaryLedgerReviewPassed(t *testing.T) {
-	now := time.Date(2026, 6, 26, 22, 51, 0, 0, time.UTC)
 	// Non-nil but empty ledger (clean review) → "Review passed", not "No findings".
-	out := RenderSummaryFull(&PRInfo{HeadSHA: "h"}, nil, nil, 0, nil, nil, SummaryOptions{Ledger: []LedgerEntry{}, Now: now})
+	out := RenderSummaryFull(&PRInfo{HeadSHA: "h"}, nil, nil, 0, nil, nil, SummaryOptions{Ledger: []LedgerEntry{}})
 	// A clean review renders the Review passed pill in the same <sub><sub> chip
 	// style as the severity chips (consistent + baseline-aligned).
 	if !strings.Contains(out, "<sub><sub>![Review passed](https://img.shields.io/badge/Review_passed-brightgreen?style=flat)</sub></sub>") {
@@ -270,7 +269,6 @@ func TestRenderSummaryLedgerOffDiffMarker(t *testing.T) {
 	out := RenderSummaryFull(&PRInfo{Owner: "o", Repo: "r", Number: 1, HeadSHA: "headsha1"}, findings, map[string]any{"truncation_level": "full"}, 0, nil, nil, SummaryOptions{
 		Ledger: ledger,
 		Diffs:  diffs,
-		Now:    now,
 	})
 	if n := strings.Count(out, "(off-diff)"); n != 1 {
 		t.Fatalf("want exactly one (off-diff) marker, got %d:\n%s", n, out)
@@ -288,7 +286,7 @@ func TestRenderSummaryLedgerNoMarkerWithoutDiff(t *testing.T) {
 	now := time.Date(2026, 6, 28, 0, 0, 0, 0, time.UTC)
 	findings := []engine.Finding{{File: "p.go", Line: 99, Title: "lonely", Severity: "high"}}
 	ledger := MergeLedger(nil, findings, "h", map[string]bool{"p.go": true}, now)
-	out := RenderSummaryFull(&PRInfo{Owner: "o", Repo: "r", Number: 1, HeadSHA: "h"}, findings, map[string]any{"truncation_level": "full"}, 0, nil, nil, SummaryOptions{Ledger: ledger, Now: now})
+	out := RenderSummaryFull(&PRInfo{Owner: "o", Repo: "r", Number: 1, HeadSHA: "h"}, findings, map[string]any{"truncation_level": "full"}, 0, nil, nil, SummaryOptions{Ledger: ledger})
 	if strings.Contains(out, "(off-diff)") {
 		t.Fatalf("no diffs → no off-diff marker:\n%s", out)
 	}
@@ -334,7 +332,7 @@ func TestRenderSummaryLegacyUnchangedWithoutLedger(t *testing.T) {
 	if !strings.Contains(out, "No_findings") {
 		t.Fatalf("legacy path must keep the No findings badge:\n%s", out)
 	}
-	if strings.Contains(out, "Last reviewed") {
+	if strings.Contains(out, " UTC") {
 		t.Fatalf("legacy path must not stamp a timestamp:\n%s", out)
 	}
 	if strings.Contains(out, ledgerPrefix) {
@@ -420,7 +418,7 @@ func TestRenderLedgerResolvedRowCap(t *testing.T) {
 	for i := 0; i < 30; i++ {
 		ledger = append(ledger, LedgerEntry{FP: fpStr(100 + i), Path: fmt.Sprintf("r%d.go", i), Title: fmt.Sprintf("resolved %d", i), Status: statusResolved, Sev: "low", FirstSev: "low", OpenSHA: "aaaaaa1", ResSHA: "bbbbbb2", ResAt: now.Add(time.Duration(i) * time.Minute).Format(time.RFC3339)})
 	}
-	out := RenderSummaryFull(info, nil, nil, 0, nil, nil, SummaryOptions{Ledger: ledger, Now: now})
+	out := RenderSummaryFull(info, nil, nil, 0, nil, nil, SummaryOptions{Ledger: ledger})
 
 	// The resolved table is capped at maxResolvedRows visible rows. Each resolved
 	// row here has distinct open/resolved SHAs, so it carries an "opened → resolved"
@@ -445,7 +443,7 @@ func TestRenderLedgerSameCommitNoArrow(t *testing.T) {
 	ledger := []LedgerEntry{
 		{FP: fpStr(1), Path: "a.go", Title: "x", Status: statusResolved, Sev: "low", FirstSev: "low", OpenSHA: "0519d5d", ResSHA: "0519d5d", ResAt: now.Format(time.RFC3339)},
 	}
-	out := RenderSummaryFull(info, nil, nil, 0, nil, nil, SummaryOptions{Ledger: ledger, Now: now})
+	out := RenderSummaryFull(info, nil, nil, 0, nil, nil, SummaryOptions{Ledger: ledger})
 	if strings.Contains(out, " → ") {
 		t.Fatalf("same opened/resolved commit must not render a transition arrow:\n%s", out)
 	}
@@ -457,7 +455,6 @@ func TestRenderLedgerSameCommitNoArrow(t *testing.T) {
 	// render "<openSHA> → —"; with no resolved commit it shows just the dash.
 	noRes := RenderSummaryFull(info, nil, nil, 0, nil, nil, SummaryOptions{
 		Ledger: []LedgerEntry{{FP: fpStr(2), Path: "a.go", Title: "x", Status: statusResolved, Sev: "low", OpenSHA: "0519d5d", ResSHA: "", ResAt: now.Format(time.RFC3339)}},
-		Now:    now,
 	})
 	if strings.Contains(noRes, " → ") {
 		t.Fatalf("empty ResSHA must not render an arrow to a dash:\n%s", noRes)
@@ -471,7 +468,7 @@ func TestRenderLedgerReopenPrefix(t *testing.T) {
 		{FP: fpStr(1), Path: "a.go", Title: "reopened open", Status: statusReopened, Sev: "high", FirstSev: "high", OpenSHA: "aaaaaa1", Reopens: 1},
 		{FP: fpStr(2), Path: "b.go", Title: "reopened then fixed", Status: statusResolved, Sev: "low", FirstSev: "low", OpenSHA: "aaaaaa1", ResSHA: "bbbbbb2", ResAt: now.Format(time.RFC3339), Reopens: 1},
 	}
-	out := RenderSummaryFull(info, nil, nil, 0, nil, nil, SummaryOptions{Ledger: ledger, Now: now})
+	out := RenderSummaryFull(info, nil, nil, 0, nil, nil, SummaryOptions{Ledger: ledger})
 
 	if !strings.Contains(out, "🔁 reopened open") {
 		t.Fatalf("a currently-open reopened finding must show the 🔁 prefix:\n%s", out)

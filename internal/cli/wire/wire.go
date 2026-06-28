@@ -841,8 +841,7 @@ func publishReview(ctx stdctx.Context, client mgithub.Client, runner *gitcmd.Run
 	// Merge this run's findings into the comment-embedded finding ledger ONCE (the
 	// summary may be upserted twice for overflow; merging twice would double-count
 	// reopens). MergeLedger returns non-nil even when empty, so the summary always
-	// renders in lifecycle mode on the PR path. now stamps both the ledger
-	// timestamps and the footer "Last reviewed".
+	// renders in lifecycle mode on the PR path.
 	now := time.Now()
 	ledger := mgithub.MergeLedger(info.PriorLedger, publishFindings, info.HeadSHA, diffPathSet(diffs), now)
 
@@ -860,7 +859,6 @@ func publishReview(ctx stdctx.Context, client mgithub.Client, runner *gitcmd.Run
 			Version:       cli.Version(),
 			RuleCitations: ruleCites,
 			Ledger:        ledger,
-			Now:           now,
 			InlineURLs:    existing,
 			Published:     published,
 			PublishKey:    publishKey,
