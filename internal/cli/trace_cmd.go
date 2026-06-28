@@ -3,7 +3,10 @@ package cli
 import (
 	"encoding/json"
 	"errors"
+	"fmt"
 	"io"
+	"regexp"
+	"strconv"
 	"strings"
 	"sync"
 
@@ -13,6 +16,22 @@ import (
 	"github.com/vanducng/miu-cr/internal/engine"
 	"github.com/vanducng/miu-cr/internal/store"
 )
+
+// prRefRe matches a PR reference "owner/repo#number" so trace can resolve it to
+// the latest review for that PR instead of requiring the review id.
+var prRefRe = regexp.MustCompile(`^([^/\s]+)/([^#\s]+)#(\d+)$`)
+
+func parsePRRef(s string) (store.PRKey, bool) {
+	m := prRefRe.FindStringSubmatch(s)
+	if m == nil {
+		return store.PRKey{}, false
+	}
+	n, err := strconv.Atoi(m[3])
+	if err != nil {
+		return store.PRKey{}, false
+	}
+	return store.PRKey{Owner: m[1], Repo: m[2], Number: n}, true
+}
 
 // newTraceSink returns a trace Sink that writes each captured step to w as one
 // NDJSON line ({"step":...,"payload":...}). Used by --trace to stream the live
@@ -41,19 +60,30 @@ func newTraceSink(w io.Writer) func(step string, payload any) {
 // provider and never posted; secrets were redacted at persist.
 func traceCommand(_ *options) *cobra.Command {
 	cmd := &cobra.Command{
-		Use:   "trace <id>",
-		Short: "Show the full review trace of a saved review (system prompt, diff, rules, prompts, response)",
+		Use:   "trace <id|owner/repo#number>",
+		Short: "Show the full review trace of a saved review (by review id, or owner/repo#number for that PR's latest)",
 		Args:  cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			id := strings.TrimSpace(args[0])
 			if id == "" {
-				return &CLIError{Code: "trace.id_required", Message: "a non-empty review id is required", Hint: "miucr trace <id>", Exit: 2}
+				return &CLIError{Code: "trace.id_required", Message: "a non-empty review id is required", Hint: "miucr trace <id|owner/repo#number>", Exit: 2}
 			}
 			st, closeStore, err := openHistory(cmd.Context())
 			if err != nil {
 				return err
 			}
 			defer closeStore()
+			// A PR ref (owner/repo#number) resolves to that PR's most recent review.
+			if key, ok := parsePRRef(id); ok {
+				lr, found, lerr := st.LatestReviewForPR(cmd.Context(), key)
+				if lerr != nil {
+					return &CLIError{Code: "store.unavailable", Message: config.RedactString(lerr.Error()), Hint: "the review store could not be read — check the DB/config", Exit: 1, Details: map[string]any{"ref": id}}
+				}
+				if !found {
+					return &CLIError{Code: "trace.not_found", Message: fmt.Sprintf("no saved review for %s", id), Hint: "run `miucr history` to list ids", Exit: 2, Details: map[string]any{"ref": id}}
+				}
+				id = lr.ID
+			}
 			rec, err := st.GetReview(cmd.Context(), id)
 			if err != nil {
 				if errors.Is(err, store.ErrReviewNotFound) {

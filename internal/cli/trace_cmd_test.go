@@ -164,6 +164,23 @@ func TestTraceShowMissingID(t *testing.T) {
 	}
 }
 
+func TestParsePRRef(t *testing.T) {
+	refs := map[string]store.PRKey{
+		"acme/widget#7":      {Owner: "acme", Repo: "widget", Number: 7},
+		"vanducng/miu-cr#20": {Owner: "vanducng", Repo: "miu-cr", Number: 20},
+	}
+	for in, want := range refs {
+		if got, ok := parsePRRef(in); !ok || got != want {
+			t.Fatalf("parsePRRef(%q) = %+v ok=%v, want %+v", in, got, ok, want)
+		}
+	}
+	for _, in := range []string{"137a960f863e0d851c8c9dcd7a704a5f", "acme/widget", "acme#7", "owner/repo#x", ""} {
+		if _, ok := parsePRRef(in); ok {
+			t.Fatalf("parsePRRef(%q) should not parse as a PR ref", in)
+		}
+	}
+}
+
 // sinkingReviewer fires req.TraceSink (when set) with two ordered steps before
 // returning, simulating the engine's live capture seams.
 type sinkingReviewer struct{ sawSink bool }
