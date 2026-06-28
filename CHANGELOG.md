@@ -55,6 +55,13 @@ comment with a new marker); subsequent re-runs dedupe normally. On a
 first M5 review **manually** (or off-hours) to absorb the one-time re-post before
 the next scheduled run.
 
+## [0.65.0](https://github.com/vanducng/miu-cr/compare/v0.64.0...v0.65.0) (2026-06-28)
+
+
+### Features
+
+* **host:** synced resolved review conversations ([#195](https://github.com/vanducng/miu-cr/issues/195)) ([0edff53](https://github.com/vanducng/miu-cr/commit/0edff5312810e57f257fac7c8a899623f6b2f85c))
+
 ## [0.64.0](https://github.com/vanducng/miu-cr/compare/v0.63.0...v0.64.0) (2026-06-28)
 
 
