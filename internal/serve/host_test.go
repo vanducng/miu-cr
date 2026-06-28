@@ -15,6 +15,7 @@ import (
 	"github.com/google/go-github/v84/github"
 
 	"github.com/vanducng/miu-cr/internal/config"
+	mgithub "github.com/vanducng/miu-cr/internal/github"
 	"github.com/vanducng/miu-cr/internal/store"
 )
 
@@ -235,6 +236,33 @@ func TestHostRunnerThreadResolutionSyncDropClearsThrottle(t *testing.T) {
 
 	if _, ok := r.threadSyncLast["octo/hello#1"]; ok {
 		t.Fatal("dropped sync kept throttle reservation")
+	}
+}
+
+func TestHostRunnerThreadResolutionSyncDetachesFromPollContext(t *testing.T) {
+	now := time.Date(2026, 6, 28, 10, 0, 0, 0, time.UTC)
+	client := &threadSyncContextClient{}
+	r := &HostRunner{
+		threadSyncLast: map[string]time.Time{},
+		log:            slog.New(slog.NewTextHandler(io.Discard, nil)),
+	}
+	ctx, cancel := stdctx.WithCancel(stdctx.Background())
+	cancel()
+
+	r.enqueueThreadResolutionSync(ctx, client, HostRepoConfig{
+		Slug:  "octo/hello",
+		Owner: "octo",
+		Repo:  "hello",
+		ThreadResolutionSync: HostThreadResolutionSync{
+			Interval: time.Minute,
+		},
+	}, prWithHead(1, "sha-A"), now)
+
+	if !r.waitThreadResolutionSync(time.Second) {
+		t.Fatal("sync worker did not finish")
+	}
+	if err := client.issueContextErr(); err != nil {
+		t.Fatalf("sync worker inherited canceled poll context: %v", err)
 	}
 }
 
@@ -882,6 +910,70 @@ func TestHostRunnerWaitsForThreadResolutionSync(t *testing.T) {
 		t.Fatal("wait should finish after sync completes")
 	}
 }
+
+type threadSyncContextClient struct {
+	mu  sync.Mutex
+	err error
+}
+
+func (c *threadSyncContextClient) issueContextErr() error {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	return c.err
+}
+
+func (c *threadSyncContextClient) ListIssueComments(ctx stdctx.Context, _, _ string, _ int, _ *github.IssueListCommentsOptions) ([]*github.IssueComment, *github.Response, error) {
+	c.mu.Lock()
+	c.err = ctx.Err()
+	c.mu.Unlock()
+	return nil, nil, nil
+}
+
+func (c *threadSyncContextClient) GetPR(stdctx.Context, string, string, int) (*github.PullRequest, error) {
+	return nil, nil
+}
+
+func (c *threadSyncContextClient) ListFiles(stdctx.Context, string, string, int, *github.ListOptions) ([]*github.CommitFile, *github.Response, error) {
+	return nil, nil, nil
+}
+
+func (c *threadSyncContextClient) GetCommit(stdctx.Context, string, string, string) (*github.Commit, error) {
+	return nil, nil
+}
+
+func (c *threadSyncContextClient) CreateReview(stdctx.Context, string, string, int, *github.PullRequestReviewRequest) (*github.PullRequestReview, error) {
+	return nil, nil
+}
+
+func (c *threadSyncContextClient) ListReviews(stdctx.Context, string, string, int, *github.ListOptions) ([]*github.PullRequestReview, *github.Response, error) {
+	return nil, nil, nil
+}
+
+func (c *threadSyncContextClient) ListReviewComments(stdctx.Context, string, string, int, *github.PullRequestListCommentsOptions) ([]*github.PullRequestComment, *github.Response, error) {
+	return nil, nil, nil
+}
+
+func (c *threadSyncContextClient) CreateIssueComment(stdctx.Context, string, string, int, *github.IssueComment) (*github.IssueComment, error) {
+	return nil, nil
+}
+
+func (c *threadSyncContextClient) EditIssueComment(stdctx.Context, string, string, int64, *github.IssueComment) (*github.IssueComment, error) {
+	return nil, nil
+}
+
+func (c *threadSyncContextClient) CreateCheckRun(stdctx.Context, string, string, github.CreateCheckRunOptions) (*github.CheckRun, error) {
+	return nil, nil
+}
+
+func (c *threadSyncContextClient) UpdateCheckRun(stdctx.Context, string, string, int64, github.UpdateCheckRunOptions) (*github.CheckRun, error) {
+	return nil, nil
+}
+
+func (c *threadSyncContextClient) ListCheckRunsForRef(stdctx.Context, string, string, string, *github.ListCheckRunsOptions) (*github.ListCheckRunsResults, *github.Response, error) {
+	return nil, nil, nil
+}
+
+var _ mgithub.Client = (*threadSyncContextClient)(nil)
 
 func hostRunnerConfig(t *testing.T) HostRunnerConfig {
 	t.Helper()

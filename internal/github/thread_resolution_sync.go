@@ -38,13 +38,17 @@ func SyncSummaryConversationResolved(ctx stdctx.Context, client Client, info *PR
 	if delta.Resolved == 0 && delta.Reopened == 0 {
 		return result, nil
 	}
+	renderInfo := *info
+	if reviewed := parseReviewedCommit(body); reviewed != "" {
+		renderInfo.HeadSHA = reviewed
+	}
 	inlineURLs, err := ExistingFingerprints(ctx, client, info)
 	updateReason := "updated"
 	if err != nil {
 		inlineURLs = nil
 		updateReason = "updated_without_inline_urls"
 	}
-	nextBody, ok := replaceSummaryLedgerBody(body, info, next, inlineURLs)
+	nextBody, ok := replaceSummaryLedgerBody(body, &renderInfo, next, inlineURLs)
 	if !ok {
 		return ThreadResolutionSyncResult{Reason: "summary_shape_unsupported", Entries: len(next), Resolved: delta.Resolved, Reopened: delta.Reopened}, nil
 	}

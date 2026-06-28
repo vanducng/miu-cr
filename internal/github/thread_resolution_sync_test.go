@@ -209,10 +209,11 @@ func TestSyncSummaryConversationResolvedEditsExistingComment(t *testing.T) {
 
 func TestSyncSummaryConversationResolvedContinuesWithoutInlineURLs(t *testing.T) {
 	now := time.Date(2026, 6, 28, 10, 0, 0, 0, time.UTC)
-	info := &PRInfo{Owner: "o", Repo: "r", Number: 1, HeadSHA: "bbbbbb2", HTMLBase: "https://github.com/o/r", ReviewCount: 1}
+	priorInfo := &PRInfo{Owner: "o", Repo: "r", Number: 1, HeadSHA: "bbbbbb2", HTMLBase: "https://github.com/o/r", ReviewCount: 1}
+	info := &PRInfo{Owner: "o", Repo: "r", Number: 1, HeadSHA: "cccccc3", HTMLBase: "https://github.com/o/r", ReviewCount: 1}
 	f := engine.Finding{File: "a.go", Line: 5, Severity: "low", Category: "bug", Title: "thing", QuotedCode: "x"}
 	fp := Fingerprint(f)
-	body := RenderSummaryFull(info, []engine.Finding{f}, nil, 0, nil, nil, SummaryOptions{
+	body := RenderSummaryFull(priorInfo, []engine.Finding{f}, nil, 0, nil, nil, SummaryOptions{
 		Ledger: MergeLedger(nil, []engine.Finding{f}, "aaaaaa1", map[string]bool{"a.go": true}, now),
 	})
 	client := &syncRecordClientWithExistingError{syncRecordClient: syncRecordClient{
@@ -229,6 +230,9 @@ func TestSyncSummaryConversationResolvedContinuesWithoutInlineURLs(t *testing.T)
 	}
 	if !strings.Contains(client.editedBody, "conversation resolved") || !strings.Contains(client.editedBody, "a.go:5") {
 		t.Fatalf("edited body missing fallback location:\n%s", client.editedBody)
+	}
+	if !strings.Contains(client.editedBody, "/blob/bbbbbb2/a.go#L5") || strings.Contains(client.editedBody, "/blob/cccccc3/a.go#L5") {
+		t.Fatalf("fallback location should use the reviewed commit:\n%s", client.editedBody)
 	}
 }
 

@@ -568,20 +568,38 @@ func (h *HostRunner) pruneThreadResolutionSync(slug string, openNumbers []int64)
 }
 
 func (h *HostRunner) enqueueThreadResolutionSync(ctx stdctx.Context, client mgithub.Client, repo HostRepoConfig, pr *github.PullRequest, now time.Time) {
-	ok, reason := h.reserveThreadResolutionSync(repo.Slug, int64(pr.GetNumber()), repo.ThreadResolutionSync.Interval, now)
+	snap := threadResolutionSyncPR{
+		Number:   pr.GetNumber(),
+		HeadSHA:  pr.GetHead().GetSHA(),
+		BaseSHA:  pr.GetBase().GetSHA(),
+		HTMLBase: pr.GetBase().GetRepo().GetHTMLURL(),
+	}
+	if snap.HTMLBase == "" && repo.Slug != "" {
+		snap.HTMLBase = "https://github.com/" + repo.Slug
+	}
+	ok, reason := h.reserveThreadResolutionSync(repo.Slug, int64(snap.Number), repo.ThreadResolutionSync.Interval, now)
 	if !ok {
 		if reason == "stopping" {
-			h.log.Warn("host: conversation resolution sync dropped; host stopping", "repo", repo.Slug, "pr", pr.GetNumber(), "head_sha", pr.GetHead().GetSHA())
+			h.log.Warn("host: conversation resolution sync dropped; host stopping", "repo", repo.Slug, "pr", snap.Number, "head_sha", snap.HeadSHA)
 		}
 		if reason == "workers_busy" {
-			h.log.Warn("host: conversation resolution sync dropped; workers busy", "repo", repo.Slug, "pr", pr.GetNumber(), "head_sha", pr.GetHead().GetSHA())
+			h.log.Warn("host: conversation resolution sync dropped; workers busy", "repo", repo.Slug, "pr", snap.Number, "head_sha", snap.HeadSHA)
 		}
 		return
 	}
 	go func() {
 		defer h.finishThreadResolutionSync()
-		h.syncThreadResolution(ctx, client, repo, pr, now)
+		syncCtx, cancel := stdctx.WithTimeout(stdctx.WithoutCancel(ctx), runHostDrainGrace)
+		defer cancel()
+		h.syncThreadResolution(syncCtx, client, repo, snap, now)
 	}()
+}
+
+type threadResolutionSyncPR struct {
+	Number   int
+	HeadSHA  string
+	BaseSHA  string
+	HTMLBase string
 }
 
 func (h *HostRunner) finishThreadResolutionSync() {
@@ -597,20 +615,17 @@ func (h *HostRunner) finishThreadResolutionSync() {
 	}
 }
 
-func (h *HostRunner) syncThreadResolution(ctx stdctx.Context, client mgithub.Client, repo HostRepoConfig, pr *github.PullRequest, now time.Time) {
+func (h *HostRunner) syncThreadResolution(ctx stdctx.Context, client mgithub.Client, repo HostRepoConfig, pr threadResolutionSyncPR, now time.Time) {
 	info := &mgithub.PRInfo{
 		Owner:    repo.Owner,
 		Repo:     repo.Repo,
-		Number:   pr.GetNumber(),
-		HeadSHA:  pr.GetHead().GetSHA(),
-		BaseSHA:  pr.GetBase().GetSHA(),
-		HTMLBase: pr.GetBase().GetRepo().GetHTMLURL(),
-	}
-	if info.HTMLBase == "" && repo.Slug != "" {
-		info.HTMLBase = "https://github.com/" + repo.Slug
+		Number:   pr.Number,
+		HeadSHA:  pr.HeadSHA,
+		BaseSHA:  pr.BaseSHA,
+		HTMLBase: pr.HTMLBase,
 	}
 	res, err := mgithub.SyncSummaryConversationResolved(ctx, client, info, now)
-	attrs := []any{"repo", repo.Slug, "pr", pr.GetNumber(), "head_sha", info.HeadSHA, "reason", res.Reason, "resolved", res.Resolved, "reopened", res.Reopened, "entries", res.Entries}
+	attrs := []any{"repo", repo.Slug, "pr", pr.Number, "head_sha", info.HeadSHA, "reason", res.Reason, "resolved", res.Resolved, "reopened", res.Reopened, "entries", res.Entries}
 	if err != nil {
 		attrs = append(attrs, "error", config.RedactString(err.Error()))
 		h.log.Warn("host: conversation resolution sync failed", attrs...)
