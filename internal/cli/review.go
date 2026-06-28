@@ -88,6 +88,9 @@ type ReviewRequest struct {
 	// stderr as NDJSON (--trace). Local-only; distinct from Progress; the stdout
 	// result envelope is untouched.
 	TraceSink func(step string, payload any)
+	// CaptureReasoning opts into capturing model reasoning into the trace; gated by
+	// MIUCR_TRACE_REASONING. Requires [review].thinking to be on.
+	CaptureReasoning bool
 }
 
 // ReviewOutcome is the Reviewer's result: anchored findings plus run stats. PR
@@ -224,6 +227,8 @@ type PRReviewRequest struct {
 	Progress        func(string) // nil = silent; stderr milestones, never the stdout envelope
 	// TraceSink streams live trace steps to stderr as NDJSON (--trace); nil = off.
 	TraceSink func(step string, payload any)
+	// CaptureReasoning opts into capturing model reasoning into the trace.
+	CaptureReasoning bool
 	// ActionsOut is the command's stdout writer (cmd.OutOrStdout()), used ONLY by the
 	// fork-PR 403 fallback to emit ::error:: workflow commands on the same stream as
 	// the JSON envelope (GitHub parses workflow commands only from stdout). nil →
@@ -415,43 +420,48 @@ func reviewCommand(opts *options) *cobra.Command {
 			if traceLive {
 				traceSink = newTraceSink(cmd.ErrOrStderr())
 			}
+			captureReasoning, err := captureReasoningFromEnv()
+			if err != nil {
+				return err
+			}
 			if pr != "" {
 				return runPRReview(cmd, prRunArgs{
-					ref:             pr,
-					token:           token,
-					post:            post && !noPost,
-					suggest:         suggest,
-					patchRepair:     patchRepair,
-					approval:        approval,
-					gate:            gate,
-					provider:        provider,
-					apiKey:          apiKey,
-					baseURL:         baseURL,
-					authToken:       authToken,
-					model:           model,
-					timeout:         opts.timeout,
-					include:         include,
-					exclude:         exclude,
-					exts:            exts,
-					expand:          expand,
-					tokenBudget:     tokenBudget,
-					deepContext:     deepContext,
-					contextHops:     contextHops,
-					contextHopsAuto: contextHopsAuto,
-					subagents:       rcfg.Subagents,
-					filterMode:      filterMode,
-					minSeverity:     minSeverity,
-					format:          format,
-					promptFormat:    promptFormat,
-					wantDiagram:     wantDiagram,
-					instruction:     instruction,
-					conversation:    conversation,
-					mode:            mode,
-					sarifOut:        sarifOut,
-					noSave:          noSave,
-					force:           force,
-					progress:        prog,
-					traceSink:       traceSink,
+					ref:              pr,
+					token:            token,
+					post:             post && !noPost,
+					suggest:          suggest,
+					patchRepair:      patchRepair,
+					approval:         approval,
+					gate:             gate,
+					provider:         provider,
+					apiKey:           apiKey,
+					baseURL:          baseURL,
+					authToken:        authToken,
+					model:            model,
+					timeout:          opts.timeout,
+					include:          include,
+					exclude:          exclude,
+					exts:             exts,
+					expand:           expand,
+					tokenBudget:      tokenBudget,
+					deepContext:      deepContext,
+					contextHops:      contextHops,
+					contextHopsAuto:  contextHopsAuto,
+					subagents:        rcfg.Subagents,
+					filterMode:       filterMode,
+					minSeverity:      minSeverity,
+					format:           format,
+					promptFormat:     promptFormat,
+					wantDiagram:      wantDiagram,
+					instruction:      instruction,
+					conversation:     conversation,
+					mode:             mode,
+					sarifOut:         sarifOut,
+					noSave:           noSave,
+					force:            force,
+					progress:         prog,
+					traceSink:        traceSink,
+					captureReasoning: captureReasoning,
 				})
 			}
 			if err := nudgeIfUnconfigured(apiKey, authToken); err != nil {
@@ -461,34 +471,35 @@ func reviewCommand(opts *options) *cobra.Command {
 				return &CLIError{Code: "review.not_wired", Message: "review engine not wired", Exit: 1}
 			}
 			req := ReviewRequest{
-				Staged:          staged,
-				From:            from,
-				To:              to,
-				Commit:          commit,
-				Gate:            gate,
-				RepoDir:         repoDir,
-				IncludeGlobs:    include,
-				ExcludeGlobs:    exclude,
-				Extensions:      exts,
-				Provider:        provider,
-				APIKey:          apiKey,
-				BaseURL:         baseURL,
-				AuthToken:       authToken,
-				Model:           model,
-				Timeout:         opts.timeout,
-				ExpandWindow:    expand,
-				TokenBudget:     tokenBudget,
-				DeepContext:     deepContext,
-				ContextHops:     contextHops,
-				ContextHopsAuto: contextHopsAuto,
-				Subagents:       rcfg.Subagents,
-				FilterMode:      filterMode,
-				WantDiagram:     wantDiagram,
-				Instruction:     instruction,
-				PromptFormat:    promptFormat,
-				NoSave:          noSave,
-				Progress:        prog,
-				TraceSink:       traceSink,
+				Staged:           staged,
+				From:             from,
+				To:               to,
+				Commit:           commit,
+				Gate:             gate,
+				RepoDir:          repoDir,
+				IncludeGlobs:     include,
+				ExcludeGlobs:     exclude,
+				Extensions:       exts,
+				Provider:         provider,
+				APIKey:           apiKey,
+				BaseURL:          baseURL,
+				AuthToken:        authToken,
+				Model:            model,
+				Timeout:          opts.timeout,
+				ExpandWindow:     expand,
+				TokenBudget:      tokenBudget,
+				DeepContext:      deepContext,
+				ContextHops:      contextHops,
+				ContextHopsAuto:  contextHopsAuto,
+				Subagents:        rcfg.Subagents,
+				FilterMode:       filterMode,
+				WantDiagram:      wantDiagram,
+				Instruction:      instruction,
+				PromptFormat:     promptFormat,
+				NoSave:           noSave,
+				Progress:         prog,
+				TraceSink:        traceSink,
+				CaptureReasoning: captureReasoning,
 			}
 			ctx := cmd.Context()
 			if opts.timeout > 0 {
@@ -594,28 +605,29 @@ type prRunArgs struct {
 	model       string
 	timeout     time.Duration
 
-	include         []string
-	exclude         []string
-	exts            []string
-	expand          int
-	tokenBudget     int
-	deepContext     bool
-	contextHops     int
-	contextHopsAuto bool
-	subagents       config.ReviewSubagents
-	filterMode      string
-	minSeverity     string
-	format          string
-	promptFormat    string
-	wantDiagram     bool
-	instruction     string
-	conversation    bool
-	mode            string
-	sarifOut        string
-	noSave          bool
-	force           bool
-	progress        func(string)
-	traceSink       func(step string, payload any)
+	include          []string
+	exclude          []string
+	exts             []string
+	expand           int
+	tokenBudget      int
+	deepContext      bool
+	contextHops      int
+	contextHopsAuto  bool
+	subagents        config.ReviewSubagents
+	filterMode       string
+	minSeverity      string
+	format           string
+	promptFormat     string
+	wantDiagram      bool
+	instruction      string
+	conversation     bool
+	mode             string
+	sarifOut         string
+	noSave           bool
+	force            bool
+	progress         func(string)
+	traceSink        func(step string, payload any)
+	captureReasoning bool
 }
 
 // runPRReview drives the --pr path: resolve the GitHub token (empty-tolerant for
@@ -643,41 +655,42 @@ func runPRReview(cmd *cobra.Command, a prRunArgs) error {
 	}
 
 	out, err := prReviewer.ReviewPR(ctx, PRReviewRequest{
-		Ref:             a.ref,
-		Token:           ghToken,
-		Post:            a.post,
-		Suggest:         a.suggest,
-		PatchRepair:     a.patchRepair,
-		Approval:        a.approval,
-		Gate:            a.gate,
-		Provider:        a.provider,
-		APIKey:          a.apiKey,
-		BaseURL:         a.baseURL,
-		AuthToken:       a.authToken,
-		Model:           a.model,
-		Timeout:         a.timeout,
-		IncludeGlobs:    a.include,
-		ExcludeGlobs:    a.exclude,
-		Extensions:      a.exts,
-		ExpandWindow:    a.expand,
-		TokenBudget:     a.tokenBudget,
-		DeepContext:     a.deepContext,
-		ContextHops:     a.contextHops,
-		ContextHopsAuto: a.contextHopsAuto,
-		Subagents:       a.subagents,
-		FilterMode:      a.filterMode,
-		MinSeverity:     a.minSeverity,
-		Format:          a.format,
-		PromptFormat:    a.promptFormat,
-		WantDiagram:     a.wantDiagram,
-		Instruction:     a.instruction,
-		Conversation:    a.conversation,
-		Mode:            a.mode,
-		NoSave:          a.noSave,
-		Force:           a.force,
-		Progress:        a.progress,
-		TraceSink:       a.traceSink,
-		ActionsOut:      cmd.OutOrStdout(),
+		Ref:              a.ref,
+		Token:            ghToken,
+		Post:             a.post,
+		Suggest:          a.suggest,
+		PatchRepair:      a.patchRepair,
+		Approval:         a.approval,
+		Gate:             a.gate,
+		Provider:         a.provider,
+		APIKey:           a.apiKey,
+		BaseURL:          a.baseURL,
+		AuthToken:        a.authToken,
+		Model:            a.model,
+		Timeout:          a.timeout,
+		IncludeGlobs:     a.include,
+		ExcludeGlobs:     a.exclude,
+		Extensions:       a.exts,
+		ExpandWindow:     a.expand,
+		TokenBudget:      a.tokenBudget,
+		DeepContext:      a.deepContext,
+		ContextHops:      a.contextHops,
+		ContextHopsAuto:  a.contextHopsAuto,
+		Subagents:        a.subagents,
+		FilterMode:       a.filterMode,
+		MinSeverity:      a.minSeverity,
+		Format:           a.format,
+		PromptFormat:     a.promptFormat,
+		WantDiagram:      a.wantDiagram,
+		Instruction:      a.instruction,
+		Conversation:     a.conversation,
+		Mode:             a.mode,
+		NoSave:           a.noSave,
+		Force:            a.force,
+		Progress:         a.progress,
+		TraceSink:        a.traceSink,
+		CaptureReasoning: a.captureReasoning,
+		ActionsOut:       cmd.OutOrStdout(),
 	})
 	if err != nil {
 		return classifyReviewErr(err, a.timeout)

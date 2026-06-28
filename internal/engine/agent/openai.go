@@ -218,6 +218,12 @@ func (a *openaiAgent) Review(ctx stdctx.Context, rc Context) (engine.ReviewOutpu
 		usage.InputTokens += resp.Usage.PromptTokens - cached
 		usage.OutputTokens += resp.Usage.CompletionTokens
 		usage.CacheReadTokens += cached
+		// OpenAI does not return raw reasoning text; capture token count only.
+		if rc.CaptureReasoning {
+			if rt := resp.Usage.CompletionTokensDetails.ReasoningTokens; rt > 0 {
+				rc.Trace.SetReasoning("openai", "[hidden by provider]", rt)
+			}
+		}
 		msg := resp.Choices[0].Message
 		params.Messages = append(params.Messages, msg.ToParam())
 

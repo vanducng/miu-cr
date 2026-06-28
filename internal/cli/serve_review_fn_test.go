@@ -60,7 +60,7 @@ func TestBuildServeReviewFn_TimedOutStillPersistsFailed(t *testing.T) {
 
 	st := &ctxRecordingStore{}
 	log := slog.New(slog.NewTextHandler(io.Discard, nil))
-	fn := buildServeReviewFn(log, "high", st, nil)
+	fn := buildServeReviewFn(log, "high", st, nil, false)
 
 	err := fn(serve.Job{Ref: "octocat/hello#7", ReviewID: "rev-timeout", Timeout: 20 * time.Millisecond})
 	if err == nil {

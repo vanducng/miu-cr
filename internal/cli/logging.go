@@ -47,6 +47,12 @@ func parseCLILogLevel(raw string) (slog.Level, error) {
 	}
 }
 
+// captureReasoningFromEnv reads MIUCR_TRACE_REASONING; reuses boolEnv so bad
+// values return config.invalid (exit 2). OFF by default.
+func captureReasoningFromEnv() (bool, error) {
+	return boolEnv("MIUCR_TRACE_REASONING")
+}
+
 func serveTraceSinkFromEnv(log *slog.Logger) (func(step string, payload any), error) {
 	if log == nil {
 		log = slog.Default()

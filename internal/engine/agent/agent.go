@@ -74,6 +74,9 @@ type Context struct {
 	// Trace, when non-nil, accumulates the raw prompt, per-turn tool calls, and
 	// raw final response for persistence. nil = no capture (mirrors Progress).
 	Trace *engine.ReviewTrace
+	// CaptureReasoning, when true, records thinking blocks into Trace.Reasoning.
+	// Only fires when [review].thinking produced blocks; off = byte-identical.
+	CaptureReasoning bool
 }
 
 // progress invokes the sink when set; a nil sink is a silent no-op.
@@ -317,14 +320,22 @@ func parseRepairReply(reply string) string {
 func (a *anthropicAgent) dispatch(ctx stdctx.Context, rc Context, turn int, msg *anthropic.Message) ([]anthropic.ContentBlockParamUnion, string) {
 	var results []anthropic.ContentBlockParamUnion
 	var text strings.Builder
+	var thinkingText strings.Builder
 	for _, block := range msg.Content {
 		switch block.Type {
 		case "text":
 			text.WriteString(block.Text)
+		case "thinking":
+			if rc.CaptureReasoning {
+				thinkingText.WriteString(block.Thinking)
+			}
 		case "tool_use":
 			out, isErr := runTool(ctx, rc, turn, block.Name, block.Input)
 			results = append(results, anthropic.NewToolResultBlock(block.ID, out, isErr))
 		}
+	}
+	if rc.CaptureReasoning && thinkingText.Len() > 0 {
+		rc.Trace.SetReasoning("anthropic", thinkingText.String(), 0)
 	}
 	return results, text.String()
 }

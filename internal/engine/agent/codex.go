@@ -242,6 +242,8 @@ func (a *codexAgent) Review(ctx stdctx.Context, rc Context) (engine.ReviewOutput
 		}
 		// codex IS a reasoning model, so "auto"/level → set its reasoning effort;
 		// "off" leaves the backend default. (No temperature on this transport.)
+		// CaptureReasoning is a no-op here: the Responses API exposes reasoning as an
+		// effort knob, not returned content blocks, so there is nothing to capture.
 		if wantOn, effort := thinkingSetting(a.thinking); wantOn {
 			req.Reasoning = &codexReasoning{Effort: effort}
 		}
