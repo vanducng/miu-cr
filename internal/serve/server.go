@@ -34,12 +34,15 @@ func (k prKey) String() string { return fmt.Sprintf("%s/%s#%d", k.Owner, k.Repo,
 // owner/repo#N form, and the resolved (in-memory-only) GitHub token. The token
 // is never logged, never put in any envelope, never persisted.
 type Job struct {
-	Key     prKey
-	Ref     string
-	Token   string
-	Timeout time.Duration
-	Review  *JobReviewOptions
-	HeadSHA string
+	Key           prKey
+	Ref           string
+	Token         string
+	Timeout       time.Duration
+	Review        *JobReviewOptions
+	HeadSHA       string
+	HostJobID     int64
+	HostAttemptID int64
+	HostAttempt   int
 	// ReviewID is the server-generated id of a REST-initiated review (empty on the
 	// webhook/poll paths). reviewFn persists the FINAL record under this id; the
 	// CLI/webhook/poll paths leave it empty and skip that upsert.

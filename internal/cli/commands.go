@@ -62,7 +62,7 @@ func SetHistoryStoreFactory(f func(ctx stdctx.Context) (store.Store, func(), err
 	historyStoreFactory = f
 }
 
-var version = "v0.61.2" // x-release-please-version
+var version = "v0.61.3" // x-release-please-version
 
 // Version returns the current miucr version. The literal is bumped by
 // release-please; goreleaser ldflags-overrides it with the release tag in
@@ -1239,7 +1239,7 @@ func buildServeReviewFn(log *slog.Logger, gate string, st serve.ReviewStore, tra
 		jobCtx, cancel := stdctx.WithTimeout(stdctx.Background(), timeout)
 		defer cancel()
 		progress := func(stage string) {
-			log.Debug("review progress", "ref", j.Ref, "stage", config.RedactString(stage))
+			log.Debug("review progress", serveJobLogAttrs(j, "head_sha", j.HeadSHA, "stage", config.RedactString(stage))...)
 		}
 		out, err := ReviewPRForServe(jobCtx, PRReviewRequest{
 			Ref:            j.Ref,
@@ -1279,11 +1279,11 @@ func buildServeReviewFn(log *slog.Logger, gate string, st serve.ReviewStore, tra
 			// comment re-triggers a fresh job that re-checks the quota.
 			var ce *CLIError
 			if errors.As(err, &ce) && ce.Code == "quota.exceeded" {
-				log.Warn("review skipped: provider quota exhausted", "ref", j.Ref, "err", config.RedactString(err.Error()))
+				log.Warn("review skipped: provider quota exhausted", serveJobLogAttrs(j, "head_sha", j.HeadSHA, "err", config.RedactString(err.Error()))...)
 				persistFinalReview(log, st, j.ReviewID, "done", ReviewOutcome{})
 				return nil
 			}
-			log.Error("review failed", "ref", j.Ref, "err", config.RedactString(err.Error()))
+			log.Error("review failed", serveJobLogAttrs(j, "head_sha", j.HeadSHA, "err", config.RedactString(err.Error()))...)
 			persistFinalReview(log, st, j.ReviewID, "failed", ReviewOutcome{})
 			return err
 		}
@@ -1292,10 +1292,24 @@ func buildServeReviewFn(log *slog.Logger, gate string, st serve.ReviewStore, tra
 			posted, action = out.PR.PostedInline, out.PR.SummaryAction
 			headSHA = out.PR.HeadSHA
 		}
-		log.Info("review done", "ref", j.Ref, "review_id", out.ReviewID, "head_sha", headSHA, "findings", len(out.Findings), "posted_inline", posted, "summary", action)
+		log.Info("review done", serveJobLogAttrs(j, "review_id", out.ReviewID, "head_sha", headSHA, "findings", len(out.Findings), "posted_inline", posted, "summary", action)...)
 		persistFinalReview(log, st, j.ReviewID, "done", out)
 		return nil
 	}
+}
+
+func serveJobLogAttrs(j serve.Job, attrs ...any) []any {
+	out := []any{"ref", j.Ref}
+	if j.HostJobID != 0 {
+		out = append(out, "job_id", j.HostJobID)
+	}
+	if j.HostAttemptID != 0 {
+		out = append(out, "attempt_id", j.HostAttemptID)
+	}
+	if j.HostAttempt != 0 {
+		out = append(out, "attempt", j.HostAttempt)
+	}
+	return append(out, attrs...)
 }
 
 // persistFinalReview upserts the terminal REST record under id. A no-op when id

@@ -199,6 +199,36 @@ func TestHostEnqueueRequeuesExpiredRunningJob(t *testing.T) {
 	}
 }
 
+func TestHostHeartbeatExtendsRunningLease(t *testing.T) {
+	s := openHost(t)
+	ctx := context.Background()
+	repo := mustHostRepo(t, s)
+	session := mustHostSession(t, s, repo.ID, 18, "open")
+	in := hostJobInput(repo.ID, session.ID, 18, uniqueName(t, "head"))
+	job, ok, err := s.EnqueueHostJob(ctx, in)
+	if err != nil || !ok {
+		t.Fatalf("enqueue ok=%v err=%v", ok, err)
+	}
+	now := time.Now().UTC()
+	claim, ok, err := s.ClaimHostJob(ctx, store.HostJobClaimInput{WorkerID: "worker-1", Now: now, LeaseDuration: time.Second})
+	if err != nil || !ok {
+		t.Fatalf("claim ok=%v err=%v", ok, err)
+	}
+	if err := s.HeartbeatHostJob(ctx, store.HostJobHeartbeatInput{JobID: job.ID, AttemptID: claim.AttemptID, Now: now.Add(500 * time.Millisecond), LeaseDuration: 2 * time.Second}); err != nil {
+		t.Fatalf("heartbeat: %v", err)
+	}
+	if next, ok, err := s.ClaimHostJob(ctx, store.HostJobClaimInput{WorkerID: "worker-2", Now: now.Add(1500 * time.Millisecond), LeaseDuration: time.Hour}); err != nil || ok {
+		t.Fatalf("claim before heartbeat lease expiry ok=%v err=%v job=%+v", ok, err, next.Job)
+	}
+	next, ok, err := s.ClaimHostJob(ctx, store.HostJobClaimInput{WorkerID: "worker-2", Now: now.Add(3 * time.Second), LeaseDuration: time.Hour})
+	if err != nil || !ok {
+		t.Fatalf("claim after heartbeat lease expiry ok=%v err=%v", ok, err)
+	}
+	if next.Job.ID != job.ID || next.Job.Attempts != 2 {
+		t.Fatalf("reclaimed job = %+v, want id=%d attempt=2", next.Job, job.ID)
+	}
+}
+
 func TestHostEnqueueRespectsFailedRetryAvailability(t *testing.T) {
 	s := openHost(t)
 	ctx := context.Background()
