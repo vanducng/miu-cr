@@ -374,6 +374,8 @@ func TestPostReviewNonSelfApprove422DegradesToCommentRejected(t *testing.T) {
 }
 
 func TestPostReviewApprovePermissionDeniedDegradesToComment(t *testing.T) {
+	t.Setenv("GITHUB_ACTIONS", "false")
+
 	for _, tc := range []struct {
 		name string
 		err  error
@@ -397,6 +399,22 @@ func TestPostReviewApprovePermissionDeniedDegradesToComment(t *testing.T) {
 				t.Fatalf("retry Event must be COMMENT, got %q", last.GetEvent())
 			}
 		})
+	}
+}
+
+func TestPostReviewApprovePermissionDeniedUnderActionsDegradesToAnnotationFallback(t *testing.T) {
+	t.Setenv("GITHUB_ACTIONS", "true")
+
+	c := &recordClient{createReviewErrFirst: forbidden403()}
+	res, err := PostReview(stdctx.Background(), c, approveInfo(), nil, nil, staticSummary("review"), nil, approveOpts())
+	if err != nil {
+		t.Fatalf("permission-denied approval under Actions must not error: %v", err)
+	}
+	if res.Event != "COMMENT" || res.Reason != approveReasonForbidden {
+		t.Fatalf("want COMMENT/approve_forbidden, got (%q,%q)", res.Event, res.Reason)
+	}
+	if c.createReviewN != 1 {
+		t.Fatalf("Actions fallback should not retry CreateReview, got %d calls", c.createReviewN)
 	}
 }
 

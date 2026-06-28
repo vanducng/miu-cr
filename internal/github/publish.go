@@ -574,9 +574,10 @@ func PostReview(ctx stdctx.Context, client Client, info *PRInfo, findings []engi
 				out = os.Stdout
 			}
 			result.Fallback = emitWorkflowAnnotations(out, toPost)
-			// A fork token that 403s on CreateReview also can't APPROVE (same call);
-			// the fallback only emits annotations, so the resolved event degrades to
-			// COMMENT regardless of opts.Approval: intentional, not a dropped approval.
+			if event == "APPROVE" {
+				result.Reason = approveReasonForbidden
+				slog.Warn("approval rejected; degrading to comment", "reason", result.Reason)
+			}
 			result.Posted, result.Event, result.PostedFindings = 0, "COMMENT", nil
 			return result, nil
 		}
