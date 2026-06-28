@@ -26,7 +26,7 @@ const defaultHostJobLeaseDuration = 2 * time.Minute
 const hostJobHeartbeatInterval = 30 * time.Second
 const hostFailedRetryBase = 5 * time.Minute
 const hostFailedRetryCap = time.Hour
-const threadResolutionSyncMinInterval = time.Minute
+const threadResolutionSyncMinInterval = 5 * time.Minute
 
 var runHostDrainGrace = 10 * time.Second
 var hostPRFilterRegexCache sync.Map
