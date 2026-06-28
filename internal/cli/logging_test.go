@@ -5,6 +5,7 @@ import (
 	"log/slog"
 	"strings"
 	"testing"
+	"unicode/utf8"
 )
 
 func TestParseCLILogLevel(t *testing.T) {
@@ -81,7 +82,26 @@ func TestTraceLogSinkRedactsAndTruncates(t *testing.T) {
 	if !strings.Contains(out, "password=[redacted]") {
 		t.Fatalf("redacted marker missing: %s", out)
 	}
-	if !strings.Contains(out, "truncated=true") || !strings.Contains(out, "...[truncated]") {
+	if !strings.Contains(out, "truncated=true") || !strings.Contains(out, "...[truncated]...") {
 		t.Fatalf("trace payload was not truncated: %s", out)
+	}
+}
+
+func TestTruncateLogValueKeepsHeadAndTail(t *testing.T) {
+	got, truncated := truncateLogValue("start-"+strings.Repeat("中", 50)+"-end", 40)
+	if !truncated {
+		t.Fatal("expected value to be truncated")
+	}
+	if len(got) > 40 {
+		t.Fatalf("truncated value length = %d, want <= 40", len(got))
+	}
+	if !strings.HasPrefix(got, "start-") || !strings.HasSuffix(got, "-end") {
+		t.Fatalf("truncated value should keep head and tail: %q", got)
+	}
+	if !strings.Contains(got, "...[truncated]...") {
+		t.Fatalf("missing middle truncation marker: %q", got)
+	}
+	if !utf8.ValidString(got) {
+		t.Fatalf("truncated value is not valid UTF-8: %q", got)
 	}
 }
