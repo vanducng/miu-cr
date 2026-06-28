@@ -24,11 +24,12 @@ const (
 	approveReasonHeadMoved             = "head_moved"
 	approveReasonAlreadyDone           = "already_approved"
 	approveReasonSelfForbidden         = "self_approve_forbidden"
+	approveReasonForbidden             = "approve_forbidden"
 	approveReasonRejected              = "approve_rejected"
 	approveReasonIdempotencyUnverified = "idempotency_unverified"
 )
 
-const defaultApprovalMaxPriority = "P3"
+const defaultApprovalMaxPriority = "P4"
 
 // trustedAssociations are the only AuthorAssociation values we auto-approve. This
 // is a fail-CLOSED allowlist, not a denylist: an empty string (API didn't populate

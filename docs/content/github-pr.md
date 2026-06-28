@@ -387,7 +387,7 @@ safety precondition hold. `--approval clean` requires **zero findings**.
 `--approval threshold --approval-max-priority P3` approves when the worst active
 finding is P3 or P4; P0, P1, and P2 block approval. If findings remain, the
 approval review includes a short note. Threshold `max_priority` accepts
-`P0|P1|P2|P3|P4` and defaults to `P3`.
+`P0|P1|P2|P3|P4` and defaults to `P4`.
 
 All approval modes still require: no finding reaches the gate, the PR is **not a
 fork**, the author is **trusted** (`AuthorAssociation` not `NONE` /
@@ -400,7 +400,7 @@ Any missed precondition silently **degrades to `COMMENT`** with a reason; it
 **never fails the run**. The outcome is reported as `approve_action`
 (`approved` | `commented`) and `approve_reason` (e.g. `gate_failed`, `fork`,
 `findings_above_approval_threshold`, `untrusted_author`, `nothing_reviewed`,
-`head_moved`, `already_approved`, `self_approve_forbidden`).
+`head_moved`, `already_approved`, `self_approve_forbidden`, `approve_forbidden`).
 
 > **`--approval` is not advisory.** A review submitted by a **PAT satisfies
 > branch-protection required-reviews** and can enable auto-merge, so a human does

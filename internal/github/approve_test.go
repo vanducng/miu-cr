@@ -57,6 +57,14 @@ func TestResolveEvent(t *testing.T) {
 
 func TestResolveEventThreshold(t *testing.T) {
 	info := PRInfo{Owner: "o", Repo: "r", Number: 1, HeadSHA: "h", AuthorAssociation: "MEMBER"}
+	defaultOpts := PostReviewOptions{Approval: config.ApprovalPolicy{Mode: "threshold"}}
+	if ev, rs := resolveEvent(defaultOpts, info, true, []engine.Finding{{Severity: "info"}}, 1, true); ev != "APPROVE" || rs != approveReasonApproved {
+		t.Fatalf("default threshold should approve P4, got (%q,%q)", ev, rs)
+	}
+	if ev, rs := resolveEvent(defaultOpts, info, true, []engine.Finding{{Severity: "low"}}, 1, true); ev != "COMMENT" || rs != approveReasonThresholdFailed {
+		t.Fatalf("default threshold should block P3, got (%q,%q)", ev, rs)
+	}
+
 	opts := PostReviewOptions{Approval: config.ApprovalPolicy{Mode: "threshold", MaxPriority: "P3"}}
 	if ev, rs := resolveEvent(opts, info, true, []engine.Finding{{Severity: "low"}}, 1, true); ev != "APPROVE" || rs != approveReasonApproved {
 		t.Fatalf("P3 finding should approve under P3 threshold, got (%q,%q)", ev, rs)
@@ -339,6 +347,13 @@ func generic422() error {
 	}
 }
 
+func unauthorized401() error {
+	return &gh.ErrorResponse{
+		Response: &http.Response{StatusCode: 401},
+		Message:  "Bad credentials",
+	}
+}
+
 func TestPostReviewNonSelfApprove422DegradesToCommentRejected(t *testing.T) {
 	// A 422 that is NOT a self-approve must degrade to COMMENT/approve_rejected,
 	// never be mislabeled self_approve_forbidden, and never surface as an error.
@@ -355,6 +370,33 @@ func TestPostReviewNonSelfApprove422DegradesToCommentRejected(t *testing.T) {
 	}
 	if last := c.gotReviews[len(c.gotReviews)-1]; last.GetEvent() != "COMMENT" {
 		t.Fatalf("retry Event must be COMMENT, got %q", last.GetEvent())
+	}
+}
+
+func TestPostReviewApprovePermissionDeniedDegradesToComment(t *testing.T) {
+	for _, tc := range []struct {
+		name string
+		err  error
+	}{
+		{"forbidden", forbidden403()},
+		{"unauthorized", unauthorized401()},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			c := &recordClient{createReviewErrFirst: tc.err}
+			res, err := PostReview(stdctx.Background(), c, approveInfo(), nil, nil, staticSummary("review"), nil, approveOpts())
+			if err != nil {
+				t.Fatalf("permission-denied approval must degrade, not error: %v", err)
+			}
+			if res.Event != "COMMENT" || res.Reason != approveReasonForbidden {
+				t.Fatalf("want COMMENT/approve_forbidden, got (%q,%q)", res.Event, res.Reason)
+			}
+			if c.createReviewN != 2 {
+				t.Fatalf("want a COMMENT retry after permission-denied approval, got %d CreateReview calls", c.createReviewN)
+			}
+			if last := c.gotReviews[len(c.gotReviews)-1]; last.GetEvent() != "COMMENT" {
+				t.Fatalf("retry Event must be COMMENT, got %q", last.GetEvent())
+			}
+		})
 	}
 }
 
