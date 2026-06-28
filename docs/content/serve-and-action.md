@@ -339,7 +339,6 @@ review:
       - '(^|\s)(/miucr review\b|@vanducng\b)'
     rules:
       - action: exclude
-        author_types: ["Bot"]
         title_regexes: ['^chore\(deps\):']
 
 repos:
@@ -365,8 +364,10 @@ repos:
             requested_reviewers: ["vanducng"]
 ```
 
-Because rules append across layers, keep broad `include` rules out of the global
-block when a repo should be a strict allowlist.
+Matchers inside one rule are ANDed. Use title-only rules for generated PRs that
+may be opened by a human account, such as Renovate branches pushed by a
+maintainer token. Because rules append across layers, keep broad `include` rules
+out of the global block when a repo should be a strict allowlist.
 
 Supported matchers are `authors` (exact login), `author_types` (`Bot`, `User`,
 `Organization`), `author_associations` (`OWNER`, `MEMBER`, etc.),

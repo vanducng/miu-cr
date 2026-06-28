@@ -67,7 +67,6 @@ review:
       - '(^|\s)(/miucr review\b|@vanducng\b)'
     rules:
       - action: exclude
-        author_types: ["Bot"]
         title_regexes: ['^chore\(deps\):']
 
 agent:

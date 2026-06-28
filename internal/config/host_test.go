@@ -40,7 +40,6 @@ x:
       include_drafts: false
       rules:
         - action: exclude
-          author_types: ["Bot"]
           title_regexes: ['^chore\(deps\):']
     subagents:
       mode: auto
