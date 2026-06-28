@@ -120,8 +120,8 @@ func replaceSummaryLedgerBody(body string, info *PRInfo, ledger []LedgerEntry, i
 	if !strings.Contains(body, ReviewMarker) || !strings.Contains(body, ledgerPrefix) {
 		return "", false
 	}
-	next := replaceResultLine(body, ledgerResultLine(ledger))
-	if next == body {
+	next, ok := replaceResultLine(body, ledgerResultLine(ledger))
+	if !ok {
 		return "", false
 	}
 	tables := renderLedgerTables(info, ledger, inlineURLs)
@@ -142,7 +142,7 @@ func replaceSummaryLedgerBody(body string, info *PRInfo, ledger []LedgerEntry, i
 	return next, true
 }
 
-func replaceResultLine(body, result string) string {
+func replaceResultLine(body, result string) (string, bool) {
 	start := 0
 	for start <= len(body) {
 		end := strings.IndexByte(body[start:], '\n')
@@ -152,16 +152,16 @@ func replaceResultLine(body, result string) string {
 		}
 		if strings.HasPrefix(body[start:lineEnd], "**Result:**") {
 			if end < 0 {
-				return body[:start] + "**Result:** " + result
+				return body[:start] + "**Result:** " + result, true
 			}
-			return body[:start] + "**Result:** " + result + body[lineEnd:]
+			return body[:start] + "**Result:** " + result + body[lineEnd:], true
 		}
 		if end < 0 {
 			break
 		}
 		start = lineEnd + 1
 	}
-	return body
+	return body, false
 }
 
 func renderLedgerTables(info *PRInfo, ledger []LedgerEntry, inlineURLs map[string]string) string {

@@ -144,6 +144,32 @@ func TestReplaceSummaryLedgerBodyIgnoresInlineResultText(t *testing.T) {
 	}
 }
 
+func TestReplaceSummaryLedgerBodyUpdatesWhenResultLineUnchanged(t *testing.T) {
+	now := time.Date(2026, 6, 28, 10, 0, 0, 0, time.UTC)
+	info := &PRInfo{Owner: "o", Repo: "r", Number: 1, HeadSHA: "bbbbbb2", HTMLBase: "https://github.com/o/r"}
+	f := engine.Finding{File: "a.go", Line: 5, Severity: "low", Category: "bug", Title: "thing", QuotedCode: "x"}
+	ledger := MergeLedger(nil, []engine.Finding{f}, "aaaaaa1", map[string]bool{"a.go": true}, now)
+	ledger[0].Status = statusResolved
+	ledger[0].ResSHA = "bbbbbb2"
+	ledger[0].ResKind = resolutionConversation
+	ledger[0].ResAt = now.Add(time.Hour).Format(time.RFC3339)
+	body := RenderSummaryFull(info, nil, nil, 0, nil, nil, SummaryOptions{Ledger: ledger})
+	next := append([]LedgerEntry(nil), ledger...)
+	next[0].ResKind = ""
+
+	out, ok := replaceSummaryLedgerBody(body, info, next, nil)
+	if !ok {
+		t.Fatal("replaceSummaryLedgerBody returned false")
+	}
+	if strings.Contains(out, "conversation resolved") {
+		t.Fatalf("summary kept stale conversation marker:\n%s", out)
+	}
+	parsed := ParseLedger(out)
+	if len(parsed) != 1 || parsed[0].ResKind != "" {
+		t.Fatalf("ledger marker not updated: %+v", parsed)
+	}
+}
+
 func TestSyncSummaryConversationResolvedEditsExistingComment(t *testing.T) {
 	now := time.Date(2026, 6, 28, 10, 0, 0, 0, time.UTC)
 	info := &PRInfo{Owner: "o", Repo: "r", Number: 1, HeadSHA: "bbbbbb2", HTMLBase: "https://github.com/o/r", ReviewCount: 1}

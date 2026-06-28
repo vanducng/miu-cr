@@ -222,11 +222,11 @@ func TestHostRunnerPrunesThreadResolutionSyncAfterReconcileError(t *testing.T) {
 func TestHostRunnerThreadResolutionSyncDropClearsThrottle(t *testing.T) {
 	now := time.Date(2026, 6, 28, 10, 0, 0, 0, time.UTC)
 	r := &HostRunner{
-		threadSyncLast: map[string]time.Time{"octo/hello#1": now},
-		threadSyncSem:  make(chan struct{}, 1),
-		log:            slog.New(slog.NewTextHandler(io.Discard, nil)),
+		threadSyncLast:   map[string]time.Time{"octo/hello#1": now},
+		threadSyncActive: maxThreadResolutionSyncWorkers,
+		threadSyncDone:   make(chan struct{}),
+		log:              slog.New(slog.NewTextHandler(io.Discard, nil)),
 	}
-	r.threadSyncSem <- struct{}{}
 
 	r.enqueueThreadResolutionSync(stdctx.Background(), nil, HostRepoConfig{Slug: "octo/hello"}, prWithHead(1, "sha-A"), now)
 
@@ -865,12 +865,11 @@ func TestRunHostReturnsWhenRunnerDoesNotStop(t *testing.T) {
 }
 
 func TestHostRunnerWaitsForThreadResolutionSync(t *testing.T) {
-	r := &HostRunner{threadSyncSem: make(chan struct{}, 1)}
-	r.threadSyncSem <- struct{}{}
+	r := &HostRunner{threadSyncActive: 1, threadSyncDone: make(chan struct{})}
 	done := make(chan struct{})
 	go func() {
 		<-done
-		<-r.threadSyncSem
+		r.finishThreadResolutionSync()
 	}()
 	if r.waitThreadResolutionSync(time.Millisecond) {
 		t.Fatal("wait should time out while sync is running")
