@@ -48,6 +48,15 @@ package imports/reverse imports and basic relative JS/TS/Python imports.
 Related files are context only; findings must still target changed files in the
 diff. Fork PRs skip root project files and hop-expanded related files.
 
+Before the LLM turn, the engine also builds a small changed-symbol prelude from
+the selected files using the same revision-pinned `symbol_context` scanner the
+model can call later. This mirrors review-pack style systems: changed symbols
+come first, wider related context comes second. The prelude skips deleted files
+and files with no detected symbols, caps itself separately, and reports
+`stats.changed_symbol_context_files`,
+`stats.changed_symbol_context_truncated`, and
+`stats.changed_symbol_context_ms` when it contributes context.
+
 When `--token-budget` is set and the full context exceeds it, assembly degrades down a **truncation ladder**, recording the level it landed on in `stats.truncation_level`:
 
 | Level | Contents |
@@ -67,14 +76,24 @@ After file selection (where the changed paths are known in memory) the engine se
 A single structured pass reviews the assembled context by default. When
 `[review.subagents]` is enabled, large reviews can fan out into scoped passes by
 glob. Each pass sees only its assigned diff slice plus the same rules, project
-context, related context, conversation, and read-only tools. Candidate findings
-from all passes are merged before the deterministic stages below, so line
-anchoring, drift drop, dedupe, gate, history, and posting stay centralized.
+context, changed-symbol prelude, related context, conversation, and read-only
+tools. Candidate findings from all passes are merged before the deterministic
+stages below, so line anchoring, drift drop, dedupe, gate, history, and posting
+stay centralized.
 
-The model has two read-only tools to gather more context before deciding:
+The model has three read-only tools to gather more context before deciding:
 
 - **`file_read`**: read a line range of a file at the reviewed revision.
 - **`grep`**: search the reviewed revision for a fixed string.
+- **`symbol_context`**: fetch bounded internal code-intelligence context from the reviewed revision.
+
+`symbol_context` is bounded by `[review.tools.symbol_context]` and helps answer
+concrete cross-file symbol or dependency questions without reading the live
+worktree. It is a heuristic scanner for common code symbols, dependencies, and
+lightweight frontend component symbols. The reviewer prompt tells the model to
+prefer `symbol_context` before `file_read` for definitions, references,
+incoming/outgoing calls, implementations, and dbt/SQL dependencies; `grep`
+remains the raw text search fallback for config keys and string usage.
 
 The model returns JSON findings **without line numbers**; instead it quotes the exact source it refers to (`existing_code`). Severities are constrained to `info|low|medium|high|critical`; categories are short kebab-case tags (`bug`, `security`, `performance`, `error-handling`, `concurrency`, `resource-leak`, `maintainability`, …).
 

@@ -121,6 +121,12 @@ default_provider = "anthropic"
 # suggest      = false           # emit GitHub one-click suggestions on --post (default off)
 # patch_repair = false           # 2nd-pass recovery of one-click suggestions; only effective with suggest=true (default off)
 #
+# # Internal symbol_context tool limits (all optional; values shown are defaults).
+# [review.tools.symbol_context]
+# max_bytes = 16000    # per-result byte budget (default 16000)
+# max_files = 2000     # max files to scan (default 2000)
+# max_parallel = 8     # worker concurrency (default 8, capped at 32)
+#
 # [review.approval]
 # mode = "off"                   # off|clean|threshold
 # max_priority = "P4"            # threshold mode only; P0|P1|P2|P3|P4

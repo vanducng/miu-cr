@@ -255,6 +255,31 @@ func TestReviewProjectContextMissingFilesIsNoop(t *testing.T) {
 	}
 }
 
+func TestReviewInjectsChangedSymbolContext(t *testing.T) {
+	dir := initRepo(t)
+	writeFile(t, dir, "app.go", "package app\n\nfunc Existing() int { return 1 }\n")
+	git(t, dir, "add", ".")
+	git(t, dir, "commit", "-q", "-m", "base")
+	writeFile(t, dir, "app.go", "package app\n\nfunc Existing() int { return 1 }\n\nfunc Risky() int { return Existing() }\n")
+	git(t, dir, "add", "app.go")
+
+	fa := &fakeAgent{}
+	eng := engine.New(fa, gitcmd.New())
+	res, err := eng.Review(stdctx.Background(), engine.Request{Mode: 0, RepoDir: dir, Gate: "high", Extensions: []string{"go"}})
+	if err != nil {
+		t.Fatalf("Review: %v", err)
+	}
+	if !strings.Contains(fa.gotRelated, "Changed symbol context from the reviewed revision") {
+		t.Fatalf("changed symbol context missing from RelatedContext: %q", fa.gotRelated)
+	}
+	if !strings.Contains(fa.gotRelated, "Risky") {
+		t.Fatalf("changed symbol context did not summarize changed file symbols: %q", fa.gotRelated)
+	}
+	if got, _ := res.Stats["changed_symbol_context_files"].(float64); got != 1 {
+		t.Fatalf("changed_symbol_context_files: got %v", res.Stats["changed_symbol_context_files"])
+	}
+}
+
 type failStore struct{ called bool }
 
 func (s *failStore) SaveReview(stdctx.Context, engine.PersistRecord) (string, error) {

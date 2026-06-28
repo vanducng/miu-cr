@@ -149,10 +149,48 @@ type Review struct {
 	Conversation *bool             `toml:"conversation,omitempty"`
 	Suggest      *bool             `toml:"suggest,omitempty"`
 	PatchRepair  *bool             `toml:"patch_repair,omitempty"`
+	Tools        ReviewTools       `toml:"tools,omitempty"`
 	Approval     ApprovalPolicy    `toml:"approval"`
 	Subagents    ReviewSubagents   `toml:"subagents,omitempty"`
 	PRFilter     HostPRFilter      `toml:"pr_filter,omitempty"`
 	CategoryURLs map[string]string `toml:"category_urls,omitempty"`
+}
+
+type ReviewTools struct {
+	SymbolContext SymbolContext `toml:"symbol_context,omitempty" yaml:"symbol_context,omitempty" json:"symbol_context,omitempty"`
+}
+
+type SymbolContext struct {
+	MaxBytes    int `toml:"max_bytes,omitempty" yaml:"max_bytes,omitempty" json:"max_bytes,omitempty"`
+	MaxFiles    int `toml:"max_files,omitempty" yaml:"max_files,omitempty" json:"max_files,omitempty"`
+	MaxParallel int `toml:"max_parallel,omitempty" yaml:"max_parallel,omitempty" json:"max_parallel,omitempty"`
+}
+
+func (s SymbolContext) MaxBytesOrDefault(defaults ...int) int {
+	if s.MaxBytes > 0 {
+		return s.MaxBytes
+	}
+	if len(defaults) > 0 && defaults[0] > 0 {
+		return defaults[0]
+	}
+	return 16000
+}
+
+func (s SymbolContext) MaxFilesOrDefault() int {
+	if s.MaxFiles > 0 {
+		return s.MaxFiles
+	}
+	return 2000
+}
+
+func (s SymbolContext) MaxParallelOrDefault() int {
+	if s.MaxParallel > 0 {
+		if s.MaxParallel > 32 {
+			return 32
+		}
+		return s.MaxParallel
+	}
+	return 8
 }
 
 type ApprovalPolicy struct {

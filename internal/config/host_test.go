@@ -33,6 +33,11 @@ x:
     thread_resolution_sync:
       mode: poll
       interval: 7m
+    tools:
+      symbol_context:
+        max_bytes: 12000
+        max_files: 500
+        max_parallel: 4
     approval:
       mode: threshold
       max_priority: P3
@@ -105,6 +110,9 @@ repos:
 	}
 	if cfg.Host.Review.ThreadResolutionSync.Mode != "poll" || cfg.Host.Review.ThreadResolutionSync.Interval != "7m" {
 		t.Fatalf("thread resolution sync not loaded: %+v", cfg.Host.Review)
+	}
+	if cfg.Host.Review.Tools.SymbolContext.MaxBytes != 12000 || cfg.Host.Review.Tools.SymbolContext.MaxFiles != 500 || cfg.Host.Review.Tools.SymbolContext.MaxParallel != 4 {
+		t.Fatalf("review tools not loaded: %+v", cfg.Host.Review.Tools)
 	}
 	if cfg.Host.Review.Approval.Mode != "threshold" || cfg.Host.Review.Approval.MaxPriority != "P3" || cfg.Host.Review.Approval.Note != "on_findings" {
 		t.Fatalf("host approval not loaded: %+v", cfg.Host.Review.Approval)

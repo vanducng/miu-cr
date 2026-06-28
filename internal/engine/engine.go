@@ -20,6 +20,7 @@ import (
 	enginectx "github.com/vanducng/miu-cr/internal/engine/context"
 	"github.com/vanducng/miu-cr/internal/engine/diff"
 	"github.com/vanducng/miu-cr/internal/engine/gitcmd"
+	"github.com/vanducng/miu-cr/internal/engine/tools/symbolcontext"
 	"github.com/vanducng/miu-cr/internal/rules"
 )
 
@@ -272,6 +273,7 @@ type AgentContext struct {
 	// mirror Conversation at every hop or the format is silently dropped.
 	PromptFormat   string
 	OperatorPrompt string
+	SymbolContext  config.SymbolContext
 	RepoDir        string
 	Rev            string
 	Runner         *gitcmd.Runner
@@ -386,6 +388,7 @@ type Request struct {
 	PromptFormat string
 	// OperatorPrompt is trusted host policy. LOCKSTEP: mirror Conversation at every hop.
 	OperatorPrompt string
+	SymbolContext  config.SymbolContext
 
 	// Progress is the optional milestone sink (stderr); nil = silent. The wire/cli
 	// layer builds it from --verbose/--quiet + a TTY check. Only milestone strings
@@ -591,6 +594,10 @@ func (e *Engine) Review(ctx stdctx.Context, req Request) (ReviewResult, error) {
 		related = enginectx.BuildRelatedContext(ctx, req.RepoDir, rev, selected, e.Runner, enginectx.RelatedOptions{HopDepth: relatedHops})
 		relatedMS = time.Since(relatedStart).Milliseconds()
 	}
+	changedSymbolStart := time.Now()
+	changedSymbolContext, changedSymbolFiles, changedSymbolTruncated := buildChangedSymbolContext(ctx, req, selected, rev, e.Runner)
+	changedSymbolMS := time.Since(changedSymbolStart).Milliseconds()
+	relatedText := joinPromptContext(changedSymbolContext, related.Text)
 
 	trace.SetModel(req.Provider, req.Model)
 
@@ -598,7 +605,7 @@ func (e *Engine) Review(ctx stdctx.Context, req Request) (ReviewResult, error) {
 		rulesText:       rulesText,
 		semanticContext: semanticContext,
 		projectContext:  projectContext,
-		relatedContext:  related.Text,
+		relatedContext:  relatedText,
 		rev:             rev,
 		trace:           trace,
 	})
@@ -642,6 +649,11 @@ func (e *Engine) Review(ctx stdctx.Context, req Request) (ReviewResult, error) {
 		stats["related_context_hops"] = float64(related.Hops)
 		stats["related_context_truncated"] = related.Truncated
 		stats["related_context_ms"] = float64(relatedMS)
+	}
+	if changedSymbolFiles > 0 || changedSymbolTruncated {
+		stats["changed_symbol_context_files"] = float64(changedSymbolFiles)
+		stats["changed_symbol_context_truncated"] = changedSymbolTruncated
+		stats["changed_symbol_context_ms"] = float64(changedSymbolMS)
 	}
 	for k, v := range passStats {
 		stats[k] = v
@@ -810,6 +822,10 @@ func retrieveSemantic(ctx stdctx.Context, r Retriever, selected []diff.Diff) (ad
 const (
 	projectContextMaxFileBytes  = 8 * 1024
 	projectContextMaxTotalBytes = 32 * 1024
+	changedSymbolContextFiles   = 12
+	changedSymbolContextBytes   = 16 * 1024
+	changedSymbolContextLimit   = 8
+	changedSymbolContextHeader  = "Changed symbol context from the reviewed revision:\n"
 )
 
 var projectContextFiles = []string{"AGENTS.md", "CLAUDE.md"}
@@ -855,6 +871,120 @@ func (e *Engine) loadProjectContext(ctx stdctx.Context, repoDir, rev string) (st
 		}
 	}
 	return sb.String(), files, truncated
+}
+
+func buildChangedSymbolContext(ctx stdctx.Context, req Request, selected []diff.Diff, rev string, runner *gitcmd.Runner) (string, int, bool) {
+	if runner == nil {
+		runner = gitcmd.New()
+	}
+	maxFiles := changedSymbolContextFiles
+	if req.SymbolContext.MaxFiles > 0 && req.SymbolContext.MaxFiles < maxFiles {
+		maxFiles = req.SymbolContext.MaxFiles
+	}
+	if maxFiles <= 0 {
+		return "", 0, false
+	}
+	maxBytes := req.SymbolContext.MaxBytesOrDefault(changedSymbolContextBytes)
+	if maxBytes > changedSymbolContextBytes {
+		maxBytes = changedSymbolContextBytes
+	}
+	tc := symbolcontext.Context{RepoDir: req.RepoDir, Rev: rev, Runner: runner}
+	var sb strings.Builder
+	seen := map[string]bool{}
+	files := 0
+	truncated := false
+	for _, d := range selected {
+		if d.IsDeleted {
+			continue
+		}
+		path := filepath.ToSlash(strings.TrimSpace(d.NewPath))
+		if path == "" || seen[path] {
+			continue
+		}
+		seen[path] = true
+		if files >= maxFiles {
+			truncated = true
+			break
+		}
+		block := changedFileSymbolBlock(ctx, req.SymbolContext, tc, path)
+		if strings.TrimSpace(block) == "" {
+			continue
+		}
+		prefix := changedSymbolContextHeader
+		if sb.Len() > 0 {
+			prefix = "\n"
+		}
+		block = prefix + block
+		if sb.Len()+len(block) > maxBytes {
+			remaining := maxBytes - sb.Len()
+			if remaining > len(prefix) {
+				sb.Write(truncateUTF8Bytes([]byte(block), remaining))
+				files++
+			}
+			truncated = true
+			break
+		}
+		sb.WriteString(block)
+		files++
+	}
+	return strings.TrimRight(sb.String(), "\n"), files, truncated
+}
+
+func changedFileSymbolBlock(ctx stdctx.Context, cfg config.SymbolContext, tc symbolcontext.Context, path string) string {
+	var blocks []string
+	if out, failed := runSymbolContext(ctx, cfg, tc, symbolcontext.Args{Relation: "document_symbols", File: path, Limit: changedSymbolContextLimit}); usefulSymbolOutput(out, failed) {
+		blocks = append(blocks, out)
+	}
+	if strings.EqualFold(filepath.Ext(path), ".sql") {
+		if out, failed := runSymbolContext(ctx, cfg, tc, symbolcontext.Args{Relation: "dependencies", File: path, Limit: changedSymbolContextLimit}); usefulSymbolOutput(out, failed) {
+			blocks = append(blocks, out)
+		}
+	}
+	if len(blocks) == 0 {
+		return ""
+	}
+	return strings.Join(blocks, "\n")
+}
+
+func runSymbolContext(ctx stdctx.Context, cfg config.SymbolContext, tc symbolcontext.Context, args symbolcontext.Args) (string, bool) {
+	raw, err := json.Marshal(args)
+	if err != nil {
+		return "", true
+	}
+	return symbolcontext.Run(ctx, cfg, tc, -1, raw)
+}
+
+func usefulSymbolOutput(out string, failed bool) bool {
+	if failed {
+		return false
+	}
+	out = strings.TrimSpace(out)
+	if out == "" {
+		return false
+	}
+	emptyMarkers := []string{
+		symbolcontext.NoSymbolsDetectedMarker,
+		symbolcontext.NoSymbolsFoundMarker,
+		symbolcontext.NoDependenciesFoundMarker,
+		symbolcontext.NoSymbolContextMarker,
+	}
+	for _, marker := range emptyMarkers {
+		if strings.Contains(out, marker) {
+			return false
+		}
+	}
+	return true
+}
+
+func joinPromptContext(parts ...string) string {
+	var out []string
+	for _, p := range parts {
+		p = strings.TrimSpace(p)
+		if p != "" {
+			out = append(out, p)
+		}
+	}
+	return strings.Join(out, "\n\n")
 }
 
 func truncateUTF8Bytes(blob []byte, n int) []byte {

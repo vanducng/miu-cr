@@ -244,6 +244,7 @@ func (engineReviewer) Review(ctx stdctx.Context, req cli.ReviewRequest) (cli.Rev
 		ContextHops:     req.ContextHops,
 		ContextHopsAuto: req.ContextHopsAuto,
 		Subagents:       engineSubagents(req.Subagents),
+		SymbolContext:   req.SymbolContext,
 		Provider:        string(creds.Kind),
 		Model:           creds.Model,
 		Quota:           gate,
@@ -463,6 +464,7 @@ func (prReviewer) ReviewPR(ctx stdctx.Context, req cli.PRReviewRequest) (cli.Rev
 		ContextHops:     contextHopsForPR(req.ContextHops, info.IsFork),
 		ContextHopsAuto: contextHopsAutoForPR(req.ContextHopsAuto, info.IsFork),
 		Subagents:       engineSubagents(req.Subagents),
+		SymbolContext:   req.SymbolContext,
 		Provider:        string(creds.Kind),
 		Model:           creds.Model,
 		Quota:           gate,
@@ -592,6 +594,7 @@ type reviewReuseShape struct {
 	ContextHops     int
 	ContextHopsAuto bool
 	Subagents       config.ReviewSubagents
+	SymbolContext   config.SymbolContext
 	FilterMode      string
 	MinSeverity     string
 	WantDiagram     bool
@@ -668,6 +671,7 @@ func newReviewReuseShape(req cli.PRReviewRequest, cfg config.Config, providerNam
 		ContextHops:     req.ContextHops,
 		ContextHopsAuto: req.ContextHopsAuto,
 		Subagents:       req.Subagents,
+		SymbolContext:   req.SymbolContext,
 		FilterMode:      req.FilterMode,
 		MinSeverity:     req.MinSeverity,
 		WantDiagram:     req.WantDiagram,
@@ -1097,6 +1101,7 @@ func (a agentAdapter) Review(ctx stdctx.Context, rc engine.AgentContext) (engine
 		Conversation:     rc.Conversation,    // lockstep: forgetting this silently drops the PR conversation
 		PromptFormat:     rc.PromptFormat,    // lockstep: forgetting this silently renders legacy under xml request
 		OperatorPrompt:   rc.OperatorPrompt,
+		SymbolContext:    rc.SymbolContext,
 		RepoDir:          rc.RepoDir,
 		Rev:              rc.Rev,
 		Runner:           rc.Runner,

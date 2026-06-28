@@ -106,6 +106,11 @@ temperature  = 0               # LLM sampling temperature (0–2), used when thi
 suggest      = false           # CLI default --suggest (Action input defaults true)
 patch_repair = false           # CLI default --patch-repair; requires suggest=true
 
+[review.tools.symbol_context]  # internal symbol_context tool limits
+max_bytes = 16000              # cap returned text before it reaches the model
+max_files = 2000               # cap repo-wide files scanned per tool call
+max_parallel = 8               # bounded workers for large repo-wide scans
+
 [review.subagents]             # optional scoped fanout inside one review
 mode = "auto"                  # off|auto|always
 max_parallel = 2               # default 2, capped at 8
@@ -127,6 +132,19 @@ system_prompt = "Focus on correctness, concurrency, error handling, and API comp
 [review.category_urls]         # map a finding Category → a docs URL (clickable link + SARIF helpUri)
 "security" = "https://example.com/docs/security"
 ```
+
+`symbol_context` is part of the core read-only reviewer toolset, alongside
+`file_read` and `grep`. `[review.tools.symbol_context]` tunes its bounds. The
+internal revision-pinned scanner can fetch bounded `document_symbols`,
+`definition`, `references`, `incoming_calls`, `outgoing_calls`,
+`implementations`, `dependencies`, and lightweight Astro/Vue/Svelte component
+symbols. It also supplies a compact changed-symbol prelude before the model
+turn, capped separately to a small first-pass slice of changed files. Large
+repo-wide scans use up to `max_parallel` bounded readers while preserving
+deterministic output order. It reads the same reviewed git revision as the other
+tools, so PR and staged reviews do not inspect the live worktree. The tool is
+intended for code-intelligence lookups first; use `grep` for raw text and
+`file_read` for exact lines after a target is located.
 
 Only these review attributes can be defaulted from config; there is intentionally **no** `post` or `force` config because write-action and repeat-spend defaults are footguns. Approval remains explicit as a policy object so host configs can choose strict clean approval or a priority threshold per repo.
 

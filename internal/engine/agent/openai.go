@@ -15,6 +15,7 @@ import (
 	"github.com/vanducng/miu-cr/internal/config"
 	"github.com/vanducng/miu-cr/internal/engine"
 	"github.com/vanducng/miu-cr/internal/engine/gitcmd"
+	enginetools "github.com/vanducng/miu-cr/internal/engine/tools"
 )
 
 // classifyOpenAIErr types a proven OpenAI-compatible API status into the stable
@@ -82,35 +83,21 @@ func openAIReasoningEffort(effort string) shared.ReasoningEffort {
 }
 
 func openAITools() []openai.ChatCompletionToolUnionParam {
-	fileReadParams := map[string]any{
-		"type": "object",
-		"properties": map[string]any{
-			"file":  map[string]any{"type": "string", "description": "path to read"},
-			"start": map[string]any{"type": "integer", "description": "1-based start line"},
-			"end":   map[string]any{"type": "integer", "description": "1-based end line"},
-		},
-		"required": []string{"file"},
+	specs := enginetools.Specs()
+	out := make([]openai.ChatCompletionToolUnionParam, 0, len(specs))
+	for _, spec := range specs {
+		params := map[string]any{
+			"type":       "object",
+			"properties": spec.Properties,
+			"required":   spec.Required,
+		}
+		out = append(out, openai.ChatCompletionFunctionTool(shared.FunctionDefinitionParam{
+			Name:        spec.Name,
+			Description: openai.String(spec.Description),
+			Parameters:  shared.FunctionParameters(params),
+		}))
 	}
-	grepParams := map[string]any{
-		"type": "object",
-		"properties": map[string]any{
-			"pattern": map[string]any{"type": "string", "description": "fixed string to search for"},
-			"file":    map[string]any{"type": "string", "description": "optional file path to limit the search"},
-		},
-		"required": []string{"pattern"},
-	}
-	return []openai.ChatCompletionToolUnionParam{
-		openai.ChatCompletionFunctionTool(shared.FunctionDefinitionParam{
-			Name:        "file_read",
-			Description: openai.String("Read a line range of a file at the reviewed revision."),
-			Parameters:  shared.FunctionParameters(fileReadParams),
-		}),
-		openai.ChatCompletionFunctionTool(shared.FunctionDefinitionParam{
-			Name:        "grep",
-			Description: openai.String("Search the reviewed revision for a fixed string."),
-			Parameters:  shared.FunctionParameters(grepParams),
-		}),
-	}
+	return out
 }
 
 // RepairPatch issues one tools-less, code-only chat completion and returns the

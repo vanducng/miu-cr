@@ -45,6 +45,11 @@ x:
     context_hops: 1
     conversation: true
     mode: review
+    tools:
+      symbol_context:
+        max_bytes: 16000
+        max_files: 2000
+        max_parallel: 8
 
 review:
   <<: *review_defaults

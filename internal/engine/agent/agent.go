@@ -16,9 +16,10 @@ import (
 	"github.com/anthropics/anthropic-sdk-go"
 	"github.com/anthropics/anthropic-sdk-go/option"
 
+	"github.com/vanducng/miu-cr/internal/config"
 	"github.com/vanducng/miu-cr/internal/engine"
-	enginectx "github.com/vanducng/miu-cr/internal/engine/context"
 	"github.com/vanducng/miu-cr/internal/engine/gitcmd"
+	enginetools "github.com/vanducng/miu-cr/internal/engine/tools"
 )
 
 // classifyAnthropicErr types a proven Anthropic API status into the stable
@@ -68,6 +69,7 @@ type Context struct {
 	PromptFormat string
 	// OperatorPrompt is trusted host policy. LOCKSTEP: mirror Conversation in ALL backends.
 	OperatorPrompt string
+	SymbolContext  config.SymbolContext
 	RepoDir        string
 	Rev            string
 	Runner         *gitcmd.Runner
@@ -164,26 +166,15 @@ func anthropicOptions(creds Credentials) []option.RequestOption {
 }
 
 func reviewTools() []anthropic.ToolUnionParam {
-	fileReadSchema := anthropic.ToolInputSchemaParam{
-		Properties: map[string]any{
-			"file":  map[string]any{"type": "string", "description": "path to read"},
-			"start": map[string]any{"type": "integer", "description": "1-based start line"},
-			"end":   map[string]any{"type": "integer", "description": "1-based end line"},
-		},
-		Required: []string{"file"},
+	specs := enginetools.Specs()
+	out := make([]anthropic.ToolUnionParam, 0, len(specs))
+	for _, spec := range specs {
+		schema := anthropic.ToolInputSchemaParam{Properties: spec.Properties, Required: spec.Required}
+		tool := anthropic.ToolUnionParamOfTool(schema, spec.Name)
+		tool.OfTool.Description = anthropic.String(spec.Description)
+		out = append(out, tool)
 	}
-	grepSchema := anthropic.ToolInputSchemaParam{
-		Properties: map[string]any{
-			"pattern": map[string]any{"type": "string", "description": "fixed string to search for"},
-			"file":    map[string]any{"type": "string", "description": "optional file path to limit the search"},
-		},
-		Required: []string{"pattern"},
-	}
-	fileRead := anthropic.ToolUnionParamOfTool(fileReadSchema, "file_read")
-	fileRead.OfTool.Description = anthropic.String("Read a line range of a file at the reviewed revision.")
-	grep := anthropic.ToolUnionParamOfTool(grepSchema, "grep")
-	grep.OfTool.Description = anthropic.String("Search the reviewed revision for a fixed string.")
-	return []anthropic.ToolUnionParam{fileRead, grep}
+	return out
 }
 
 func (a *anthropicAgent) Review(ctx stdctx.Context, rc Context) (engine.ReviewOutput, error) {
@@ -341,77 +332,17 @@ func (a *anthropicAgent) dispatch(ctx stdctx.Context, rc Context, turn int, msg 
 	return results, text.String()
 }
 
-type fileReadArgs struct {
-	File  string `json:"file"`
-	Start int    `json:"start"`
-	End   int    `json:"end"`
-}
-
-type grepArgs struct {
-	Pattern string `json:"pattern"`
-	File    string `json:"file"`
-}
-
-// fileReadLabel renders a short "path:start-end" label for the progress sink
-// (range omitted when unset). Paths/line numbers only, never secrets.
-func fileReadLabel(a fileReadArgs) string {
-	if a.Start <= 0 {
-		return a.File // no usable start (incl. line 0, which doesn't exist) → just the path
-	}
-	if a.End <= 0 {
-		return fmt.Sprintf("%s:%d", a.File, a.Start)
-	}
-	return fmt.Sprintf("%s:%d-%d", a.File, a.Start, a.End)
-}
-
-func grepLabel(a grepArgs) string {
-	if strings.TrimSpace(a.File) == "" {
-		return a.Pattern
-	}
-	return fmt.Sprintf("%s in %s", a.Pattern, a.File)
-}
-
 // runTool executes one tool against the reviewed revision. Provider-agnostic so
 // all agent loops share it (and record the dispatch into the trace). Returns
 // (content, isError).
 func runTool(ctx stdctx.Context, rc Context, turn int, name string, input json.RawMessage) (string, bool) {
-	switch name {
-	case "file_read":
-		var args fileReadArgs
-		_ = json.Unmarshal(input, &args)
-		if strings.TrimSpace(args.File) == "" {
-			return "file_read requires a non-empty \"file\"", true
-		}
-		rc.progress("→ file_read " + fileReadLabel(args))
-		rc.Trace.RecordTool(turn, "file_read", fileReadLabel(args))
-		out, err := enginectx.ReadRange(ctx, rc.RepoDir, rc.Rev, args.File, args.Start, args.End, rc.Runner)
-		if err != nil {
-			return fmt.Sprintf("file_read failed: %v", err), true
-		}
-		if out == "" {
-			return "(no lines in range)", false
-		}
-		return out, false
-	case "grep":
-		var args grepArgs
-		_ = json.Unmarshal(input, &args)
-		if strings.TrimSpace(args.Pattern) == "" {
-			return "grep requires a non-empty \"pattern\"", true
-		}
-		label := grepLabel(args)
-		rc.progress("→ grep " + label)
-		rc.Trace.RecordTool(turn, "grep", label)
-		out, err := enginectx.Grep(ctx, rc.RepoDir, rc.Rev, args.Pattern, rc.Runner, args.File)
-		if err != nil {
-			return fmt.Sprintf("grep failed: %v", err), true
-		}
-		if out == "" {
-			return "(no matches)", false
-		}
-		return out, false
-	default:
-		return fmt.Sprintf("unknown tool %q", name), true
-	}
+	return enginetools.Execute(ctx, rc.SymbolContext, enginetools.Context{
+		RepoDir:  rc.RepoDir,
+		Rev:      rc.Rev,
+		Runner:   rc.Runner,
+		Progress: rc.Progress,
+		Trace:    rc.Trace,
+	}, turn, name, input)
 }
 
 // parseFindings strips markdown fences and unmarshals the model's JSON into a

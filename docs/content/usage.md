@@ -197,6 +197,47 @@ an explicit CLI flag still wins.
   related-file hop context are skipped.
 - `--instruction <text>`: extra free-text steer for THIS review (e.g. "focus on the auth changes"); injected fenced, context-only, and length-capped, so it never redefines the finding schema.
 
+## Symbol Context
+
+`symbol_context` is a core read-only reviewer tool. It runs inside miucr against
+the reviewed git revision; `[review.tools.symbol_context]` tunes its bounds:
+
+```toml
+[review.tools.symbol_context]
+max_bytes = 16000
+max_files = 2000
+max_parallel = 8
+```
+
+Use `symbol_context` for concrete cross-file questions such as
+`document_symbols`, `definition`, `references`, `incoming_calls`,
+`outgoing_calls`, `implementations`, or `dependencies`. It covers common Go,
+TypeScript/JavaScript, Python, PHP, SQL, Rust, Java/C#, C/C++, and lightweight
+Astro/Vue/Svelte component symbols. The scanner is best-effort, bounded, and
+read-only; failures stay local to that tool call.
+
+Recommended reviewer flow:
+
+1. Use `document_symbols` on a changed file to map functions, classes,
+   components, models, and blocks before reading full files.
+2. Use `definition` to jump from a changed call site to the declaration that
+   defines the contract.
+3. Use `references`, `incoming_calls`, and `outgoing_calls` when a changed
+   symbol may affect incoming callers, outgoing calls, or implementations
+   outside the diff.
+4. Use `dependencies` for dbt/SQL model lineage and table-like references.
+5. Use `file_read` only after `symbol_context` or `grep` narrows the exact
+   implementation lines needed for a finding.
+
+Every review also gets a compact changed-symbol prelude before the LLM turn.
+It summarizes detected symbols in selected changed files first, then leaves the
+model-initiated `symbol_context` tool available for deeper targeted lookup. The
+automatic prelude is capped to a small first-pass slice of changed files and at
+most the configured `max_bytes` value, so it cannot replace targeted tool use on
+large PRs. Repo-wide `definition`, `implementations`, and `dependencies` scans
+use up to `max_parallel` bounded file readers when the file set is large enough;
+set `max_parallel = 1` to force serial reads.
+
 ## Configurable subagents
 
 `[review.subagents]` can split large reviews into scoped in-process LLM passes by

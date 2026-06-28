@@ -686,6 +686,7 @@ type hostReviewAnalysisFields struct {
 	Conversation *bool
 	Force        *bool
 	PatchRepair  *bool
+	Tools        config.ReviewTools
 	Subagents    config.ReviewSubagents
 }
 
@@ -703,6 +704,7 @@ func hostReviewAnalysisShape(review config.HostReview) any {
 		Conversation: review.Conversation,
 		Force:        review.Force,
 		PatchRepair:  review.PatchRepair,
+		Tools:        review.Tools,
 		Subagents:    review.Subagents,
 		PromptFormat: review.PromptFormat,
 	}
@@ -726,6 +728,7 @@ func hostReviewOptions(providerName string, provider config.HostProvider, secret
 		Model:         provider.Model,
 		DeepContext:   boolValue(review.DeepContext),
 		Subagents:     review.Subagents,
+		SymbolContext: review.Tools.SymbolContext,
 		Quota:         provider.Quota,
 		QuotaProvider: providerName,
 	}
@@ -1152,6 +1155,7 @@ func mergeHostReview(base, over config.HostReview) config.HostReview {
 	if over.PatchRepair != nil {
 		out.PatchRepair = over.PatchRepair
 	}
+	out.Tools = config.MergeReviewTools(base.Tools, over.Tools)
 	out.ThreadResolutionSync = config.MergeThreadResolutionSyncConfig(base.ThreadResolutionSync, over.ThreadResolutionSync)
 	out.Approval = config.MergeApprovalPolicy(base.Approval, over.Approval)
 	out.Subagents = config.MergeReviewSubagents(base.Subagents, over.Subagents)
@@ -1314,6 +1318,7 @@ func buildServeReviewFn(log *slog.Logger, gate string, st serve.ReviewStore, tra
 			DeepContext:      review.DeepContext,
 			ContextHops:      review.ContextHops,
 			Subagents:        review.Subagents,
+			SymbolContext:    review.SymbolContext,
 			FilterMode:       review.FilterMode,
 			MinSeverity:      review.MinSeverity,
 			Format:           review.Format,

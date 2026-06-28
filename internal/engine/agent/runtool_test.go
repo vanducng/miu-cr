@@ -51,6 +51,9 @@ func TestRunTool_Validation(t *testing.T) {
 	if out, isErr := runTool(ctx, rc, 0, "grep", json.RawMessage(`{}`)); !isErr || !strings.Contains(out, "non-empty") {
 		t.Errorf("empty grep: got %q isErr=%v", out, isErr)
 	}
+	if out, isErr := runTool(ctx, rc, 0, "file_read", json.RawMessage(`{"file":"main.go","start":"bad"}`)); !isErr || !strings.Contains(out, "invalid arguments") {
+		t.Errorf("invalid file_read args: got %q isErr=%v", out, isErr)
+	}
 	if out, isErr := runTool(ctx, rc, 0, "bogus", json.RawMessage(`{}`)); !isErr || !strings.Contains(out, "unknown tool") {
 		t.Errorf("unknown tool: got %q isErr=%v", out, isErr)
 	}
@@ -79,6 +82,11 @@ func TestRunTool_FileReadAndGrep(t *testing.T) {
 	out, isErr = runTool(ctx, rc, 0, "grep", json.RawMessage(`{"pattern":"zzz_no_such_symbol"}`))
 	if isErr || out != "(no matches)" {
 		t.Errorf("grep no-match: got %q isErr=%v", out, isErr)
+	}
+
+	out, isErr = runTool(ctx, rc, 0, "symbol_context", json.RawMessage(`{"relation":"document_symbols","file":"main.go"}`))
+	if isErr || !strings.Contains(out, "Document symbols for main.go") || !strings.Contains(out, "Foo") {
+		t.Errorf("symbol_context dispatch: got %q isErr=%v", out, isErr)
 	}
 
 	out, isErr = runTool(ctx, rc, 0, "file_read", json.RawMessage(`{"file":"main.go","start":99,"end":100}`))

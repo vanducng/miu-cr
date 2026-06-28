@@ -76,7 +76,7 @@ flowchart TD
     A["Fetch PR<br/>three-dot diff at head SHA"] --> B["SelectFiles<br/>ext / include / exclude globs"]
     B --> C["AssembleContext<br/>diff hunks + line-numbered windows"]
     C --> D["Project rules<br/>glob-selected, trust-fenced, fork-dropped"]
-    D --> E["Agent.Review<br/>one LLM pass, file_read / grep tools"]
+    D --> E["Agent.Review<br/>one LLM pass, file_read / grep / symbol_context tools"]
     E --> F["ResolveLineNumbers<br/>re-anchor from quoted code"]
     F --> G{"Quote still<br/>matches?"}
     G -->|"no: Line == 0"| Drop["drop: findings_dropped"]

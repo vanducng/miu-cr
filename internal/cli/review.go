@@ -76,6 +76,7 @@ type ReviewRequest struct {
 	ContextHops     int
 	ContextHopsAuto bool
 	Subagents       config.ReviewSubagents
+	SymbolContext   config.SymbolContext
 	FilterMode      string // added|diff_context|file|nofilter (default diff_context)
 	WantDiagram     bool   // opt into the mermaid change diagram (default off)
 	Instruction     string // optional per-review developer steer; injected fenced/context-only into the USER turn
@@ -213,6 +214,7 @@ type PRReviewRequest struct {
 	ContextHops     int
 	ContextHopsAuto bool
 	Subagents       config.ReviewSubagents
+	SymbolContext   config.SymbolContext
 	FilterMode      string // added|diff_context|file|nofilter (default diff_context)
 	MinSeverity     string // inline-posting floor: none|info|low|medium|high|critical (default keeps current behavior)
 	Format          string // review-comment presentation preset: full (default) | minimal
@@ -448,6 +450,7 @@ func reviewCommand(opts *options) *cobra.Command {
 					contextHops:      contextHops,
 					contextHopsAuto:  contextHopsAuto,
 					subagents:        rcfg.Subagents,
+					symbolContext:    rcfg.Tools.SymbolContext,
 					filterMode:       filterMode,
 					minSeverity:      minSeverity,
 					format:           format,
@@ -492,6 +495,7 @@ func reviewCommand(opts *options) *cobra.Command {
 				ContextHops:      contextHops,
 				ContextHopsAuto:  contextHopsAuto,
 				Subagents:        rcfg.Subagents,
+				SymbolContext:    rcfg.Tools.SymbolContext,
 				FilterMode:       filterMode,
 				WantDiagram:      wantDiagram,
 				Instruction:      instruction,
@@ -614,6 +618,7 @@ type prRunArgs struct {
 	contextHops      int
 	contextHopsAuto  bool
 	subagents        config.ReviewSubagents
+	symbolContext    config.SymbolContext
 	filterMode       string
 	minSeverity      string
 	format           string
@@ -677,6 +682,7 @@ func runPRReview(cmd *cobra.Command, a prRunArgs) error {
 		ContextHops:      a.contextHops,
 		ContextHopsAuto:  a.contextHopsAuto,
 		Subagents:        a.subagents,
+		SymbolContext:    a.symbolContext,
 		FilterMode:       a.filterMode,
 		MinSeverity:      a.minSeverity,
 		Format:           a.format,
