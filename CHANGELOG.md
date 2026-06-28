@@ -55,6 +55,13 @@ comment with a new marker); subsequent re-runs dedupe normally. On a
 first M5 review **manually** (or off-hours) to absorb the one-time re-post before
 the next scheduled run.
 
+## [0.61.1](https://github.com/vanducng/miu-cr/compare/v0.61.0...v0.61.1) (2026-06-28)
+
+
+### Bug Fixes
+
+* **host:** keep publish options out of review hashes ([#178](https://github.com/vanducng/miu-cr/issues/178)) ([fba9e0b](https://github.com/vanducng/miu-cr/commit/fba9e0b6055c37ccfe1c32e027ff35f2ccc86f79))
+
 ## [0.61.0](https://github.com/vanducng/miu-cr/compare/v0.60.0...v0.61.0) (2026-06-28)
 
 
