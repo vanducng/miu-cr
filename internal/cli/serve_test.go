@@ -482,8 +482,8 @@ func TestBuildServeHostReposThreadResolutionSyncLayering(t *testing.T) {
 	if err != nil {
 		t.Fatalf("buildServeHostRepos: %v", err)
 	}
-	if !repos[0].Review.ThreadResolutionSync {
-		t.Fatalf("repo override did not enable thread resolution sync: %+v", repos[0].Review)
+	if !repos[0].ThreadResolutionSync {
+		t.Fatalf("repo override did not enable thread resolution sync: %+v", repos[0])
 	}
 }
 

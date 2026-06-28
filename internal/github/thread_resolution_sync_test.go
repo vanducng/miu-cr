@@ -90,6 +90,28 @@ func TestReplaceSummaryLedgerBodyPreservesSummarySections(t *testing.T) {
 	}
 }
 
+func TestReplaceSummaryLedgerBodyAcceptsResultLineWithoutSpace(t *testing.T) {
+	now := time.Date(2026, 6, 28, 10, 0, 0, 0, time.UTC)
+	info := &PRInfo{Owner: "o", Repo: "r", Number: 1, HeadSHA: "bbbbbb2", HTMLBase: "https://github.com/o/r"}
+	f := engine.Finding{File: "a.go", Line: 5, Severity: "low", Category: "bug", Title: "thing", QuotedCode: "x"}
+	ledger := MergeLedger(nil, []engine.Finding{f}, "aaaaaa1", map[string]bool{"a.go": true}, now)
+	body := RenderSummaryFull(info, []engine.Finding{f}, nil, 0, nil, nil, SummaryOptions{Ledger: ledger})
+	body = strings.Replace(body, "**Result:** ", "**Result:**", 1)
+	next := append([]LedgerEntry(nil), ledger...)
+	next[0].Status = statusResolved
+	next[0].ResSHA = "bbbbbb2"
+	next[0].ResKind = resolutionConversation
+	next[0].ResAt = now.Add(time.Hour).Format(time.RFC3339)
+
+	out, ok := replaceSummaryLedgerBody(body, info, next, nil)
+	if !ok {
+		t.Fatal("replaceSummaryLedgerBody returned false")
+	}
+	if !strings.Contains(out, "conversation resolved") {
+		t.Fatalf("body missing conversation resolution:\n%s", out)
+	}
+}
+
 func TestSyncSummaryConversationResolvedEditsExistingComment(t *testing.T) {
 	now := time.Date(2026, 6, 28, 10, 0, 0, 0, time.UTC)
 	info := &PRInfo{Owner: "o", Repo: "r", Number: 1, HeadSHA: "bbbbbb2", HTMLBase: "https://github.com/o/r", ReviewCount: 1}

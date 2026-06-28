@@ -144,6 +144,23 @@ func TestHostRunnerSkipsDraftPRsByDefault(t *testing.T) {
 	}
 }
 
+func TestHostRunnerThreadResolutionSyncThrottleIsPerPR(t *testing.T) {
+	r := &HostRunner{threadSyncLast: map[string]time.Time{}}
+	now := time.Date(2026, 6, 28, 10, 0, 0, 0, time.UTC)
+	if !r.shouldSyncThreadResolution("octo/hello", 1, now) {
+		t.Fatal("first sync should run")
+	}
+	if r.shouldSyncThreadResolution("octo/hello", 1, now.Add(30*time.Second)) {
+		t.Fatal("same PR should be throttled inside interval")
+	}
+	if !r.shouldSyncThreadResolution("octo/hello", 2, now.Add(30*time.Second)) {
+		t.Fatal("different PR should not share throttle state")
+	}
+	if !r.shouldSyncThreadResolution("octo/hello", 1, now.Add(threadResolutionSyncMinInterval)) {
+		t.Fatal("same PR should run again after interval")
+	}
+}
+
 func TestHostPRFilterLastMatchWins(t *testing.T) {
 	filter := config.HostPRFilter{Rules: []config.HostPRFilterRule{
 		{Action: "exclude", AuthorTypes: []string{"Bot"}},

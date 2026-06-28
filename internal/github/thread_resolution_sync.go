@@ -141,7 +141,7 @@ func replaceSummaryLedgerBody(body string, info *PRInfo, ledger []LedgerEntry, i
 }
 
 func replaceResultLine(body, result string) string {
-	start := strings.Index(body, "**Result:** ")
+	start := strings.Index(body, "**Result:**")
 	if start < 0 {
 		return body
 	}
