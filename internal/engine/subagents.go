@@ -300,8 +300,13 @@ func mergeSubagentOutputs(results []subagentRunResult) (ReviewOutput, error, int
 		}
 		okCount++
 		out.Findings = append(out.Findings, r.out.Findings...)
-		if strings.TrimSpace(r.out.Walkthrough) != "" {
-			parts = append(parts, fmt.Sprintf("%s: %s", r.name, strings.TrimSpace(r.out.Walkthrough)))
+		if walkthrough := strings.TrimSpace(r.out.Walkthrough); walkthrough != "" {
+			if strings.HasPrefix(walkthrough, "- ") {
+				walkthrough = "- " + r.name + ": " + strings.TrimSpace(strings.TrimPrefix(walkthrough, "- "))
+			} else {
+				walkthrough = fmt.Sprintf("%s: %s", r.name, walkthrough)
+			}
+			parts = append(parts, walkthrough)
 		}
 		for k, v := range r.out.FileSummaries {
 			if _, ok := out.FileSummaries[k]; !ok {
