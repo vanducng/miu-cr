@@ -575,7 +575,7 @@ func TestPublishReviewApprovalThreshold(t *testing.T) {
 		Findings: []engine.Finding{{File: "foo.go", Line: 4, Severity: "low", Category: "style", Rationale: "minor issue", QuotedCode: "func B() {}"}},
 		Stats:    map[string]any{"truncation_level": "full", "files_reviewed": float64(1)},
 	}
-	req := cli.PRReviewRequest{Gate: "high", Approval: config.ApprovalPolicy{Mode: "threshold", MaxSeverity: "low", Note: "on_findings"}}
+	req := cli.PRReviewRequest{Gate: "high", Approval: config.ApprovalPolicy{Mode: "threshold", MaxPriority: "P3", Note: "on_findings"}}
 	pr := &cli.PRResult{SummaryAction: "none"}
 	if err := publishReview(stdctx.Background(), client, runner, dir, info, res, pr, req, nil, embedWriter{}, nil, nil, ""); err != nil {
 		t.Fatalf("publishReview: %v", err)
@@ -586,7 +586,7 @@ func TestPublishReviewApprovalThreshold(t *testing.T) {
 	if fake.lastReviewed == nil || fake.lastReviewed.GetEvent() != "APPROVE" {
 		t.Fatalf("CreateReview Event must be APPROVE, got %v", fake.lastReviewed)
 	}
-	if !strings.Contains(fake.lastReviewed.GetBody(), "at or below `low`") {
+	if !strings.Contains(fake.lastReviewed.GetBody(), "at or below `P3`") {
 		t.Fatalf("threshold approval must include a review body note, got:\n%s", fake.lastReviewed.GetBody())
 	}
 }

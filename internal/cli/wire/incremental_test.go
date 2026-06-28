@@ -197,7 +197,7 @@ func TestReviewReuseKeyIgnoresPublishOnlyFields(t *testing.T) {
 	base := reviewReuseKey(req, cfg)
 	req.Format = "minimal"
 	req.Suggest = true
-	req.Approval = config.ApprovalPolicy{Mode: "threshold", MaxSeverity: "low", Note: "on_findings"}
+	req.Approval = config.ApprovalPolicy{Mode: "threshold", MaxPriority: "P3", Note: "on_findings"}
 	if got := reviewReuseKey(req, cfg); got != base {
 		t.Fatalf("publish-only fields changed reuse key: base=%s got=%s", base, got)
 	}
@@ -274,7 +274,7 @@ func TestApprovalReuseThresholdRequiresApprovalForLowFinding(t *testing.T) {
 	ctx := stdctx.Background()
 	info := prInfo("sha-1")
 	info.AuthorAssociation = "MEMBER"
-	policy := config.ApprovalPolicy{Mode: "threshold", MaxSeverity: "low"}
+	policy := config.ApprovalPolicy{Mode: "threshold", MaxPriority: "P3"}
 	rec := store.ReviewRecord{
 		Findings: []engine.Finding{{Severity: "low", File: "a.go", Line: 1}},
 		Stats:    map[string]any{"files_reviewed": float64(1)},
@@ -289,7 +289,7 @@ func TestApprovalReuseThresholdRequiresApprovalForLowFinding(t *testing.T) {
 
 	rec.Findings = []engine.Finding{{Severity: "medium", File: "a.go", Line: 1}}
 	if !approvalReuseOK(ctx, &fakeGitHub{}, info, rec, true, policy, "high") {
-		t.Fatal("medium finding above low threshold should reuse; approval is not expected")
+		t.Fatal("P2 finding above P3 threshold should reuse; approval is not expected")
 	}
 }
 
@@ -298,7 +298,7 @@ func TestApprovalStorelessReuseUsesLedgerSeverity(t *testing.T) {
 	info := prInfo("sha-1")
 	info.AuthorAssociation = "MEMBER"
 	info.Files = []string{"a.go"}
-	policy := config.ApprovalPolicy{Mode: "threshold", MaxSeverity: "low"}
+	policy := config.ApprovalPolicy{Mode: "threshold", MaxPriority: "P3"}
 
 	info.PriorLedger = []mgithub.LedgerEntry{{Status: "open", Sev: "low"}}
 	if approvalReuseOK(ctx, &fakeGitHub{}, info, store.ReviewRecord{}, false, policy, "high") {

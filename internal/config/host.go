@@ -431,12 +431,12 @@ func validateHostReview(path, field string, r HostReview) error {
 	default:
 		return invalidHost(path, field+".approval.mode", r.Approval.Mode, "off|clean|threshold")
 	}
-	if r.Approval.MaxSeverity != "" {
+	if r.Approval.MaxPriority != "" {
 		if r.Approval.Mode != "threshold" {
-			return invalidHost(path, field+".approval.max_severity", r.Approval.MaxSeverity, "only used when approval.mode is \"threshold\"")
+			return invalidHost(path, field+".approval.max_priority", r.Approval.MaxPriority, "only used when approval.mode is \"threshold\"")
 		}
-		if !validApprovalSeverity(r.Approval.MaxSeverity) {
-			return invalidHost(path, field+".approval.max_severity", r.Approval.MaxSeverity, "info|low|medium|high|critical")
+		if !validApprovalPriority(r.Approval.MaxPriority) {
+			return invalidHost(path, field+".approval.max_priority", r.Approval.MaxPriority, "P0|P1|P2|P3|P4")
 		}
 	}
 	switch r.Approval.Note {

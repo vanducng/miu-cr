@@ -180,18 +180,18 @@ func MergeApprovalPolicy(base, over ApprovalPolicy) ApprovalPolicy {
 	if over.Mode != "" {
 		out.Mode = over.Mode
 		if over.Mode != "threshold" {
-			out.MaxSeverity = ""
+			out.MaxPriority = ""
 			out.Note = ""
 		}
 	}
-	if over.MaxSeverity != "" {
-		out.MaxSeverity = over.MaxSeverity
+	if over.MaxPriority != "" {
+		out.MaxPriority = over.MaxPriority
 	}
 	if over.Note != "" {
 		out.Note = over.Note
 	}
 	if out.Mode != "threshold" {
-		out.MaxSeverity = ""
+		out.MaxPriority = ""
 	}
 	if out.Mode == "" || out.Mode == "off" {
 		out.Note = ""

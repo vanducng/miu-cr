@@ -95,7 +95,7 @@ require_all = true             # failed subagent prevents approval/check success
 
 [review.approval]              # optional default for --approval on PR --post
 mode = "off"                   # off|clean|threshold
-max_severity = "low"           # threshold mode only; info|low|medium|high|critical
+max_priority = "P3"            # threshold mode only; P0|P1|P2|P3|P4
 note = "on_findings"           # none|on_findings|always
 
 [[review.subagents.agents]]
@@ -108,7 +108,7 @@ system_prompt = "Focus on correctness, concurrency, error handling, and API comp
 "security" = "https://example.com/docs/security"
 ```
 
-Only these review attributes can be defaulted from config; there is intentionally **no** `post` or `force` config because write-action and repeat-spend defaults are footguns. Approval remains explicit as a policy object so host configs can choose strict clean approval or a severity threshold per repo.
+Only these review attributes can be defaulted from config; there is intentionally **no** `post` or `force` config because write-action and repeat-spend defaults are footguns. Approval remains explicit as a policy object so host configs can choose strict clean approval or a priority threshold per repo.
 
 ### Viewing and editing config (`config show` / `set` / `edit`)
 

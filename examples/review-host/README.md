@@ -87,7 +87,7 @@ MIUCR_PG_DSN='postgres://miucr:miucr@localhost:55432/miucr?sslmode=disable' \
   directory of `*.md` files.
 - The example sets `approval.mode: off` and never pushes code. Enable
   `approval.mode: clean` for zero-finding approvals, or `approval.mode: threshold`
-  with `max_severity: low` to approve low-risk findings with a note. Posting
+  with `max_priority: P3` to approve low-risk findings with a note. Posting
   review comments is controlled by each effective `review.post` value.
 - Retention fields are intentionally explicit: V1 prunes stale DB sessions,
   job-attempt history, and cursors. Workspace-size limits are validated and

@@ -132,7 +132,7 @@ type Review struct {
 
 type ApprovalPolicy struct {
 	Mode        string `toml:"mode,omitempty" yaml:"mode,omitempty" json:"mode,omitempty"`
-	MaxSeverity string `toml:"max_severity,omitempty" yaml:"max_severity,omitempty" json:"max_severity,omitempty"`
+	MaxPriority string `toml:"max_priority,omitempty" yaml:"max_priority,omitempty" json:"max_priority,omitempty"`
 	Note        string `toml:"note,omitempty" yaml:"note,omitempty" json:"note,omitempty"`
 }
 

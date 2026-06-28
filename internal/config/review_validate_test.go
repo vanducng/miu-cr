@@ -42,7 +42,7 @@ func TestValidateReview(t *testing.T) {
 		wantErr bool
 	}{
 		{"empty ok", Review{}, false},
-		{"all valid", Review{Gate: "high", FilterMode: "file", MinSeverity: "low", Timeout: "5m", Expand: intPtr(20), TokenBudget: intPtr(0), DeepContext: boolPtr(true), ContextHops: intPtr(5), Conversation: boolPtr(true), Suggest: boolPtr(true), Approval: ApprovalPolicy{Mode: "threshold", MaxSeverity: "low", Note: "on_findings"}}, false},
+		{"all valid", Review{Gate: "high", FilterMode: "file", MinSeverity: "low", Timeout: "5m", Expand: intPtr(20), TokenBudget: intPtr(0), DeepContext: boolPtr(true), ContextHops: intPtr(5), Conversation: boolPtr(true), Suggest: boolPtr(true), Approval: ApprovalPolicy{Mode: "threshold", MaxPriority: "P3", Note: "on_findings"}}, false},
 		{"bad gate", Review{Gate: "huge"}, true},
 		{"bad filter_mode", Review{FilterMode: "bogus"}, true},
 		{"bad min_severity", Review{MinSeverity: "meh"}, true},
@@ -55,8 +55,8 @@ func TestValidateReview(t *testing.T) {
 		{"context hops negative", Review{ContextHops: intPtr(-1)}, true},
 		{"bad context hops", Review{ContextHops: intPtr(6)}, true},
 		{"bad approval mode", Review{Approval: ApprovalPolicy{Mode: "maybe"}}, true},
-		{"bad approval severity", Review{Approval: ApprovalPolicy{Mode: "threshold", MaxSeverity: "minor"}}, true},
-		{"approval severity outside threshold", Review{Approval: ApprovalPolicy{Mode: "clean", MaxSeverity: "low"}}, true},
+		{"bad approval priority", Review{Approval: ApprovalPolicy{Mode: "threshold", MaxPriority: "P9"}}, true},
+		{"approval priority outside threshold", Review{Approval: ApprovalPolicy{Mode: "clean", MaxPriority: "P3"}}, true},
 		{"bad approval note", Review{Approval: ApprovalPolicy{Mode: "clean", Note: "verbose"}}, true},
 		{"subagents valid", Review{Subagents: ReviewSubagents{Mode: "auto", MaxParallel: 2, MinFiles: 4, Agents: []ReviewSubagent{{Name: "go", Include: []string{"**/*.go"}}}}}, false},
 		{"subagents bad mode", Review{Subagents: ReviewSubagents{Mode: "sometimes", Agents: []ReviewSubagent{{Name: "go", Include: []string{"**/*.go"}}}}}, true},
@@ -86,7 +86,7 @@ func TestValidateReview(t *testing.T) {
 
 func TestMergeReviewMergesNewFields(t *testing.T) {
 	base := Review{Approval: ApprovalPolicy{Mode: "clean"}}
-	file := Review{Gate: "low", FilterMode: "file", MinSeverity: "medium", Timeout: "120s", Expand: intPtr(12), TokenBudget: intPtr(0), DeepContext: boolPtr(true), ContextHops: intPtr(3), Conversation: boolPtr(true), Suggest: boolPtr(false), Approval: ApprovalPolicy{Mode: "threshold", MaxSeverity: "low"}, Subagents: ReviewSubagents{Mode: "auto", Agents: []ReviewSubagent{{Name: "go", Include: []string{"**/*.go"}}}}}
+	file := Review{Gate: "low", FilterMode: "file", MinSeverity: "medium", Timeout: "120s", Expand: intPtr(12), TokenBudget: intPtr(0), DeepContext: boolPtr(true), ContextHops: intPtr(3), Conversation: boolPtr(true), Suggest: boolPtr(false), Approval: ApprovalPolicy{Mode: "threshold", MaxPriority: "P3"}, Subagents: ReviewSubagents{Mode: "auto", Agents: []ReviewSubagent{{Name: "go", Include: []string{"**/*.go"}}}}}
 	out := mergeReview(base, file)
 	if out.Gate != "low" || out.FilterMode != "file" || out.MinSeverity != "medium" || out.Timeout != "120s" {
 		t.Fatalf("scalar review fields not merged: %+v", out)
@@ -97,7 +97,7 @@ func TestMergeReviewMergesNewFields(t *testing.T) {
 	if out.Suggest == nil || *out.Suggest != false {
 		t.Fatalf("Suggest not merged: %+v", out.Suggest)
 	}
-	if out.Approval.Mode != "threshold" || out.Approval.MaxSeverity != "low" || out.Approval.Note != "" {
+	if out.Approval.Mode != "threshold" || out.Approval.MaxPriority != "P3" || out.Approval.Note != "" {
 		t.Fatalf("Approval not merged: %+v", out.Approval)
 	}
 	if out.Subagents.Mode != "auto" || len(out.Subagents.Agents) != 1 {
@@ -114,7 +114,7 @@ func TestMergeReviewMergesNewFields(t *testing.T) {
 }
 
 func TestMergeApprovalPolicy(t *testing.T) {
-	base := ApprovalPolicy{Mode: "threshold", MaxSeverity: "high", Note: "always"}
+	base := ApprovalPolicy{Mode: "threshold", MaxPriority: "P1", Note: "always"}
 	inherit := MergeApprovalPolicy(base, ApprovalPolicy{Mode: "threshold"})
 	if inherit != base {
 		t.Fatalf("threshold mode should inherit base subfields: %+v", inherit)
@@ -127,8 +127,8 @@ func TestMergeApprovalPolicy(t *testing.T) {
 	if off != (ApprovalPolicy{Mode: "off"}) {
 		t.Fatalf("off mode should drop approval subfields: %+v", off)
 	}
-	override := MergeApprovalPolicy(base, ApprovalPolicy{MaxSeverity: "low", Note: "on_findings"})
-	if override != (ApprovalPolicy{Mode: "threshold", MaxSeverity: "low", Note: "on_findings"}) {
+	override := MergeApprovalPolicy(base, ApprovalPolicy{MaxPriority: "P3", Note: "on_findings"})
+	if override != (ApprovalPolicy{Mode: "threshold", MaxPriority: "P3", Note: "on_findings"}) {
 		t.Fatalf("subfields should override inherited threshold policy: %+v", override)
 	}
 }

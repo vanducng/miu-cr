@@ -657,22 +657,24 @@ func buildServeHostRepos(ctx stdctx.Context, cfg config.HostConfig, path string)
 	return out, reviewTO, nil
 }
 
+type hostReviewAnalysisFields struct {
+	Gate         string
+	FilterMode   string
+	MinSeverity  string
+	Timeout      string
+	Expand       *int
+	TokenBudget  *int
+	ContextHops  *int
+	Mode         string
+	DeepContext  *bool
+	Conversation *bool
+	Force        *bool
+	PatchRepair  *bool
+	Subagents    config.ReviewSubagents
+}
+
 func hostReviewAnalysisShape(review config.HostReview) any {
-	return struct {
-		Gate         string
-		FilterMode   string
-		MinSeverity  string
-		Timeout      string
-		Expand       *int
-		TokenBudget  *int
-		ContextHops  *int
-		Mode         string
-		DeepContext  *bool
-		Conversation *bool
-		Force        *bool
-		PatchRepair  *bool
-		Subagents    config.ReviewSubagents
-	}{
+	return hostReviewAnalysisFields{
 		Gate:         review.Gate,
 		FilterMode:   review.FilterMode,
 		MinSeverity:  review.MinSeverity,
