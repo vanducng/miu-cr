@@ -3,10 +3,10 @@ title: Store backends
 description: Choose between the default SQLite store and the opt-in Postgres backend; configure the DSN, sslmode, and the gated integration smoke.
 ---
 
-miucr persists reviews and PR-thread resolution state behind two small
-interfaces (`store.Store`, `store.PRThreadStore`). The backend is selectable; the
-engine, CLI, publish, and MCP-server layers consume only the interfaces and don't
-change with the backend.
+miucr persists review history and optional PR-thread resolution state behind
+small interfaces (`store.Store`, `store.PRThreadStore`). The backend is
+selectable; the engine, CLI, publish, and MCP-server layers consume only the
+interfaces and don't change with the backend.
 
 ## Backends
 
@@ -61,9 +61,9 @@ provision pgvector; see [Semantic code-recall](/semantic-recall/).
 ## Failure behavior
 
 Because Postgres is an **explicit** choice, an open/connect/auth failure with
-`backend = postgres` is **fatal** for the **resolution-tracking and history-read
-paths**: a typed `store.unavailable` error (exit 1, safe to retry): the `miucr
-history` command, the MCP `serve` paths, and the PR-thread store (when
+`backend = postgres` is **fatal** for the **history-read and explicit optional
+store paths**: a typed `store.unavailable` error (exit 1, safe to retry): the
+`miucr history` command, the MCP `serve` paths, and the PR-thread store (when
 `MIUCR_PR_STORE` is set). Those never silently degrade to a no-op store the way the
 implicit, opt-in SQLite PR-thread path can; a user who selected Postgres is told it
 failed (with a redacted message).
@@ -81,7 +81,7 @@ against drift; types differ only by dialect, e.g. SQLite `INTEGER` ↔ Postgres
 byte-for-byte row parity across a switch.
 
 - `reviews`: persisted review records.
-- `pr_findings`: PR-thread dedupe/resolution state
+- `pr_findings`: optional PR-thread dedupe/resolution state
   (`owner, repo, number, fingerprint, path, status`).
 
 The opt-in semantic-recall layer adds a separate, Postgres-only

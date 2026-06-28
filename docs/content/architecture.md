@@ -137,9 +137,9 @@ result.
 
 ## The store-swap seam
 
-miucr persists reviews and PR-thread resolution state behind two small
-interfaces. Everything above them (engine, CLI, publish, MCP server) consumes
-only the interfaces, so the backend swaps without any of them changing.
+miucr persists review history and optional PR-thread resolution state behind two
+small interfaces. Everything above them (engine, CLI, publish, MCP server)
+consumes only the interfaces, so the backend swaps without any of them changing.
 
 ```mermaid
 graph LR
@@ -184,9 +184,10 @@ service container.
 
 Because Postgres is an explicit choice, an open/connect/auth failure with
 `backend = postgres` is **fatal** (a typed `store.unavailable` `CLIError`, exit 1,
-safe to retry) on both the CLI and the MCP-`Serve` paths, never a panic, never a
-silent nil-degrade. The implicit, opt-in SQLite PR-thread path keeps its silent
-nil-degrade. See [Store backends](/store-backends/) for the operator reference.
+safe to retry) on history reads and explicit optional store paths, never a panic,
+never a silent nil-degrade. The implicit, opt-in SQLite PR-thread path keeps its
+silent nil-degrade. See [Store backends](/store-backends/) for the operator
+reference.
 
 ## The serve security model
 
@@ -253,7 +254,7 @@ which would over-dedup and collapse indentation-distinct findings. The content k
 is best-effort exact-match; semantic matching is a separate, opt-in layer (see
 [Semantic code-recall](/semantic-recall/)).
 
-**Layer 2, opt-in PR-thread store (serve / local).** Resolution tracking lives
+**Layer 2, opt-in PR-thread store (serve / local).** Additional dedupe/reopen tracking lives
 behind `store.PRThreadStore`: `UpsertPosted` / `MarkResolved` / `ListFindings`
 over a `pr_findings` table (`owner, repo, number, fingerprint, path, status` with
 `status ∈ {posted, resolved}`). It is **opt-in via `MIUCR_PR_STORE`** (an explicit
