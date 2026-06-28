@@ -617,6 +617,34 @@ func TestHostRunnerDuplicateSubmitDelaysRetryUntilReviewTimeout(t *testing.T) {
 	}
 }
 
+func TestHostRunnerUsesShortHeartbeatLease(t *testing.T) {
+	now := time.Date(2026, 6, 28, 9, 0, 0, 0, time.UTC)
+	cfg := hostRunnerConfig(t)
+	cfg.Now = func() time.Time { return now }
+	cfg.ReviewTO = 15 * time.Minute
+	disp := cfg.Dispatcher.(*pollDispatcher)
+	st := cfg.Store.(*fakeHostStore)
+	r, err := NewHostRunner(cfg)
+	if err != nil {
+		t.Fatalf("NewHostRunner: %v", err)
+	}
+	if err := r.Tick(stdctx.Background()); err != nil {
+		t.Fatalf("Tick: %v", err)
+	}
+	if st.lastClaim.LeaseDuration != defaultHostJobLeaseDuration {
+		t.Fatalf("claim lease = %v, want %v", st.lastClaim.LeaseDuration, defaultHostJobLeaseDuration)
+	}
+	disp.mu.Lock()
+	defer disp.mu.Unlock()
+	if len(disp.jobs) != 1 {
+		t.Fatalf("jobs = %d, want 1", len(disp.jobs))
+	}
+	j := disp.jobs[0]
+	if j.HostJobID == 0 || j.HostAttemptID == 0 || j.HostAttempt != 1 || j.HeadSHA != "sha-A" {
+		t.Fatalf("job host attrs missing: %+v", j)
+	}
+}
+
 func TestHostRunnerDispatcherRejectReleasesJob(t *testing.T) {
 	cfg := hostRunnerConfig(t)
 	disp := cfg.Dispatcher.(*pollDispatcher)
@@ -851,6 +879,8 @@ type fakeHostStore struct {
 	cursorWrites  int
 	releaseCount  int
 	lastRelease   store.HostJobReleaseInput
+	lastClaim     store.HostJobClaimInput
+	heartbeats    []store.HostJobHeartbeatInput
 	lastPrune     store.HostPrunePolicy
 	lastReconcile store.HostClosedPRsInput
 	pruneBlock    <-chan struct{}
@@ -953,6 +983,7 @@ func (s *fakeHostStore) EnqueueHostJob(_ stdctx.Context, in store.HostJobInput) 
 func (s *fakeHostStore) ClaimHostJob(_ stdctx.Context, in store.HostJobClaimInput) (store.HostJobClaim, bool, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
+	s.lastClaim = in
 	if len(s.queued) == 0 {
 		return store.HostJobClaim{}, false, nil
 	}
@@ -961,11 +992,28 @@ func (s *fakeHostStore) ClaimHostJob(_ stdctx.Context, in store.HostJobClaimInpu
 	job := s.jobs[key]
 	job.Status = "running"
 	job.LeaseOwner = in.WorkerID
+	leaseUntil := in.Now.Add(in.LeaseDuration)
+	job.LeaseUntil = &leaseUntil
 	job.Attempts++
 	s.jobs[key] = job
 	claim := store.HostJobClaim{Job: job, AttemptID: s.nextAttempt}
 	s.nextAttempt++
 	return claim, true, nil
+}
+
+func (s *fakeHostStore) HeartbeatHostJob(_ stdctx.Context, in store.HostJobHeartbeatInput) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.heartbeats = append(s.heartbeats, in)
+	for key, job := range s.jobs {
+		if job.ID == in.JobID && job.Status == "running" {
+			leaseUntil := in.Now.Add(in.LeaseDuration)
+			job.LeaseUntil = &leaseUntil
+			s.jobs[key] = job
+			return nil
+		}
+	}
+	return store.ErrHostStaleAttempt
 }
 
 func (s *fakeHostStore) CompleteHostJob(_ stdctx.Context, in store.HostJobCompleteInput) error {

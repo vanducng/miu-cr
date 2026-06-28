@@ -21,6 +21,8 @@ import (
 )
 
 const maxHostClaimsPerTick = 32
+const defaultHostJobLeaseDuration = 2 * time.Minute
+const hostJobHeartbeatInterval = 30 * time.Second
 const hostFailedRetryBase = 5 * time.Minute
 const hostFailedRetryCap = time.Hour
 
@@ -711,7 +713,8 @@ func (h *HostRunner) listOpenPRs(ctx stdctx.Context, getter notifGetter, repo Ho
 
 func (h *HostRunner) claimReady(ctx stdctx.Context, snap hostRunnerSnapshot, repos map[int64]HostRepoConfig) error {
 	for claims := 0; claims < maxHostClaimsPerTick; claims++ {
-		claim, ok, err := h.store.ClaimHostJob(ctx, store.HostJobClaimInput{WorkerID: h.workerID, Now: h.now().UTC(), LeaseDuration: snap.reviewTO + time.Minute})
+		claimLease := hostJobLeaseDuration(snap.reviewTO)
+		claim, ok, err := h.store.ClaimHostJob(ctx, store.HostJobClaimInput{WorkerID: h.workerID, Now: h.now().UTC(), LeaseDuration: claimLease})
 		if err != nil || !ok {
 			return err
 		}
@@ -736,14 +739,20 @@ func (h *HostRunner) claimReady(ctx stdctx.Context, snap hostRunnerSnapshot, rep
 			continue
 		}
 		jobID, attemptID, attempts := claim.Job.ID, claim.AttemptID, claim.Job.Attempts
+		heartbeatLease := hostJobLeaseDuration(timeout)
+		stopHeartbeat := h.startHostJobHeartbeat(ctx, jobID, attemptID, attempts, claim.Job.HeadSHA, heartbeatLease, fmt.Sprintf("%s/%s#%d", repo.Owner, repo.Repo, claim.Job.Number))
 		job := Job{
-			Key:     prKey{Owner: repo.Owner, Repo: repo.Repo, Number: int(claim.Job.Number)},
-			Ref:     fmt.Sprintf("%s/%s#%d", repo.Owner, repo.Repo, claim.Job.Number),
-			Token:   token,
-			Timeout: timeout,
-			Review:  &review,
-			HeadSHA: claim.Job.HeadSHA,
+			Key:           prKey{Owner: repo.Owner, Repo: repo.Repo, Number: int(claim.Job.Number)},
+			Ref:           fmt.Sprintf("%s/%s#%d", repo.Owner, repo.Repo, claim.Job.Number),
+			Token:         token,
+			Timeout:       timeout,
+			Review:        &review,
+			HeadSHA:       claim.Job.HeadSHA,
+			HostJobID:     jobID,
+			HostAttemptID: attemptID,
+			HostAttempt:   attempts,
 			OnDone: func(runErr error) {
+				stopHeartbeat()
 				status := "done"
 				msg := ""
 				if runErr != nil {
@@ -764,25 +773,75 @@ func (h *HostRunner) claimReady(ctx stdctx.Context, snap hostRunnerSnapshot, rep
 		}
 		switch h.disp.Submit(job) {
 		case SubmitQueued:
+			h.log.Debug("host: review job submitted", "ref", job.Ref, "job_id", jobID, "attempt_id", attemptID, "attempt", attempts, "head_sha", claim.Job.HeadSHA, "lease_seconds", int(heartbeatLease.Seconds()))
 		case SubmitDuplicate:
+			stopHeartbeat()
 			now := h.now().UTC()
 			_ = h.store.ReleaseHostJob(ctx, store.HostJobReleaseInput{JobID: jobID, AttemptID: attemptID, Error: "duplicate review already in flight", Now: now, AvailableAt: now.Add(timeout + time.Minute)})
 			continue
 		case SubmitCoalesced:
+			stopHeartbeat()
 			now := h.now().UTC()
 			_ = h.store.ReleaseHostJob(ctx, store.HostJobReleaseInput{JobID: jobID, AttemptID: attemptID, Error: "review already in flight for PR", Now: now, AvailableAt: now.Add(snap.interval)})
 			continue
 		case SubmitFull:
+			stopHeartbeat()
 			now := h.now().UTC()
 			_ = h.store.ReleaseHostJob(ctx, store.HostJobReleaseInput{JobID: jobID, AttemptID: attemptID, Error: "dispatcher rejected job", Now: now, AvailableAt: now.Add(snap.interval)})
 			continue
 		default:
+			stopHeartbeat()
 			now := h.now().UTC()
 			_ = h.store.ReleaseHostJob(ctx, store.HostJobReleaseInput{JobID: jobID, AttemptID: attemptID, Error: "dispatcher rejected job", Now: now, AvailableAt: now})
 			return nil
 		}
 	}
 	return nil
+}
+
+func (h *HostRunner) startHostJobHeartbeat(ctx stdctx.Context, jobID, attemptID int64, attempt int, headSHA string, lease time.Duration, ref string) func() {
+	if jobID == 0 || attemptID == 0 {
+		return func() {}
+	}
+	if lease <= 0 {
+		lease = defaultHostJobLeaseDuration
+	}
+	hctx, cancel := stdctx.WithCancel(stdctx.WithoutCancel(ctx))
+	go func() {
+		ticker := time.NewTicker(hostJobHeartbeatInterval)
+		defer ticker.Stop()
+		for {
+			select {
+			case <-hctx.Done():
+				return
+			case <-ticker.C:
+				now := h.now().UTC()
+				cctx, ccancel := stdctx.WithTimeout(hctx, 10*time.Second)
+				err := h.store.HeartbeatHostJob(cctx, store.HostJobHeartbeatInput{JobID: jobID, AttemptID: attemptID, Now: now, LeaseDuration: lease})
+				ccancel()
+				if errors.Is(err, stdctx.Canceled) {
+					return
+				}
+				if errors.Is(err, store.ErrHostStaleAttempt) {
+					h.log.Debug("host: job heartbeat stopped for stale attempt", "ref", ref, "job_id", jobID, "attempt_id", attemptID, "attempt", attempt, "head_sha", headSHA)
+					return
+				}
+				if err != nil {
+					h.log.Warn("host: job heartbeat failed", "ref", ref, "job_id", jobID, "attempt_id", attemptID, "attempt", attempt, "head_sha", headSHA, "error", config.RedactString(err.Error()))
+					continue
+				}
+				h.log.Debug("host: job heartbeat", "ref", ref, "job_id", jobID, "attempt_id", attemptID, "attempt", attempt, "head_sha", headSHA, "lease_until", now.Add(lease).Format(time.RFC3339))
+			}
+		}
+	}()
+	return cancel
+}
+
+func hostJobLeaseDuration(timeout time.Duration) time.Duration {
+	if timeout > 0 && timeout+time.Minute < defaultHostJobLeaseDuration {
+		return timeout + time.Minute
+	}
+	return defaultHostJobLeaseDuration
 }
 
 func hostFailedRetryDelay(attempts int) time.Duration {

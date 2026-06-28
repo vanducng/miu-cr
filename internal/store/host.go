@@ -16,6 +16,7 @@ type HostStore interface {
 	UpsertHostPRSession(context.Context, HostPRSessionInput) (HostPRSession, error)
 	EnqueueHostJob(context.Context, HostJobInput) (HostJob, bool, error)
 	ClaimHostJob(context.Context, HostJobClaimInput) (HostJobClaim, bool, error)
+	HeartbeatHostJob(context.Context, HostJobHeartbeatInput) error
 	CompleteHostJob(context.Context, HostJobCompleteInput) error
 	ReleaseHostJob(context.Context, HostJobReleaseInput) error
 	ReconcileHostClosedPRs(context.Context, HostClosedPRsInput) (HostClosedPRsResult, error)
@@ -101,6 +102,13 @@ type HostJobClaimInput struct {
 type HostJobClaim struct {
 	Job       HostJob
 	AttemptID int64
+}
+
+type HostJobHeartbeatInput struct {
+	JobID         int64
+	AttemptID     int64
+	Now           time.Time
+	LeaseDuration time.Duration
 }
 
 type HostJobCompleteInput struct {
