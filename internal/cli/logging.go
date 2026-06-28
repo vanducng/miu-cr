@@ -112,22 +112,39 @@ func truncateLogValue(value string, maxBytes int) (string, bool) {
 	if len(value) <= maxBytes {
 		return value, false
 	}
-	const suffix = "...[truncated]"
-	limit := maxBytes - len(suffix)
-	if limit <= 0 {
-		limit = maxBytes
-		suffixless := value[:limit]
-		for !utf8.ValidString(suffixless) && limit > 0 {
-			limit--
-			suffixless = value[:limit]
-		}
-		return suffixless, true
+	const marker = "...[truncated]..."
+	keep := maxBytes - len(marker)
+	if keep <= 0 {
+		return utf8Prefix(value, maxBytes), true
 	}
-	cut := limit
-	prefix := value[:cut]
-	for !utf8.ValidString(prefix) && cut > 0 {
-		cut--
-		prefix = value[:cut]
+	prefixBytes := keep/2 + keep%2
+	suffixBytes := keep / 2
+	return utf8Prefix(value, prefixBytes) + marker + utf8Suffix(value, suffixBytes), true
+}
+
+func utf8Prefix(value string, maxBytes int) string {
+	if maxBytes <= 0 {
+		return ""
 	}
-	return prefix + suffix, true
+	if len(value) <= maxBytes {
+		return value
+	}
+	for maxBytes > 0 && !utf8.ValidString(value[:maxBytes]) {
+		maxBytes--
+	}
+	return value[:maxBytes]
+}
+
+func utf8Suffix(value string, maxBytes int) string {
+	if maxBytes <= 0 {
+		return ""
+	}
+	if len(value) <= maxBytes {
+		return value
+	}
+	start := len(value) - maxBytes
+	for start < len(value) && !utf8.ValidString(value[start:]) {
+		start++
+	}
+	return value[start:]
 }

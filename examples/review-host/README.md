@@ -65,11 +65,11 @@ MIUCR_PG_DSN='postgres://miucr:miucr@localhost:55432/miucr?sslmode=disable' \
 - Host mode is Postgres-focused. The YAML validates `store.backend: postgres`,
   `MIUCR_STORE_BACKEND=postgres` selects Postgres for review history, and
   `MIUCR_PG_DSN` should hold the DSN so passwords stay out of config.
-- The compose example defaults `MIUCR_LOG_LEVEL=debug` for local development so
-  review progress, tool-turn progress, and poll activity are visible. Set
-  `MIUCR_TRACE_LOG=true` only when you want bounded live trace payloads in logs;
-  trace payloads can include prompt and diff context, are redacted, and are
-  truncated to `MIUCR_TRACE_LOG_MAX_BYTES` bytes per step.
+- The compose example defaults `MIUCR_LOG_LEVEL=debug`. Copying
+  `.env.example` enables `MIUCR_TRACE_LOG=true` for local development so review
+  progress, tool-turn progress, poll activity, and bounded live trace payloads
+  are visible. Trace payloads can include prompt and diff context, are redacted,
+  and are truncated to `MIUCR_TRACE_LOG_MAX_BYTES` bytes per step.
 - Startup applies versioned Postgres migrations under an advisory lock and
   records them in `schema_migrations`, so concurrent host instances do not race
   schema bootstrap.

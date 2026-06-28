@@ -421,13 +421,15 @@ not delete arbitrary filesystem children under `workspace_dir`.
 default `info`). The review-host compose example defaults it to `debug` so local
 dogfood shows poll activity, review progress, tool turns, and lifecycle events.
 
-Live trace payload logging is separate and off by default. Set
-`MIUCR_TRACE_LOG=true` to stream captured review trace steps into debug logs:
-system prompt, user prompt, selected files, injected rules, resolved model,
-tool calls, and final response. Each payload is redacted with the same free-text
-redactor used elsewhere and then truncated to `MIUCR_TRACE_LOG_MAX_BYTES`
-(default `4096`, minimum `256`). Treat it as a local/debug switch because
-payloads can include prompt and diff context.
+Live trace payload logging is separate. Set `MIUCR_TRACE_LOG=true` to stream
+captured review trace steps into debug logs: system prompt, user prompt,
+selected files, injected rules, resolved model, tool calls, and final response.
+Each payload is redacted with the same free-text redactor used elsewhere and
+then truncated to `MIUCR_TRACE_LOG_MAX_BYTES` (minimum `256`). The review-host
+`.env.example` enables it for local dogfood with a `20000` byte cap per step,
+while the compose fallback remains off for deployments without an env file.
+Treat it as a local/debug switch because payloads can include prompt and diff
+context.
 
 A complete runnable example is in
 [`examples/review-host/`](https://github.com/vanducng/miu-cr/tree/main/examples/review-host).
