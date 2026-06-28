@@ -18,7 +18,7 @@ func init() {
 			return s == "info" || s == "low" || s == "medium" || s == "high" || s == "critical"
 		},
 		func(s string) bool { return s == "full" || s == "minimal" },
-		func(s string) bool { return s == "legacy" || s == "xml" },
+		func(s string) bool { return s == "markdown" || s == "xml" },
 	)
 }
 

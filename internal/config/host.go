@@ -424,7 +424,7 @@ func validateHostReview(path, field string, r HostReview) error {
 		return invalidHost(path, field+".format", r.Format, "full|minimal")
 	}
 	if r.PromptFormat != "" && promptFormatValidator != nil && !promptFormatValidator(r.PromptFormat) {
-		return invalidHost(path, field+".prompt_format", r.PromptFormat, "legacy|xml")
+		return invalidHost(path, field+".prompt_format", r.PromptFormat, "markdown|xml")
 	}
 	if r.Timeout != "" {
 		if _, err := time.ParseDuration(r.Timeout); err != nil {

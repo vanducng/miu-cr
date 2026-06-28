@@ -423,10 +423,10 @@ func TestReviewSystemPromptUnchangedByRepair(t *testing.T) {
 	}
 }
 
-// TestBuildUserPromptLegacyByteIdentical verifies that Format="" and
-// Format="legacy" produce byte-identical output — the legacy path must not
+// TestBuildUserPromptMarkdownByteIdentical verifies that Format="" and
+// Format="markdown" produce byte-identical output — the legacy path must not
 // diverge from the pre-xml baseline.
-func TestBuildUserPromptLegacyByteIdentical(t *testing.T) {
+func TestBuildUserPromptMarkdownByteIdentical(t *testing.T) {
 	parts := PromptParts{
 		Rules:           "## Rule: sec (user)\nbody",
 		SemanticContext: "- [bug] off-by-one",
@@ -437,7 +437,7 @@ func TestBuildUserPromptLegacyByteIdentical(t *testing.T) {
 		Diff:            "=== File: a.go ===\n+func boom() {}\n",
 	}
 	empty := BuildUserPrompt(parts)
-	parts.Format = "legacy"
+	parts.Format = "markdown"
 	explicit := BuildUserPrompt(parts)
 	if empty != explicit {
 		t.Fatalf("Format=\"\" and Format=\"legacy\" must be byte-identical\n empty=%q\nexplicit=%q", empty, explicit)

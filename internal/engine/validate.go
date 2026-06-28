@@ -16,7 +16,7 @@ var validGates = map[string]bool{
 // ValidGate reports whether gate is in the closed gate set.
 func ValidGate(gate string) bool { return validGates[gate] }
 
-var validPromptFormats = map[string]bool{"legacy": true, "xml": true}
+var validPromptFormats = map[string]bool{"markdown": true, "xml": true}
 
 // ValidPromptFormat reports whether f is a known prompt format.
 func ValidPromptFormat(f string) bool { return validPromptFormats[f] }

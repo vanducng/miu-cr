@@ -46,7 +46,7 @@ func ValidateReview(r Review) error {
 		return invalidReview("format", r.Format, "full|minimal")
 	}
 	if r.PromptFormat != "" && promptFormatValidator != nil && !promptFormatValidator(r.PromptFormat) {
-		return invalidReview("prompt_format", r.PromptFormat, "legacy|xml")
+		return invalidReview("prompt_format", r.PromptFormat, "markdown|xml")
 	}
 	if r.Timeout != "" {
 		if _, err := time.ParseDuration(r.Timeout); err != nil {

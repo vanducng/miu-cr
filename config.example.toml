@@ -115,7 +115,7 @@ default_provider = "anthropic"
 # [review]
 # gate          = "high"          # fail (exit 2) at this severity: none|info|low|medium|high|critical
 # filter_mode   = "diff_context"  # --pr inline eligibility: added|diff_context|file|nofilter
-# prompt_format = "legacy"        # review prompt format: legacy (default) | xml
+# prompt_format = "markdown"        # review prompt format: markdown (default) | xml
 # min_severity = "low"           # --pr inline floor: none|info|low|medium|high|critical
 # timeout      = "300s"          # review timeout (a Go duration: 300s, 5m, …)
 # suggest      = false           # emit GitHub one-click suggestions on --post (default off)

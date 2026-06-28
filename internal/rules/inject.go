@@ -33,7 +33,7 @@ func estTokens(s string) int { return len(s) / 4 }
 // tokens by dropping the least-important rules last (input order is the
 // truncation order); truncated is set when any selected rule is dropped. A cap
 // of <=0 disables the token cap. When useXML is true, rules are emitted in
-// XML-tagged form with all bodies XML-escaped; when false, the legacy fence form
+// XML-tagged form with all bodies XML-escaped; when false, the markdown fence form
 // is used (default, byte-identical).
 func BuildRulesSection(selected []Rule, allowContextFiles bool, cap int, useXML bool) (text string, applied int, truncated bool) {
 	if len(selected) == 0 {

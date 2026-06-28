@@ -24,7 +24,7 @@ proposing fixes). It runs five review ways:
 - **One-click suggestions are conservative + model-controlled.** `--suggest` emits a native GitHub ` ```suggestion ` block ONLY when the patch *deterministically* replaces the exact anchored line(s) AND the model is certain of a grounded mechanical fix (a cited rule or an obvious best practice). It NEVER guesses an unverifiable value (a URL, path, route, ID, version, config key, API signature); such concerns become a verification-question in the rationale instead. `--patch-repair` (requires `--suggest`) runs one focused 2nd LLM pass to recover a near-miss single-line patch. `--approval clean` approves only zero-finding PRs; `--approval threshold` can approve low-risk findings with a note.
 - **`-o pretty`** is the human-readable local format; **`-o json`** is for agents; `-o sarif` for editors/CI.
 - **Multi-provider profiles.** Add a named provider (e.g. z.ai/glm) with `kind`, `base_url`, `model`, `auth`, and either `auth_env` or `auth_command`; select with `--provider <name>`. Built-in kinds: `anthropic`, `openai` (ChatGPT-plan OAuth via `miucr login`). Transient GitHub/network errors auto-retry with backoff. Optionally cap a provider instance's usage with `[providers.<name>.quota]` (`dimension = tokens|requests`, `limit`, `window = <Go duration like 5h/24h>|monthly`); **uncapped by default**, fail-closed, over-quota → typed `quota.exceeded`.
-- **Thinking on by default; deterministic fallback.** Capable models (Claude, gpt-5/o-series, codex) review with **extended thinking/reasoning** (deeper analysis; temperature is omitted because thinking forces temp 1). Models without thinking (gpt-4o, glm chat) sample at **temperature 0** for stable, reproducible findings. Both are config-exposed: `[review].thinking` (`auto|off|low|medium|high`, default auto) and `[review].temperature` (0–2, default 0).
+- **Thinking on by default; deterministic fallback.** Capable models (Claude, gpt-5/o-series, codex, **z.ai GLM 4.5+**) review with **extended thinking/reasoning** (deeper analysis; temperature is omitted because thinking forces temp 1). Models without thinking (gpt-4o, plain glm-4 chat) sample at **temperature 0** for stable, reproducible findings. Both are config-exposed: `[review].thinking` (`auto|off|low|medium|high`, default auto) and `[review].temperature` (0–2, default 0). Set `MIUCR_TRACE_REASONING=true` to capture that reasoning into the review trace (`miucr trace <id>`).
 
 ## Output contract: `miucr.cli/v1` envelope (parse this)
 
@@ -218,6 +218,7 @@ miucr review --pr owner/repo#123 --conversation                   # also read th
 | `--walkthrough-diagram` | OFF | Opt in to a Mermaid change diagram in the summary (fenced ```mermaid block GitHub renders). Rides the same single review pass, no extra LLM call. Diagram quality varies; a malformed/omitted diagram degrades to a plain note. |
 | `--mode review\|checks` | `review` | GitHub reporter on `--pr --post`. `review` posts inline comments + a summary. `checks` posts a GitHub CheckRun with annotations (survives force-push, works on fork PRs, can be a **required** check); conclusion maps from the gate (gate-clean→`success`, gate-hit→`failure`); needs `checks: write`. |
 | `--format full\|minimal` | `full` | Review-comment presentation on `--pr`. `full` is the current output (summary section + severity/priority badges). `minimal` drops the `## Code Review Summary` section and **all** shields badges (summary chips **and** the per-finding inline `P3 · bug`), keeping inline findings, the footer, and the hidden upsert markers. Render-only — does not change which findings surface. An out-of-set value is rejected (`flags.invalid_format`, exit 2). |
+| `--prompt-format markdown\|xml` | `markdown` | Review **prompt** structure (orthogonal to `--format`, which is comment presentation). `xml` wraps untrusted payloads (diffs, new-content, project files, rules, conversation) in entity-escaped XML tags instead of `===`/`---` delimiters + fences, hardening against delimiter-collision / prompt-injection (a planted `</file>` or `=== File: ===` stays inert). Opt-in; `markdown` (the default) is byte-identical to today. Out-of-set value rejected (`flags.invalid_prompt_format`, exit 2). Also `[review].prompt_format`. |
 | `--sarif-out <path>` | - | Also write a SARIF 2.1.0 report to `<path>` from the SAME single review run (in addition to `--output`/posting). Written only on success (atomic temp+rename); a failed run leaves no file. This is how the Action does single-pass SARIF, no second LLM call. |
 | `--no-save` | off | Skip persisting this run to the local history store (every review is saved by default). |
 | `--force` | off | On `--pr`, re-review even when the head SHA is unchanged since the last saved review. By default an unchanged head SHA short-circuits (`skipped_unchanged`, no LLM pass); a new commit always re-reviews. |
@@ -297,7 +298,9 @@ WEBHOOK_SECRET=… GITHUB_TOKEN=… ANTHROPIC_API_KEY=… \
 Env: `WEBHOOK_SECRET` (required unless poll-only), `GITHUB_TOKEN`/`GH_TOKEN` (required unless `[github] mode=app`),
 `ANTHROPIC_API_KEY` (or compatible). `MIUCR_LOG_LEVEL=debug` enables progress/tool-turn logs; `MIUCR_TRACE_LOG=true`
 adds bounded debug trace payloads (`MIUCR_TRACE_LOG_MAX_BYTES`, default `4096`) that are redacted/truncated but may
-include prompt/diff context. Endpoints: `POST /webhook` (HMAC), `GET /healthz`. Each new head SHA = one full
+include prompt/diff context. `MIUCR_TRACE_REASONING=true` captures the model's reasoning as a `reasoning` trace step
+(Claude/GLM thinking verbatim; OpenAI a token count + `[hidden by provider]`) — off by default, redacted in storage,
+needs `[review].thinking` on. Endpoints: `POST /webhook` (HMAC), `GET /healthz`. Each new head SHA = one full
 LLM review; allowlist + per-head dedup are the only spend guards. serve inherits `--suggest` and `--approval` **OFF**.
 
 **Opt-in REST API**: set `MIUCR_API_TOKEN` (env-only, no flag) to register `/v1`:
@@ -620,6 +623,7 @@ gate         = "high"                   # default --gate: none|info|low|medium|h
 filter_mode  = "diff_context"           # default --filter-mode (--pr): added|diff_context|file|nofilter
 min_severity = "low"                    # default --min-severity (--pr inline floor)
 format       = "full"                   # default --format (--pr presentation): full | minimal (minimal drops the summary section + all badges)
+prompt_format = "markdown"               # default --prompt-format: markdown | xml (xml = injection-hardened XML prompt structure)
 timeout      = "900s"                   # default review timeout (Go duration: 900s, 15m, …)
 expand       = 20                       # default --expand
 token_budget = 0                        # default --token-budget; 0 = no cap

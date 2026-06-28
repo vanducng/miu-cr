@@ -122,7 +122,7 @@ type PromptParts struct {
 	// fenced/context-only so it can never redefine the finding schema. Empty (after
 	// TrimSpace) => byte-identical; rides the USER turn only, after the instruction.
 	Conversation string
-	// Format selects the prompt serialization: "" or "legacy" → legacy fenced form
+	// Format selects the prompt serialization: "" or "markdown" → markdown fenced form
 	// (byte-identical default); "xml" → XML-tagged wrapping for untrusted parts.
 	Format string
 }
@@ -223,10 +223,10 @@ func BuildUserPrompt(parts PromptParts) string {
 	if parts.Format == "xml" {
 		return buildUserPromptXML(parts)
 	}
-	return buildUserPromptLegacy(parts)
+	return buildUserPromptMarkdown(parts)
 }
 
-func buildUserPromptLegacy(parts PromptParts) string {
+func buildUserPromptMarkdown(parts PromptParts) string {
 	var sb strings.Builder
 	sb.WriteString("Review the following change. Report findings as specified.\n\n")
 	if strings.TrimSpace(parts.Rules) != "" {

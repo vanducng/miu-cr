@@ -200,6 +200,10 @@ miucr review --staged \
 Set `model` (or `--model` / `ANTHROPIC_MODEL`) to a GLM model; the pinned default is an Anthropic model and won't exist on the gateway.
 :::
 
+:::note[Thinking on GLM]
+GLM 4.5+ (e.g. `glm-5.2`) returns extended-thinking blocks over the z.ai Anthropic-compatible endpoint, so it honors `[review].thinking` like Claude (default `auto` = on). Set `thinking = "off"` to disable, or `MIUCR_TRACE_REASONING=true` to capture the thinking into the review trace.
+:::
+
 :::note[Migrating from `ZAI_API_KEY`]
 Earlier builds special-cased a bare `ZAI_API_KEY`. That hardcoding is gone. Use a config profile (above) with `auth_env = "ZAI_API_KEY"` or `auth_command = [...]`, or set `ANTHROPIC_BASE_URL` + `ANTHROPIC_AUTH_TOKEN`.
 :::

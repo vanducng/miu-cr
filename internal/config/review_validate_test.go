@@ -32,7 +32,7 @@ func stubReviewValidators(t *testing.T) {
 	filterModeValidator = inSet("added", "diff_context", "file", "nofilter")
 	minSeverityValidator = inSet("none", "info", "low", "medium", "high", "critical")
 	formatValidator = inSet("full", "minimal")
-	promptFormatValidator = inSet("legacy", "xml")
+	promptFormatValidator = inSet("markdown", "xml")
 }
 
 func TestValidateReview(t *testing.T) {
@@ -49,9 +49,9 @@ func TestValidateReview(t *testing.T) {
 		{"bad min_severity", Review{MinSeverity: "meh"}, true},
 		{"format valid", Review{Format: "minimal"}, false},
 		{"bad format", Review{Format: "fancy"}, true},
-		{"prompt_format legacy ok", Review{PromptFormat: "legacy"}, false},
+		{"prompt_format markdown ok", Review{PromptFormat: "markdown"}, false},
 		{"prompt_format xml ok", Review{PromptFormat: "xml"}, false},
-		{"bad prompt_format", Review{PromptFormat: "markdown"}, true},
+		{"bad prompt_format", Review{PromptFormat: "yaml"}, true},
 		{"bad timeout", Review{Timeout: "5 fortnights"}, true},
 		{"bad expand", Review{Expand: intPtr(-1)}, true},
 		{"bad token budget", Review{TokenBudget: intPtr(-1)}, true},

@@ -11,7 +11,7 @@ import (
 type AssembleOptions struct {
 	TokenBudget  int  // approximate token budget (len(text)/4); <=0 disables budgeting
 	ExpandWindow int  // context lines added above/below each hunk in the new-content window; <=0 disables expansion
-	UseXML       bool // emit XML-tagged file sections instead of legacy === File: === delimiters
+	UseXML       bool // emit XML-tagged file sections instead of markdown === File: === delimiters
 }
 
 // Truncation levels, ordered from richest to leanest. Recorded in Stats so
@@ -117,7 +117,7 @@ func xmlEscAttr(s string) string {
 }
 
 // renderXML emits per-file sections using XML-tagged structure instead of the
-// legacy === File: === delimiters; file paths and content bodies are escaped.
+// markdown === File: === delimiters; file paths and content bodies are escaped.
 func renderXML(diffs []diff.Diff, expand int, withWindows bool) string {
 	var sb strings.Builder
 	for _, d := range diffs {

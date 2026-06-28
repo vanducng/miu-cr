@@ -267,7 +267,7 @@ type AgentContext struct {
 	// Conversation is the optional fetched PR conversation (Untrusted, fenced,
 	// byte-capped, context-only). LOCKSTEP: mirror Instruction at every hop.
 	Conversation string
-	// PromptFormat selects the prompt serialization: "" or "legacy" → legacy fenced
+	// PromptFormat selects the prompt serialization: "" or "markdown" → markdown fenced
 	// format (default, byte-identical); "xml" → XML-tagged format. LOCKSTEP: mirror
 	// Conversation at every hop or xml is silently dropped.
 	PromptFormat   string
@@ -381,7 +381,7 @@ type Request struct {
 	// drops it on fork PRs. Threaded onto AgentContext so it rides the USER turn; empty
 	// is byte-identical. LOCKSTEP: mirror Instruction at every hop.
 	Conversation string
-	// PromptFormat selects the prompt serialization: "" or "legacy" → legacy (default,
+	// PromptFormat selects the prompt serialization: "" or "markdown" → markdown (default,
 	// byte-identical); "xml" → XML-tagged. LOCKSTEP: mirror Conversation at every hop.
 	PromptFormat string
 	// OperatorPrompt is trusted host policy. LOCKSTEP: mirror Conversation at every hop.
