@@ -412,6 +412,9 @@ type PostReviewOptions struct {
 	// rule vs cite-only user/built-in). Built from the LOADED, fork-dropped rule set
 	// in the wire layer; a finding citing a stem absent here is not grounded.
 	RuleCitations map[string]RuleCitation
+	// Format selects the presentation preset (see modes.go); empty = "full".
+	// "minimal" drops the per-finding priority badge from the inline comment.
+	Format string
 	// ActionsOut is where the fork-PR 403 fallback writes ::error:: workflow commands.
 	// GitHub Actions parses workflow commands ONLY from the step's stdout, so this must
 	// resolve to the same stream as the miucr.cli/v1 envelope (the command's stdout
@@ -736,13 +739,23 @@ func escapeWorkflowProperty(s string) string {
 // single-line finding (EndLine<=Line) ignores isRange.
 func commentBody(info *PRInfo, f engine.Finding, newFileContent string, opts PostReviewOptions, isRange bool) (string, bool) {
 	var b strings.Builder
-	badge := priorityBadge(f.Severity)
 	cite := ruleCitation(info, f.Rule, opts.RuleCitations)
-	cat := f.Category
-	if cat != "" {
-		fmt.Fprintf(&b, "%s · %s%s\n\n", badge, categoryMarkdown(cat, opts.CategoryURLs), cite)
-	} else {
-		fmt.Fprintf(&b, "%s%s\n\n", badge, cite)
+	cat := ""
+	if f.Category != "" {
+		cat = categoryMarkdown(f.Category, opts.CategoryURLs)
+	}
+	switch {
+	case presentationFor(opts.Format).PriorityBadge:
+		badge := priorityBadge(f.Severity)
+		if cat != "" {
+			fmt.Fprintf(&b, "%s · %s%s\n\n", badge, cat, cite)
+		} else {
+			fmt.Fprintf(&b, "%s%s\n\n", badge, cite)
+		}
+	case cat != "":
+		fmt.Fprintf(&b, "%s%s\n\n", cat, cite)
+	case strings.TrimSpace(cite) != "":
+		fmt.Fprintf(&b, "%s\n\n", strings.TrimSpace(cite))
 	}
 	if t := mdInline(f.Title); t != "" {
 		fmt.Fprintf(&b, "**%s**\n\n", t)

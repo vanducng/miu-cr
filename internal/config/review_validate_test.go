@@ -43,6 +43,8 @@ func TestValidateReview(t *testing.T) {
 		{"bad gate", Review{Gate: "huge"}, true},
 		{"bad filter_mode", Review{FilterMode: "bogus"}, true},
 		{"bad min_severity", Review{MinSeverity: "meh"}, true},
+		{"format valid", Review{Format: "minimal"}, false},
+		{"bad format", Review{Format: "fancy"}, true},
 		{"bad timeout", Review{Timeout: "5 fortnights"}, true},
 		{"bad expand", Review{Expand: intPtr(-1)}, true},
 		{"bad token budget", Review{TokenBudget: intPtr(-1)}, true},

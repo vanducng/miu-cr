@@ -103,6 +103,7 @@ type HostReview struct {
 	Gate         string          `yaml:"gate" json:"gate,omitempty"`
 	FilterMode   string          `yaml:"filter_mode" json:"filter_mode,omitempty"`
 	MinSeverity  string          `yaml:"min_severity" json:"min_severity,omitempty"`
+	Format       string          `yaml:"format" json:"format,omitempty"`
 	Timeout      string          `yaml:"timeout" json:"timeout,omitempty"`
 	Expand       *int            `yaml:"expand" json:"expand,omitempty"`
 	TokenBudget  *int            `yaml:"token_budget" json:"token_budget,omitempty"`
@@ -392,6 +393,9 @@ func validateHostReview(path, field string, r HostReview) error {
 	}
 	if r.MinSeverity != "" && minSeverityValidator != nil && !minSeverityValidator(r.MinSeverity) {
 		return invalidHost(path, field+".min_severity", r.MinSeverity, "none|info|low|medium|high|critical")
+	}
+	if r.Format != "" && formatValidator != nil && !formatValidator(r.Format) {
+		return invalidHost(path, field+".format", r.Format, "full|minimal")
 	}
 	if r.Timeout != "" {
 		if _, err := time.ParseDuration(r.Timeout); err != nil {

@@ -157,6 +157,8 @@ ledger state is persisted **storelessly** in a third hidden marker — `<!-- miu
 written at the end of the comment like the runs counter — so the open/resolved history survives
 across pushes and **ephemeral CI runners with no database**.
 
+This anatomy describes the default **`full`** presentation. The [`--format`](/usage/#--format) knob (`[review].format` / host `review.format`) selects it; `--format minimal` drops the entire `## Code Review Summary` section and every shields badge — both the summary chips and the per-inline `P0`/`P1` priority badge — while keeping the inline findings, the footer, and all three hidden markers, so re-runs still upsert the same comment. It is render-only: the same findings are produced either way.
+
 The summary lives **solely in ONE issue comment** (not the review body). Its first line is
 a hidden marker that identifies the comment as miucr-authored:
 

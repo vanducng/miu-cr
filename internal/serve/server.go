@@ -61,6 +61,7 @@ type JobReviewOptions struct {
 	Gate           string
 	FilterMode     string
 	MinSeverity    string
+	Format         string
 	Mode           string
 	Provider       string
 	APIKey         string

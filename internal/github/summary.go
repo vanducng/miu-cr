@@ -138,6 +138,10 @@ type SummaryOptions struct {
 	InlineURLs map[string]string
 	Published  bool
 	PublishKey string
+	// Format selects the presentation preset (see modes.go). Empty = "full" =
+	// the legacy byte-for-byte summary; "minimal" drops the heading, walkthrough,
+	// result badges, changes table, and review reference.
+	Format string
 }
 
 // RenderSummaryFull is RenderSummaryWithOverflow plus the LLM-free reviewer-trust
@@ -159,31 +163,52 @@ func RenderSummaryFull(info *PRInfo, findings []engine.Finding, stats map[string
 		b.WriteString(publishedToken(info.HeadSHA, opts.PublishKey) + "\n")
 	}
 
+	p := presentationFor(opts.Format)
+
 	// Keep the H2 small; severity chips ride the compact Result line below, not the header.
-	b.WriteString("## Code Review Summary\n\n")
+	if p.Heading {
+		b.WriteString("## Code Review Summary\n\n")
+	}
 
 	if opts.Ledger != nil {
 		// Lifecycle mode: Result → a concise PR summary → the always-visible
 		// Open/Resolved tracking tables. No inline-comment pointer (GitHub already
 		// surfaces the inline review thread below).
-		fmt.Fprintf(&b, "**Result:** %s\n\n", ledgerResultLine(opts.Ledger))
-		renderWalkthrough(&b, opts.Walkthrough)
+		result := ledgerResultLine(opts.Ledger)
+		if !p.ResultBadges {
+			result = ledgerResultPlain(opts.Ledger)
+		}
+		fmt.Fprintf(&b, "**Result:** %s\n\n", result)
+		if p.Walkthrough {
+			renderWalkthrough(&b, opts.Walkthrough)
+		}
 		renderLedger(&b, info, opts.Ledger, opts.InlineURLs)
 	} else {
-		lead := severityCounts(findings)
-		if lead != "" {
-			lead += fmt.Sprintf(" · %d finding%s", len(findings), plural(len(findings)))
+		var lead string
+		if p.ResultBadges {
+			lead = severityCounts(findings)
+			if lead != "" {
+				lead += fmt.Sprintf(" · %d finding%s", len(findings), plural(len(findings)))
+			} else {
+				lead = "<sub><sub>![No findings](https://img.shields.io/badge/No_findings-brightgreen?style=flat)</sub></sub>"
+			}
+		} else if len(findings) == 0 {
+			lead = "No findings"
 		} else {
-			lead = "<sub><sub>![No findings](https://img.shields.io/badge/No_findings-brightgreen?style=flat)</sub></sub>"
+			lead = fmt.Sprintf("%d finding%s", len(findings), plural(len(findings)))
 		}
 		fmt.Fprintf(&b, "**Result:** %s\n\n", lead)
 		if posted := len(findings) - omittedInline; posted > 0 {
 			b.WriteString(fmt.Sprintf("→ Review the %d inline comment%s below.", posted, plural(posted)))
 			b.WriteString("\n\n")
 		}
-		renderWalkthrough(&b, opts.Walkthrough)
+		if p.Walkthrough {
+			renderWalkthrough(&b, opts.Walkthrough)
+		}
 	}
-	renderDiagram(&b, opts.Diagram)
+	if p.Diagram {
+		renderDiagram(&b, opts.Diagram)
+	}
 
 	if info.IsFork {
 		b.WriteString("> Source: fork (comments posted to the base repo)\n\n")
@@ -196,9 +221,13 @@ func RenderSummaryFull(info *PRInfo, findings []engine.Finding, stats map[string
 		renderOverflow(&b, info, omitted, categoryURLs, opts.RuleCitations)
 	}
 
-	renderPresentation(&b, info, findings, opts.Diffs, opts.FileSummaries)
+	if p.ChangesTable {
+		renderPresentation(&b, info, findings, opts.Diffs, opts.FileSummaries)
+	}
 
-	renderReviewReference(&b, info, stats, opts.Diffs)
+	if p.ReviewRef {
+		renderReviewReference(&b, info, stats, opts.Diffs)
+	}
 
 	handoff := ""
 	if info.ReviewCount > 0 {

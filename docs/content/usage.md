@@ -74,6 +74,17 @@ It is written **only on a successful review** (atomically: temp file + rename), 
 
 `file` and `nofilter` never widen the **inline** set past the diff (GitHub rejects an off-diff inline comment); they surface the extra findings in the summary, SARIF, and local output instead.
 
+### `--format`
+
+`--format` (default `full`) selects the **presentation** of the posted review comment on `--pr`. It is render-only — it never changes which findings are produced or posted, only how the comment looks.
+
+| Format | Comment shape |
+|--------|---------------|
+| `full` (default) | The complete output: the `## Code Review Summary` section (result line, "What changed" walkthrough, changed-files table, review reference) plus severity/priority **badges** — the result chips and the per-finding `P3 · bug` badge on each inline comment. |
+| `minimal` | Drops the `## Code Review Summary` section and **all** shields badges (both the summary chips and the inline `P3 · bug` badge). Inline findings, the footer, and the hidden tracking markers are kept, so re-runs still upsert the same comment. |
+
+Set it per-invocation (`--format minimal`) or as a default in `[review].format` (CLI config) / the host `review.format` (serve config). An out-of-set value is rejected with `flags.invalid_format` / `config.invalid` (exit 2). The set is extensible: new named formats are added to the renderer's format registry.
+
 The default JSON is a **stable v1 envelope** (`api_version: "miucr.cli/v1"`) so a host agent can branch without parsing prose:
 
 ```json

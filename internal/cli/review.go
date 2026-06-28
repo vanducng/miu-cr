@@ -203,6 +203,7 @@ type PRReviewRequest struct {
 	Subagents       config.ReviewSubagents
 	FilterMode      string // added|diff_context|file|nofilter (default diff_context)
 	MinSeverity     string // inline-posting floor: none|info|low|medium|high|critical (default keeps current behavior)
+	Format          string // review-comment presentation preset: full (default) | minimal
 	WantDiagram     bool   // opt into the mermaid change diagram (default off)
 	Instruction     string // optional per-review developer steer; injected fenced/context-only into the USER turn
 	OperatorPrompt  string
@@ -316,6 +317,7 @@ func reviewCommand(opts *options) *cobra.Command {
 		contextHops  int
 		filterMode   string
 		minSeverity  string
+		format       string
 		wantDiagram  bool
 		instruction  string
 		conversation bool
@@ -345,6 +347,9 @@ func reviewCommand(opts *options) *cobra.Command {
 			if err := validateMinSeverity(minSeverity); err != nil {
 				return err
 			}
+			if err := validateFormat(format); err != nil {
+				return err
+			}
 			if contextHops < 0 || contextHops > maxContextHops {
 				return &CLIError{Code: "config.invalid", Message: fmt.Sprintf("--context-hops must be between 0 and %d", maxContextHops), Exit: 2}
 			}
@@ -359,7 +364,7 @@ func reviewCommand(opts *options) *cobra.Command {
 			return validateReviewFlags(staged, from, to, commit, gate)
 		},
 		RunE: func(cmd *cobra.Command, args []string) error {
-			rcfg, err := loadReviewDefaults(cmd, &gate, &filterMode, &minSeverity, &expand, &tokenBudget, &deepContext, &contextHops, &conversation, &suggest, &patchRepair)
+			rcfg, err := loadReviewDefaults(cmd, &gate, &filterMode, &minSeverity, &format, &expand, &tokenBudget, &deepContext, &contextHops, &conversation, &suggest, &patchRepair)
 			if err != nil {
 				return err
 			}
@@ -419,6 +424,7 @@ func reviewCommand(opts *options) *cobra.Command {
 					subagents:       rcfg.Subagents,
 					filterMode:      filterMode,
 					minSeverity:     minSeverity,
+					format:          format,
 					wantDiagram:     wantDiagram,
 					instruction:     instruction,
 					conversation:    conversation,
@@ -526,6 +532,7 @@ func reviewCommand(opts *options) *cobra.Command {
 	f.IntVar(&contextHops, "context-hops", 0, "Related-file context hop depth from changed files (0 disables, max 5)")
 	f.StringVar(&filterMode, "filter-mode", "diff_context", "Inline-eligibility filter on --pr: added|diff_context|file|nofilter (default diff_context; file/nofilter route off-diff findings to the summary/SARIF/local output, never inline)")
 	f.StringVar(&minSeverity, "min-severity", "", "Minimum severity posted INLINE on --pr: none|info|low|medium|high|critical (default keeps current behavior; below-threshold findings still appear in the summary histogram + SARIF, never inline)")
+	f.StringVar(&format, "format", "", "Review-comment presentation on --pr: full (default) | minimal (minimal drops the summary section + severity/priority badges, keeping inline findings)")
 	f.BoolVar(&wantDiagram, "walkthrough-diagram", false, "Ask the model to also emit an optional mermaid change diagram in the summary (opt-in; diagram quality varies; a malformed/omitted diagram degrades to a plain note)")
 	f.StringVar(&instruction, "instruction", "", "Extra free-text steer for THIS review (e.g. 'focus on the auth changes'); injected fenced, context-only, and length-capped, so it never redefines the finding schema")
 	f.BoolVar(&conversation, "conversation", false, "On --pr, fetch the prior PR conversation (miucr summary + review overviews + finding threads + developer replies) and inject it fenced/context-only as UNTRUSTED context (dropped on fork PRs); one extra read pass, no extra LLM call (default OFF)")
@@ -576,6 +583,7 @@ type prRunArgs struct {
 	subagents       config.ReviewSubagents
 	filterMode      string
 	minSeverity     string
+	format          string
 	wantDiagram     bool
 	instruction     string
 	conversation    bool
@@ -636,6 +644,7 @@ func runPRReview(cmd *cobra.Command, a prRunArgs) error {
 		Subagents:       a.subagents,
 		FilterMode:      a.filterMode,
 		MinSeverity:     a.minSeverity,
+		Format:          a.format,
 		WantDiagram:     a.wantDiagram,
 		Instruction:     a.instruction,
 		Conversation:    a.conversation,
@@ -705,7 +714,7 @@ func runPRReview(cmd *cobra.Command, a prRunArgs) error {
 // command line. An explicit flag always wins (cmd.Flags().Changed); a config
 // value only fills an unset flag. Returns the validated Review so the caller can
 // also derive the timeout default. A config-load error propagates (typed).
-func loadReviewDefaults(cmd *cobra.Command, gate, filterMode, minSeverity *string, expand, tokenBudget *int, deepContext *bool, contextHops *int, conversation, suggest, patchRepair *bool) (config.Review, error) {
+func loadReviewDefaults(cmd *cobra.Command, gate, filterMode, minSeverity, format *string, expand, tokenBudget *int, deepContext *bool, contextHops *int, conversation, suggest, patchRepair *bool) (config.Review, error) {
 	cfg, err := config.Load()
 	if err != nil {
 		return config.Review{}, err
@@ -723,6 +732,9 @@ func loadReviewDefaults(cmd *cobra.Command, gate, filterMode, minSeverity *strin
 	}
 	if r.MinSeverity != "" && !f.Changed("min-severity") {
 		*minSeverity = r.MinSeverity
+	}
+	if r.Format != "" && !f.Changed("format") {
+		*format = r.Format
 	}
 	if r.Expand != nil && !f.Changed("expand") {
 		*expand = *r.Expand
@@ -828,6 +840,20 @@ func validateMinSeverity(sev string) error {
 		Code:    "flags.invalid_min_severity",
 		Message: fmt.Sprintf("unknown --min-severity %q", sev),
 		Hint:    "use none, info, low, medium, high, or critical",
+		Exit:    2,
+	}
+}
+
+// validateFormat rejects an out-of-set --format (empty = full), delegating to the
+// github registry so the CLI and the renderer share one source of truth.
+func validateFormat(format string) error {
+	if ghub.ValidFormat(format) {
+		return nil
+	}
+	return &CLIError{
+		Code:    "flags.invalid_format",
+		Message: fmt.Sprintf("unknown --format %q", format),
+		Hint:    "use " + strings.Join(ghub.ModeNames(), " or "),
 		Exit:    2,
 	}
 }

@@ -214,6 +214,7 @@ miucr review --pr owner/repo#123 --conversation                   # also read th
 | `--min-severity none\|info\|low\|medium\|high\|critical` | none (no floor) | Minimum severity posted **inline** on `--pr`. Below-threshold findings still appear in the summary header counts + SARIF, never inline. An out-of-set value is rejected (`flags.invalid_min_severity`, exit 2). |
 | `--walkthrough-diagram` | OFF | Opt in to a Mermaid change diagram in the summary (fenced ```mermaid block GitHub renders). Rides the same single review pass, no extra LLM call. Diagram quality varies; a malformed/omitted diagram degrades to a plain note. |
 | `--mode review\|checks` | `review` | GitHub reporter on `--pr --post`. `review` posts inline comments + a summary. `checks` posts a GitHub CheckRun with annotations (survives force-push, works on fork PRs, can be a **required** check); conclusion maps from the gate (gate-clean→`success`, gate-hit→`failure`); needs `checks: write`. |
+| `--format full\|minimal` | `full` | Review-comment presentation on `--pr`. `full` is the current output (summary section + severity/priority badges). `minimal` drops the `## Code Review Summary` section and **all** shields badges (summary chips **and** the per-finding inline `P3 · bug`), keeping inline findings, the footer, and the hidden upsert markers. Render-only — does not change which findings surface. An out-of-set value is rejected (`flags.invalid_format`, exit 2). |
 | `--sarif-out <path>` | - | Also write a SARIF 2.1.0 report to `<path>` from the SAME single review run (in addition to `--output`/posting). Written only on success (atomic temp+rename); a failed run leaves no file. This is how the Action does single-pass SARIF, no second LLM call. |
 | `--no-save` | off | Skip persisting this run to the local history store (every review is saved by default). |
 | `--force` | off | On `--pr`, re-review even when the head SHA is unchanged since the last saved review. By default an unchanged head SHA short-circuits (`skipped_unchanged`, no LLM pass); a new commit always re-reviews. |
@@ -615,6 +616,7 @@ private_key_path = "/etc/miucr/app-key.pem"   # app mode: PATH to RSA PEM (never
 gate         = "high"                   # default --gate: none|info|low|medium|high|critical
 filter_mode  = "diff_context"           # default --filter-mode (--pr): added|diff_context|file|nofilter
 min_severity = "low"                    # default --min-severity (--pr inline floor)
+format       = "full"                   # default --format (--pr presentation): full | minimal (minimal drops the summary section + all badges)
 timeout      = "900s"                   # default review timeout (Go duration: 900s, 15m, …)
 expand       = 20                       # default --expand
 token_budget = 0                        # default --token-budget; 0 = no cap

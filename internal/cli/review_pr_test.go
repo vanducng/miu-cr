@@ -104,6 +104,24 @@ func TestPRDryRunEmitsFindingsAndPRBlock(t *testing.T) {
 	}
 }
 
+func TestPRFormatThreadedToRequest(t *testing.T) {
+	pr := &fakePRReviewer{outcome: ReviewOutcome{PR: &PRResult{Owner: "o", Repo: "r", Number: 1}}}
+	if _, err := runPR(t, pr, &fakeReviewer{}, "--pr", "o/r#1", "--no-post", "--format", "minimal"); err != nil {
+		t.Fatalf("--format minimal rejected on PR path: %v", err)
+	}
+	if pr.gotReq.Format != "minimal" {
+		t.Fatalf("--format not threaded into PRReviewRequest: %q", pr.gotReq.Format)
+	}
+	// Default is full (empty threads through; renderer resolves "" → full).
+	pr2 := &fakePRReviewer{outcome: ReviewOutcome{PR: &PRResult{Owner: "o", Repo: "r", Number: 2}}}
+	if _, err := runPR(t, pr2, &fakeReviewer{}, "--pr", "o/r#2", "--no-post"); err != nil {
+		t.Fatalf("default PR review rejected: %v", err)
+	}
+	if pr2.gotReq.Format != "" {
+		t.Fatalf("Format must default empty (= full), got %q", pr2.gotReq.Format)
+	}
+}
+
 func TestPRSkippedUnchangedEnvelope(t *testing.T) {
 	pr := &fakePRReviewer{outcome: ReviewOutcome{
 		SkippedUnchanged: true,

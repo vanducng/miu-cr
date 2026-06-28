@@ -237,6 +237,7 @@ x:
     gate: high
     filter_mode: diff_context
     min_severity: low
+    format: full            # comment presentation: full (default) | minimal (drops the summary section + all badges)
     timeout: 900s
     expand: 20
     token_budget: 0
