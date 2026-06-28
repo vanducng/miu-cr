@@ -668,6 +668,7 @@ func hostReviewOptions(provider config.HostProvider, secret string, review confi
 		Gate:         review.Gate,
 		FilterMode:   review.FilterMode,
 		MinSeverity:  review.MinSeverity,
+		Format:       review.Format,
 		Mode:         review.Mode,
 		BaseURL:      provider.BaseURL,
 		Model:        provider.Model,
@@ -1050,6 +1051,9 @@ func mergeHostReview(base, over config.HostReview) config.HostReview {
 	if over.MinSeverity != "" {
 		out.MinSeverity = over.MinSeverity
 	}
+	if over.Format != "" {
+		out.Format = over.Format
+	}
 	if over.Timeout != "" {
 		out.Timeout = over.Timeout
 	}
@@ -1220,6 +1224,7 @@ func buildServeReviewFn(log *slog.Logger, gate string, st serve.ReviewStore, tra
 			Subagents:      review.Subagents,
 			FilterMode:     review.FilterMode,
 			MinSeverity:    review.MinSeverity,
+			Format:         review.Format,
 			OperatorPrompt: review.OperatorPrompt,
 			Conversation:   review.Conversation,
 			Mode:           review.Mode,
@@ -1384,5 +1389,5 @@ func commandPath(args []string) string {
 
 func init() {
 	cobra.EnableCommandSorting = false
-	config.SetReviewValidators(engine.ValidGate, ghub.ValidFilterMode, ghub.ValidMinSeverity)
+	config.SetReviewValidators(engine.ValidGate, ghub.ValidFilterMode, ghub.ValidMinSeverity, ghub.ValidFormat)
 }

@@ -17,13 +17,14 @@ var (
 	gateValidator        func(string) bool
 	filterModeValidator  func(string) bool
 	minSeverityValidator func(string) bool
+	formatValidator      func(string) bool
 )
 
 // SetReviewValidators wires the enum predicates used by ValidateReview. Called
 // once from the cli package init so config can validate [review] values without
 // importing engine/github.
-func SetReviewValidators(gate, filterMode, minSeverity func(string) bool) {
-	gateValidator, filterModeValidator, minSeverityValidator = gate, filterMode, minSeverity
+func SetReviewValidators(gate, filterMode, minSeverity, format func(string) bool) {
+	gateValidator, filterModeValidator, minSeverityValidator, formatValidator = gate, filterMode, minSeverity, format
 }
 
 // ValidateReview rejects an out-of-set [review] enum or an unparsable timeout,
@@ -39,6 +40,9 @@ func ValidateReview(r Review) error {
 	}
 	if r.MinSeverity != "" && minSeverityValidator != nil && !minSeverityValidator(r.MinSeverity) {
 		return invalidReview("min_severity", r.MinSeverity, "none|info|low|medium|high|critical")
+	}
+	if r.Format != "" && formatValidator != nil && !formatValidator(r.Format) {
+		return invalidReview("format", r.Format, "full|minimal")
 	}
 	if r.Timeout != "" {
 		if _, err := time.ParseDuration(r.Timeout); err != nil {

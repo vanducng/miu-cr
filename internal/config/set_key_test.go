@@ -17,6 +17,7 @@ func init() {
 		func(s string) bool {
 			return s == "info" || s == "low" || s == "medium" || s == "high" || s == "critical"
 		},
+		func(s string) bool { return s == "full" || s == "minimal" },
 	)
 }
 
@@ -25,6 +26,7 @@ func TestSetKeyHappyPaths(t *testing.T) {
 	for _, tc := range []struct{ key, val string }{
 		{"default_provider", "zai"},
 		{"review.gate", "high"},
+		{"review.format", "minimal"},
 		{"review.expand", "20"},
 		{"review.token_budget", "0"},
 		{"review.deep_context", "true"},
@@ -43,7 +45,7 @@ func TestSetKeyHappyPaths(t *testing.T) {
 			t.Fatalf("SetKey(%q,%q): %v", tc.key, tc.val, err)
 		}
 	}
-	if cfg.DefaultProvider != "zai" || cfg.Review.Gate != "high" || cfg.Store.Backend != "postgres" {
+	if cfg.DefaultProvider != "zai" || cfg.Review.Gate != "high" || cfg.Review.Format != "minimal" || cfg.Store.Backend != "postgres" {
 		t.Fatalf("scalars not set: %+v", cfg)
 	}
 	if cfg.Review.Expand == nil || *cfg.Review.Expand != 20 || cfg.Review.TokenBudget == nil || *cfg.Review.TokenBudget != 0 || cfg.Review.DeepContext == nil || !*cfg.Review.DeepContext || cfg.Review.ContextHops == nil || *cfg.Review.ContextHops != 3 || cfg.Review.Conversation == nil || !*cfg.Review.Conversation {

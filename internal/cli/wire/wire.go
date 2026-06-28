@@ -563,6 +563,7 @@ type reviewReuseShape struct {
 	Subagents       config.ReviewSubagents
 	FilterMode      string
 	MinSeverity     string
+	Format          string
 	WantDiagram     bool
 	Instruction     string
 	OperatorPrompt  string
@@ -642,6 +643,7 @@ func newReviewReuseShape(req cli.PRReviewRequest, cfg config.Config, providerNam
 		Subagents:       req.Subagents,
 		FilterMode:      req.FilterMode,
 		MinSeverity:     req.MinSeverity,
+		Format:          req.Format,
 		WantDiagram:     req.WantDiagram,
 		Instruction:     req.Instruction,
 		OperatorPrompt:  req.OperatorPrompt,
@@ -836,6 +838,7 @@ func publishReview(ctx stdctx.Context, client mgithub.Client, runner *gitcmd.Run
 		ReviewedFiles: reviewedFilesFromStats(res.Stats),
 		FilterMode:    filterModeOf(req.FilterMode),
 		MinSeverity:   req.MinSeverity,
+		Format:        req.Format,
 		CategoryURLs:  categoryURLs,
 		RuleCitations: ruleCites,
 		// Fork-fallback ::error:: commands must share the envelope's stdout stream
@@ -869,6 +872,7 @@ func publishReview(ctx stdctx.Context, client mgithub.Client, runner *gitcmd.Run
 			InlineURLs:    existing,
 			Published:     published,
 			PublishKey:    publishKey,
+			Format:        req.Format,
 		})
 	}
 

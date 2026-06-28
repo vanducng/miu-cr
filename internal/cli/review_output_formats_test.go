@@ -150,6 +150,28 @@ func TestReviewInvalidMinSeverity(t *testing.T) {
 	}
 }
 
+func TestReviewInvalidFormat(t *testing.T) {
+	r := &fakeReviewer{outcome: ReviewOutcome{}}
+	_, err := runReviewFmt(t, "json", r, "--staged", "--format", "fancy")
+	if err == nil {
+		t.Fatal("want error for invalid --format")
+	}
+	var ce *CLIError
+	if !asCLIError(err, &ce) || ce.Code != "flags.invalid_format" {
+		t.Fatalf("want flags.invalid_format, got %+v", err)
+	}
+	if ce.Exit != 2 {
+		t.Fatalf("want exit 2 for invalid --format, got %d", ce.Exit)
+	}
+}
+
+func TestReviewValidFormatAccepted(t *testing.T) {
+	r := &fakeReviewer{outcome: ReviewOutcome{}}
+	if _, err := runReviewFmt(t, "json", r, "--staged", "--format", "minimal", "--gate", "none"); err != nil {
+		t.Fatalf("valid --format rejected: %v", err)
+	}
+}
+
 func TestReviewWalkthroughDiagramThreaded(t *testing.T) {
 	r := &fakeReviewer{outcome: ReviewOutcome{}}
 	if _, err := runReviewFmt(t, "json", r, "--staged", "--walkthrough-diagram", "--gate", "none"); err != nil {

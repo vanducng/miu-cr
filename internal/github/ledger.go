@@ -236,6 +236,21 @@ func ledgerResultLine(entries []LedgerEntry) string {
 	return strings.Join(chips, " ")
 }
 
+// ledgerResultPlain is the badge-free Result line for minimal formats: a plain
+// open-finding count (or "all clear"), mirroring ledgerResultLine's open tally.
+func ledgerResultPlain(entries []LedgerEntry) string {
+	open := 0
+	for _, e := range entries {
+		if e.Status != statusResolved {
+			open++
+		}
+	}
+	if open == 0 {
+		return "all clear"
+	}
+	return fmt.Sprintf("%d open finding%s", open, plural(open))
+}
+
 // renderLedger writes the grouped lifecycle tables. Both are ALWAYS VISIBLE
 // (not collapsed) — the tracking history is the point of the section. Section
 // labels are bold (not H3) so the marker emoji stays normal-sized; ⚠️ flags Open
