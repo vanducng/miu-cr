@@ -117,7 +117,8 @@ func newTraceLogSink(log *slog.Logger, maxBytes int) func(step string, payload a
 		}
 		body, err := json.Marshal(payload)
 		if err != nil {
-			log.Debug("review trace marshal failed", "step", config.RedactString(step), "err", config.RedactString(err.Error()))
+			attrs = append(attrs, "err", config.RedactString(err.Error()))
+			log.Debug("review trace marshal failed", attrs...)
 			return
 		}
 		text, truncated := truncateLogValue(config.RedactString(string(body)), maxBytes)

@@ -117,6 +117,26 @@ func TestTraceLogSinkMarksFinalResponseTerminality(t *testing.T) {
 	}
 }
 
+func TestTraceLogSinkKeepsContextOnMarshalFailure(t *testing.T) {
+	var buf bytes.Buffer
+	log := slog.New(slog.NewTextHandler(&buf, &slog.HandlerOptions{Level: slog.LevelDebug}))
+	sink := newTraceLogSink(log, 512)
+
+	sink("final_response", map[string]any{
+		"source":          "subagent",
+		"subagent":        "backend",
+		"review_terminal": false,
+		"payload":         make(chan int),
+	})
+
+	out := buf.String()
+	for _, want := range []string{"review trace marshal failed", "step=final_response", "source=subagent", "subagent=backend", "review_terminal=false", "err="} {
+		if !strings.Contains(out, want) {
+			t.Fatalf("marshal failure log missing %q: %s", want, out)
+		}
+	}
+}
+
 func TestTruncateLogValueKeepsHeadAndTail(t *testing.T) {
 	got, truncated := truncateLogValue("start-"+strings.Repeat("中", 50)+"-end", 40)
 	if !truncated {
