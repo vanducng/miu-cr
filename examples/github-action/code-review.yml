@@ -16,7 +16,11 @@ name: AI Code Review
 
 on:
   pull_request_target:
-    types: [opened, synchronize, reopened]
+    types: [opened, synchronize, reopened, ready_for_review, closed, converted_to_draft]
+
+concurrency:
+  group: miucr-review-${{ github.event.pull_request.number }}
+  cancel-in-progress: true
 
 permissions:
   contents: read        # read the diff
@@ -29,6 +33,8 @@ jobs:
     # Skip dependency/release automation and explicit opt-outs.
     if: |
       github.actor != 'dependabot[bot]' &&
+      github.event.action != 'closed' &&
+      github.event.pull_request.draft != true &&
       !startsWith(github.head_ref, 'release-please--') &&
       !startsWith(github.event.pull_request.title, 'chore(main): release ') &&
       !contains(github.event.pull_request.title, '[skip review]')

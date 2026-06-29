@@ -116,6 +116,7 @@ type HostRunner struct {
 	threadSyncActive int
 	threadSyncDone   chan struct{}
 	threadSyncStop   bool
+	activeJobs       map[prKey]activeHostJob
 }
 
 type hostRunnerSnapshot struct {
@@ -125,6 +126,15 @@ type hostRunnerSnapshot struct {
 	reviewTO        time.Duration
 	prune           HostPruneConfig
 	janitorInterval time.Duration
+}
+
+type activeHostJob struct {
+	cancel    stdctx.CancelFunc
+	ref       string
+	jobID     int64
+	attemptID int64
+	attempt   int
+	headSHA   string
 }
 
 type HostPruneConfig struct {
@@ -182,6 +192,7 @@ func NewHostRunner(cfg HostRunnerConfig) (*HostRunner, error) {
 		janitorInterval: cfg.JanitorInterval,
 		now:             cfg.Now,
 		threadSyncLast:  map[string]time.Time{},
+		activeJobs:      map[prKey]activeHostJob{},
 	}, nil
 }
 
@@ -441,6 +452,52 @@ func (h *HostRunner) reconcileRepos(ctx stdctx.Context, repos []HostRepoConfig) 
 	return byID, bySlug, nil
 }
 
+func (h *HostRunner) registerActiveHostJob(key prKey, ref string, jobID, attemptID int64, attempt int, headSHA string) (stdctx.Context, func()) {
+	ctx, cancel := stdctx.WithCancel(stdctx.Background())
+	h.mu.Lock()
+	h.activeJobs[key] = activeHostJob{cancel: cancel, ref: ref, jobID: jobID, attemptID: attemptID, attempt: attempt, headSHA: headSHA}
+	h.mu.Unlock()
+	var once sync.Once
+	cleanup := func() {
+		once.Do(func() {
+			h.mu.Lock()
+			if active, ok := h.activeJobs[key]; ok && active.jobID == jobID && active.attemptID == attemptID {
+				delete(h.activeJobs, key)
+			}
+			h.mu.Unlock()
+			cancel()
+		})
+	}
+	return ctx, cleanup
+}
+
+func (h *HostRunner) cancelClosedActiveHostJobs(repo HostRepoConfig, openNumbers []int64) int {
+	open := make(map[int]struct{}, len(openNumbers))
+	for _, number := range openNumbers {
+		if number > 0 && number <= int64(math.MaxInt) {
+			open[int(number)] = struct{}{}
+		}
+	}
+	var canceled []activeHostJob
+	h.mu.Lock()
+	for key, active := range h.activeJobs {
+		if key.Owner != repo.Owner || key.Repo != repo.Repo {
+			continue
+		}
+		if _, ok := open[key.Number]; ok {
+			continue
+		}
+		delete(h.activeJobs, key)
+		canceled = append(canceled, active)
+	}
+	h.mu.Unlock()
+	for _, active := range canceled {
+		active.cancel()
+		h.log.Info("host: canceled active review for closed PR", "ref", active.ref, "job_id", active.jobID, "attempt_id", active.attemptID, "attempt", active.attempt, "head_sha", ShortSHA(active.headSHA))
+	}
+	return len(canceled)
+}
+
 func (h *HostRunner) pollRepo(ctx stdctx.Context, snap hostRunnerSnapshot, repo HostRepoConfig, repoID int64) (time.Duration, error) {
 	token, err := snap.tokens[repo.GithubAccount].Token(ctx)
 	if err != nil {
@@ -509,10 +566,11 @@ func (h *HostRunner) pollRepo(ctx stdctx.Context, snap hostRunnerSnapshot, repo 
 		}
 	}
 	res, err := h.store.ReconcileHostClosedPRs(ctx, store.HostClosedPRsInput{RepoID: repoID, OpenNumbers: openNumbers, Now: now})
+	activeCanceled := h.cancelClosedActiveHostJobs(repo, openNumbers)
 	if err != nil {
-		h.log.Warn("host: failed to reconcile closed PRs", "repo", repo.Slug, "error", config.RedactString(err.Error()))
-	} else if res.SessionsClosed > 0 || res.JobsCanceled > 0 {
-		h.log.Info("host: reconciled closed PRs", "repo", repo.Slug, "sessions_closed", res.SessionsClosed, "jobs_canceled", res.JobsCanceled)
+		h.log.Warn("host: failed to reconcile closed PRs", "repo", repo.Slug, "active_canceled", activeCanceled, "error", config.RedactString(err.Error()))
+	} else if res.SessionsClosed > 0 || res.JobsCanceled > 0 || activeCanceled > 0 {
+		h.log.Info("host: reconciled closed PRs", "repo", repo.Slug, "sessions_closed", res.SessionsClosed, "jobs_canceled", res.JobsCanceled, "active_canceled", activeCanceled)
 	}
 	h.pruneThreadResolutionSync(repo.Slug, openNumbers)
 	return pollFloor, nil
@@ -886,11 +944,15 @@ func (h *HostRunner) claimReady(ctx stdctx.Context, snap hostRunnerSnapshot, rep
 			continue
 		}
 		jobID, attemptID, attempts := claim.Job.ID, claim.AttemptID, claim.Job.Attempts
+		ref := fmt.Sprintf("%s/%s#%d", repo.Owner, repo.Repo, claim.Job.Number)
+		jobKey := prKey{Owner: repo.Owner, Repo: repo.Repo, Number: int(claim.Job.Number)}
+		jobCtx, cleanupActive := h.registerActiveHostJob(jobKey, ref, jobID, attemptID, attempts, claim.Job.HeadSHA)
 		heartbeatLease := hostJobLeaseDuration(timeout)
-		stopHeartbeat := h.startHostJobHeartbeat(ctx, jobID, attemptID, attempts, claim.Job.HeadSHA, heartbeatLease, fmt.Sprintf("%s/%s#%d", repo.Owner, repo.Repo, claim.Job.Number))
+		stopHeartbeat := h.startHostJobHeartbeat(ctx, jobID, attemptID, attempts, claim.Job.HeadSHA, heartbeatLease, ref)
 		job := Job{
-			Key:            prKey{Owner: repo.Owner, Repo: repo.Repo, Number: int(claim.Job.Number)},
-			Ref:            fmt.Sprintf("%s/%s#%d", repo.Owner, repo.Repo, claim.Job.Number),
+			Context:        jobCtx,
+			Key:            jobKey,
+			Ref:            ref,
 			Token:          token,
 			Timeout:        timeout,
 			StalledTimeout: review.StalledTimeout,
@@ -901,21 +963,30 @@ func (h *HostRunner) claimReady(ctx stdctx.Context, snap hostRunnerSnapshot, rep
 			HostAttemptID:  attemptID,
 			HostAttempt:    attempts,
 			OnDone: func(runErr error) {
+				cleanupActive()
 				stopHeartbeat()
 				status := "done"
 				msg := ""
 				if runErr != nil {
-					status = "failed"
 					msg = config.RedactString(runErr.Error())
+					if errors.Is(runErr, stdctx.Canceled) {
+						status = "canceled"
+					} else {
+						status = "failed"
+					}
 				}
 				cctx, cancel := stdctx.WithTimeout(stdctx.WithoutCancel(ctx), 10*time.Second)
 				defer cancel()
 				now := h.now().UTC()
 				availableAt := now
-				if runErr != nil {
+				if status == "failed" {
 					availableAt = now.Add(hostFailedRetryDelay(attempts))
 				}
 				if err := h.store.CompleteHostJob(cctx, store.HostJobCompleteInput{JobID: jobID, AttemptID: attemptID, Status: status, Error: msg, Now: now, AvailableAt: availableAt}); err != nil {
+					if errors.Is(err, store.ErrHostStaleAttempt) && status == "canceled" {
+						h.log.Debug("host: canceled job already stale", "ref", ref, "job_id", jobID, "attempt_id", attemptID, "attempt", attempts, "head_sha", ShortSHA(claim.Job.HeadSHA))
+						return
+					}
 					h.log.Warn("host: failed to complete job", "job", jobID, "error", config.RedactString(err.Error()))
 				}
 			},
@@ -924,21 +995,25 @@ func (h *HostRunner) claimReady(ctx stdctx.Context, snap hostRunnerSnapshot, rep
 		case SubmitQueued:
 			h.log.Debug("host: review job submitted", "ref", job.Ref, "pr_title", config.RedactString(claim.Title), "job_id", jobID, "attempt_id", attemptID, "attempt", attempts, "head_sha", ShortSHA(claim.Job.HeadSHA), "lease_seconds", int(heartbeatLease.Seconds()))
 		case SubmitDuplicate:
+			cleanupActive()
 			stopHeartbeat()
 			now := h.now().UTC()
 			_ = h.store.ReleaseHostJob(ctx, store.HostJobReleaseInput{JobID: jobID, AttemptID: attemptID, Error: "duplicate review already in flight", Now: now, AvailableAt: now.Add(timeout + time.Minute), DiscardAttempt: true})
 			continue
 		case SubmitCoalesced:
+			cleanupActive()
 			stopHeartbeat()
 			now := h.now().UTC()
 			_ = h.store.ReleaseHostJob(ctx, store.HostJobReleaseInput{JobID: jobID, AttemptID: attemptID, Error: "review already in flight for PR", Now: now, AvailableAt: now.Add(snap.interval), DiscardAttempt: true})
 			continue
 		case SubmitFull:
+			cleanupActive()
 			stopHeartbeat()
 			now := h.now().UTC()
 			_ = h.store.ReleaseHostJob(ctx, store.HostJobReleaseInput{JobID: jobID, AttemptID: attemptID, Error: "dispatcher rejected job", Now: now, AvailableAt: now.Add(snap.interval), DiscardAttempt: true})
 			continue
 		default:
+			cleanupActive()
 			stopHeartbeat()
 			now := h.now().UTC()
 			_ = h.store.ReleaseHostJob(ctx, store.HostJobReleaseInput{JobID: jobID, AttemptID: attemptID, Error: "dispatcher rejected job", Now: now, AvailableAt: now, DiscardAttempt: true})

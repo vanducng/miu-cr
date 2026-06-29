@@ -1322,7 +1322,11 @@ func buildServeReviewFn(log *slog.Logger, gate string, st serve.ReviewStore, tra
 		if j.Review != nil {
 			stalledTimeout = review.StalledTimeout
 		}
-		jobCtx, cancel := stdctx.WithTimeout(stdctx.Background(), timeout)
+		parentCtx := j.Context
+		if parentCtx == nil {
+			parentCtx = stdctx.Background()
+		}
+		jobCtx, cancel := stdctx.WithTimeout(parentCtx, timeout)
 		defer cancel()
 		progress := func(stage string) {
 			log.Debug("review progress", serveJobLogAttrs(j, "stage", config.RedactString(stage))...)
@@ -1367,6 +1371,11 @@ func buildServeReviewFn(log *slog.Logger, gate string, st serve.ReviewStore, tra
 		})
 		if err != nil {
 			err = classifyReviewErr(err, timeout, jobCtx)
+			if errors.Is(err, stdctx.Canceled) {
+				log.Info("review canceled", serveJobLogAttrs(j, "err", config.RedactString(err.Error()))...)
+				persistFinalReview(log, st, j.ReviewID, "failed", ReviewOutcome{})
+				return err
+			}
 			// A quota-exhausted provider is a terminal skip for THIS job, not a
 			// failure: returning err would retry it every poll until the window
 			// resets, spamming the provider. Mark done + log; a later push or

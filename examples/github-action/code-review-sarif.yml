@@ -19,7 +19,11 @@ name: AI Code Review (SARIF)
 
 on:
   pull_request_target:
-    types: [opened, synchronize, reopened]
+    types: [opened, synchronize, reopened, ready_for_review, closed, converted_to_draft]
+
+concurrency:
+  group: miucr-review-${{ github.event.pull_request.number }}
+  cancel-in-progress: true
 
 permissions:
   contents: read          # read the diff
@@ -32,6 +36,8 @@ jobs:
     runs-on: ubuntu-latest
     if: |
       github.actor != 'dependabot[bot]' &&
+      github.event.action != 'closed' &&
+      github.event.pull_request.draft != true &&
       !startsWith(github.head_ref, 'release-please--') &&
       !startsWith(github.event.pull_request.title, 'chore(main): release ') &&
       !contains(github.event.pull_request.title, '[skip review]')

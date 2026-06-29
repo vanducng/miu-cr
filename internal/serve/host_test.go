@@ -540,6 +540,94 @@ func TestHostRunnerPollCancelsQueuedJobsForClosedPRs(t *testing.T) {
 	}
 }
 
+func TestHostRunnerPollCancelsActiveJobsForClosedPRs(t *testing.T) {
+	cfg := hostRunnerConfig(t)
+	gh := &fakeNotifGetter{prs: map[string][]*github.PullRequest{
+		"octo/hello": {prWithHead(2, "sha-B")},
+	}}
+	cfg.NewNotifGetter = func(string) notifGetter { return gh }
+	disp := &holdDispatcher{}
+	cfg.Dispatcher = disp
+	st := cfg.Store.(*fakeHostStore)
+	r, err := NewHostRunner(cfg)
+	if err != nil {
+		t.Fatalf("NewHostRunner: %v", err)
+	}
+	if err := r.Tick(stdctx.Background()); err != nil {
+		t.Fatalf("first tick: %v", err)
+	}
+	job, ok := disp.job()
+	if !ok {
+		t.Fatal("job was not submitted")
+	}
+	if job.Context == nil {
+		t.Fatal("job context is nil")
+	}
+	if err := job.Context.Err(); err != nil {
+		t.Fatalf("job context canceled before close: %v", err)
+	}
+
+	gh.prs["octo/hello"] = nil
+	if err := r.Tick(stdctx.Background()); err != nil {
+		t.Fatalf("second tick: %v", err)
+	}
+	select {
+	case <-job.Context.Done():
+	case <-time.After(time.Second):
+		t.Fatal("active job context was not canceled")
+	}
+	st.mu.Lock()
+	defer st.mu.Unlock()
+	for _, stored := range st.jobs {
+		if stored.Number == 2 && stored.Status != "canceled" {
+			t.Fatalf("closed PR job status = %q, want canceled", stored.Status)
+		}
+	}
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	if len(r.activeJobs) != 0 {
+		t.Fatalf("active jobs = %d, want 0", len(r.activeJobs))
+	}
+}
+
+func TestHostRunnerPollCancelsActiveJobsWhenReconcileFails(t *testing.T) {
+	cfg := hostRunnerConfig(t)
+	gh := &fakeNotifGetter{prs: map[string][]*github.PullRequest{
+		"octo/hello": {prWithHead(2, "sha-B")},
+	}}
+	cfg.NewNotifGetter = func(string) notifGetter { return gh }
+	disp := &holdDispatcher{}
+	cfg.Dispatcher = disp
+	st := cfg.Store.(*fakeHostStore)
+	r, err := NewHostRunner(cfg)
+	if err != nil {
+		t.Fatalf("NewHostRunner: %v", err)
+	}
+	if err := r.Tick(stdctx.Background()); err != nil {
+		t.Fatalf("first tick: %v", err)
+	}
+	job, ok := disp.job()
+	if !ok {
+		t.Fatal("job was not submitted")
+	}
+
+	st.reconcileErr = errors.New("store unavailable")
+	gh.prs["octo/hello"] = nil
+	if err := r.Tick(stdctx.Background()); err != nil {
+		t.Fatalf("second tick: %v", err)
+	}
+	select {
+	case <-job.Context.Done():
+	case <-time.After(time.Second):
+		t.Fatal("active job context was not canceled")
+	}
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	if len(r.activeJobs) != 0 {
+		t.Fatalf("active jobs = %d, want 0", len(r.activeJobs))
+	}
+}
+
 func TestHostRunnerReloadsBeforeEachTick(t *testing.T) {
 	cfg := hostRunnerConfig(t)
 	oldRepo := cfg.Repos[0]
@@ -1031,6 +1119,26 @@ func prWithBranches(pr *github.PullRequest, base, head string) *github.PullReque
 	return pr
 }
 
+type holdDispatcher struct {
+	mu  sync.Mutex
+	got Job
+	ok  bool
+}
+
+func (d *holdDispatcher) Submit(j Job) SubmitResult {
+	d.mu.Lock()
+	defer d.mu.Unlock()
+	d.got = j
+	d.ok = true
+	return SubmitQueued
+}
+
+func (d *holdDispatcher) job() (Job, bool) {
+	d.mu.Lock()
+	defer d.mu.Unlock()
+	return d.got, d.ok
+}
+
 type countTokenSource struct {
 	mu    sync.Mutex
 	token string
@@ -1144,7 +1252,7 @@ func (s *fakeHostStore) ReconcileHostClosedPRs(_ stdctx.Context, in store.HostCl
 	}
 	canceled := map[string]bool{}
 	for key, job := range s.jobs {
-		if job.Status == "queued" && !open[job.Number] {
+		if (job.Status == "queued" || job.Status == "running") && !open[job.Number] {
 			job.Status = "canceled"
 			job.Error = "PR no longer open"
 			s.jobs[key] = job
@@ -1229,7 +1337,7 @@ func (s *fakeHostStore) CompleteHostJob(_ stdctx.Context, in store.HostJobComple
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	for key, job := range s.jobs {
-		if job.ID == in.JobID {
+		if job.ID == in.JobID && job.Status == "running" {
 			job.Status = in.Status
 			if !in.AvailableAt.IsZero() {
 				job.AvailableAt = in.AvailableAt
@@ -1238,7 +1346,7 @@ func (s *fakeHostStore) CompleteHostJob(_ stdctx.Context, in store.HostJobComple
 			return nil
 		}
 	}
-	return errors.New("job not found")
+	return store.ErrHostStaleAttempt
 }
 
 func (s *fakeHostStore) ReleaseHostJob(_ stdctx.Context, in store.HostJobReleaseInput) error {
