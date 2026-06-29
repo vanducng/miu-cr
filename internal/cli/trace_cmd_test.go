@@ -114,7 +114,7 @@ func TestTraceShowOrderedSteps(t *testing.T) {
 func TestTraceShowPrettyRendersToolCalls(t *testing.T) {
 	tr := engine.ReviewTrace{
 		SystemPrompt: "sys",
-		Turns:        []engine.TurnRecord{{Turn: 1, Tool: "grep", Args: "needleArg"}},
+		Turns:        []engine.TurnRecord{{Turn: 1, Tool: "grep", Args: "needleArg", Result: "File: a.go\n1|needle", ResultTruncated: true}},
 	}
 	st, id := seededTraceStore(t, sampleTraceJSON(t, tr))
 	out, err := runTrace(t, st, true, id) // pretty
@@ -123,6 +123,9 @@ func TestTraceShowPrettyRendersToolCalls(t *testing.T) {
 	}
 	if !strings.Contains(out, "grep") || !strings.Contains(out, "needleArg") {
 		t.Fatalf("tool_calls turn not rendered in pretty trace (TurnRecord case unreachable?):\n%s", out)
+	}
+	if !strings.Contains(out, "result:") || !strings.Contains(out, "1|needle") || !strings.Contains(out, "truncated: true") {
+		t.Fatalf("tool result not rendered in pretty trace:\n%s", out)
 	}
 }
 

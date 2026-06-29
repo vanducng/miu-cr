@@ -68,8 +68,9 @@ MIUCR_PG_DSN='postgres://miucr:miucr@localhost:55432/miucr?sslmode=disable' \
 - The compose example defaults `MIUCR_LOG_LEVEL=debug`. Copying
   `.env.example` enables `MIUCR_TRACE_LOG=true` for local development so review
   progress, tool-turn progress, poll activity, and bounded live trace payloads
-  are visible. Trace payloads can include prompt and diff context, are redacted,
-  and are truncated to `MIUCR_TRACE_LOG_MAX_BYTES` bytes per step.
+  are visible. Trace payloads can include prompt, diff context, and bounded tool
+  results; they are redacted and truncated to `MIUCR_TRACE_LOG_MAX_BYTES` bytes
+  per step.
 - Startup applies versioned Postgres migrations under an advisory lock and
   records them in `schema_migrations`, so concurrent host instances do not race
   schema bootstrap.

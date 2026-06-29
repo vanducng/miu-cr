@@ -206,6 +206,41 @@ func TestCodexAgentToolLoopThenFindings(t *testing.T) {
 	}
 }
 
+func TestCodexAgentHonorsConfiguredToolTurns(t *testing.T) {
+	maxTurns := 3
+	var calls int
+	var finalWithoutTools bool
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		calls++
+		raw, _ := io.ReadAll(r.Body)
+		var body codexReq
+		_ = json.Unmarshal(raw, &body)
+		if len(body.Tools) == 0 {
+			finalWithoutTools = true
+			io.WriteString(w, codexMessageResp(codexFindingsJSON))
+			return
+		}
+		io.WriteString(w, codexFunctionCallResp("call-1", "grep", `{"pattern":"TODO"}`))
+	}))
+	defer srv.Close()
+
+	a := newTestCodexAgent(t, srv)
+	out, err := a.Review(stdctx.Background(), Context{
+		Text:    "diff",
+		RepoDir: t.TempDir(),
+		Tools:   config.ReviewTools{MaxTurns: &maxTurns},
+	})
+	if err != nil {
+		t.Fatalf("Review: %v", err)
+	}
+	if len(out.Findings) != 1 {
+		t.Fatalf("findings = %d, want 1", len(out.Findings))
+	}
+	if calls != maxTurns || !finalWithoutTools {
+		t.Fatalf("calls=%d finalWithoutTools=%v, want %d/true", calls, finalWithoutTools, maxTurns)
+	}
+}
+
 func TestCodexAgentRefreshesOn401(t *testing.T) {
 	var calls int
 	var lastAuth string

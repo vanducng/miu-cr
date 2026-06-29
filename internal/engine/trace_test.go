@@ -18,7 +18,7 @@ func TestRedactTraceCoversStructuredAndFreeText(t *testing.T) {
 		FinalResponse: "the model echoed " + tok,
 		InjectedRules: []RuleRef{{Stem: "auth token=" + tok, Provenance: "user"}},
 		SelectedFiles: []string{"a.go"},
-		Turns:         []TurnRecord{{Turn: 0, Tool: "grep", Args: "secret=" + tok}},
+		Turns:         []TurnRecord{{Turn: 0, Tool: "grep", Args: "secret=" + tok, Result: "found " + tok}},
 	}
 	blob, err := json.Marshal(redactTrace(tr))
 	if err != nil {
@@ -67,6 +67,7 @@ func TestReviewTraceSettersNilSafeAndSink(t *testing.T) {
 	nilTrace.SetSelectedFiles([]string{"a.go"})
 	nilTrace.SetInjectedRules([]RuleRef{{Stem: "r"}})
 	nilTrace.RecordTool(0, "grep", "x") // must not panic
+	nilTrace.RecordToolResult(0, "grep", "x", "y", false)
 
 	var steps []string
 	tr := &ReviewTrace{Sink: func(step string, _ any) { steps = append(steps, step) }}
@@ -77,9 +78,10 @@ func TestReviewTraceSettersNilSafeAndSink(t *testing.T) {
 	tr.SetInjectedRules([]RuleRef{{Stem: "r", Provenance: "user"}})
 	tr.SetPrompt("user")
 	tr.RecordTool(0, "grep", "x")
+	tr.RecordToolResult(0, "grep", "x", "y", false)
 	tr.SetFinalResponse("done")
 
-	want := []string{"system_prompt", "model", "diff_meta", "selected_files", "injected_rules", "user_prompt", "tool", "final_response"}
+	want := []string{"system_prompt", "model", "diff_meta", "selected_files", "injected_rules", "user_prompt", "tool", "tool_result", "final_response"}
 	if strings.Join(steps, ",") != strings.Join(want, ",") {
 		t.Fatalf("sink steps = %v, want %v", steps, want)
 	}

@@ -38,7 +38,7 @@ func newTraceSink(w io.Writer) func(step string, payload any) {
 // traceCommand renders the full review trace of a saved review:
 // `miucr trace <id>` loads the review's redacted trace_json from history and
 // shows the ordered steps (system prompt → diff identification → selected files
-// → injected rules → user prompt → raw response → tool calls). The trace is
+// → injected rules → user prompt → raw response → tool calls/results). The trace is
 // LOCAL-only: it is read from the local history store, never re-fetched from a
 // provider and never posted; secrets were redacted at persist.
 func traceCommand(_ *options) *cobra.Command {
@@ -113,7 +113,7 @@ type traceStep struct {
 
 // traceSteps returns the trace as ordered steps mirroring the review pipeline:
 // system prompt → diff identification → selected files → injected rules → user
-// prompt → model/provider → raw response → tool calls. Empty steps are omitted.
+// prompt → model/provider → raw response → tool calls/results. Empty steps are omitted.
 func traceSteps(tr engine.ReviewTrace) []traceStep {
 	var steps []traceStep
 	add := func(name string, payload any, present bool) {
@@ -181,8 +181,30 @@ func renderTracePayload(ew *errWriter, payload any) {
 	case []engine.TurnRecord:
 		for _, tr := range v {
 			ew.printf("- [%d] %s %s\n", tr.Turn, tr.Tool, tr.Args)
+			if tr.Result != "" || tr.Error || tr.ResultTruncated {
+				if tr.Error {
+					ew.printf("  error: true\n")
+				}
+				if tr.ResultTruncated {
+					ew.printf("  truncated: true\n")
+				}
+				if tr.Result != "" {
+					ew.printf("  result:\n%s\n", indentTraceResult(tr.Result))
+				}
+			}
 		}
 	default:
 		ew.printf("%v\n", v)
 	}
+}
+
+func indentTraceResult(result string) string {
+	if result == "" {
+		return ""
+	}
+	lines := strings.Split(strings.TrimRight(result, "\n"), "\n")
+	for i, line := range lines {
+		lines[i] = "    " + line
+	}
+	return strings.Join(lines, "\n")
 }

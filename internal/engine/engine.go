@@ -46,12 +46,16 @@ type PersistRecord struct {
 	TraceJSON   string
 }
 
-// TurnRecord is one tool dispatch in the review session (turn index, tool name,
-// raw args). Args are paths/patterns, no auth tokens.
+const maxTraceToolResultBytes = 16 * 1024
+
+// TurnRecord is one tool dispatch in the review session.
 type TurnRecord struct {
-	Turn int    `json:"turn"`
-	Tool string `json:"tool"`
-	Args string `json:"args"`
+	Turn            int    `json:"turn"`
+	Tool            string `json:"tool"`
+	Args            string `json:"args"`
+	Result          string `json:"result,omitempty"`
+	Error           bool   `json:"error,omitempty"`
+	ResultTruncated bool   `json:"result_truncated,omitempty"`
 }
 
 // DiffMeta identifies which revisions the review compared and how that diff was
@@ -71,7 +75,7 @@ type RuleRef struct {
 
 // ReviewTrace accumulates the full session content during a review for
 // persistence: the system + user prompts, diff identification, selected files,
-// injected rules, model/provider, the per-turn tool calls, and the raw final
+// injected rules, model/provider, the per-turn tool calls/results, and the raw final
 // response. The agent/engine record into it via nil-safe setters (mirroring the
 // Progress seam); the engine creates it, threads it onto AgentContext, and reads
 // it back after Review. A nil *ReviewTrace makes every recorder a no-op (capture
@@ -203,6 +207,43 @@ func (t *ReviewTrace) RecordTool(turn int, tool, args string) {
 	t.emit("tool", tr)
 }
 
+// RecordToolResult attaches a bounded result to the latest matching dispatch.
+func (t *ReviewTrace) RecordToolResult(turn int, tool, args, result string, isErr bool) {
+	if t == nil {
+		return
+	}
+	result, truncated := truncateTraceToolResult(result)
+	t.recordToolResult(turn, tool, args, result, isErr, truncated)
+}
+
+func (t *ReviewTrace) recordToolResult(turn int, tool, args, result string, isErr, truncated bool) {
+	for i := len(t.Turns) - 1; i >= 0; i-- {
+		tr := &t.Turns[i]
+		if tr.Turn == turn && tr.Tool == tool && tr.Args == args && tr.Result == "" && !tr.Error && !tr.ResultTruncated {
+			tr.Result = result
+			tr.Error = isErr
+			tr.ResultTruncated = truncated
+			t.emit("tool_result", *tr)
+			return
+		}
+	}
+	tr := TurnRecord{Turn: turn, Tool: tool, Args: args, Result: result, Error: isErr, ResultTruncated: truncated}
+	t.Turns = append(t.Turns, tr)
+	t.emit("tool_result", tr)
+}
+
+func truncateTraceToolResult(result string) (string, bool) {
+	if len(result) <= maxTraceToolResultBytes {
+		return result, false
+	}
+	const marker = "\n...[truncated tool result]..."
+	keep := maxTraceToolResultBytes - len(marker)
+	if keep <= 0 {
+		return string(truncateUTF8Bytes([]byte(result), maxTraceToolResultBytes)), true
+	}
+	return string(truncateUTF8Bytes([]byte(result), keep)) + marker, true
+}
+
 // SetReasoning captures the model's reasoning once (first non-empty wins); nil-safe.
 // Only call when text is non-empty: reasoning quotes diff content and is redacted at persist.
 func (t *ReviewTrace) SetReasoning(provider, text string, tokens int64) {
@@ -280,7 +321,7 @@ type AgentContext struct {
 	Rev            string
 	Runner         *gitcmd.Runner
 	Progress       func(string) // nil = silent; milestone strings only, never secrets
-	// Trace, when non-nil, captures the raw prompt, per-turn tool calls, and raw
+	// Trace, when non-nil, captures the raw prompt, per-turn tool calls/results, and raw
 	// final response for persistence. nil = no capture (mirrors Progress).
 	Trace *ReviewTrace
 	// CaptureReasoning, when true, captures thinking blocks (Anthropic) or reasoning
@@ -708,14 +749,15 @@ func (e *Engine) Review(ctx stdctx.Context, req Request) (ReviewResult, error) {
 		if trace != nil {
 			rec.RawPrompt = trace.UserPrompt
 			rec.RawResponse = trace.FinalResponse
-			if len(trace.Turns) > 0 {
-				if blob, merr := json.Marshal(trace.Turns); merr != nil {
+			redactedTrace := redactTrace(*trace)
+			if len(redactedTrace.Turns) > 0 {
+				if blob, merr := json.Marshal(redactedTrace.Turns); merr != nil {
 					stats["transcript_error"] = merr.Error()
 				} else {
 					rec.Transcript = blob
 				}
 			}
-			if blob, merr := json.Marshal(redactTrace(*trace)); merr != nil {
+			if blob, merr := json.Marshal(redactedTrace); merr != nil {
 				stats["trace_error"] = merr.Error()
 			} else {
 				rec.TraceJSON = string(blob)
@@ -1113,7 +1155,14 @@ func redactTrace(t ReviewTrace) ReviewTrace {
 	t.SelectedFiles = files
 	turns := make([]TurnRecord, len(t.Turns))
 	for i, tr := range t.Turns {
-		turns[i] = TurnRecord{Turn: tr.Turn, Tool: tr.Tool, Args: config.RedactString(tr.Args)}
+		turns[i] = TurnRecord{
+			Turn:            tr.Turn,
+			Tool:            tr.Tool,
+			Args:            config.RedactString(tr.Args),
+			Result:          config.RedactString(tr.Result),
+			Error:           tr.Error,
+			ResultTruncated: tr.ResultTruncated,
+		}
 	}
 	t.Turns = turns
 	// Reasoning quotes diff content; redact text while preserving provider/tokens metadata.

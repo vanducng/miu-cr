@@ -12,6 +12,7 @@ import (
 
 type TraceRecorder interface {
 	RecordTool(turn int, tool, args string)
+	RecordToolResult(turn int, tool, args, result string, isErr bool)
 }
 
 type Context struct {
@@ -51,7 +52,10 @@ func Execute(ctx context.Context, cfg config.SymbolContext, tc Context, turn int
 			Trace:    tc.Trace,
 		}, turn, input)
 	default:
-		return fmt.Sprintf("unknown tool %q", name), true
+		out := fmt.Sprintf("unknown tool %q", name)
+		record(tc, turn, name, "(unknown tool)")
+		recordResult(tc, turn, name, "(unknown tool)", out, true)
+		return out, true
 	}
 }
 
@@ -74,5 +78,11 @@ func progress(tc Context, msg string) {
 func record(tc Context, turn int, tool, args string) {
 	if tc.Trace != nil {
 		tc.Trace.RecordTool(turn, tool, args)
+	}
+}
+
+func recordResult(tc Context, turn int, tool, args, result string, isErr bool) {
+	if tc.Trace != nil {
+		tc.Trace.RecordToolResult(turn, tool, args, result, isErr)
 	}
 }

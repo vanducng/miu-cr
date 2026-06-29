@@ -31,21 +31,30 @@ func fileReadSpec() Spec {
 func runFileRead(ctx context.Context, tc Context, turn int, input json.RawMessage) (string, bool) {
 	var args fileReadArgs
 	if err := json.Unmarshal(input, &args); err != nil {
-		return fmt.Sprintf("file_read: invalid arguments: %v", err), true
+		out := fmt.Sprintf("file_read: invalid arguments: %v", err)
+		record(tc, turn, "file_read", "(invalid arguments)")
+		recordResult(tc, turn, "file_read", "(invalid arguments)", out, true)
+		return out, true
 	}
 	if strings.TrimSpace(args.File) == "" {
-		return "file_read requires a non-empty \"file\"", true
+		out := "file_read requires a non-empty \"file\""
+		record(tc, turn, "file_read", "(missing file)")
+		recordResult(tc, turn, "file_read", "(missing file)", out, true)
+		return out, true
 	}
 	label := fileReadLabel(args)
 	progress(tc, "→ file_read "+label)
 	record(tc, turn, "file_read", label)
 	out, err := enginectx.ReadRange(ctx, tc.RepoDir, tc.Rev, args.File, args.Start, args.End, tc.Runner)
 	if err != nil {
-		return fmt.Sprintf("file_read failed: %v", err), true
+		out := fmt.Sprintf("file_read failed: %v", err)
+		recordResult(tc, turn, "file_read", label, out, true)
+		return out, true
 	}
 	if out == "" {
-		return "(no lines in range)", false
+		out = "(no lines in range)"
 	}
+	recordResult(tc, turn, "file_read", label, out, false)
 	return out, false
 }
 

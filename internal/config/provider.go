@@ -184,6 +184,7 @@ func DefaultProviderRetry() ProviderRetry {
 
 type ReviewTools struct {
 	MaxRetries    *int          `toml:"max_retries,omitempty" yaml:"max_retries,omitempty" json:"max_retries,omitempty"`
+	MaxTurns      *int          `toml:"max_turns,omitempty" yaml:"max_turns,omitempty" json:"max_turns,omitempty"`
 	RetryBackoff  string        `toml:"retry_backoff,omitempty" yaml:"retry_backoff,omitempty" json:"retry_backoff,omitempty"`
 	SymbolContext SymbolContext `toml:"symbol_context,omitempty" yaml:"symbol_context,omitempty" json:"symbol_context,omitempty"`
 }

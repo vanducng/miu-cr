@@ -66,8 +66,7 @@ func assertCapturedSystemPrompt(t *testing.T, tr *engine.ReviewTrace, wantProvid
 	}
 }
 
-// runTool records each dispatch into a non-nil Trace (turn, tool, args), with
-// args holding only the path/pattern label, never the file content or a token.
+// runTool records each dispatch and bounded result into a non-nil Trace.
 func TestTrace_RecordsToolDispatches(t *testing.T) {
 	repo, sha := runToolRepo(t)
 	tr := &engine.ReviewTrace{}
@@ -76,19 +75,25 @@ func TestTrace_RecordsToolDispatches(t *testing.T) {
 
 	runTool(ctx, rc, 0, "grep", json.RawMessage(`{"pattern":"func Bar"}`))
 	runTool(ctx, rc, 1, "file_read", json.RawMessage(`{"file":"main.go","start":1,"end":2}`))
+	runTool(ctx, rc, 2, "symbol_context", json.RawMessage(`{"relation":"document_symbols","file":"main.go"}`))
 
-	if len(tr.Turns) != 2 {
-		t.Fatalf("want 2 recorded turns, got %d: %+v", len(tr.Turns), tr.Turns)
+	if len(tr.Turns) != 3 {
+		t.Fatalf("want 3 recorded turns, got %d: %+v", len(tr.Turns), tr.Turns)
 	}
-	if tr.Turns[0] != (engine.TurnRecord{Turn: 0, Tool: "grep", Args: "func Bar"}) {
+	if tr.Turns[0].Turn != 0 || tr.Turns[0].Tool != "grep" || tr.Turns[0].Args != "func Bar" {
 		t.Errorf("grep turn: %+v", tr.Turns[0])
 	}
-	if tr.Turns[1] != (engine.TurnRecord{Turn: 1, Tool: "file_read", Args: "main.go:1-2"}) {
+	if tr.Turns[1].Turn != 1 || tr.Turns[1].Tool != "file_read" || tr.Turns[1].Args != "main.go:1-2" {
 		t.Errorf("file_read turn: %+v", tr.Turns[1])
 	}
-	// The transcript holds only the label, never the read file content.
+	if !strings.Contains(tr.Turns[0].Result, "File: main.go") || !strings.Contains(tr.Turns[1].Result, "package main") {
+		t.Errorf("tool results not captured: %+v", tr.Turns)
+	}
+	if tr.Turns[2].Tool != "symbol_context" || !strings.Contains(tr.Turns[2].Result, "Document symbols for main.go") {
+		t.Errorf("symbol_context result not captured: %+v", tr.Turns[2])
+	}
 	if strings.Contains(tr.Turns[1].Args, "package main") {
-		t.Errorf("file content leaked into transcript: %q", tr.Turns[1].Args)
+		t.Errorf("file content leaked into args label: %q", tr.Turns[1].Args)
 	}
 }
 
@@ -126,4 +131,5 @@ func TestTrace_NilIsNoOp(t *testing.T) {
 	tr.SetPrompt("x")
 	tr.SetFinalResponse("y")
 	tr.RecordTool(0, "grep", "z") // all no-ops, no panic
+	tr.RecordToolResult(0, "grep", "z", "out", false)
 }

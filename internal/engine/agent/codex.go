@@ -214,7 +214,8 @@ func (a *codexAgent) Review(ctx stdctx.Context, rc Context) (engine.ReviewOutput
 	}}
 
 	emptyRounds := 0
-	for turn := 0; turn < maxToolTurns; turn++ {
+	maxTurns := toolTurns(rc.Tools)
+	for turn := 0; turn < maxTurns; turn++ {
 		if err := ctx.Err(); err != nil {
 			return engine.ReviewOutput{}, err
 		}
@@ -236,7 +237,7 @@ func (a *codexAgent) Review(ctx stdctx.Context, rc Context) (engine.ReviewOutput
 		}
 		// Final allowed turn: withdraw tools and force a finalize so a
 		// budget-exhausted diff yields a real review, not a hard failure.
-		if turn == maxToolTurns-1 {
+		if turn == maxTurns-1 {
 			req.Tools = nil
 			input = append(input, codexItem{Type: "message", Role: "user",
 				Content: []codexContent{{Type: "input_text", Text: forceFinalizeNudge}}})
@@ -265,7 +266,7 @@ func (a *codexAgent) Review(ctx stdctx.Context, rc Context) (engine.ReviewOutput
 		emptyRounds = 0
 		input = append(input, toolItems...)
 	}
-	return engine.ReviewOutput{}, fmt.Errorf("agent: forced finalization produced no parseable findings after %d turns", maxToolTurns)
+	return engine.ReviewOutput{}, fmt.Errorf("agent: forced finalization produced no parseable findings after %d turns", maxTurns)
 }
 
 // dispatch runs every function_call in resp, returning function_call_output

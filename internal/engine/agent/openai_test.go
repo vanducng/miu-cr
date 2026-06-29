@@ -248,7 +248,7 @@ var _ openaiClient = (*toolHungryOpenAI)(nil)
 
 // On a large diff the model may keep requesting tools to the budget. The loop
 // must FORCE finalization on the last turn (withdraw tools + nudge) so it is
-// driven to emit findings, a real review, not a hard maxToolTurns failure.
+// driven to emit findings, a real review, not a hard turn-budget failure.
 func TestOpenAIAgentForcedFinalizeReturnsFindings(t *testing.T) {
 	fc := &toolHungryOpenAI{findings: `{"findings":[{"file":"a.go","existing_code":"x","severity":"warning","category":"bug","rationale":"r"}]}`}
 	a := &openaiAgent{client: fc, model: "gpt-test"}
@@ -259,8 +259,24 @@ func TestOpenAIAgentForcedFinalizeReturnsFindings(t *testing.T) {
 	if len(out.Findings) != 1 {
 		t.Fatalf("want 1 finding from forced finalize, got %d", len(out.Findings))
 	}
-	if fc.calls != maxToolTurns {
-		t.Fatalf("expected %d calls (explore to budget then finalize), got %d", maxToolTurns, fc.calls)
+	if fc.calls != defaultMaxToolTurns {
+		t.Fatalf("expected %d calls (explore to budget then finalize), got %d", defaultMaxToolTurns, fc.calls)
+	}
+}
+
+func TestOpenAIAgentHonorsConfiguredToolTurns(t *testing.T) {
+	maxTurns := 3
+	fc := &toolHungryOpenAI{findings: `{"findings":[{"file":"a.go","existing_code":"x","severity":"warning","category":"bug","rationale":"r"}]}`}
+	a := &openaiAgent{client: fc, model: "gpt-test"}
+	out, err := a.Review(stdctx.Background(), Context{Text: "ctx", RepoDir: t.TempDir(), Tools: config.ReviewTools{MaxTurns: &maxTurns}})
+	if err != nil {
+		t.Fatalf("Review: %v", err)
+	}
+	if len(out.Findings) != 1 {
+		t.Fatalf("want 1 finding from forced finalize, got %d", len(out.Findings))
+	}
+	if fc.calls != maxTurns {
+		t.Fatalf("expected %d calls, got %d", maxTurns, fc.calls)
 	}
 }
 

@@ -174,7 +174,7 @@ type ReviewRequest struct {
 	NoSave          bool         // opt out of persisting this run to the local history store
 	Progress        func(string) // nil = silent; stderr milestones, never the stdout envelope
 	// TraceSink, when non-nil, streams each captured trace step (system prompt, diff
-	// meta, selected files, injected rules, prompts, response, tool calls) live to
+	// meta, selected files, injected rules, prompts, response, tool calls/results) live to
 	// stderr as NDJSON (--trace). Local-only; distinct from Progress; the stdout
 	// result envelope is untouched.
 	TraceSink func(step string, payload any)

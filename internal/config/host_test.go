@@ -35,6 +35,7 @@ x:
       interval: 7m
     tools:
       max_retries: 2
+      max_turns: 14
       retry_backoff: 250ms
       symbol_context:
         max_bytes: 12000
@@ -113,7 +114,7 @@ repos:
 	if cfg.Host.Review.ThreadResolutionSync.Mode != "poll" || cfg.Host.Review.ThreadResolutionSync.Interval != "7m" {
 		t.Fatalf("thread resolution sync not loaded: %+v", cfg.Host.Review)
 	}
-	if cfg.Host.Review.Tools.MaxRetries == nil || *cfg.Host.Review.Tools.MaxRetries != 2 || cfg.Host.Review.Tools.RetryBackoff != "250ms" || cfg.Host.Review.Tools.SymbolContext.MaxBytes != 12000 || cfg.Host.Review.Tools.SymbolContext.MaxFiles != 500 || cfg.Host.Review.Tools.SymbolContext.MaxParallel != 4 {
+	if cfg.Host.Review.Tools.MaxRetries == nil || *cfg.Host.Review.Tools.MaxRetries != 2 || cfg.Host.Review.Tools.MaxTurns == nil || *cfg.Host.Review.Tools.MaxTurns != 14 || cfg.Host.Review.Tools.RetryBackoff != "250ms" || cfg.Host.Review.Tools.SymbolContext.MaxBytes != 12000 || cfg.Host.Review.Tools.SymbolContext.MaxFiles != 500 || cfg.Host.Review.Tools.SymbolContext.MaxParallel != 4 {
 		t.Fatalf("review tools not loaded: %+v", cfg.Host.Review.Tools)
 	}
 	if cfg.Host.Review.Approval.Mode != "threshold" || cfg.Host.Review.Approval.MaxPriority != "P3" || cfg.Host.Review.Approval.Note != "on_findings" {
