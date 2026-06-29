@@ -55,6 +55,14 @@ comment with a new marker); subsequent re-runs dedupe normally. On a
 first M5 review **manually** (or off-hours) to absorb the one-time re-post before
 the next scheduled run.
 
+## [0.71.0](https://github.com/vanducng/miu-cr/compare/v0.70.0...v0.71.0) (2026-06-29)
+
+
+### Features
+
+* **review:** clarified symbol context tool guidance ([#208](https://github.com/vanducng/miu-cr/issues/208)) ([cfcf300](https://github.com/vanducng/miu-cr/commit/cfcf3003578851201ac20b3be62c13f474aaeafd))
+* **summary:** link the 💬 conversation marker to its thread ([#209](https://github.com/vanducng/miu-cr/issues/209)) ([3da9d3e](https://github.com/vanducng/miu-cr/commit/3da9d3ece552147d0c81fbe5b8cdcbff14007821))
+
 ## [0.70.0](https://github.com/vanducng/miu-cr/compare/v0.69.0...v0.70.0) (2026-06-28)
 
 
