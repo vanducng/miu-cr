@@ -58,6 +58,15 @@ type TurnRecord struct {
 	ResultTruncated bool   `json:"result_truncated,omitempty"`
 }
 
+// TurnReason is the assistant prose accompanying one agent turn: why it called
+// that turn's tools and what it concluded from the previous results. The loop
+// otherwise discards this once tools are dispatched, so capturing it per turn is
+// what makes the think -> tool -> result -> think chain recoverable from a trace.
+type TurnReason struct {
+	Turn int    `json:"turn"`
+	Text string `json:"text"`
+}
+
 // DiffMeta identifies which revisions the review compared and how that diff was
 // computed (staged index / commit / range).
 type DiffMeta struct {
@@ -96,6 +105,9 @@ type ReviewTrace struct {
 	Provider      string       `json:"provider"`
 	FinalResponse string       `json:"final_response"`
 	Turns         []TurnRecord `json:"turns"`
+	// TurnReasons holds the per-turn assistant prose (why each turn's tools were
+	// called / what the prior results meant). Quotes diff content: redacted at persist.
+	TurnReasons []TurnReason `json:"turn_reasons,omitempty"`
 	// Reasoning holds the model's captured internal reasoning. Populated only when
 	// CaptureReasoning is on AND [review].thinking is enabled (off = nothing to capture).
 	// Quotes diff content: always redacted at persist; opt-in, off by default.
@@ -242,6 +254,20 @@ func truncateTraceToolResult(result string) (string, bool) {
 		return string(truncateUTF8Bytes([]byte(result), maxTraceToolResultBytes)), true
 	}
 	return string(truncateUTF8Bytes([]byte(result), keep)) + marker, true
+}
+
+// RecordTurnReason captures one turn's assistant prose (the why of its tool calls
+// / interpretation of prior results); bounded to the tool-result cap, nil-safe.
+func (t *ReviewTrace) RecordTurnReason(turn int, text string) {
+	if t == nil || text == "" {
+		return
+	}
+	if len(text) > maxTraceToolResultBytes {
+		text = string(truncateUTF8Bytes([]byte(text), maxTraceToolResultBytes))
+	}
+	tr := TurnReason{Turn: turn, Text: text}
+	t.TurnReasons = append(t.TurnReasons, tr)
+	t.emit("turn_reason", tr)
 }
 
 // SetReasoning captures the model's reasoning once (first non-empty wins); nil-safe.
@@ -1165,6 +1191,13 @@ func redactTrace(t ReviewTrace) ReviewTrace {
 		}
 	}
 	t.Turns = turns
+	if len(t.TurnReasons) > 0 {
+		reasons := make([]TurnReason, len(t.TurnReasons))
+		for i, tr := range t.TurnReasons {
+			reasons[i] = TurnReason{Turn: tr.Turn, Text: config.RedactString(tr.Text)}
+		}
+		t.TurnReasons = reasons
+	}
 	// Reasoning quotes diff content; redact text while preserving provider/tokens metadata.
 	if t.Reasoning != nil {
 		r := *t.Reasoning

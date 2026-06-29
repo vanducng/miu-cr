@@ -57,6 +57,47 @@ func TestRedactTraceRedactsReasoning(t *testing.T) {
 	}
 }
 
+// redactTrace redacts per-turn reason text (the assistant prose quotes diff content).
+func TestRedactTraceRedactsTurnReason(t *testing.T) {
+	const tok = "sk-ant-secrettoken1234567890"
+	tr := ReviewTrace{
+		TurnReasons: []TurnReason{
+			{Turn: 0, Text: "I'll grep for the key sk-ant-api_key=" + tok},
+			{Turn: 1, Text: "no secret here, just logic"},
+		},
+	}
+	blob, err := json.Marshal(redactTrace(tr))
+	if err != nil {
+		t.Fatalf("marshal: %v", err)
+	}
+	if s := string(blob); strings.Contains(s, tok) {
+		t.Fatalf("token leaked in turn reason:\n%s", s)
+	}
+}
+
+// RecordTurnReason appends + emits a turn_reason step, is nil-safe, skips empty
+// text, and caps oversized prose to the tool-result byte bound.
+func TestRecordTurnReason(t *testing.T) {
+	var nilTrace *ReviewTrace
+	nilTrace.RecordTurnReason(0, "x") // must not panic
+
+	var steps []string
+	tr := &ReviewTrace{Sink: func(step string, _ any) { steps = append(steps, step) }}
+	tr.RecordTurnReason(0, "")               // empty: no-op
+	tr.RecordTurnReason(0, "why I grep")     // recorded
+	tr.RecordTurnReason(1, strings.Repeat("a", maxTraceToolResultBytes+500))
+
+	if len(tr.TurnReasons) != 2 {
+		t.Fatalf("want 2 turn reasons, got %d", len(tr.TurnReasons))
+	}
+	if strings.Join(steps, ",") != "turn_reason,turn_reason" {
+		t.Fatalf("sink steps = %v", steps)
+	}
+	if got := len(tr.TurnReasons[1].Text); got > maxTraceToolResultBytes {
+		t.Fatalf("turn reason not capped: %d bytes", got)
+	}
+}
+
 // The setters are nil-safe (a nil *ReviewTrace is a no-op) and Sink, when set,
 // receives each recorded step.
 func TestReviewTraceSettersNilSafeAndSink(t *testing.T) {
