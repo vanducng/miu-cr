@@ -55,6 +55,14 @@ comment with a new marker); subsequent re-runs dedupe normally. On a
 first M5 review **manually** (or off-hours) to absorb the one-time re-post before
 the next scheduled run.
 
+## [0.74.0](https://github.com/vanducng/miu-cr/compare/v0.73.1...v0.74.0) (2026-06-29)
+
+
+### Features
+
+* **engine:** capture per-turn reasoning on the review trace ([#223](https://github.com/vanducng/miu-cr/issues/223)) ([10e4393](https://github.com/vanducng/miu-cr/commit/10e439368cab724e81070f792fed6e45f4a17c6d))
+* **rules:** CI-coverage-gap + wait/poll-loop review checks ([#224](https://github.com/vanducng/miu-cr/issues/224)) ([593ec82](https://github.com/vanducng/miu-cr/commit/593ec829f83344f5af5132e979e5af9b86cbbb11))
+
 ## [0.73.1](https://github.com/vanducng/miu-cr/compare/v0.73.0...v0.73.1) (2026-06-29)
 
 
