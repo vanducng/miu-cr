@@ -321,7 +321,7 @@ func renderLedger(b *strings.Builder, info *PRInfo, entries []LedgerEntry, inlin
 			shown = shown[:maxResolvedRows]
 		}
 		for _, e := range shown {
-			fmt.Fprintf(b, "| %s | %s | %s | %s |\n", ledgerSevCell(e, true), ledgerIssue(e, false), ledgerLocation(info, e, inlineURLs), ledgerResolvedCell(info, e))
+			fmt.Fprintf(b, "| %s | %s | %s | %s |\n", ledgerSevCell(e, true), ledgerIssue(e, false), ledgerLocation(info, e, inlineURLs), ledgerResolvedCell(info, e, inlineURLs))
 		}
 		if extra > 0 {
 			fmt.Fprintf(b, "\n_+%d older resolved finding(s) tracked but not shown._\n", extra)
@@ -333,10 +333,14 @@ func renderLedger(b *strings.Builder, info *PRInfo, entries []LedgerEntry, inlin
 // ledgerResolvedCell renders the "Resolved" column. A commit resolution shows the
 // fix-commit transition (open → resolved SHA). A CONVERSATION resolution has no fix
 // commit — the open-SHA shown there only misleads (it reads as if a commit fixed
-// it) — so it renders one clean 💬 marker, visually distinct from commit rows; the
-// Location cell already links the discussion thread.
-func ledgerResolvedCell(info *PRInfo, e LedgerEntry) string {
+// it) — so it renders one clean 💬 marker, linked to the discussion thread when one
+// exists (inlineURLs[fp], GitHub-server-assigned so angle-bracketed), visually
+// distinct from commit rows.
+func ledgerResolvedCell(info *PRInfo, e LedgerEntry, inlineURLs map[string]string) string {
 	if e.ResKind == resolutionConversation {
+		if u := inlineURLs[e.FP]; u != "" {
+			return fmt.Sprintf("[💬 conversation](<%s>)", u)
+		}
 		return "💬 conversation"
 	}
 	cell := shaLink(info, e.ResSHA)

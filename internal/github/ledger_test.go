@@ -467,14 +467,24 @@ func TestRenderLedgerSameCommitNoArrow(t *testing.T) {
 func TestRenderLedgerConversationResolvedCell(t *testing.T) {
 	info := &PRInfo{HeadSHA: "deadbeef", HTMLBase: "https://github.com/o/r"}
 	now := time.Date(2026, 6, 26, 22, 0, 0, 0, time.UTC)
-	out := RenderSummaryFull(info, nil, nil, 0, nil, nil, SummaryOptions{
-		Ledger: []LedgerEntry{{FP: fpStr(1), Path: "a.go", Title: "x", Status: statusResolved, Sev: "low", FirstSev: "low", OpenSHA: "0519d5d", ResSHA: "0519d5d", ResKind: resolutionConversation, ResAt: now.Format(time.RFC3339)}},
-	})
-	if !strings.Contains(out, "💬 conversation") {
-		t.Fatalf("conversation-resolved row missing clean marker:\n%s", out)
+	led := []LedgerEntry{{FP: fpStr(1), Path: "a.go", Title: "x", Status: statusResolved, Sev: "low", FirstSev: "low", OpenSHA: "0519d5d", ResSHA: "0519d5d", ResKind: resolutionConversation, ResAt: now.Format(time.RFC3339)}}
+	threadURL := "https://github.com/o/r/pull/1#discussion_r1"
+
+	linked := RenderSummaryFull(info, nil, nil, 0, nil, nil, SummaryOptions{Ledger: led, InlineURLs: map[string]string{fpStr(1): threadURL}})
+	if !strings.Contains(linked, "[💬 conversation](<"+threadURL+">)") {
+		t.Fatalf("conversation marker should link to the discussion thread:\n%s", linked)
 	}
-	if strings.Contains(out, "`0519d5d`") {
-		t.Fatalf("conversation-resolved row must not show the misleading open-SHA as a fix commit:\n%s", out)
+	if strings.Contains(linked, "`0519d5d`") {
+		t.Fatalf("conversation-resolved row must not show the misleading open-SHA as a fix commit:\n%s", linked)
+	}
+
+	// No thread URL → plain marker, never a broken/empty link.
+	plain := RenderSummaryFull(info, nil, nil, 0, nil, nil, SummaryOptions{Ledger: led})
+	if !strings.Contains(plain, "💬 conversation") {
+		t.Fatalf("conversation-resolved row missing clean marker:\n%s", plain)
+	}
+	if strings.Contains(plain, "[💬 conversation](") {
+		t.Fatalf("no thread URL → marker must be plain, not linked:\n%s", plain)
 	}
 }
 
