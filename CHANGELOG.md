@@ -55,6 +55,13 @@ comment with a new marker); subsequent re-runs dedupe normally. On a
 first M5 review **manually** (or off-hours) to absorb the one-time re-post before
 the next scheduled run.
 
+## [0.71.2](https://github.com/vanducng/miu-cr/compare/v0.71.1...v0.71.2) (2026-06-29)
+
+
+### Bug Fixes
+
+* **host:** cancel reviews when PRs close ([ca26eb7](https://github.com/vanducng/miu-cr/commit/ca26eb75ec5bbb78ac1da481614b16c363f464ad))
+
 ## [0.71.1](https://github.com/vanducng/miu-cr/compare/v0.71.0...v0.71.1) (2026-06-29)
 
 
