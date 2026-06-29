@@ -234,6 +234,9 @@ func (a *openaiAgent) Review(ctx stdctx.Context, rc Context) (engine.ReviewOutpu
 			continue
 		}
 		emptyRounds = 0
+		// Capture the prose accompanying the tool calls (why this turn) before it's
+		// dropped; a tools-free turn's content is the final answer, handled above.
+		rc.Trace.RecordTurnReason(turn, msg.Content)
 		for _, tc := range msg.ToolCalls {
 			fn := tc.Function
 			out, isErr := runTool(ctx, rc, turn, fn.Name, json.RawMessage(fn.Arguments))

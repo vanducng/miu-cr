@@ -294,6 +294,11 @@ func (a *codexAgent) dispatch(ctx stdctx.Context, rc Context, turn int, resp *co
 			)
 		}
 	}
+	// When tools were called, the prose is the model's why for this turn; capture
+	// it before it's dropped (a tools-free turn's text is the final answer).
+	if len(items) > 0 && text.Len() > 0 {
+		rc.Trace.RecordTurnReason(turn, text.String())
+	}
 	return items, text.String()
 }
 

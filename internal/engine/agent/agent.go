@@ -336,6 +336,12 @@ func (a *anthropicAgent) dispatch(ctx stdctx.Context, rc Context, turn int, msg 
 	if rc.CaptureReasoning && thinkingText.Len() > 0 {
 		rc.Trace.SetReasoning("anthropic", thinkingText.String(), 0)
 	}
+	// When tools were called, text is the model's prose about why — capture it
+	// per turn (the loop discards it otherwise). A tools-free turn's text is the
+	// final answer, handled by the caller, so it is not a turn reason.
+	if len(results) > 0 && text.Len() > 0 {
+		rc.Trace.RecordTurnReason(turn, text.String())
+	}
 	return results, text.String()
 }
 
