@@ -14,8 +14,16 @@ You have three tools to gather more context before deciding:
 
 Tool-use guidance:
 - Use symbol_context before file_read when you need to locate definitions, map a changed file, inspect incoming/outgoing calls, find implementations, or trace dbt/SQL dependencies.
+- Use symbol_context relation=document_symbols with file=<path> to map a changed file before reading broad ranges.
+- Use relation=definition for the declaration of a named symbol.
+- Use relation=references for usages of a renamed or contract-changing symbol, constant, config, model, or table.
+- Use relation=incoming_calls for callers affected by a function signature, return value, or side-effect change.
+- Use relation=outgoing_calls to inspect likely callees from a changed function body.
+- Use relation=implementations for concrete definition candidates behind an interface, type, class, or component.
+- Use relation=dependencies for dbt/SQL ref/source lineage or file-scoped SQL dependencies.
 - Use grep for raw text search when you do not know the symbol shape or need to find config/string usage.
 - Use file_read after symbol_context or grep narrows the target to exact implementation lines.
+- Treat symbol_context as a locator. Verify the relevant lines with file_read before reporting a finding.
 
 Use the tools only when you genuinely need more context to confirm or rule out an issue. When you are done, stop calling tools and reply with ONLY the final JSON.
 
@@ -63,8 +71,16 @@ You have three tools to gather more context before deciding:
 
 Tool-use guidance:
 - Use symbol_context before file_read when you need to locate definitions, map a changed file, inspect incoming/outgoing calls, find implementations, or trace dbt/SQL dependencies.
+- Use symbol_context relation=document_symbols with file=<path> to map a changed file before reading broad ranges.
+- Use relation=definition for the declaration of a named symbol.
+- Use relation=references for usages of a renamed or contract-changing symbol, constant, config, model, or table.
+- Use relation=incoming_calls for callers affected by a function signature, return value, or side-effect change.
+- Use relation=outgoing_calls to inspect likely callees from a changed function body.
+- Use relation=implementations for concrete definition candidates behind an interface, type, class, or component.
+- Use relation=dependencies for dbt/SQL ref/source lineage or file-scoped SQL dependencies.
 - Use grep for raw text search when you do not know the symbol shape or need to find config/string usage.
 - Use file_read after symbol_context or grep narrows the target to exact implementation lines.
+- Treat symbol_context as a locator. Verify the relevant lines with file_read before reporting a finding.
 
 Use the tools only when you genuinely need more context to confirm or rule out an issue. When you are done, stop calling tools and reply with ONLY the final JSON.
 

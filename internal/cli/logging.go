@@ -109,14 +109,44 @@ func newTraceLogSink(log *slog.Logger, maxBytes int) func(step string, payload a
 		log = slog.Default()
 	}
 	return func(step string, payload any) {
+		attrs := []any{"step", config.RedactString(step)}
+		var hasTerminal bool
+		payload, hasTerminal = appendTracePayloadAttrs(&attrs, payload)
+		if step == "final_response" && !hasTerminal {
+			attrs = append(attrs, "review_terminal", true)
+		}
 		body, err := json.Marshal(payload)
 		if err != nil {
-			log.Debug("review trace marshal failed", "step", config.RedactString(step), "err", config.RedactString(err.Error()))
+			attrs = append(attrs, "err", config.RedactString(err.Error()))
+			log.Debug("review trace marshal failed", attrs...)
 			return
 		}
 		text, truncated := truncateLogValue(config.RedactString(string(body)), maxBytes)
-		log.Debug("review trace", "step", config.RedactString(step), "payload", text, "truncated", truncated)
+		attrs = append(attrs, "payload", text, "truncated", truncated)
+		log.Debug("review trace", attrs...)
 	}
+}
+
+func appendTracePayloadAttrs(attrs *[]any, payload any) (any, bool) {
+	event, ok := payload.(map[string]any)
+	if !ok {
+		return payload, false
+	}
+	if source, ok := event["source"].(string); ok {
+		*attrs = append(*attrs, "source", config.RedactString(source))
+	}
+	if subagent, ok := event["subagent"].(string); ok {
+		*attrs = append(*attrs, "subagent", config.RedactString(subagent))
+	}
+	hasTerminal := false
+	if terminal, ok := event["review_terminal"].(bool); ok {
+		*attrs = append(*attrs, "review_terminal", terminal)
+		hasTerminal = true
+	}
+	if inner, ok := event["payload"]; ok {
+		return inner, hasTerminal
+	}
+	return payload, hasTerminal
 }
 
 func truncateLogValue(value string, maxBytes int) (string, bool) {

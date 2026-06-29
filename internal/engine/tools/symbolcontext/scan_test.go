@@ -57,6 +57,20 @@ func symbolConfig() config.SymbolContext {
 	return config.SymbolContext{}
 }
 
+func TestToolSpecDescribesRelationUsage(t *testing.T) {
+	spec := ToolSpec()
+	relation, ok := spec.Properties["relation"].(map[string]any)
+	if !ok {
+		t.Fatalf("relation schema missing: %+v", spec.Properties)
+	}
+	text := spec.Description + " " + relation["description"].(string)
+	for _, want := range []string{"document_symbols maps", "definition finds", "references finds", "incoming_calls finds", "outgoing_calls lists", "implementations finds", "dependencies traces"} {
+		if !strings.Contains(text, want) {
+			t.Fatalf("tool spec missing %q:\n%s", want, text)
+		}
+	}
+}
+
 func TestRunDefinitionReadsReviewedRevision(t *testing.T) {
 	repo := initRepo(t)
 	writeRepoFile(t, repo, "src/user.ts", "export function loadUser() {\n  return 1\n}\n")
