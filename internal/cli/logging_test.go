@@ -91,6 +91,32 @@ func TestTraceLogSinkRedactsAndTruncates(t *testing.T) {
 	}
 }
 
+func TestTraceLogSinkMarksFinalResponseTerminality(t *testing.T) {
+	var buf bytes.Buffer
+	log := slog.New(slog.NewTextHandler(&buf, &slog.HandlerOptions{Level: slog.LevelDebug}))
+	sink := newTraceLogSink(log, 512)
+
+	sink("final_response", map[string]any{
+		"source":          "subagent",
+		"subagent":        "backend",
+		"review_terminal": false,
+		"payload":         `{"findings":[]}`,
+	})
+	out := buf.String()
+	if !strings.Contains(out, "source=subagent") || !strings.Contains(out, "subagent=backend") || !strings.Contains(out, "review_terminal=false") {
+		t.Fatalf("missing subagent trace attrs: %s", out)
+	}
+	if strings.Count(out, "review_terminal=") != 1 {
+		t.Fatalf("terminal attr should be emitted once: %s", out)
+	}
+
+	buf.Reset()
+	sink("final_response", `{"findings":[]}`)
+	if !strings.Contains(buf.String(), "review_terminal=true") {
+		t.Fatalf("top-level final_response should be terminal: %s", buf.String())
+	}
+}
+
 func TestTruncateLogValueKeepsHeadAndTail(t *testing.T) {
 	got, truncated := truncateLogValue("start-"+strings.Repeat("中", 50)+"-end", 40)
 	if !truncated {

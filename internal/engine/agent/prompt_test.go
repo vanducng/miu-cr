@@ -20,6 +20,25 @@ func TestBuildUserPromptM6ParityEmpty(t *testing.T) {
 	}
 }
 
+func TestSystemPromptDescribesSymbolContextRelations(t *testing.T) {
+	for name, prompt := range map[string]string{"markdown": systemPrompt, "xml": systemPromptXML} {
+		for _, want := range []string{
+			"relation=document_symbols",
+			"relation=definition",
+			"relation=references",
+			"relation=incoming_calls",
+			"relation=outgoing_calls",
+			"relation=implementations",
+			"relation=dependencies",
+			"Verify the relevant lines with file_read",
+		} {
+			if !strings.Contains(prompt, want) {
+				t.Fatalf("%s system prompt missing %q", name, want)
+			}
+		}
+	}
+}
+
 func TestBuildUserPromptM6ParityEmptySemantic(t *testing.T) {
 	diff := "=== File: a.go ===\n+x := 1\n"
 	// Whitespace-only SemanticContext must collapse to the M6 prompt.

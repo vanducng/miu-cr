@@ -178,7 +178,7 @@ func runSubagentPlans(ctx stdctx.Context, e *Engine, req Request, plans []subage
 			})
 			var trace *ReviewTrace
 			if shared.trace != nil {
-				trace = &ReviewTrace{Sink: shared.trace.Sink}
+				trace = &ReviewTrace{Sink: subagentTraceSink(plan.name, shared.trace.Sink)}
 			}
 			out, ms, err := e.reviewOnce(ctx, req, assembled.Text, shared, joinPrompt(req.OperatorPrompt, plan.operatorPrompt), subagentInstruction(req.Instruction, plan), trace)
 			results[i] = subagentRunResult{
@@ -194,6 +194,19 @@ func runSubagentPlans(ctx stdctx.Context, e *Engine, req Request, plans []subage
 	}
 	wg.Wait()
 	return results
+}
+
+func subagentTraceSink(name string, sink func(step string, payload any)) func(step string, payload any) {
+	if sink == nil {
+		return nil
+	}
+	return func(step string, payload any) {
+		event := map[string]any{"source": "subagent", "subagent": name, "payload": payload}
+		if step == "final_response" {
+			event["review_terminal"] = false
+		}
+		sink(step, event)
+	}
 }
 
 func subagentDiffBudget(req Request, shared reviewSharedContext) int {

@@ -192,15 +192,23 @@ func TestReviewSubagentsStreamsTraceSink(t *testing.T) {
 
 	var mu sync.Mutex
 	var steps []string
+	var events []struct {
+		step    string
+		payload any
+	}
 	eng := engine.New(&subagentFake{}, gitcmd.New())
 	if _, err := eng.Review(stdctx.Background(), engine.Request{
 		Mode:    0,
 		RepoDir: dir,
 		Gate:    "high",
-		TraceSink: func(step string, _ any) {
+		TraceSink: func(step string, payload any) {
 			mu.Lock()
 			defer mu.Unlock()
 			steps = append(steps, step)
+			events = append(events, struct {
+				step    string
+				payload any
+			}{step: step, payload: payload})
 		},
 		Subagents: engine.SubagentConfig{
 			Mode:       "always",
@@ -218,6 +226,12 @@ func TestReviewSubagentsStreamsTraceSink(t *testing.T) {
 	mu.Unlock()
 	if got < 2 {
 		t.Fatalf("user_prompt trace steps = %d, want at least 2: %#v", got, steps)
+	}
+	if !hasSubagentFinalResponse(events) {
+		t.Fatalf("missing tagged subagent final_response event: %#v", events)
+	}
+	if !hasTopLevelFinalResponse(events) {
+		t.Fatalf("missing terminal top-level final_response event: %#v", events)
 	}
 }
 
@@ -280,4 +294,38 @@ func countSteps(steps []string, want string) int {
 		}
 	}
 	return n
+}
+
+func hasSubagentFinalResponse(events []struct {
+	step    string
+	payload any
+}) bool {
+	for _, event := range events {
+		if event.step != "final_response" {
+			continue
+		}
+		payload, ok := event.payload.(map[string]any)
+		if !ok {
+			continue
+		}
+		if payload["source"] == "subagent" && payload["subagent"] != "" && payload["review_terminal"] == false {
+			return true
+		}
+	}
+	return false
+}
+
+func hasTopLevelFinalResponse(events []struct {
+	step    string
+	payload any
+}) bool {
+	for _, event := range events {
+		if event.step != "final_response" {
+			continue
+		}
+		if _, ok := event.payload.(map[string]any); !ok {
+			return true
+		}
+	}
+	return false
 }
