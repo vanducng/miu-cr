@@ -55,6 +55,13 @@ comment with a new marker); subsequent re-runs dedupe normally. On a
 first M5 review **manually** (or off-hours) to absorb the one-time re-post before
 the next scheduled run.
 
+## [0.76.0](https://github.com/vanducng/miu-cr/compare/v0.75.0...v0.76.0) (2026-06-29)
+
+
+### Features
+
+* **serve:** emit superseded/closed cancels as review-lifecycle suppressed ([#228](https://github.com/vanducng/miu-cr/issues/228)) ([da15e28](https://github.com/vanducng/miu-cr/commit/da15e2850485024b7dd3802ccf12e4ef79261fa1))
+
 ## [0.75.0](https://github.com/vanducng/miu-cr/compare/v0.74.0...v0.75.0) (2026-06-29)
 
 
