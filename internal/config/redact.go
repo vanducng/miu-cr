@@ -6,12 +6,22 @@ import (
 	"strings"
 )
 
+// secretTokenChars bounds a credential to the chars real tokens use (base64url,
+// hex, JWT, sk-, gh*_) so the match can't greedily eat trailing quotes/brackets
+// (which corrupted traces) or, via a quote sitting before `bearer`, swallow the
+// keyword and leave the actual token unredacted.
+const secretTokenChars = `[A-Za-z0-9._~+/=-]+`
+
+// optQuote optionally consumes an opening quote/backtick before a bearer/token so
+// a quoted value like `'Bearer <tok>'` redacts the token, not the quote+keyword.
+const optQuote = "[\"'\x60]?"
+
 var (
 	sensitiveAssignments = regexp.MustCompile(`(?i)(password|passwd|pwd|secret|token|api[_-]?key|auth[_-]?token|private[_-]?key|client[_-]?secret)=([^\s&]+)`)
-	// header form: `Authorization: Bearer sk-...`, `x-api-key: sk-...` (also `=` delimiter).
-	sensitiveHeaders = regexp.MustCompile(`(?i)(authorization|x-api-key)(\s*[:=]\s*)(?:bearer\s+)?\S+`)
+	// header form: `Authorization: Bearer sk-...`, `x-api-key: sk-...` (also `=` delimiter, optional quote).
+	sensitiveHeaders = regexp.MustCompile(`(?i)(authorization|x-api-key)(\s*[:=]\s*` + optQuote + `(?:bearer\s+)?)` + secretTokenChars)
 	// bare bearer token anywhere in prose (must run before headers to avoid double work).
-	bearerToken = regexp.MustCompile(`(?i)bearer\s+\S+`)
+	bearerToken = regexp.MustCompile(`(?i)bearer\s+` + secretTokenChars)
 	// provider-key shape (sk-..., sk-ant-...) as a last-resort net for delimiter-less prose.
 	providerKey = regexp.MustCompile(`sk-[A-Za-z0-9_-]{8,}`)
 	// GitHub-style PATs (ghp_, gho_, ghu_, ghs_, ghr_) in delimiter-less prose.

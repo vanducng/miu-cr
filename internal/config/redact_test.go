@@ -59,6 +59,33 @@ func TestRedactStringHeaderAndBearer(t *testing.T) {
 	}
 }
 
+// A credential embedded in quoted code (diff/prompt text persisted to traces) must
+// be redacted WITHOUT eating the surrounding quotes/brackets, and a quote between
+// the delimiter and `bearer` must not let the real token slip through unredacted.
+func TestRedactStringQuotedTokenNoLeakNoOvermatch(t *testing.T) {
+	tests := []struct {
+		name         string
+		in           string
+		leaked       string // must NOT appear in output
+		mustPreserve string // surrounding syntax that must survive
+	}{
+		{"php array bearer", "'Authorization' => 'bearer s3cretval'],", "s3cretval", "'],"},
+		{"quoted bearer header", "{Authorization: 'Bearer abc12345tok'},", "abc12345tok", "},"},
+		{"curl header closing quote", `curl -H "Authorization: Bearer tok9val123" url`, "tok9val123", `"`},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := RedactString(tt.in)
+			if strings.Contains(got, tt.leaked) {
+				t.Fatalf("leaked %q in %q", tt.leaked, got)
+			}
+			if !strings.Contains(got, tt.mustPreserve) {
+				t.Fatalf("over-matched, %q eaten: %q -> %q", tt.mustPreserve, tt.in, got)
+			}
+		})
+	}
+}
+
 // Delimiter-less provider tokens (no header/bearer/= prefix) must still be caught
 // by the last-resort net: GitHub PATs and z.ai/GLM gateway <hex>.<token> shapes.
 func TestRedactStringDelimiterlessProviderTokens(t *testing.T) {
