@@ -57,8 +57,9 @@ reaches a log line, because the clone URL embeds the PAT.
 3. **HMAC**: a bad or missing `X-Hub-Signature-256` is rejected `401`; nothing
    is dispatched.
 4. **Filter**: only `opened`, `synchronize`, `reopened`, `ready_for_review` are
-   reviewed; a PR opened as a draft is ignored until it's marked ready; an event
-   for a repo outside `--repos` is `200`-ignored and logged.
+   reviewed; draft/closed PRs are ignored, and host polling cancels unfinished
+   jobs once the PR leaves the open set. An event for a repo outside `--repos`
+   is `200`-ignored and logged.
 5. **Respond first**: serve returns `200` *before* dispatching, so GitHub's
    ~10 s delivery budget is never spent on the LLM review.
 6. **Bounded async worker**: the review runs on a worker pool, never on the HTTP
@@ -523,10 +524,13 @@ overhead). Drop it into any workflow in the repo you want self-reviewed:
 name: PR Review
 on:
   pull_request:
-    types: [opened, synchronize, reopened, ready_for_review]
+    types: [opened, synchronize, reopened, ready_for_review, closed, converted_to_draft]
 permissions:
   pull-requests: write
   contents: read
+concurrency:
+  group: miucr-review-${{ github.event.pull_request.number }}
+  cancel-in-progress: true
 jobs:
   review:
     runs-on: ubuntu-latest
@@ -534,6 +538,8 @@ jobs:
     if: >-
       ${{
         github.event.pull_request.head.repo.fork != true &&
+        github.event.action != 'closed' &&
+        github.event.pull_request.draft != true &&
         !startsWith(github.head_ref, 'release-please--') &&
         !startsWith(github.event.pull_request.title, 'chore(main): release ')
       }}

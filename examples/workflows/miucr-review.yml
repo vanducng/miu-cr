@@ -25,7 +25,7 @@ name: miucr review
 
 on:
   pull_request:
-    types: [opened, synchronize, reopened, ready_for_review]
+    types: [opened, synchronize, reopened, ready_for_review, closed, converted_to_draft]
   issue_comment:
     types: [created]
 
@@ -43,6 +43,8 @@ jobs:
     runs-on: ubuntu-latest
     if: >-
       (github.event_name == 'pull_request' &&
+       github.event.action != 'closed' &&
+       github.event.pull_request.draft != true &&
        github.event.pull_request.head.repo.fork != true &&
        !startsWith(github.head_ref, 'release-please--') &&
        !startsWith(github.event.pull_request.title, 'chore(main): release ')) ||

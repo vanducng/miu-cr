@@ -587,6 +587,53 @@ func TestHostReconcileClosedPRsCancelsQueuedJobs(t *testing.T) {
 	}
 }
 
+func TestHostReconcileClosedPRsCancelsRunningJobs(t *testing.T) {
+	s := openHost(t)
+	ctx := context.Background()
+	repo := mustHostRepo(t, s)
+	session := mustHostSession(t, s, repo.ID, 33, "open")
+	job, ok, err := s.EnqueueHostJob(ctx, hostJobInput(repo.ID, session.ID, 33, "head-running"))
+	if err != nil || !ok {
+		t.Fatalf("enqueue ok=%v err=%v", ok, err)
+	}
+	now := time.Now().UTC()
+	claim, ok, err := s.ClaimHostJob(ctx, store.HostJobClaimInput{WorkerID: "worker-1", Now: now, LeaseDuration: time.Hour})
+	if err != nil || !ok {
+		t.Fatalf("claim ok=%v err=%v", ok, err)
+	}
+	res, err := s.ReconcileHostClosedPRs(ctx, store.HostClosedPRsInput{RepoID: repo.ID, OpenNumbers: nil, Now: now.Add(time.Second)})
+	if err != nil {
+		t.Fatalf("reconcile: %v", err)
+	}
+	if res.SessionsClosed != 1 || res.JobsCanceled != 1 {
+		t.Fatalf("reconcile result = %+v, want 1 session / 1 job", res)
+	}
+
+	var jobStatus, attemptStatus string
+	if err := s.db.QueryRowContext(ctx, `SELECT status FROM host_jobs WHERE id=$1`, job.ID).Scan(&jobStatus); err != nil {
+		t.Fatalf("query job: %v", err)
+	}
+	if jobStatus != "canceled" {
+		t.Fatalf("job status = %q, want canceled", jobStatus)
+	}
+	if err := s.db.QueryRowContext(ctx, `SELECT status FROM host_job_attempts WHERE id=$1`, claim.AttemptID).Scan(&attemptStatus); err != nil {
+		t.Fatalf("query attempt: %v", err)
+	}
+	if attemptStatus != "canceled" {
+		t.Fatalf("attempt status = %q, want canceled", attemptStatus)
+	}
+	err = s.CompleteHostJob(ctx, store.HostJobCompleteInput{JobID: job.ID, AttemptID: claim.AttemptID, Status: "done", Now: now.Add(2 * time.Second)})
+	if !errors.Is(err, store.ErrHostStaleAttempt) {
+		t.Fatalf("late completion err = %v, want stale attempt", err)
+	}
+	if err := s.db.QueryRowContext(ctx, `SELECT status FROM host_jobs WHERE id=$1`, job.ID).Scan(&jobStatus); err != nil {
+		t.Fatalf("query job after completion: %v", err)
+	}
+	if jobStatus != "canceled" {
+		t.Fatalf("late completion changed job status to %q, want canceled", jobStatus)
+	}
+}
+
 func TestHostEnqueueRequeuesCanceledJobOnReopen(t *testing.T) {
 	s := openHost(t)
 	ctx := context.Background()

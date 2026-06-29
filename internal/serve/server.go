@@ -5,6 +5,7 @@
 package serve
 
 import (
+	stdctx "context"
 	"errors"
 	"fmt"
 	"log/slog"
@@ -34,6 +35,7 @@ func (k prKey) String() string { return fmt.Sprintf("%s/%s#%d", k.Owner, k.Repo,
 // owner/repo#N form, and the resolved (in-memory-only) GitHub token. The token
 // is never logged, never put in any envelope, never persisted.
 type Job struct {
+	Context        stdctx.Context
 	Key            prKey
 	Ref            string
 	Token          string

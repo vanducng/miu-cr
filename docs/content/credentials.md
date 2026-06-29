@@ -97,14 +97,17 @@ so for the OpenAI path invoke the CLI directly:
 ```yaml
 on:
   pull_request:
-    types: [opened, synchronize, reopened, ready_for_review]
+    types: [opened, synchronize, reopened, ready_for_review, closed, converted_to_draft]
 permissions:
   pull-requests: write
   contents: read
+concurrency:
+  group: miucr-review-${{ github.event.pull_request.number }}
+  cancel-in-progress: true
 jobs:
   review:
     runs-on: ubuntu-latest
-    if: ${{ github.event.pull_request.head.repo.fork != true }}   # never run on fork PR code
+    if: ${{ github.event.action != 'closed' && github.event.pull_request.draft != true && github.event.pull_request.head.repo.fork != true }}   # never run on fork PR code
     steps:
       - run: curl -fsSL https://cr.miu.sh/install.sh | sh
       - name: Review PR on OpenAI

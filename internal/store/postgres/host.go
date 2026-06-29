@@ -268,6 +268,7 @@ SET status=$2,
     completed_at=$5,
     available_at=$6
 WHERE id=$1
+  AND status='running'
   AND ($7::bigint = 0 OR attempts = (SELECT attempt FROM host_job_attempts WHERE id=$7 AND job_id=$1))`,
 		in.JobID, in.Status, in.ReviewID, in.Error, now, availableAt, in.AttemptID)
 	if err != nil {
@@ -365,10 +366,8 @@ WHERE id=$1`, in.AttemptID, in.Error, now); err != nil {
 }
 
 // ReconcileHostClosedPRs marks previously-open sessions whose PR has left the
-// open list as closed and cancels their still-queued jobs, so a PR that closed
-// inside a coalesced/duplicate retry window is never claimed and reviewed.
-// Only queued jobs are canceled: running jobs are mid-flight, and failed/done
-// jobs are never re-claimed without a re-enqueue (which a closed PR never gets).
+// open list as closed and cancels unfinished jobs so closed PRs are never
+// claimed or reclaimed.
 func (s *Store) ReconcileHostClosedPRs(ctx context.Context, in store.HostClosedPRsInput) (store.HostClosedPRsResult, error) {
 	now := in.Now
 	if now.IsZero() {
@@ -399,14 +398,23 @@ WHERE repo_id=$1 AND state='open' AND number <> ALL($2::bigint[])`, in.RepoID, o
 		return out, err
 	}
 	out.SessionsClosed = sessions
-	jobs, err := execRows(ctx, tx, `
+	err = tx.QueryRowContext(ctx, `
+WITH canceled_jobs AS (
 UPDATE host_jobs
 SET status='canceled', lease_owner='', lease_until=NULL, error='PR no longer open', updated_at=$3, completed_at=$3
-WHERE repo_id=$1 AND status='queued' AND number <> ALL($2::bigint[])`, in.RepoID, open, now)
+WHERE repo_id=$1 AND status IN ('queued','running') AND number <> ALL($2::bigint[])
+RETURNING id
+), canceled_attempts AS (
+UPDATE host_job_attempts a
+SET status='canceled', error='PR no longer open', finished_at=$3
+FROM canceled_jobs j
+WHERE a.job_id=j.id AND a.status='running'
+RETURNING a.id
+)
+SELECT count(*) FROM canceled_jobs`, in.RepoID, open, now).Scan(&out.JobsCanceled)
 	if err != nil {
 		return out, err
 	}
-	out.JobsCanceled = jobs
 	return out, tx.Commit()
 }
 
