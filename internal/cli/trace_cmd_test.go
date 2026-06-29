@@ -76,6 +76,7 @@ func TestTraceShowOrderedSteps(t *testing.T) {
 		Provider:      "anthropic",
 		Model:         "claude",
 		FinalResponse: "no findings",
+		TurnReasons:   []engine.TurnReason{{Turn: 1, Text: "grepping for the helper"}},
 		Turns:         []engine.TurnRecord{{Turn: 1, Tool: "grep", Args: "func"}},
 	}
 	st, id := seededTraceStore(t, sampleTraceJSON(t, tr))
@@ -93,7 +94,7 @@ func TestTraceShowOrderedSteps(t *testing.T) {
 		t.Fatalf("id mismatch: %v", data["id"])
 	}
 	steps, _ := data["steps"].([]any)
-	want := []string{"system_prompt", "diff_meta", "selected_files", "injected_rules", "user_prompt", "model", "final_response", "tool_calls"}
+	want := []string{"system_prompt", "diff_meta", "selected_files", "injected_rules", "user_prompt", "model", "turn_reasons", "tool_calls", "final_response"}
 	if len(steps) != len(want) {
 		t.Fatalf("want %d steps, got %d: %v", len(want), len(steps), steps)
 	}
@@ -106,6 +107,9 @@ func TestTraceShowOrderedSteps(t *testing.T) {
 	// the system prompt (the headline gap) is present in the rendered trace.
 	if !strings.Contains(out, "you are a code reviewer") {
 		t.Fatalf("system prompt missing from trace.show: %s", out)
+	}
+	if !strings.Contains(out, "grepping for the helper") {
+		t.Fatalf("turn_reason text missing from trace.show: %s", out)
 	}
 }
 
