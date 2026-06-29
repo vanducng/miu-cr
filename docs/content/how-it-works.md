@@ -94,6 +94,8 @@ lightweight frontend component symbols. The reviewer prompt tells the model to
 prefer `symbol_context` before `file_read` for definitions, references,
 incoming/outgoing calls, implementations, and dbt/SQL dependencies; `grep`
 remains the raw text search fallback for config keys and string usage.
+Saved/live traces record each tool call plus a bounded, redacted result so you
+can audit what context the model received after the initial prompt.
 
 The model returns JSON findings **without line numbers**; instead it quotes the exact source it refers to (`existing_code`). Severities are constrained to `info|low|medium|high|critical`; categories are short kebab-case tags (`bug`, `security`, `performance`, `error-handling`, `concurrency`, `resource-leak`, `maintainability`, …).
 

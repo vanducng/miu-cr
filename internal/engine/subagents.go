@@ -262,6 +262,12 @@ func mergeSubagentTraces(dst *ReviewTrace, results []subagentRunResult) {
 		for _, tr := range r.trace.Turns {
 			turn := tr.Turn - minTurn
 			dst.RecordTool(turn+turnOffset, tr.Tool, tr.Args)
+			if tr.Result != "" || tr.Error || tr.ResultTruncated {
+				dst.RecordToolResult(turn+turnOffset, tr.Tool, tr.Args, tr.Result, tr.Error)
+				if tr.ResultTruncated && len(dst.Turns) > 0 {
+					dst.Turns[len(dst.Turns)-1].ResultTruncated = true
+				}
+			}
 			if turn > maxTurn {
 				maxTurn = turn
 			}

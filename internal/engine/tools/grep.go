@@ -29,21 +29,30 @@ func grepSpec() Spec {
 func runGrep(ctx context.Context, tc Context, turn int, input json.RawMessage) (string, bool) {
 	var args grepArgs
 	if err := json.Unmarshal(input, &args); err != nil {
-		return fmt.Sprintf("grep: invalid arguments: %v", err), true
+		out := fmt.Sprintf("grep: invalid arguments: %v", err)
+		record(tc, turn, "grep", "(invalid arguments)")
+		recordResult(tc, turn, "grep", "(invalid arguments)", out, true)
+		return out, true
 	}
 	if strings.TrimSpace(args.Pattern) == "" {
-		return "grep requires a non-empty \"pattern\"", true
+		out := "grep requires a non-empty \"pattern\""
+		record(tc, turn, "grep", "(missing pattern)")
+		recordResult(tc, turn, "grep", "(missing pattern)", out, true)
+		return out, true
 	}
 	label := grepLabel(args)
 	progress(tc, "→ grep "+label)
 	record(tc, turn, "grep", label)
 	out, err := enginectx.Grep(ctx, tc.RepoDir, tc.Rev, args.Pattern, tc.Runner, args.File)
 	if err != nil {
-		return fmt.Sprintf("grep failed: %v", err), true
+		out := fmt.Sprintf("grep failed: %v", err)
+		recordResult(tc, turn, "grep", label, out, true)
+		return out, true
 	}
 	if out == "" {
-		return "(no matches)", false
+		out = "(no matches)"
 	}
+	recordResult(tc, turn, "grep", label, out, false)
 	return out, false
 }
 

@@ -20,6 +20,7 @@ const (
 
 type TraceRecorder interface {
 	RecordTool(turn int, tool, args string)
+	RecordToolResult(turn int, tool, args, result string, isErr bool)
 }
 
 type Context struct {
@@ -41,23 +42,34 @@ type Args struct {
 func Run(ctx context.Context, cfg config.SymbolContext, tc Context, turn int, input json.RawMessage) (string, bool) {
 	var args Args
 	if err := json.Unmarshal(input, &args); err != nil {
-		return "symbol_context: invalid arguments: " + config.RedactString(err.Error()), true
+		out := "symbol_context: invalid arguments: " + config.RedactString(err.Error())
+		record(tc, turn, "symbol_context", "(invalid arguments)")
+		recordResult(tc, turn, "symbol_context", "(invalid arguments)", out, true)
+		return out, true
 	}
 	args.Relation = strings.TrimSpace(args.Relation)
 	if args.Relation == "" {
-		return "symbol_context requires a non-empty \"relation\"", true
+		out := "symbol_context requires a non-empty \"relation\""
+		record(tc, turn, "symbol_context", "(missing relation)")
+		recordResult(tc, turn, "symbol_context", "(missing relation)", out, true)
+		return out, true
 	}
 	label := label(args)
 	progress(tc, "→ symbol_context "+label)
 	record(tc, turn, "symbol_context", label)
 	out, err := scan(ctx, cfg, tc, args)
 	if err != nil {
-		return "symbol_context failed: " + config.RedactString(err.Error()), true
+		out := "symbol_context failed: " + config.RedactString(err.Error())
+		recordResult(tc, turn, "symbol_context", label, out, true)
+		return out, true
 	}
 	if strings.TrimSpace(out) == "" {
-		return NoSymbolContextMarker, false
+		out = NoSymbolContextMarker
+	} else {
+		out = capUTF8(out, cfg.MaxBytesOrDefault(defaultMaxBytes))
 	}
-	return capUTF8(out, cfg.MaxBytesOrDefault(defaultMaxBytes)), false
+	recordResult(tc, turn, "symbol_context", label, out, false)
+	return out, false
 }
 
 func label(a Args) string {
@@ -119,5 +131,11 @@ func progress(tc Context, msg string) {
 func record(tc Context, turn int, tool, args string) {
 	if tc.Trace != nil {
 		tc.Trace.RecordTool(turn, tool, args)
+	}
+}
+
+func recordResult(tc Context, turn int, tool, args, result string, isErr bool) {
+	if tc.Trace != nil {
+		tc.Trace.RecordToolResult(turn, tool, args, result, isErr)
 	}
 }

@@ -252,6 +252,7 @@ x:
     conversation: true
     tools:
       max_retries: 2
+      max_turns: 24
       retry_backoff: 250ms
 
 review:
@@ -362,6 +363,7 @@ review:
     max_elapsed: 10m
   tools:
     max_retries: 2
+    max_turns: 24
     retry_backoff: 250ms
     symbol_context:
       max_bytes: 16000
@@ -370,7 +372,9 @@ review:
 ```
 
 `max_retries` is capped at `5` and applies only to transient tool execution
-failures. Bad tool arguments, unknown tools, missing files, and canceled
+failures. `max_turns` caps model tool-use turns before miucr withdraws tools and
+forces the final JSON answer; `0` or unset keeps the default `24`, and the value
+is capped at `64`. Bad tool arguments, unknown tools, missing files, and canceled
 contexts are returned to the model immediately.
 
 `mode: clean` approves only zero-finding reviews. `mode: threshold` approves
@@ -494,9 +498,10 @@ dogfood shows poll activity, review progress, tool turns, and lifecycle events.
 
 Live trace payload logging is separate. Set `MIUCR_TRACE_LOG=true` to stream
 captured review trace steps into debug logs: system prompt, user prompt,
-selected files, injected rules, resolved model, tool calls, and final response.
-Each payload is redacted with the same free-text redactor used elsewhere and
-then truncated to `MIUCR_TRACE_LOG_MAX_BYTES` (minimum `256`). The review-host
+selected files, injected rules, resolved model, tool calls, tool results, and
+final response. Tool results are bounded before they enter the trace. Each
+payload is redacted with the same free-text redactor used elsewhere and then
+truncated to `MIUCR_TRACE_LOG_MAX_BYTES` (minimum `256`). The review-host
 `.env.example` enables it for local dogfood with a `20000` byte cap per step,
 while the compose fallback remains off for deployments without an env file.
 Treat it as a local/debug switch because payloads can include prompt and diff

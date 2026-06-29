@@ -115,6 +115,7 @@ max_elapsed = "10m"            # cap total retry sleep budget inside the review 
 
 [review.tools]                 # built-in reviewer tool behavior
 max_retries = 2                # transient tool execution retries; 0 disables
+max_turns = 24                 # max model tool turns before forced finalization; 0 uses default, capped at 64
 retry_backoff = "250ms"        # initial retry delay, doubled per retry and capped
 
 [review.tools.symbol_context]  # internal symbol_context tool limits
@@ -150,9 +151,9 @@ mode; set it to `"0s"` only when debugging. `[review.provider_retry]` retries
 transient provider failures (`429`, `5xx`, `529`, and temporary transport
 errors) with bounded jittered exponential backoff. It does not retry auth,
 invalid request, content-policy, or context cancellation errors. `[review.tools]`
-retries transient tool execution failures such as temporary filesystem/process
-errors, but does not retry malformed tool calls, unknown tools, missing files, or
-context cancellation.
+sets the agent tool-loop budget and retries transient tool execution failures
+such as temporary filesystem/process errors, but does not retry malformed tool
+calls, unknown tools, missing files, or context cancellation.
 
 `symbol_context` is part of the core read-only reviewer toolset, alongside
 `file_read` and `grep`. `[review.tools.symbol_context]` tunes its bounds. The

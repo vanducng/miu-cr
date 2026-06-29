@@ -37,7 +37,7 @@ type ReviewRecord struct {
 	CreatedAt   time.Time
 	Findings    []engine.Finding
 	Stats       map[string]any
-	Transcript  []byte // JSON per-turn tool calls; nil/empty when not captured
+	Transcript  []byte // JSON per-turn tool calls/results; nil/empty when not captured
 	RawPrompt   string
 	RawResponse string
 	// TraceJSON is the full redacted review trace (system+user prompts, diff meta,

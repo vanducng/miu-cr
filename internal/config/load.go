@@ -205,6 +205,9 @@ func MergeReviewTools(base, over ReviewTools) ReviewTools {
 	if over.MaxRetries != nil {
 		out.MaxRetries = over.MaxRetries
 	}
+	if over.MaxTurns != nil {
+		out.MaxTurns = over.MaxTurns
+	}
 	if over.RetryBackoff != "" {
 		out.RetryBackoff = over.RetryBackoff
 	}

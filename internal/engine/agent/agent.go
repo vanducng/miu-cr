@@ -76,7 +76,7 @@ type Context struct {
 	Rev            string
 	Runner         *gitcmd.Runner
 	Progress       func(string) // nil = silent; milestone/tool strings only, never secrets
-	// Trace, when non-nil, accumulates the raw prompt, per-turn tool calls, and
+	// Trace, when non-nil, accumulates the raw prompt, per-turn tool calls/results, and
 	// raw final response for persistence. nil = no capture (mirrors Progress).
 	Trace *engine.ReviewTrace
 	// CaptureReasoning, when true, records thinking blocks into Trace.Reasoning.
@@ -104,9 +104,9 @@ type Agent interface {
 }
 
 const (
-	maxToolTurns   = 24
-	maxEmptyRounds = 3
-	maxTokens      = 8192
+	defaultMaxToolTurns = 24
+	maxEmptyRounds      = 3
+	maxTokens           = 8192
 
 	// repairMaxTokens bounds the second-pass replacement: a single span's minimal
 	// edit, never a full review.
@@ -218,7 +218,8 @@ func (a *anthropicAgent) Review(ctx stdctx.Context, rc Context) (engine.ReviewOu
 
 	emptyRounds := 0
 	var usage engine.Usage
-	for turn := 0; turn < maxToolTurns; turn++ {
+	maxTurns := toolTurns(rc.Tools)
+	for turn := 0; turn < maxTurns; turn++ {
 		if err := ctx.Err(); err != nil {
 			return engine.ReviewOutput{}, err
 		}
@@ -228,7 +229,7 @@ func (a *anthropicAgent) Review(ctx stdctx.Context, rc Context) (engine.ReviewOu
 		// exploring and must answer, and fold the finalize nudge into the trailing
 		// user turn (the loop invariant guarantees the last message is user-role,
 		// so this avoids an illegal consecutive user message).
-		if turn == maxToolTurns-1 {
+		if turn == maxTurns-1 {
 			params.Tools = nil
 			last := len(params.Messages) - 1
 			params.Messages[last].Content = append(params.Messages[last].Content, anthropic.NewTextBlock(forceFinalizeNudge))
@@ -264,7 +265,7 @@ func (a *anthropicAgent) Review(ctx stdctx.Context, rc Context) (engine.ReviewOu
 		emptyRounds = 0
 		params.Messages = append(params.Messages, anthropic.NewUserMessage(toolResults...))
 	}
-	return engine.ReviewOutput{}, fmt.Errorf("agent: forced finalization produced no parseable findings after %d turns", maxToolTurns)
+	return engine.ReviewOutput{}, fmt.Errorf("agent: forced finalization produced no parseable findings after %d turns", maxTurns)
 }
 
 // RepairPatch issues one tools-less, code-only completion (system =
@@ -381,6 +382,13 @@ func toolAttempts(tools config.ReviewTools) int {
 		retries = 5
 	}
 	return retries + 1
+}
+
+func toolTurns(tools config.ReviewTools) int {
+	if tools.MaxTurns == nil || *tools.MaxTurns <= 0 {
+		return defaultMaxToolTurns
+	}
+	return *tools.MaxTurns
 }
 
 func toolRetryBackoff(tools config.ReviewTools) time.Duration {

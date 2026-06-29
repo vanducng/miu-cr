@@ -9,6 +9,7 @@ import (
 
 const maxReviewContextHops = 5
 const maxReviewToolRetries = 5
+const maxReviewToolTurns = 64
 const maxProviderRetryRetries = 20
 
 // gateValidator/filterModeValidator/minSeverityValidator are injected by the cli
@@ -123,6 +124,9 @@ func validateProviderRetry(field string, retry ProviderRetry, invalid func(strin
 func validateReviewTools(field string, tools ReviewTools, invalid func(string, string, string) error) error {
 	if tools.MaxRetries != nil && (*tools.MaxRetries < 0 || *tools.MaxRetries > maxReviewToolRetries) {
 		return invalid(field+".max_retries", fmt.Sprint(*tools.MaxRetries), fmt.Sprintf("an integer in [0,%d]", maxReviewToolRetries))
+	}
+	if tools.MaxTurns != nil && (*tools.MaxTurns < 0 || *tools.MaxTurns > maxReviewToolTurns) {
+		return invalid(field+".max_turns", fmt.Sprint(*tools.MaxTurns), fmt.Sprintf("an integer in [0,%d]", maxReviewToolTurns))
 	}
 	if tools.RetryBackoff != "" {
 		d, err := time.ParseDuration(tools.RetryBackoff)

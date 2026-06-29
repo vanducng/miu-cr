@@ -211,6 +211,7 @@ the reviewed git revision; `[review.tools.symbol_context]` tunes its bounds:
 ```toml
 [review.tools]
 max_retries = 2
+max_turns = 24
 retry_backoff = "250ms"
 
 [review.tools.symbol_context]
@@ -221,7 +222,9 @@ max_parallel = 8
 
 `max_retries` applies to transient tool execution failures only and is capped at
 `5`; invalid tool arguments and missing files are returned to the model without
-retry.
+retry. `max_turns` caps the number of model tool turns before miucr withdraws
+tools and forces a final JSON answer; `0` or unset uses the default `24`, and the
+config value is capped at `64`.
 
 Use `symbol_context` for concrete cross-file questions such as
 `document_symbols`, `definition`, `references`, `incoming_calls`,

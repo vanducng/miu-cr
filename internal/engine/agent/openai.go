@@ -181,7 +181,8 @@ func (a *openaiAgent) Review(ctx stdctx.Context, rc Context) (engine.ReviewOutpu
 
 	emptyRounds := 0
 	var usage engine.Usage
-	for turn := 0; turn < maxToolTurns; turn++ {
+	maxTurns := toolTurns(rc.Tools)
+	for turn := 0; turn < maxTurns; turn++ {
 		if err := ctx.Err(); err != nil {
 			return engine.ReviewOutput{}, err
 		}
@@ -190,7 +191,7 @@ func (a *openaiAgent) Review(ctx stdctx.Context, rc Context) (engine.ReviewOutpu
 		// Final allowed turn: withdraw the tools so the model can no longer keep
 		// exploring and must answer, and append the finalize nudge so a
 		// budget-exhausted large diff yields a real review, not a hard failure.
-		if turn == maxToolTurns-1 {
+		if turn == maxTurns-1 {
 			params.Tools = nil
 			params.Messages = append(params.Messages, openai.UserMessage(forceFinalizeNudge))
 		}
@@ -242,5 +243,5 @@ func (a *openaiAgent) Review(ctx stdctx.Context, rc Context) (engine.ReviewOutpu
 			params.Messages = append(params.Messages, openai.ToolMessage(out, tc.ID))
 		}
 	}
-	return engine.ReviewOutput{}, fmt.Errorf("agent: forced finalization produced no parseable findings after %d turns", maxToolTurns)
+	return engine.ReviewOutput{}, fmt.Errorf("agent: forced finalization produced no parseable findings after %d turns", maxTurns)
 }

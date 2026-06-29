@@ -53,6 +53,7 @@ x:
     mode: review
     tools:
       max_retries: 2
+      max_turns: 24
       retry_backoff: 250ms
       symbol_context:
         max_bytes: 16000

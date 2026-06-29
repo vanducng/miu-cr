@@ -77,6 +77,7 @@ This is defense-in-depth, not a guarantee: same-repo contributors author both th
 
 `context_files` inlines extra files into the prompt as context, resolved **relative to the rule file**. Guards:
 
+- **Loaded during prompt assembly** with the selected rule body, before the model's first turn. They are not `file_read` / `grep` / `symbol_context` tool calls.
 - **Absolute paths and `..`-escaping are rejected** (a rule can't read outside its directory).
 - **Per-file and total byte caps** bound how much a rule can inject regardless of the token cap.
 - **Missing or rejected files** become a one-line warning in the prompt, never an error.

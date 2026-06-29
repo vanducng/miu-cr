@@ -241,7 +241,7 @@ var _ anthropicClient = (*toolHungryAnthropic)(nil)
 
 // On a large diff the model may keep requesting tools to the budget. The loop
 // must FORCE finalization on the last turn (withdraw tools + nudge) so the model
-// is driven to emit findings, a real review, not a hard maxToolTurns failure.
+// is driven to emit findings, a real review, not a hard turn-budget failure.
 func TestAnthropicAgentForcedFinalizeReturnsFindings(t *testing.T) {
 	fc := &toolHungryAnthropic{findings: `{"findings":[{"file":"a.go","existing_code":"x","severity":"warning","category":"bug","rationale":"r"}]}`}
 	a := &anthropicAgent{client: fc, model: "claude-test"}
@@ -253,8 +253,24 @@ func TestAnthropicAgentForcedFinalizeReturnsFindings(t *testing.T) {
 	if len(out.Findings) != 1 {
 		t.Fatalf("want 1 finding from forced finalize, got %d", len(out.Findings))
 	}
-	if fc.calls != maxToolTurns {
-		t.Fatalf("expected %d calls (explore to budget then finalize), got %d", maxToolTurns, fc.calls)
+	if fc.calls != defaultMaxToolTurns {
+		t.Fatalf("expected %d calls (explore to budget then finalize), got %d", defaultMaxToolTurns, fc.calls)
+	}
+}
+
+func TestAnthropicAgentHonorsConfiguredToolTurns(t *testing.T) {
+	maxTurns := 3
+	fc := &toolHungryAnthropic{findings: `{"findings":[{"file":"a.go","existing_code":"x","severity":"warning","category":"bug","rationale":"r"}]}`}
+	a := &anthropicAgent{client: fc, model: "claude-test"}
+	out, err := a.Review(stdctx.Background(), Context{Text: "ctx", RepoDir: t.TempDir(), Tools: config.ReviewTools{MaxTurns: &maxTurns}})
+	if err != nil {
+		t.Fatalf("Review: %v", err)
+	}
+	if len(out.Findings) != 1 {
+		t.Fatalf("want 1 finding from forced finalize, got %d", len(out.Findings))
+	}
+	if fc.calls != maxTurns {
+		t.Fatalf("expected %d calls, got %d", maxTurns, fc.calls)
 	}
 }
 

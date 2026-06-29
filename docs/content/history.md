@@ -5,10 +5,10 @@ description: Every review is auto-saved to a local store as a full record (findi
 
 Every `miucr review` (local **and** `--pr`) auto-saves a **full record** to a
 local store: the findings + stats, the PR/repo context, the provider/model, a
-per-turn **transcript** of the reviewer's tool calls, and the **raw prompt and
-raw final response**. That makes a review auditable and replayable after the
-fact: `miucr history show <id>` reconstructs exactly what the reviewer saw and
-said.
+per-turn **transcript** of the reviewer's tool calls/results, and the **raw
+prompt and raw final response**. That makes a review auditable and replayable
+after the fact: `miucr history show <id>` reconstructs exactly what the reviewer
+saw and said.
 
 Auto-save is **on by default**. Nothing leaves your machine: the store is the
 same local SQLite DB at `~/.config/miu/cr/state.db` (or your configured Postgres
@@ -25,9 +25,9 @@ never enter the prompt, the diff, or the record.
 | `provider`, `model` | The LLM profile used |
 | `status`, `max_severity` | Terminal status + worst finding severity |
 | `findings`, `stats` | The full review result |
-| `transcript` | Per-turn tool calls the reviewer made |
+| `transcript` | Per-turn tool calls/results the reviewer made |
 | `raw_prompt`, `raw_response` | The verbatim LLM I/O (audit trail) |
-| `trace` | The full redacted trace (system prompt, diff meta, selected files, injected rules, prompts, response); view with `miucr trace <id>` |
+| `trace` | The full redacted trace (system prompt, diff meta, selected files, injected rules, prompts, response, tool results); view with `miucr trace <id>` |
 
 `stats` includes run-shape counters useful for review tuning: prompt and final
 response bytes, provider duration, selected context size, tool-call count,
@@ -65,7 +65,8 @@ Alongside the record, every review keeps a **redacted trace**: the ordered steps
 of the pipeline: the **system prompt**, the **diff identification** (base/head +
 how it was computed), the **selected files**, the **injected rules** (stem +
 provenance), the **user prompt**, the **model/provider**, the **raw response**,
-and the **tool calls**. View any past review's trace:
+and the **tool calls/results**. Tool results are bounded per call and redacted
+before persistence. View any past review's trace:
 
 ```sh
 miucr trace <id>                 # ordered steps (kind: trace.show)
