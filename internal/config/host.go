@@ -108,6 +108,8 @@ type HostReview struct {
 	Format               string                     `yaml:"format" json:"format,omitempty"`
 	PromptFormat         string                     `yaml:"prompt_format" json:"prompt_format,omitempty"`
 	Timeout              string                     `yaml:"timeout" json:"timeout,omitempty"`
+	StalledTimeout       string                     `yaml:"stalled_timeout" json:"stalled_timeout,omitempty"`
+	ProviderRetry        ProviderRetry              `yaml:"provider_retry" json:"provider_retry,omitempty"`
 	Expand               *int                       `yaml:"expand" json:"expand,omitempty"`
 	TokenBudget          *int                       `yaml:"token_budget" json:"token_budget,omitempty"`
 	ContextHops          *int                       `yaml:"context_hops" json:"context_hops,omitempty"`
@@ -448,6 +450,17 @@ func validateHostReview(path, field string, r HostReview) error {
 		if _, err := time.ParseDuration(r.Timeout); err != nil {
 			return invalidHost(path, field+".timeout", r.Timeout, "a Go duration like 300s or 5m")
 		}
+	}
+	if r.StalledTimeout != "" {
+		d, err := time.ParseDuration(r.StalledTimeout)
+		if err != nil || d < 0 {
+			return invalidHost(path, field+".stalled_timeout", r.StalledTimeout, "a non-negative Go duration like 0s, 180s, or 5m")
+		}
+	}
+	if err := validateProviderRetry(field+".provider_retry", r.ProviderRetry, func(f, v, want string) error {
+		return invalidHost(path, f, v, want)
+	}); err != nil {
+		return err
 	}
 	if r.Mode != "" && r.Mode != "review" && r.Mode != "checks" {
 		return invalidHost(path, field+".mode", r.Mode, "review|checks")

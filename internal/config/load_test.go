@@ -105,6 +105,10 @@ auth = "oauth"
 [review.pr_filter]
 comment_trigger_regexes = ['(^|\s)(/miucr review\b|@vanducng\b)']
 
+[review.tools]
+max_retries = 2
+retry_backoff = "250ms"
+
 [review.tools.symbol_context]
 max_bytes = 12000
 max_files = 700
@@ -139,7 +143,7 @@ max_parallel = 6
 	if got := cfg.Review.PRFilter.CommentTriggerRegexes; len(got) != 1 || got[0] == "" {
 		t.Fatalf("review pr_filter not loaded: %+v", cfg.Review.PRFilter)
 	}
-	if cfg.Review.Tools.SymbolContext.MaxBytes != 12000 || cfg.Review.Tools.SymbolContext.MaxFiles != 700 || cfg.Review.Tools.SymbolContext.MaxParallel != 6 {
+	if cfg.Review.Tools.MaxRetries == nil || *cfg.Review.Tools.MaxRetries != 2 || cfg.Review.Tools.RetryBackoff != "250ms" || cfg.Review.Tools.SymbolContext.MaxBytes != 12000 || cfg.Review.Tools.SymbolContext.MaxFiles != 700 || cfg.Review.Tools.SymbolContext.MaxParallel != 6 {
 		t.Fatalf("review tools not loaded: %+v", cfg.Review.Tools)
 	}
 }

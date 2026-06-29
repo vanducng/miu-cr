@@ -318,13 +318,12 @@ func TestCodexAgentClassifiesStatus(t *testing.T) {
 // fast and deterministically; restored on cleanup.
 func shrinkCodexBackoff(t *testing.T) {
 	t.Helper()
-	base, maxb, attempts, maxRA := codexBaseBackoff, codexMaxBackoff, codexMaxAttempts, codexMaxRetryAfter
+	base, maxb, attempts := codexBaseBackoff, codexMaxBackoff, codexMaxAttempts
 	codexBaseBackoff = time.Millisecond
 	codexMaxBackoff = 2 * time.Millisecond
-	codexMaxRetryAfter = 2 * time.Millisecond
 	codexMaxAttempts = 3
 	t.Cleanup(func() {
-		codexBaseBackoff, codexMaxBackoff, codexMaxAttempts, codexMaxRetryAfter = base, maxb, attempts, maxRA
+		codexBaseBackoff, codexMaxBackoff, codexMaxAttempts = base, maxb, attempts
 	})
 }
 

@@ -134,29 +134,57 @@ func (h History) On() bool { return h.Enabled == nil || *h.Enabled }
 // built-in defaults), never sourced from repo .miu/cr/rules, so a fork-PR rule
 // cannot inject a link or override a review default.
 type Review struct {
-	Gate         string            `toml:"gate,omitempty"`
-	FilterMode   string            `toml:"filter_mode,omitempty"`
-	MinSeverity  string            `toml:"min_severity,omitempty"`
-	Format       string            `toml:"format,omitempty"`        // full (default) | minimal — review-comment presentation preset
-	PromptFormat string            `toml:"prompt_format,omitempty"` // xml (default) | markdown
-	Timeout      string            `toml:"timeout,omitempty"`
-	Temperature  *float64          `toml:"temperature,omitempty"` // nil → 0 (deterministic); see [review].temperature in providers.md
-	Thinking     string            `toml:"thinking,omitempty"`    // auto|off|low|medium|high; "" → auto (on when the model supports it). Thinking omits temperature.
-	Expand       *int              `toml:"expand,omitempty"`
-	TokenBudget  *int              `toml:"token_budget,omitempty"`
-	DeepContext  *bool             `toml:"deep_context,omitempty"`
-	ContextHops  *int              `toml:"context_hops,omitempty"`
-	Conversation *bool             `toml:"conversation,omitempty"`
-	Suggest      *bool             `toml:"suggest,omitempty"`
-	PatchRepair  *bool             `toml:"patch_repair,omitempty"`
-	Tools        ReviewTools       `toml:"tools,omitempty"`
-	Approval     ApprovalPolicy    `toml:"approval"`
-	Subagents    ReviewSubagents   `toml:"subagents,omitempty"`
-	PRFilter     HostPRFilter      `toml:"pr_filter,omitempty"`
-	CategoryURLs map[string]string `toml:"category_urls,omitempty"`
+	Gate           string            `toml:"gate,omitempty"`
+	FilterMode     string            `toml:"filter_mode,omitempty"`
+	MinSeverity    string            `toml:"min_severity,omitempty"`
+	Format         string            `toml:"format,omitempty"`        // full (default) | minimal — review-comment presentation preset
+	PromptFormat   string            `toml:"prompt_format,omitempty"` // xml (default) | markdown
+	Timeout        string            `toml:"timeout,omitempty"`
+	StalledTimeout string            `toml:"stalled_timeout,omitempty"`
+	ProviderRetry  ProviderRetry     `toml:"provider_retry,omitempty"`
+	Temperature    *float64          `toml:"temperature,omitempty"` // nil → 0 (deterministic); see [review].temperature in providers.md
+	Thinking       string            `toml:"thinking,omitempty"`    // auto|off|low|medium|high; "" → auto (on when the model supports it). Thinking omits temperature.
+	Expand         *int              `toml:"expand,omitempty"`
+	TokenBudget    *int              `toml:"token_budget,omitempty"`
+	DeepContext    *bool             `toml:"deep_context,omitempty"`
+	ContextHops    *int              `toml:"context_hops,omitempty"`
+	Conversation   *bool             `toml:"conversation,omitempty"`
+	Suggest        *bool             `toml:"suggest,omitempty"`
+	PatchRepair    *bool             `toml:"patch_repair,omitempty"`
+	Tools          ReviewTools       `toml:"tools,omitempty"`
+	Approval       ApprovalPolicy    `toml:"approval"`
+	Subagents      ReviewSubagents   `toml:"subagents,omitempty"`
+	PRFilter       HostPRFilter      `toml:"pr_filter,omitempty"`
+	CategoryURLs   map[string]string `toml:"category_urls,omitempty"`
+}
+
+const (
+	DefaultProviderRetryMaxRetries     = 10
+	DefaultProviderRetryInitialBackoff = "5s"
+	DefaultProviderRetryMaxBackoff     = "2m"
+	DefaultProviderRetryMaxElapsed     = "10m"
+)
+
+type ProviderRetry struct {
+	MaxRetries     *int   `toml:"max_retries,omitempty" yaml:"max_retries,omitempty" json:"max_retries,omitempty"`
+	InitialBackoff string `toml:"initial_backoff,omitempty" yaml:"initial_backoff,omitempty" json:"initial_backoff,omitempty"`
+	MaxBackoff     string `toml:"max_backoff,omitempty" yaml:"max_backoff,omitempty" json:"max_backoff,omitempty"`
+	MaxElapsed     string `toml:"max_elapsed,omitempty" yaml:"max_elapsed,omitempty" json:"max_elapsed,omitempty"`
+}
+
+func DefaultProviderRetry() ProviderRetry {
+	maxRetries := DefaultProviderRetryMaxRetries
+	return ProviderRetry{
+		MaxRetries:     &maxRetries,
+		InitialBackoff: DefaultProviderRetryInitialBackoff,
+		MaxBackoff:     DefaultProviderRetryMaxBackoff,
+		MaxElapsed:     DefaultProviderRetryMaxElapsed,
+	}
 }
 
 type ReviewTools struct {
+	MaxRetries    *int          `toml:"max_retries,omitempty" yaml:"max_retries,omitempty" json:"max_retries,omitempty"`
+	RetryBackoff  string        `toml:"retry_backoff,omitempty" yaml:"retry_backoff,omitempty" json:"retry_backoff,omitempty"`
 	SymbolContext SymbolContext `toml:"symbol_context,omitempty" yaml:"symbol_context,omitempty" json:"symbol_context,omitempty"`
 }
 
@@ -241,5 +269,6 @@ func Defaults() Config {
 		Embedding: Embedding{Enabled: false, Model: DefaultEmbeddingModel, Dim: DefaultEmbeddingDim},
 		Github:    Github{Mode: "pat"},
 		History:   History{},
+		Review:    Review{ProviderRetry: DefaultProviderRetry()},
 	}
 }

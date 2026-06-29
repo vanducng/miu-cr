@@ -146,13 +146,14 @@ The day-1 provider/auth/timeout failures classify into a **stable taxonomy** (th
 | `provider.rate_limited` | provider returned 429 | `true` |
 | `agent.unavailable` | provider returned 5xx / 529 | `true` |
 | `review.timeout` | the review exceeded `--timeout` | `true` |
+| `review.stalled` | the review emitted no progress for `[review].stalled_timeout` | `true` |
 | `review.canceled` | interrupted (Ctrl-C / SIGINT), exit `130` | `false` |
 | `config.invalid` | malformed `config.toml`, a bad enum/`auth` value, or an `openai`-kind gateway profile with an api key but no `base_url` (which would leak the key to api.openai.com); exit `2`, consistent across review/history/serve | `false` |
 | `internal.error` | any unclassified failure (the conservative default) | `false` |
 
 An unrecognized failure stays `internal.error`; it is never mislabeled as `retryable`. Classified messages are redacted: no token fragment ever appears.
 
-The codex backend retries `429`/`502`/`503`/`504` (and a `response.failed` stream event) with bounded, jittered exponential backoff like the SDK backends, honoring `Retry-After`/`resets_in_seconds` and aborting promptly on cancel/timeout. On a persistent rate limit it returns `provider.rate_limited` carrying the usage-cap reset window in `error.details.resets_in_seconds` (or `retry_after_seconds`) with a hint like `usage cap reached, resets in ~2h`.
+Provider calls retry transient overload/rate-limit failures before surfacing an error: Anthropic/OpenAI-compatible backends retry `429`, any `5xx` including `529`, and temporary transport failures; the codex backend also retries `response.failed` stream events and honors `Retry-After`/`resets_in_seconds`. The retry loop uses `[review.provider_retry]`, aborts promptly on cancel/timeout, and never retries auth or invalid-request failures. On a persistent codex usage cap, `provider.rate_limited` carries `error.details.resets_in_seconds` (or `retry_after_seconds`) with a hint like `usage cap reached, resets in ~2h`.
 
 ## Exit codes
 
@@ -185,6 +186,11 @@ an explicit CLI flag still wins.
 - `--token-budget <n>`: approximate token budget; over budget, context degrades through the truncation ladder (default `0`, no budget cap).
 - `--timeout <dur>`: operation timeout. The root default is `30s`, but `review`
   uses `900s` by default unless you set `--timeout` or `[review].timeout`.
+- `[review].stalled_timeout`: no-progress watchdog for review runs. Default
+  `5m`; set `"0s"` only to disable while debugging.
+- `[review.provider_retry]`: provider API retry policy. Defaults to 10 retries,
+  `5s` initial backoff, `2m` max backoff, and `10m` max retry elapsed time inside
+  the review timeout.
 - `--deep-context`: heavier defaults for large reviews (`--expand 20`,
   auto related-file hop depth, and root `AGENTS.md` / `CLAUDE.md` context from
   the reviewed revision when present). Token budget and timeout are already
@@ -203,11 +209,19 @@ an explicit CLI flag still wins.
 the reviewed git revision; `[review.tools.symbol_context]` tunes its bounds:
 
 ```toml
+[review.tools]
+max_retries = 2
+retry_backoff = "250ms"
+
 [review.tools.symbol_context]
 max_bytes = 16000
 max_files = 2000
 max_parallel = 8
 ```
+
+`max_retries` applies to transient tool execution failures only and is capped at
+`5`; invalid tool arguments and missing files are returned to the model without
+retry.
 
 Use `symbol_context` for concrete cross-file questions such as
 `document_symbols`, `definition`, `references`, `incoming_calls`,

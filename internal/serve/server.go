@@ -34,16 +34,17 @@ func (k prKey) String() string { return fmt.Sprintf("%s/%s#%d", k.Owner, k.Repo,
 // owner/repo#N form, and the resolved (in-memory-only) GitHub token. The token
 // is never logged, never put in any envelope, never persisted.
 type Job struct {
-	Key           prKey
-	Ref           string
-	Token         string
-	Timeout       time.Duration
-	Review        *JobReviewOptions
-	HeadSHA       string
-	Title         string
-	HostJobID     int64
-	HostAttemptID int64
-	HostAttempt   int
+	Key            prKey
+	Ref            string
+	Token          string
+	Timeout        time.Duration
+	StalledTimeout time.Duration
+	Review         *JobReviewOptions
+	HeadSHA        string
+	Title          string
+	HostJobID      int64
+	HostAttemptID  int64
+	HostAttempt    int
 	// ReviewID is the server-generated id of a REST-initiated review (empty on the
 	// webhook/poll paths). reviewFn persists the FINAL record under this id; the
 	// CLI/webhook/poll paths leave it empty and skip that upsert.
@@ -81,12 +82,15 @@ type JobReviewOptions struct {
 	BaseURL        string
 	AuthToken      string
 	Model          string
+	StalledTimeout time.Duration
+	ProviderRetry  config.ProviderRetry
 	OperatorPrompt string
 	ExpandWindow   int
 	TokenBudget    int
 	DeepContext    bool
 	ContextHops    int
 	Subagents      config.ReviewSubagents
+	Tools          config.ReviewTools
 	SymbolContext  config.SymbolContext
 	// Quota is the host provider's usage quota (nil = none); QuotaProvider is the
 	// counter key (the provider instance name, since Provider above carries the
@@ -192,6 +196,7 @@ type Server struct {
 	dispatcher   Dispatcher
 	log          *slog.Logger
 	reviewTO     time.Duration
+	stalledTO    time.Duration
 	apiToken     []byte
 	reviewStore  ReviewStore
 	now          func() time.Time
@@ -201,13 +206,14 @@ type Server struct {
 // in-memory only; neither is logged or persisted. Full P2 wiring (the bounded
 // pool, graceful shutdown, the serve cobra command) builds on this.
 type Config struct {
-	Addr          string
-	Secret        []byte
-	Repos         []string
-	ResolveToken  func() (string, error)
-	Dispatcher    Dispatcher
-	Logger        *slog.Logger
-	ReviewTimeout time.Duration
+	Addr                 string
+	Secret               []byte
+	Repos                []string
+	ResolveToken         func() (string, error)
+	Dispatcher           Dispatcher
+	Logger               *slog.Logger
+	ReviewTimeout        time.Duration
+	ReviewStalledTimeout time.Duration
 	// APIToken (the REST bearer) and ReviewStore are set only to enable the opt-in
 	// REST API; both empty/nil → the /v1 routes are not registered. Now is an
 	// optional clock seam (defaults to time.Now) for stuck-pending recovery tests.
@@ -233,6 +239,7 @@ func newServer(cfg Config) *Server {
 		dispatcher:   cfg.Dispatcher,
 		log:          log,
 		reviewTO:     cfg.ReviewTimeout,
+		stalledTO:    cfg.ReviewStalledTimeout,
 		apiToken:     cfg.APIToken,
 		reviewStore:  cfg.ReviewStore,
 		now:          now,

@@ -139,6 +139,10 @@ func mergeReview(base, file Review) Review {
 	if file.Timeout != "" {
 		out.Timeout = file.Timeout
 	}
+	if file.StalledTimeout != "" {
+		out.StalledTimeout = file.StalledTimeout
+	}
+	out.ProviderRetry = MergeProviderRetry(base.ProviderRetry, file.ProviderRetry)
 	if file.Temperature != nil {
 		out.Temperature = file.Temperature
 	}
@@ -179,8 +183,31 @@ func mergeReview(base, file Review) Review {
 	return out
 }
 
+func MergeProviderRetry(base, over ProviderRetry) ProviderRetry {
+	out := base
+	if over.MaxRetries != nil {
+		out.MaxRetries = over.MaxRetries
+	}
+	if over.InitialBackoff != "" {
+		out.InitialBackoff = over.InitialBackoff
+	}
+	if over.MaxBackoff != "" {
+		out.MaxBackoff = over.MaxBackoff
+	}
+	if over.MaxElapsed != "" {
+		out.MaxElapsed = over.MaxElapsed
+	}
+	return out
+}
+
 func MergeReviewTools(base, over ReviewTools) ReviewTools {
 	out := base
+	if over.MaxRetries != nil {
+		out.MaxRetries = over.MaxRetries
+	}
+	if over.RetryBackoff != "" {
+		out.RetryBackoff = over.RetryBackoff
+	}
 	out.SymbolContext = MergeSymbolContext(base.SymbolContext, over.SymbolContext)
 	return out
 }

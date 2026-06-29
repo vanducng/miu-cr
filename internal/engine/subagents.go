@@ -86,6 +86,8 @@ func (e *Engine) reviewOnce(ctx stdctx.Context, req Request, text string, shared
 		Conversation:     req.Conversation,
 		PromptFormat:     req.PromptFormat,
 		OperatorPrompt:   operatorPrompt,
+		ProviderRetry:    req.ProviderRetry,
+		Tools:            req.Tools,
 		SymbolContext:    req.SymbolContext,
 		RepoDir:          req.RepoDir,
 		Rev:              shared.rev,

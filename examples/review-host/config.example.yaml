@@ -39,6 +39,12 @@ x:
     filter_mode: diff_context
     min_severity: low
     timeout: 900s
+    stalled_timeout: 5m
+    provider_retry:
+      max_retries: 10
+      initial_backoff: 5s
+      max_backoff: 2m
+      max_elapsed: 10m
     expand: 20
     token_budget: 0
     deep_context: true
@@ -46,6 +52,8 @@ x:
     conversation: true
     mode: review
     tools:
+      max_retries: 2
+      retry_backoff: 250ms
       symbol_context:
         max_bytes: 16000
         max_files: 2000
@@ -145,6 +153,8 @@ repos:
       - rules/data
     review:
       gate: critical
+      timeout: 1800s
+      stalled_timeout: 8m
       suggest: false
 
   - <<: *repo_defaults

@@ -31,13 +31,14 @@ type fakeGitHub struct {
 	createIssueN  int
 	editN         int
 
-	headSHA         string                  // re-fetched head SHA returned by GetPR (defaults to "headsha")
-	reviews         []*gh.PullRequestReview // existing reviews returned by ListReviews
-	reviewThreads   []mgithub.ReviewThread
-	lastReviewed    *gh.PullRequestReviewRequest // last CreateReview request, for Event assertions
-	lastCheck       *gh.CreateCheckRunOptions    // last CreateCheckRun opts, for --mode checks assertions
-	checkRunN       int
-	createReviewErr error // injected CreateReview failure (e.g. fork 403)
+	headSHA          string                  // re-fetched head SHA returned by GetPR (defaults to "headsha")
+	reviews          []*gh.PullRequestReview // existing reviews returned by ListReviews
+	reviewThreads    []mgithub.ReviewThread
+	lastReviewed     *gh.PullRequestReviewRequest // last CreateReview request, for Event assertions
+	lastCheck        *gh.CreateCheckRunOptions    // last CreateCheckRun opts, for --mode checks assertions
+	checkRunN        int
+	createReviewErr  error // injected CreateReview failure (e.g. fork 403)
+	issueListCtxErrs []error
 }
 
 func (f *fakeGitHub) GetPR(stdctx.Context, string, string, int) (*gh.PullRequest, error) {
@@ -84,8 +85,9 @@ func (f *fakeGitHub) ReviewThreads(stdctx.Context, string, string, int) ([]mgith
 	return f.reviewThreads, nil
 }
 
-func (f *fakeGitHub) ListIssueComments(stdctx.Context, string, string, int, *gh.IssueListCommentsOptions) ([]*gh.IssueComment, *gh.Response, error) {
+func (f *fakeGitHub) ListIssueComments(ctx stdctx.Context, _ string, _ string, _ int, _ *gh.IssueListCommentsOptions) ([]*gh.IssueComment, *gh.Response, error) {
 	f.order = append(f.order, "list_issue")
+	f.issueListCtxErrs = append(f.issueListCtxErrs, ctx.Err())
 	return f.issueComments, &gh.Response{}, nil
 }
 
@@ -267,6 +269,23 @@ func TestPublishReviewWireFlow(t *testing.T) {
 	}
 	if got := fake.issueComments[0].GetBody(); !strings.Contains(got, "Review attempts: 2") {
 		t.Fatalf("re-run summary must advance to Review attempts: 2:\n%s", got)
+	}
+}
+
+func TestReviewErrorSummaryUsesFreshContext(t *testing.T) {
+	fake := &fakeGitHub{}
+	ctx, cancel := stdctx.WithCancel(stdctx.Background())
+	cancel()
+	info := &mgithub.PRInfo{Owner: "o", Repo: "r", Number: 7, HeadSHA: "headsha"}
+
+	if err := upsertReviewErrorSummary(ctx, fake, info, stdctx.DeadlineExceeded); err != nil {
+		t.Fatalf("upsertReviewErrorSummary: %v", err)
+	}
+	if fake.createIssueN != 1 {
+		t.Fatalf("error summary must be created, got createIssueN=%d", fake.createIssueN)
+	}
+	if len(fake.issueListCtxErrs) == 0 || fake.issueListCtxErrs[0] != nil {
+		t.Fatalf("summary upsert used canceled parent context: %v", fake.issueListCtxErrs)
 	}
 }
 

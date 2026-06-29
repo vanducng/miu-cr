@@ -239,10 +239,19 @@ x:
     min_severity: low
     format: full            # comment presentation: full (default) | minimal (drops the summary section + all badges)
     timeout: 900s
+    stalled_timeout: 5m
+    provider_retry:
+      max_retries: 10
+      initial_backoff: 5s
+      max_backoff: 2m
+      max_elapsed: 10m
     expand: 20
     token_budget: 0
     deep_context: true
     conversation: true
+    tools:
+      max_retries: 2
+      retry_backoff: 250ms
 
 review:
   <<: *review_defaults
@@ -286,6 +295,8 @@ repos:
       - rules/service.md
     review:
       min_severity: medium
+      timeout: 1800s
+      stalled_timeout: 8m
 ```
 
 Layering is intentionally simple: built-in defaults -> top-level `review` and
@@ -293,7 +304,26 @@ Layering is intentionally simple: built-in defaults -> top-level `review` and
 settings are where risky write behavior belongs (`post`, `force`, `suggest`,
 `patch_repair`, `thread_resolution_sync`, `approval`) because they decide what
 the host may do for that repository. `review.tools` follows the same
-layering, but it is read-only and only controls scan/output limits.
+layering, but it is read-only and only controls scan/output limits plus bounded
+tool retry behavior.
+
+`timeout` follows the same layering. The review default is `900s`; raise
+`repos[].review.timeout` for large or critical repos instead of making every
+host review wait longer. The host uses the resolved timeout for both the review
+context and the job lease, so a timed-out review fails cleanly and is retried by
+the normal durable job policy.
+
+`stalled_timeout` is the no-progress watchdog. The default is `5m`: every
+review progress event resets it, and a run that stays silent longer than this
+fails as `review.stalled` instead of consuming the full total `timeout`. Use
+`0s` only to disable the watchdog for debugging; otherwise tune it per large
+repo alongside `timeout`.
+
+`provider_retry` is the provider API retry policy. The default retries `429`,
+`5xx`/`529`, and temporary transport failures 10 times with jittered exponential
+backoff (`5s` initial, `2m` max, `10m` elapsed) inside the same review timeout.
+Tune it per critical or flaky-provider repos; set `max_retries: 0` only when you
+need fail-fast debugging.
 
 `review.subagents` follows the same layering. Configure broad defaults at the
 top level, then override the scoped agents per repo when a project benefits from
@@ -324,12 +354,23 @@ Symbol context bounds in host mode:
 
 ```yaml
 review:
+  provider_retry:
+    max_retries: 10
+    initial_backoff: 5s
+    max_backoff: 2m
+    max_elapsed: 10m
   tools:
+    max_retries: 2
+    retry_backoff: 250ms
     symbol_context:
       max_bytes: 16000
       max_files: 2000
       max_parallel: 8
 ```
+
+`max_retries` is capped at `5` and applies only to transient tool execution
+failures. Bad tool arguments, unknown tools, missing files, and canceled
+contexts are returned to the model immediately.
 
 `mode: clean` approves only zero-finding reviews. `mode: threshold` approves
 when the worst active finding is at or below `max_priority`. For example,

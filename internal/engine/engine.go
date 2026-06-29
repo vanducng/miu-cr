@@ -273,6 +273,8 @@ type AgentContext struct {
 	// mirror Conversation at every hop or the format is silently dropped.
 	PromptFormat   string
 	OperatorPrompt string
+	ProviderRetry  config.ProviderRetry
+	Tools          config.ReviewTools
 	SymbolContext  config.SymbolContext
 	RepoDir        string
 	Rev            string
@@ -329,10 +331,11 @@ type Agent interface {
 // RepairRequest is the engine-side shadow of agent.RepairRequest (defined here so
 // engine sits below agent in the import graph; the wire layer adapts it).
 type RepairRequest struct {
-	Span      string
-	Rationale string
-	Category  string
-	Severity  string
+	Span          string
+	Rationale     string
+	Category      string
+	Severity      string
+	ProviderRetry config.ProviderRetry
 }
 
 // Request is one review invocation: the diff mode and its operands, the severity
@@ -388,6 +391,8 @@ type Request struct {
 	PromptFormat string
 	// OperatorPrompt is trusted host policy. LOCKSTEP: mirror Conversation at every hop.
 	OperatorPrompt string
+	ProviderRetry  config.ProviderRetry
+	Tools          config.ReviewTools
 	SymbolContext  config.SymbolContext
 
 	// Progress is the optional milestone sink (stderr); nil = silent. The wire/cli

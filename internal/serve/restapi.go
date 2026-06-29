@@ -124,11 +124,12 @@ func (s *Server) handleCreateReview(w http.ResponseWriter, r *http.Request) {
 	}
 
 	job := Job{
-		Key:      pk,
-		Ref:      pk.String(),
-		Token:    token,
-		Timeout:  s.reviewTO,
-		ReviewID: id,
+		Key:            pk,
+		Ref:            pk.String(),
+		Token:          token,
+		Timeout:        s.reviewTO,
+		StalledTimeout: s.stalledTO,
+		ReviewID:       id,
 	}
 	if s.dispatcher.Submit(job) != SubmitQueued {
 		// Queue full or coalesced: no worker will ever process this id, so a 202

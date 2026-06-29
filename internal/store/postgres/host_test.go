@@ -232,6 +232,36 @@ func TestHostHeartbeatExtendsRunningLease(t *testing.T) {
 	}
 }
 
+func TestHostClaimExpiredRunningCancelsPreviousAttempt(t *testing.T) {
+	s := openHost(t)
+	ctx := context.Background()
+	repo := mustHostRepo(t, s)
+	session := mustHostSession(t, s, repo.ID, 19, "open")
+	job, ok, err := s.EnqueueHostJob(ctx, hostJobInput(repo.ID, session.ID, 19, uniqueName(t, "head")))
+	if err != nil || !ok {
+		t.Fatalf("enqueue ok=%v err=%v", ok, err)
+	}
+	now := time.Now().UTC()
+	first, ok, err := s.ClaimHostJob(ctx, store.HostJobClaimInput{WorkerID: "worker-1", Now: now, LeaseDuration: time.Second})
+	if err != nil || !ok {
+		t.Fatalf("first claim ok=%v err=%v", ok, err)
+	}
+	second, ok, err := s.ClaimHostJob(ctx, store.HostJobClaimInput{WorkerID: "worker-2", Now: now.Add(2 * time.Second), LeaseDuration: time.Hour})
+	if err != nil || !ok {
+		t.Fatalf("second claim ok=%v err=%v", ok, err)
+	}
+	if second.Job.ID != job.ID || second.Job.Attempts != 2 {
+		t.Fatalf("reclaimed job = %+v, want id=%d attempt=2", second.Job, job.ID)
+	}
+	var status, msg string
+	if err := s.db.QueryRowContext(ctx, `SELECT status, error FROM host_job_attempts WHERE id=$1`, first.AttemptID).Scan(&status, &msg); err != nil {
+		t.Fatalf("query first attempt: %v", err)
+	}
+	if status != "canceled" || !strings.Contains(msg, "stale running job reclaimed") {
+		t.Fatalf("first attempt status=%q error=%q, want canceled reclaimed", status, msg)
+	}
+}
+
 func TestHostEnqueueRespectsFailedRetryAvailability(t *testing.T) {
 	s := openHost(t)
 	ctx := context.Background()
@@ -421,6 +451,43 @@ func TestHostReleaseJobRequeuesWithoutFailedAttempt(t *testing.T) {
 	}
 	if next.Job.Attempts != 2 {
 		t.Fatalf("second claim attempt = %d, want 2", next.Job.Attempts)
+	}
+}
+
+func TestHostReleaseJobCanDiscardClaimAttempt(t *testing.T) {
+	s := openHost(t)
+	ctx := context.Background()
+	repo := mustHostRepo(t, s)
+	session := mustHostSession(t, s, repo.ID, 20, "open")
+	job, _, err := s.EnqueueHostJob(ctx, hostJobInput(repo.ID, session.ID, 20, uniqueName(t, "head")))
+	if err != nil {
+		t.Fatalf("enqueue: %v", err)
+	}
+	now := time.Now().UTC()
+	claim, ok, err := s.ClaimHostJob(ctx, store.HostJobClaimInput{WorkerID: "worker-1", Now: now, LeaseDuration: time.Hour})
+	if err != nil || !ok {
+		t.Fatalf("claim ok=%v err=%v", ok, err)
+	}
+	if err := s.ReleaseHostJob(ctx, store.HostJobReleaseInput{JobID: job.ID, AttemptID: claim.AttemptID, Error: "coalesced", Now: now.Add(time.Second), DiscardAttempt: true}); err != nil {
+		t.Fatalf("release: %v", err)
+	}
+	var status string
+	var attempts, attemptRows int
+	if err := s.db.QueryRowContext(ctx, `SELECT status, attempts FROM host_jobs WHERE id=$1`, job.ID).Scan(&status, &attempts); err != nil {
+		t.Fatalf("query job: %v", err)
+	}
+	if err := s.db.QueryRowContext(ctx, `SELECT count(*) FROM host_job_attempts WHERE job_id=$1`, job.ID).Scan(&attemptRows); err != nil {
+		t.Fatalf("query attempts: %v", err)
+	}
+	if status != "queued" || attempts != 0 || attemptRows != 0 {
+		t.Fatalf("released job status=%s attempts=%d rows=%d, want queued/0/0", status, attempts, attemptRows)
+	}
+	next, ok, err := s.ClaimHostJob(ctx, store.HostJobClaimInput{WorkerID: "worker-2", Now: now.Add(2 * time.Second), LeaseDuration: time.Hour})
+	if err != nil || !ok {
+		t.Fatalf("second claim ok=%v err=%v", ok, err)
+	}
+	if next.Job.Attempts != 1 {
+		t.Fatalf("second claim attempt = %d, want 1", next.Job.Attempts)
 	}
 }
 

@@ -8,6 +8,8 @@ import (
 )
 
 const maxReviewContextHops = 5
+const maxReviewToolRetries = 5
+const maxProviderRetryRetries = 20
 
 // gateValidator/filterModeValidator/minSeverityValidator are injected by the cli
 // layer (which owns the engine/github enums) so config stays a leaf and the enum
@@ -53,6 +55,15 @@ func ValidateReview(r Review) error {
 			return invalidReview("timeout", r.Timeout, "a Go duration like 300s or 5m")
 		}
 	}
+	if r.StalledTimeout != "" {
+		d, err := time.ParseDuration(r.StalledTimeout)
+		if err != nil || d < 0 {
+			return invalidReview("stalled_timeout", r.StalledTimeout, "a non-negative Go duration like 0s, 180s, or 5m")
+		}
+	}
+	if err := validateProviderRetry("provider_retry", r.ProviderRetry, invalidReview); err != nil {
+		return err
+	}
 	if r.Temperature != nil && (*r.Temperature < 0 || *r.Temperature > 2) {
 		return invalidReview("temperature", fmt.Sprintf("%v", *r.Temperature), "a number between 0 and 2")
 	}
@@ -85,7 +96,40 @@ func ValidateReview(r Review) error {
 	return nil
 }
 
+func validateProviderRetry(field string, retry ProviderRetry, invalid func(string, string, string) error) error {
+	if retry.MaxRetries != nil && (*retry.MaxRetries < 0 || *retry.MaxRetries > maxProviderRetryRetries) {
+		return invalid(field+".max_retries", fmt.Sprint(*retry.MaxRetries), fmt.Sprintf("an integer in [0,%d]", maxProviderRetryRetries))
+	}
+	for _, d := range []struct {
+		name string
+		val  string
+		want string
+	}{
+		{"initial_backoff", retry.InitialBackoff, "a non-negative Go duration like 0s, 5s, or 1m"},
+		{"max_backoff", retry.MaxBackoff, "a non-negative Go duration like 0s, 30s, or 2m"},
+		{"max_elapsed", retry.MaxElapsed, "a non-negative Go duration like 0s, 5m, or 10m"},
+	} {
+		if d.val == "" {
+			continue
+		}
+		parsed, err := time.ParseDuration(d.val)
+		if err != nil || parsed < 0 {
+			return invalid(field+"."+d.name, d.val, d.want)
+		}
+	}
+	return nil
+}
+
 func validateReviewTools(field string, tools ReviewTools, invalid func(string, string, string) error) error {
+	if tools.MaxRetries != nil && (*tools.MaxRetries < 0 || *tools.MaxRetries > maxReviewToolRetries) {
+		return invalid(field+".max_retries", fmt.Sprint(*tools.MaxRetries), fmt.Sprintf("an integer in [0,%d]", maxReviewToolRetries))
+	}
+	if tools.RetryBackoff != "" {
+		d, err := time.ParseDuration(tools.RetryBackoff)
+		if err != nil || d < 0 {
+			return invalid(field+".retry_backoff", tools.RetryBackoff, "a non-negative Go duration like 0s, 250ms, or 1s")
+		}
+	}
 	return validateSymbolContext(field+".symbol_context", tools.SymbolContext, invalid)
 }
 

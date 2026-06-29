@@ -22,13 +22,41 @@ func TestOpenAIAgentClassifies429(t *testing.T) {
 		client: &fakeOpenAI{err: &openai.Error{StatusCode: 429, Request: req, Response: resp}},
 		model:  "gpt-test",
 	}
-	_, err := a.Review(stdctx.Background(), Context{Text: "ctx", RepoDir: t.TempDir()})
+	_, err := a.Review(stdctx.Background(), Context{Text: "ctx", RepoDir: t.TempDir(), ProviderRetry: fastProviderRetry(0)})
 	ce, ok := err.(*clierr.CLIError)
 	if !ok {
 		t.Fatalf("want *clierr.CLIError, got %T: %v", err, err)
 	}
 	if ce.Code != "provider.rate_limited" || !ce.Retry {
 		t.Fatalf("got %+v, want rate_limited+retry", ce)
+	}
+}
+
+func TestOpenAIAgentRetriesProviderUnavailableThenSucceeds(t *testing.T) {
+	req, resp := fakeReqResp(503)
+	fc := &fakeOpenAI{
+		errs:      []error{&openai.Error{StatusCode: 503, Request: req, Response: resp}, nil},
+		responses: []string{textCompletion(`{"findings":[]}`)},
+	}
+	var progress []string
+	a := &openaiAgent{client: fc, model: "gpt-test"}
+	out, err := a.Review(stdctx.Background(), Context{
+		Text:          "ctx",
+		RepoDir:       t.TempDir(),
+		ProviderRetry: fastProviderRetry(2),
+		Progress:      func(s string) { progress = append(progress, s) },
+	})
+	if err != nil {
+		t.Fatalf("Review: %v", err)
+	}
+	if len(out.Findings) != 0 {
+		t.Fatalf("findings = %d, want 0", len(out.Findings))
+	}
+	if len(fc.seen) != 2 || fc.calls != 1 {
+		t.Fatalf("seen=%d calls=%d, want 2 attempts/1 success", len(fc.seen), fc.calls)
+	}
+	if !containsProgress(progress, "provider retry 1/2") {
+		t.Fatalf("retry progress missing: %#v", progress)
 	}
 }
 
@@ -39,10 +67,18 @@ type fakeOpenAI struct {
 	calls     int
 	seen      []openai.ChatCompletionNewParams
 	err       error
+	errs      []error
 }
 
 func (f *fakeOpenAI) create(_ stdctx.Context, params openai.ChatCompletionNewParams) (*openai.ChatCompletion, error) {
 	f.seen = append(f.seen, params)
+	if len(f.errs) > 0 {
+		err := f.errs[0]
+		f.errs = f.errs[1:]
+		if err != nil {
+			return nil, err
+		}
+	}
 	if f.err != nil {
 		return nil, f.err
 	}

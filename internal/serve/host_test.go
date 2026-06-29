@@ -710,6 +710,9 @@ func TestHostRunnerRejectedSubmitContinuesClaimBatch(t *testing.T) {
 			if st.releaseCount != 1 {
 				t.Fatalf("release count = %d, want 1", st.releaseCount)
 			}
+			if !st.lastRelease.DiscardAttempt {
+				t.Fatalf("release must discard unsubmitted claim attempt")
+			}
 			if disp.count() != 1 {
 				t.Fatalf("submitted jobs = %d, want second job submitted", disp.count())
 			}
@@ -1247,7 +1250,7 @@ func (s *fakeHostStore) ReleaseHostJob(_ stdctx.Context, in store.HostJobRelease
 			job.Error = in.Error
 			job.LeaseOwner = ""
 			job.AvailableAt = in.AvailableAt
-			if job.Attempts > 0 {
+			if in.DiscardAttempt && job.Attempts > 0 {
 				job.Attempts--
 			}
 			s.jobs[key] = job

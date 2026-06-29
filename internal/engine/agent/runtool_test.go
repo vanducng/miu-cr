@@ -9,7 +9,9 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/vanducng/miu-cr/internal/config"
 	"github.com/vanducng/miu-cr/internal/engine/gitcmd"
+	enginetools "github.com/vanducng/miu-cr/internal/engine/tools"
 )
 
 func runToolRepo(t *testing.T) (string, string) {
@@ -56,6 +58,66 @@ func TestRunTool_Validation(t *testing.T) {
 	}
 	if out, isErr := runTool(ctx, rc, 0, "bogus", json.RawMessage(`{}`)); !isErr || !strings.Contains(out, "unknown tool") {
 		t.Errorf("unknown tool: got %q isErr=%v", out, isErr)
+	}
+}
+
+func TestRunToolRetriesTransientErrors(t *testing.T) {
+	prev := executeTool
+	calls := 0
+	executeTool = func(stdctx.Context, config.SymbolContext, enginetools.Context, int, string, json.RawMessage) (string, bool) {
+		calls++
+		if calls < 3 {
+			return "grep failed: resource temporarily unavailable", true
+		}
+		return "ok", false
+	}
+	t.Cleanup(func() { executeTool = prev })
+
+	maxRetries := 2
+	out, isErr := runTool(stdctx.Background(), Context{Tools: config.ReviewTools{MaxRetries: &maxRetries, RetryBackoff: "0s"}}, 0, "grep", json.RawMessage(`{"pattern":"x"}`))
+	if isErr || out != "ok" {
+		t.Fatalf("runTool = %q isErr=%v, want ok", out, isErr)
+	}
+	if calls != 3 {
+		t.Fatalf("tool calls = %d, want 3", calls)
+	}
+}
+
+func TestRunToolDoesNotRetryTerminalErrors(t *testing.T) {
+	prev := executeTool
+	calls := 0
+	executeTool = func(stdctx.Context, config.SymbolContext, enginetools.Context, int, string, json.RawMessage) (string, bool) {
+		calls++
+		return "file_read: invalid arguments: bad", true
+	}
+	t.Cleanup(func() { executeTool = prev })
+
+	maxRetries := 5
+	out, isErr := runTool(stdctx.Background(), Context{Tools: config.ReviewTools{MaxRetries: &maxRetries, RetryBackoff: "0s"}}, 0, "file_read", json.RawMessage(`{}`))
+	if !isErr || !strings.Contains(out, "invalid arguments") {
+		t.Fatalf("runTool = %q isErr=%v, want terminal error", out, isErr)
+	}
+	if calls != 1 {
+		t.Fatalf("tool calls = %d, want 1", calls)
+	}
+}
+
+func TestRunToolZeroRetries(t *testing.T) {
+	prev := executeTool
+	calls := 0
+	executeTool = func(stdctx.Context, config.SymbolContext, enginetools.Context, int, string, json.RawMessage) (string, bool) {
+		calls++
+		return "grep failed: temporary failure", true
+	}
+	t.Cleanup(func() { executeTool = prev })
+
+	maxRetries := 0
+	out, isErr := runTool(stdctx.Background(), Context{Tools: config.ReviewTools{MaxRetries: &maxRetries, RetryBackoff: "0s"}}, 0, "grep", json.RawMessage(`{"pattern":"x"}`))
+	if !isErr || !strings.Contains(out, "temporary failure") {
+		t.Fatalf("runTool = %q isErr=%v, want original transient error", out, isErr)
+	}
+	if calls != 1 {
+		t.Fatalf("tool calls = %d, want 1", calls)
 	}
 }
 
