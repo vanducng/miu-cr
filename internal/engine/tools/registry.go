@@ -53,8 +53,8 @@ func Execute(ctx context.Context, cfg config.SymbolContext, tc Context, turn int
 		}, turn, input)
 	default:
 		out := fmt.Sprintf("unknown tool %q", name)
-		record(tc, turn, name, "")
-		recordResult(tc, turn, name, "", out, true)
+		record(tc, turn, name, "(unknown tool)")
+		recordResult(tc, turn, name, "(unknown tool)", out, true)
 		return out, true
 	}
 }

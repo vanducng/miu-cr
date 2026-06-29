@@ -213,6 +213,10 @@ func (t *ReviewTrace) RecordToolResult(turn int, tool, args, result string, isEr
 		return
 	}
 	result, truncated := truncateTraceToolResult(result)
+	t.recordToolResult(turn, tool, args, result, isErr, truncated)
+}
+
+func (t *ReviewTrace) recordToolResult(turn int, tool, args, result string, isErr, truncated bool) {
 	for i := len(t.Turns) - 1; i >= 0; i-- {
 		tr := &t.Turns[i]
 		if tr.Turn == turn && tr.Tool == tool && tr.Args == args && tr.Result == "" && !tr.Error && !tr.ResultTruncated {

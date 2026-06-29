@@ -2,6 +2,7 @@ package engine_test
 
 import (
 	stdctx "context"
+	"encoding/json"
 	"errors"
 	"strings"
 	"sync"
@@ -35,6 +36,7 @@ func (f *subagentFake) Review(_ stdctx.Context, rc engine.AgentContext) (engine.
 	rc.Trace.SetSystemPrompt("fake system")
 	rc.Trace.SetPrompt(rc.Text)
 	rc.Trace.RecordTool(0, "grep", "Risk")
+	rc.Trace.RecordToolResult(0, "grep", "Risk", strings.Repeat("x", 17*1024), false)
 	rc.Trace.SetFinalResponse(`{"findings":[]}`)
 	return engine.ReviewOutput{
 		Findings:      findings,
@@ -178,6 +180,13 @@ func TestReviewSubagentsMergesTrace(t *testing.T) {
 	if len(cs.rec.Transcript) == 0 {
 		t.Fatal("expected merged subagent tool transcript")
 	}
+	var turns []engine.TurnRecord
+	if err := json.Unmarshal(cs.rec.Transcript, &turns); err != nil {
+		t.Fatalf("transcript json: %v", err)
+	}
+	if !hasTruncatedToolResult(turns) {
+		t.Fatalf("merged transcript did not preserve truncated subagent result: %+v", turns)
+	}
 }
 
 func TestReviewSubagentsStreamsTraceSink(t *testing.T) {
@@ -294,6 +303,15 @@ func countSteps(steps []string, want string) int {
 		}
 	}
 	return n
+}
+
+func hasTruncatedToolResult(turns []engine.TurnRecord) bool {
+	for _, tr := range turns {
+		if tr.Tool == "grep" && tr.Args == "Risk" && tr.ResultTruncated && strings.Contains(tr.Result, "truncated tool result") {
+			return true
+		}
+	}
+	return false
 }
 
 func hasSubagentFinalResponse(events []struct {
