@@ -526,8 +526,9 @@ miucr trace <id> -o pretty       # readable per-step view
 ```
 
 `trace.show` data is `{id, steps:[{step, payload}]}` ordered: `system_prompt` → `diff_meta` →
-`selected_files` → `injected_rules` → `user_prompt` → `model` → `final_response` → `tool_calls`
-(empty steps omitted; an old review with no trace renders empty). Errors: `trace.id_required`,
+`selected_files` → `injected_rules` → `user_prompt` → `model` → `reasoning` → `turn_reasons` →
+`tool_calls` → `final_response` (empty steps omitted; an old review with no trace renders empty).
+Errors: `trace.id_required`,
 `trace.not_found`, `trace.corrupt`.
 
 For a **live** trace, pass `--trace` to `review`: each capture seam streams one NDJSON line
