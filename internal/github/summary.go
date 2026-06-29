@@ -251,15 +251,21 @@ func RenderSummaryFull(info *PRInfo, findings []engine.Finding, stats map[string
 		renderReviewReference(&b, info, stats, opts.Diffs)
 	}
 
-	handoff := ""
-	if info.ReviewCount > 0 {
-		handoff = fmt.Sprintf(" · Review attempts: %d", info.ReviewCount)
+	if p.Footer {
+		handoff := ""
+		if info.ReviewCount > 0 {
+			handoff = fmt.Sprintf(" · Review attempts: %d", info.ReviewCount)
+		}
+		ver := ""
+		if v := strings.TrimSpace(opts.Version); v != "" {
+			ver = fmt.Sprintf(" [%s](https://github.com/vanducng/miu-cr/releases/tag/%s)", mdInline(v), url.PathEscape(v))
+		}
+		fmt.Fprintf(&b, "\n<sub>Last reviewed commit %s%s · Posted by [miu-cr](https://github.com/vanducng/miu-cr)%s</sub>", commitRef(info), handoff, ver)
+	} else if sha := strings.TrimSpace(info.HeadSHA); sha != "" {
+		// Footer-off formats drop the visible sub-line but keep the reviewed head in
+		// a hidden marker; reviewedCommitRe matches "Reviewed commit <sha>" inside it.
+		fmt.Fprintf(&b, "\n<!-- Reviewed commit %s -->", sha)
 	}
-	ver := ""
-	if v := strings.TrimSpace(opts.Version); v != "" {
-		ver = fmt.Sprintf(" [%s](https://github.com/vanducng/miu-cr/releases/tag/%s)", mdInline(v), url.PathEscape(v))
-	}
-	fmt.Fprintf(&b, "\n<sub>Last reviewed commit %s%s · Posted by [miu-cr](https://github.com/vanducng/miu-cr)%s</sub>", commitRef(info), handoff, ver)
 	if opts.Ledger != nil {
 		b.WriteString("\n" + renderLedgerMarker(opts.Ledger))
 	}

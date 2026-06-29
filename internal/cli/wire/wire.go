@@ -916,10 +916,20 @@ func publishReview(ctx stdctx.Context, client mgithub.Client, runner *gitcmd.Run
 		})
 	}
 
+	// minimal + clean + first-attempt + would-approve → just approve, suppress the
+	// redundant "all clear" summary comment (the green approval IS the signal). Gated
+	// on ReviewCount<=1 (no prior summary comment) so a clean re-review that ALREADY
+	// has a findings ledger still updates it. The approval (commit_id) + persisted poll
+	// cursor keep dedup; the summary comment is not a dedup gate.
+	silentApprove := req.Format == "minimal" &&
+		len(publishFindings) == 0 &&
+		info.ReviewCount <= 1 &&
+		mgithub.ApprovalWouldApprove(*info, opts.Approval, opts.GateClean, publishFindings, opts.ReviewedFiles)
+
 	// Post the summary FIRST on a non-fork PR (with omitted=0) so it anchors ABOVE the
 	// inline review in the timeline (overview, then details); finalized after PostReview.
 	// A fork PR defers to after PostReview (an issue comment would 403 like the review).
-	summaryFirst := !info.IsFork
+	summaryFirst := !info.IsFork && !silentApprove
 	if summaryFirst {
 		if action, uerr := mgithub.UpsertSummaryComment(ctx, client, info, renderSummary(0, nil, false)); uerr != nil {
 			slog.Warn("summary upsert failed, continuing to inline review: " + config.RedactString(uerr.Error()))
@@ -945,8 +955,17 @@ func publishReview(ctx stdctx.Context, client mgithub.Client, runner *gitcmd.Run
 		return nil
 	}
 
-	// Only a successful PostReview earns the reusable publish marker.
-	if action, uerr := mgithub.UpsertSummaryComment(ctx, client, info, renderSummary(pr.Omitted, pr.OmittedFindings, true)); uerr != nil {
+	// Silent approve: skip the redundant summary comment ONLY if the approval landed.
+	// If it degraded (head moved / API error), fall back to posting the summary so the
+	// PR still carries a record.
+	if silentApprove && pr.Event == "APPROVE" {
+		prResult.SummaryAction = "skipped_silent_approve"
+		slog.Info("review: summary comment suppressed (silent approve)",
+			"repo", info.Owner+"/"+info.Repo, "pr", info.Number, "head_sha", info.HeadSHA,
+			"format", req.Format, "reason_code", "minimal_clean_silent_approve",
+			"reason", "clean first-attempt minimal review approved; redundant summary comment skipped")
+	} else if action, uerr := mgithub.UpsertSummaryComment(ctx, client, info, renderSummary(pr.Omitted, pr.OmittedFindings, true)); uerr != nil {
+		// Only a successful PostReview earns the reusable publish marker.
 		slog.Warn("summary upsert failed (inline review still posted): " + config.RedactString(uerr.Error()))
 		prResult.SummaryAction = "failed"
 	} else {

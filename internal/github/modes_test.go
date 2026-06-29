@@ -43,29 +43,35 @@ func TestRenderSummaryMinimalStripsChrome(t *testing.T) {
 		Walkthrough: "this is the walkthrough lead prose",
 		Format:      "minimal",
 	})
-	// Dropped chrome.
+	// Dropped chrome — incl. the visible footer sub-line.
 	for _, banned := range []string{
 		"img.shields.io",
 		"## Code Review Summary",
 		"this is the walkthrough lead prose",
 		"<summary>Review reference</summary>",
 		"<summary>Important Files Changed",
+		"<sub>Last reviewed commit",
 	} {
 		if strings.Contains(out, banned) {
 			t.Fatalf("minimal output must not contain %q:\n%s", banned, out)
 		}
 	}
-	// Kept essentials: upsert markers, plain result, inline pointer, footer.
+	// Kept essentials: upsert markers, plain result, inline pointer, and the HIDDEN
+	// reviewed-commit marker (so the resolution-sync still finds the head).
 	for _, required := range []string{
 		ReviewMarker,
 		"<!-- miu-cr-runs:",
 		"**Result:** 1 finding",
 		"→ Review the 1 inline comment below.",
-		"<sub>Last reviewed commit",
+		"<!-- Reviewed commit deadbeef -->",
 	} {
 		if !strings.Contains(out, required) {
 			t.Fatalf("minimal output must contain %q:\n%s", required, out)
 		}
+	}
+	// The hidden marker must remain parseable by reviewedCommitRe.
+	if got := parseReviewedCommit(out); got != "deadbeef" {
+		t.Fatalf("parseReviewedCommit on minimal output = %q, want deadbeef", got)
 	}
 }
 
