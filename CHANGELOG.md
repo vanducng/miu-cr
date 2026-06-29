@@ -55,6 +55,13 @@ comment with a new marker); subsequent re-runs dedupe normally. On a
 first M5 review **manually** (or off-hours) to absorb the one-time re-post before
 the next scheduled run.
 
+## [0.72.1](https://github.com/vanducng/miu-cr/compare/v0.72.0...v0.72.1) (2026-06-29)
+
+
+### Bug Fixes
+
+* **host:** supersede stale PR head reviews ([e49027b](https://github.com/vanducng/miu-cr/commit/e49027bd32c4e5e7bff4eebc098ab09e46fc20c1))
+
 ## [0.72.0](https://github.com/vanducng/miu-cr/compare/v0.71.2...v0.72.0) (2026-06-29)
 
 
