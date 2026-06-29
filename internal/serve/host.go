@@ -493,7 +493,7 @@ func (h *HostRunner) cancelClosedActiveHostJobs(repo HostRepoConfig, openNumbers
 	h.mu.Unlock()
 	for _, active := range canceled {
 		active.cancel()
-		h.log.Info("host: canceled active review for closed PR", "ref", active.ref, "job_id", active.jobID, "attempt_id", active.attemptID, "attempt", active.attempt, "head_sha", ShortSHA(active.headSHA))
+		h.log.Info("review lifecycle", "phase", "suppressed", "ref", active.ref, "job_id", active.jobID, "attempt_id", active.attemptID, "attempt", active.attempt, "head_sha", ShortSHA(active.headSHA), "reason", "closed_pr")
 	}
 	return len(canceled)
 }
@@ -519,7 +519,7 @@ func (h *HostRunner) cancelSupersededActiveHostJobs(repo HostRepoConfig, latestH
 	h.mu.Unlock()
 	for _, item := range canceled {
 		item.active.cancel()
-		h.log.Info("host: canceled active review for superseded PR head", "ref", item.active.ref, "job_id", item.active.jobID, "attempt_id", item.active.attemptID, "attempt", item.active.attempt, "head_sha", ShortSHA(item.active.headSHA), "latest_head_sha", ShortSHA(item.latestHeadSHA))
+		h.log.Info("review lifecycle", "phase", "suppressed", "ref", item.active.ref, "job_id", item.active.jobID, "attempt_id", item.active.attemptID, "attempt", item.active.attempt, "head_sha", ShortSHA(item.active.headSHA), "latest_head_sha", ShortSHA(item.latestHeadSHA), "reason", "superseded_head")
 	}
 	return len(canceled)
 }
