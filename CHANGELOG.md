@@ -55,6 +55,13 @@ comment with a new marker); subsequent re-runs dedupe normally. On a
 first M5 review **manually** (or off-hours) to absorb the one-time re-post before
 the next scheduled run.
 
+## [0.77.0](https://github.com/vanducng/miu-cr/compare/v0.76.0...v0.77.0) (2026-06-29)
+
+
+### Features
+
+* **cli:** show turn_reasons in trace, render answer last ([#230](https://github.com/vanducng/miu-cr/issues/230)) ([f991c7a](https://github.com/vanducng/miu-cr/commit/f991c7a23d19ce0e8a9f32dc02df6eb31c427a00))
+
 ## [0.76.0](https://github.com/vanducng/miu-cr/compare/v0.75.0...v0.76.0) (2026-06-29)
 
 
