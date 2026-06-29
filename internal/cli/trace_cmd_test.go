@@ -113,17 +113,21 @@ func TestTraceShowOrderedSteps(t *testing.T) {
 	}
 }
 
-// Proves the pretty renderer's []engine.TurnRecord case is REACHABLE, the
-// historical tool_calls step renders its turns (not just the JSON path).
+// Proves the pretty renderer's []engine.TurnRecord and []engine.TurnReason
+// cases are REACHABLE — both render in pretty mode (not just the JSON path).
 func TestTraceShowPrettyRendersToolCalls(t *testing.T) {
 	tr := engine.ReviewTrace{
 		SystemPrompt: "sys",
+		TurnReasons:  []engine.TurnReason{{Turn: 1, Text: "reasonNeedle"}},
 		Turns:        []engine.TurnRecord{{Turn: 1, Tool: "grep", Args: "needleArg", Result: "File: a.go\n1|needle", ResultTruncated: true}},
 	}
 	st, id := seededTraceStore(t, sampleTraceJSON(t, tr))
 	out, err := runTrace(t, st, true, id) // pretty
 	if err != nil {
 		t.Fatalf("trace -o pretty: %v", err)
+	}
+	if !strings.Contains(out, "reasonNeedle") {
+		t.Fatalf("turn_reasons not rendered in pretty trace (TurnReason case unreachable?):\n%s", out)
 	}
 	if !strings.Contains(out, "grep") || !strings.Contains(out, "needleArg") {
 		t.Fatalf("tool_calls turn not rendered in pretty trace (TurnRecord case unreachable?):\n%s", out)
