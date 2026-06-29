@@ -55,6 +55,13 @@ comment with a new marker); subsequent re-runs dedupe normally. On a
 first M5 review **manually** (or off-hours) to absorb the one-time re-post before
 the next scheduled run.
 
+## [0.73.1](https://github.com/vanducng/miu-cr/compare/v0.73.0...v0.73.1) (2026-06-29)
+
+
+### Bug Fixes
+
+* **config:** bound credential redaction to token chars ([#221](https://github.com/vanducng/miu-cr/issues/221)) ([b7f4afb](https://github.com/vanducng/miu-cr/commit/b7f4afb208f9523499a29855a389ff69f3018434))
+
 ## [0.73.0](https://github.com/vanducng/miu-cr/compare/v0.72.1...v0.73.0) (2026-06-29)
 
 
