@@ -20,6 +20,7 @@ type HostStore interface {
 	CompleteHostJob(context.Context, HostJobCompleteInput) error
 	ReleaseHostJob(context.Context, HostJobReleaseInput) error
 	ReconcileHostClosedPRs(context.Context, HostClosedPRsInput) (HostClosedPRsResult, error)
+	ReconcileHostSupersededPRHeads(context.Context, HostSupersededPRHeadsInput) (HostSupersededPRHeadsResult, error)
 	UpsertHostWorkspace(context.Context, HostWorkspaceInput) (HostWorkspace, error)
 	UpsertHostPollCursor(context.Context, HostPollCursorInput) error
 	GetHostPollCursor(context.Context, int64, string) (HostPollCursor, bool, error)
@@ -143,6 +144,21 @@ type HostClosedPRsInput struct {
 type HostClosedPRsResult struct {
 	SessionsClosed int
 	JobsCanceled   int
+}
+
+type HostPRHead struct {
+	Number  int64
+	HeadSHA string
+}
+
+type HostSupersededPRHeadsInput struct {
+	RepoID int64
+	Heads  []HostPRHead
+	Now    time.Time
+}
+
+type HostSupersededPRHeadsResult struct {
+	JobsCanceled int
 }
 
 type HostWorkspaceInput struct {

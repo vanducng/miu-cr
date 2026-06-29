@@ -634,6 +634,75 @@ func TestHostReconcileClosedPRsCancelsRunningJobs(t *testing.T) {
 	}
 }
 
+func TestHostReconcileSupersededPRHeadsCancelsOldJobs(t *testing.T) {
+	s := openHost(t)
+	ctx := context.Background()
+	repo := mustHostRepo(t, s)
+	session := mustHostSession(t, s, repo.ID, 34, "open")
+	oldRunning, ok, err := s.EnqueueHostJob(ctx, hostJobInput(repo.ID, session.ID, 34, "head-old-running"))
+	if err != nil || !ok {
+		t.Fatalf("enqueue old running ok=%v err=%v", ok, err)
+	}
+	now := time.Now().UTC()
+	claim, ok, err := s.ClaimHostJob(ctx, store.HostJobClaimInput{WorkerID: "worker-1", Now: now, LeaseDuration: time.Hour})
+	if err != nil || !ok {
+		t.Fatalf("claim ok=%v err=%v", ok, err)
+	}
+	oldQueued, ok, err := s.EnqueueHostJob(ctx, hostJobInput(repo.ID, session.ID, 34, "head-old-queued"))
+	if err != nil || !ok {
+		t.Fatalf("enqueue old queued ok=%v err=%v", ok, err)
+	}
+	current, ok, err := s.EnqueueHostJob(ctx, hostJobInput(repo.ID, session.ID, 34, "head-current"))
+	if err != nil || !ok {
+		t.Fatalf("enqueue current ok=%v err=%v", ok, err)
+	}
+
+	res, err := s.ReconcileHostSupersededPRHeads(ctx, store.HostSupersededPRHeadsInput{
+		RepoID: repo.ID,
+		Heads:  []store.HostPRHead{{Number: 34, HeadSHA: "head-current"}},
+		Now:    now.Add(time.Second),
+	})
+	if err != nil {
+		t.Fatalf("reconcile: %v", err)
+	}
+	if res.JobsCanceled != 2 {
+		t.Fatalf("jobs canceled = %d, want 2", res.JobsCanceled)
+	}
+
+	statuses := map[int64]string{}
+	for _, job := range []store.HostJob{oldRunning, oldQueued, current} {
+		var status string
+		if err := s.db.QueryRowContext(ctx, `SELECT status FROM host_jobs WHERE id=$1`, job.ID).Scan(&status); err != nil {
+			t.Fatalf("query job %d: %v", job.ID, err)
+		}
+		statuses[job.ID] = status
+	}
+	if statuses[oldRunning.ID] != "canceled" || statuses[oldQueued.ID] != "canceled" {
+		t.Fatalf("old job statuses = running:%q queued:%q, want canceled", statuses[oldRunning.ID], statuses[oldQueued.ID])
+	}
+	if statuses[current.ID] != "queued" {
+		t.Fatalf("current job status = %q, want queued", statuses[current.ID])
+	}
+	var attemptStatus string
+	if err := s.db.QueryRowContext(ctx, `SELECT status FROM host_job_attempts WHERE id=$1`, claim.AttemptID).Scan(&attemptStatus); err != nil {
+		t.Fatalf("query attempt: %v", err)
+	}
+	if attemptStatus != "canceled" {
+		t.Fatalf("attempt status = %q, want canceled", attemptStatus)
+	}
+	err = s.CompleteHostJob(ctx, store.HostJobCompleteInput{JobID: oldRunning.ID, AttemptID: claim.AttemptID, Status: "done", Now: now.Add(2 * time.Second)})
+	if !errors.Is(err, store.ErrHostStaleAttempt) {
+		t.Fatalf("late completion err = %v, want stale attempt", err)
+	}
+	next, ok, err := s.ClaimHostJob(ctx, store.HostJobClaimInput{WorkerID: "worker-2", Now: now.Add(3 * time.Second), LeaseDuration: time.Hour})
+	if err != nil || !ok {
+		t.Fatalf("claim current ok=%v err=%v", ok, err)
+	}
+	if next.Job.ID != current.ID {
+		t.Fatalf("claimed job = %d, want current %d", next.Job.ID, current.ID)
+	}
+}
+
 func TestHostEnqueueRequeuesCanceledJobOnReopen(t *testing.T) {
 	s := openHost(t)
 	ctx := context.Background()
