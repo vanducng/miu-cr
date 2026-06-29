@@ -80,8 +80,8 @@ var postgresMigrations = []schemaMigration{
 	{Name: "0006_provider_usage_cache", SQL: providerUsageCacheSQL},
 }
 
-// hostJobsRepoStatusIdxSQL backs the per-repo status filter in
-// ReconcileHostClosedPRs; the (status, ...) claim index doesn't lead with
+// hostJobsRepoStatusIdxSQL backs per-repo unfinished-job reconciliation; the
+// (status, ...) claim index doesn't lead with
 // repo_id, so a multi-repo host would scan all queued jobs each poll.
 const hostJobsRepoStatusIdxSQL = `
 CREATE INDEX IF NOT EXISTS host_jobs_repo_status_idx ON host_jobs (repo_id, status);`

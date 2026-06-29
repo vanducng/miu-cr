@@ -498,6 +498,32 @@ func (h *HostRunner) cancelClosedActiveHostJobs(repo HostRepoConfig, openNumbers
 	return len(canceled)
 }
 
+func (h *HostRunner) cancelSupersededActiveHostJobs(repo HostRepoConfig, latestHeads map[int]string) int {
+	type canceledJob struct {
+		active        activeHostJob
+		latestHeadSHA string
+	}
+	var canceled []canceledJob
+	h.mu.Lock()
+	for key, active := range h.activeJobs {
+		if key.Owner != repo.Owner || key.Repo != repo.Repo {
+			continue
+		}
+		latestHead, ok := latestHeads[key.Number]
+		if !ok || active.headSHA == latestHead {
+			continue
+		}
+		delete(h.activeJobs, key)
+		canceled = append(canceled, canceledJob{active: active, latestHeadSHA: latestHead})
+	}
+	h.mu.Unlock()
+	for _, item := range canceled {
+		item.active.cancel()
+		h.log.Info("host: canceled active review for superseded PR head", "ref", item.active.ref, "job_id", item.active.jobID, "attempt_id", item.active.attemptID, "attempt", item.active.attempt, "head_sha", ShortSHA(item.active.headSHA), "latest_head_sha", ShortSHA(item.latestHeadSHA))
+	}
+	return len(canceled)
+}
+
 func (h *HostRunner) pollRepo(ctx stdctx.Context, snap hostRunnerSnapshot, repo HostRepoConfig, repoID int64) (time.Duration, error) {
 	token, err := snap.tokens[repo.GithubAccount].Token(ctx)
 	if err != nil {
@@ -514,6 +540,8 @@ func (h *HostRunner) pollRepo(ctx stdctx.Context, snap hostRunnerSnapshot, repo 
 		return pollFloor, err
 	}
 	openNumbers := make([]int64, 0, len(prs))
+	openHeads := make([]store.HostPRHead, 0, len(prs))
+	latestHeads := make(map[int]string, len(prs))
 	for _, pr := range prs {
 		number := int64(pr.GetNumber())
 		head := pr.GetHead().GetSHA()
@@ -529,6 +557,10 @@ func (h *HostRunner) pollRepo(ctx stdctx.Context, snap hostRunnerSnapshot, repo 
 			continue
 		}
 		openNumbers = append(openNumbers, number)
+		openHeads = append(openHeads, store.HostPRHead{Number: number, HeadSHA: head})
+		if number <= int64(math.MaxInt) {
+			latestHeads[int(number)] = head
+		}
 		session, err := h.store.UpsertHostPRSession(ctx, store.HostPRSessionInput{
 			RepoID:  repoID,
 			Number:  number,
@@ -564,6 +596,13 @@ func (h *HostRunner) pollRepo(ctx stdctx.Context, snap hostRunnerSnapshot, repo 
 			}
 			h.enqueueThreadResolutionSync(ctx, threadSyncClient, repo, pr, now)
 		}
+	}
+	superseded, supersededErr := h.store.ReconcileHostSupersededPRHeads(ctx, store.HostSupersededPRHeadsInput{RepoID: repoID, Heads: openHeads, Now: now})
+	supersededActiveCanceled := h.cancelSupersededActiveHostJobs(repo, latestHeads)
+	if supersededErr != nil {
+		h.log.Warn("host: failed to reconcile superseded PR heads", "repo", repo.Slug, "active_canceled", supersededActiveCanceled, "error", config.RedactString(supersededErr.Error()))
+	} else if superseded.JobsCanceled > 0 || supersededActiveCanceled > 0 {
+		h.log.Info("host: reconciled superseded PR heads", "repo", repo.Slug, "jobs_canceled", superseded.JobsCanceled, "active_canceled", supersededActiveCanceled)
 	}
 	res, err := h.store.ReconcileHostClosedPRs(ctx, store.HostClosedPRsInput{RepoID: repoID, OpenNumbers: openNumbers, Now: now})
 	activeCanceled := h.cancelClosedActiveHostJobs(repo, openNumbers)

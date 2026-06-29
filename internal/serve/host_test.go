@@ -590,6 +590,51 @@ func TestHostRunnerPollCancelsActiveJobsForClosedPRs(t *testing.T) {
 	}
 }
 
+func TestHostRunnerPollCancelsActiveJobsForSupersededHeads(t *testing.T) {
+	cfg := hostRunnerConfig(t)
+	gh := &fakeNotifGetter{prs: map[string][]*github.PullRequest{
+		"octo/hello": {prWithHead(2, "sha-old")},
+	}}
+	cfg.NewNotifGetter = func(string) notifGetter { return gh }
+	disp := &holdDispatcher{}
+	cfg.Dispatcher = disp
+	st := cfg.Store.(*fakeHostStore)
+	r, err := NewHostRunner(cfg)
+	if err != nil {
+		t.Fatalf("NewHostRunner: %v", err)
+	}
+	if err := r.Tick(stdctx.Background()); err != nil {
+		t.Fatalf("first tick: %v", err)
+	}
+	oldJob, ok := disp.job()
+	if !ok {
+		t.Fatal("job was not submitted")
+	}
+	if err := oldJob.Context.Err(); err != nil {
+		t.Fatalf("job context canceled before supersede: %v", err)
+	}
+
+	gh.prs["octo/hello"] = []*github.PullRequest{prWithHead(2, "sha-new")}
+	if err := r.Tick(stdctx.Background()); err != nil {
+		t.Fatalf("second tick: %v", err)
+	}
+	select {
+	case <-oldJob.Context.Done():
+	case <-time.After(time.Second):
+		t.Fatal("superseded job context was not canceled")
+	}
+	st.mu.Lock()
+	defer st.mu.Unlock()
+	if len(st.lastSuperseded.Heads) != 1 || st.lastSuperseded.Heads[0].Number != 2 || st.lastSuperseded.Heads[0].HeadSHA != "sha-new" {
+		t.Fatalf("superseded heads = %+v, want #2 sha-new", st.lastSuperseded.Heads)
+	}
+	for _, stored := range st.jobs {
+		if stored.Number == 2 && stored.HeadSHA == "sha-old" && stored.Status != "canceled" {
+			t.Fatalf("old head job status = %q, want canceled", stored.Status)
+		}
+	}
+}
+
 func TestHostRunnerPollCancelsActiveJobsWhenReconcileFails(t *testing.T) {
 	cfg := hostRunnerConfig(t)
 	gh := &fakeNotifGetter{prs: map[string][]*github.PullRequest{
@@ -1180,25 +1225,26 @@ func (s *sequenceTokenSource) Token(stdctx.Context) (string, error) {
 }
 
 type fakeHostStore struct {
-	mu            sync.Mutex
-	nextRepo      int64
-	nextSession   int64
-	nextJob       int64
-	nextAttempt   int64
-	repos         map[string]store.HostRepo
-	jobs          map[string]store.HostJob
-	sessions      map[int64]store.HostPRSession
-	queued        []string
-	cursorWrites  int
-	releaseCount  int
-	lastRelease   store.HostJobReleaseInput
-	lastClaim     store.HostJobClaimInput
-	heartbeats    []store.HostJobHeartbeatInput
-	lastPrune     store.HostPrunePolicy
-	lastReconcile store.HostClosedPRsInput
-	pruneBlock    <-chan struct{}
-	sessionErrFor map[int64]error
-	reconcileErr  error
+	mu             sync.Mutex
+	nextRepo       int64
+	nextSession    int64
+	nextJob        int64
+	nextAttempt    int64
+	repos          map[string]store.HostRepo
+	jobs           map[string]store.HostJob
+	sessions       map[int64]store.HostPRSession
+	queued         []string
+	cursorWrites   int
+	releaseCount   int
+	lastRelease    store.HostJobReleaseInput
+	lastClaim      store.HostJobClaimInput
+	heartbeats     []store.HostJobHeartbeatInput
+	lastPrune      store.HostPrunePolicy
+	lastReconcile  store.HostClosedPRsInput
+	lastSuperseded store.HostSupersededPRHeadsInput
+	pruneBlock     <-chan struct{}
+	sessionErrFor  map[int64]error
+	reconcileErr   error
 }
 
 func newFakeHostStore() *fakeHostStore {
@@ -1259,6 +1305,40 @@ func (s *fakeHostStore) ReconcileHostClosedPRs(_ stdctx.Context, in store.HostCl
 			canceled[key] = true
 			out.JobsCanceled++
 		}
+	}
+	kept := s.queued[:0]
+	for _, key := range s.queued {
+		if !canceled[key] {
+			kept = append(kept, key)
+		}
+	}
+	s.queued = kept
+	return out, nil
+}
+
+func (s *fakeHostStore) ReconcileHostSupersededPRHeads(_ stdctx.Context, in store.HostSupersededPRHeadsInput) (store.HostSupersededPRHeadsResult, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.lastSuperseded = in
+	latest := map[int64]string{}
+	for _, head := range in.Heads {
+		latest[head.Number] = head.HeadSHA
+	}
+	var out store.HostSupersededPRHeadsResult
+	canceled := map[string]bool{}
+	for key, job := range s.jobs {
+		if job.Status != "queued" && job.Status != "running" {
+			continue
+		}
+		head, ok := latest[job.Number]
+		if !ok || job.HeadSHA == head {
+			continue
+		}
+		job.Status = "canceled"
+		job.Error = "superseded by newer PR head"
+		s.jobs[key] = job
+		canceled[key] = true
+		out.JobsCanceled++
 	}
 	kept := s.queued[:0]
 	for _, key := range s.queued {

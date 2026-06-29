@@ -418,6 +418,50 @@ SELECT count(*) FROM canceled_jobs`, in.RepoID, open, now).Scan(&out.JobsCancele
 	return out, tx.Commit()
 }
 
+func (s *Store) ReconcileHostSupersededPRHeads(ctx context.Context, in store.HostSupersededPRHeadsInput) (store.HostSupersededPRHeadsResult, error) {
+	var out store.HostSupersededPRHeadsResult
+	if len(in.Heads) == 0 {
+		return out, nil
+	}
+	now := in.Now
+	if now.IsZero() {
+		now = time.Now().UTC()
+	}
+	numbers := make([]int64, 0, len(in.Heads))
+	heads := make([]string, 0, len(in.Heads))
+	for _, head := range in.Heads {
+		if head.Number <= 0 || head.HeadSHA == "" {
+			continue
+		}
+		numbers = append(numbers, head.Number)
+		heads = append(heads, head.HeadSHA)
+	}
+	if len(numbers) == 0 {
+		return out, nil
+	}
+	err := s.db.QueryRowContext(ctx, `
+WITH latest AS (
+SELECT number, head_sha FROM unnest($2::bigint[], $3::text[]) AS t(number, head_sha)
+), canceled_jobs AS (
+UPDATE host_jobs j
+SET status='canceled', lease_owner='', lease_until=NULL, error='superseded by newer PR head', updated_at=$4, completed_at=$4
+FROM latest
+WHERE j.repo_id=$1 AND j.status IN ('queued','running') AND j.number=latest.number AND j.head_sha<>latest.head_sha
+RETURNING j.id
+), canceled_attempts AS (
+UPDATE host_job_attempts a
+SET status='canceled', error='superseded by newer PR head', finished_at=$4
+FROM canceled_jobs j
+WHERE a.job_id=j.id AND a.status='running'
+RETURNING a.id
+)
+SELECT count(*) FROM canceled_jobs`, in.RepoID, numbers, heads, now).Scan(&out.JobsCanceled)
+	if err != nil {
+		return out, err
+	}
+	return out, nil
+}
+
 func (s *Store) UpsertHostWorkspace(ctx context.Context, in store.HostWorkspaceInput) (store.HostWorkspace, error) {
 	if in.State == "" {
 		in.State = "active"
