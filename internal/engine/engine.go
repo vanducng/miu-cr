@@ -263,7 +263,12 @@ func (t *ReviewTrace) RecordTurnReason(turn int, text string) {
 		return
 	}
 	if len(text) > maxTraceToolResultBytes {
-		text = string(truncateUTF8Bytes([]byte(text), maxTraceToolResultBytes))
+		const marker = "\n...[truncated turn reason]..."
+		keep := maxTraceToolResultBytes - len(marker)
+		if keep < 0 {
+			keep = 0
+		}
+		text = string(truncateUTF8Bytes([]byte(text), keep)) + marker
 	}
 	tr := TurnReason{Turn: turn, Text: text}
 	t.TurnReasons = append(t.TurnReasons, tr)

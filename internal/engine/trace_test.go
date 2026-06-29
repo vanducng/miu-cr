@@ -96,6 +96,9 @@ func TestRecordTurnReason(t *testing.T) {
 	if got := len(tr.TurnReasons[1].Text); got > maxTraceToolResultBytes {
 		t.Fatalf("turn reason not capped: %d bytes", got)
 	}
+	if !strings.HasSuffix(tr.TurnReasons[1].Text, "[truncated turn reason]...") {
+		t.Fatalf("truncated turn reason lacks marker: %q", tr.TurnReasons[1].Text[len(tr.TurnReasons[1].Text)-40:])
+	}
 }
 
 // The setters are nil-safe (a nil *ReviewTrace is a no-op) and Sink, when set,
