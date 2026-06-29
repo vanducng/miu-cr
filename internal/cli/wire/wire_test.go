@@ -272,6 +272,56 @@ func TestPublishReviewWireFlow(t *testing.T) {
 	}
 }
 
+// TestPublishReviewMinimalCleanSilentApprove: a clean first-attempt review under
+// format=minimal with an approving policy posts the green APPROVE and NO summary
+// issue comment. Contrast: format=full still posts the "all clear" summary.
+func TestPublishReviewMinimalCleanSilentApprove(t *testing.T) {
+	runner := gitcmd.New()
+	dir, base, head := setupRepo(t, runner)
+
+	// GetPR returns the same head → headUnchanged → the approve actually lands.
+	fake := &fakeGitHub{headSHA: head}
+	restore := newGitHubClient
+	newGitHubClient = func(string) mgithub.Client { return fake }
+	t.Cleanup(func() { newGitHubClient = restore })
+	client := newGitHubClient("")
+
+	// Clean (no findings), first attempt (ReviewCount 1), trusted author.
+	cleanRes := engine.ReviewResult{Findings: nil, Stats: map[string]any{"truncation_level": "full", "files_reviewed": float64(1)}}
+	mkInfo := func() *mgithub.PRInfo {
+		return &mgithub.PRInfo{Owner: "o", Repo: "r", Number: 7, HeadSHA: head, BaseSHA: base, BaseBranch: "main", ReviewCount: 1, AuthorAssociation: "OWNER"}
+	}
+	approve := config.ApprovalPolicy{Mode: "clean"}
+
+	pr := &cli.PRResult{SummaryAction: "none"}
+	reqMin := cli.PRReviewRequest{Gate: "high", Format: "minimal", Approval: approve}
+	if err := publishReview(stdctx.Background(), client, runner, dir, mkInfo(), cleanRes, pr, reqMin, nil, embedWriter{}, nil, nil, ""); err != nil {
+		t.Fatalf("minimal clean publishReview: %v", err)
+	}
+	if fake.createIssueN != 0 || fake.editN != 0 || len(fake.issueComments) != 0 {
+		t.Fatalf("clean minimal first-attempt must post NO summary comment: create=%d edit=%d comments=%d", fake.createIssueN, fake.editN, len(fake.issueComments))
+	}
+	if pr.SummaryAction != "skipped_silent_approve" {
+		t.Fatalf("want SummaryAction skipped_silent_approve, got %q", pr.SummaryAction)
+	}
+	if fake.lastReviewed.GetEvent() != "APPROVE" {
+		t.Fatalf("clean minimal must still post the green APPROVE, got event %q", fake.lastReviewed.GetEvent())
+	}
+
+	// Contrast: same clean review under format=full still posts the summary comment.
+	fakeFull := &fakeGitHub{headSHA: head}
+	newGitHubClient = func(string) mgithub.Client { return fakeFull }
+	clientFull := newGitHubClient("")
+	prFull := &cli.PRResult{SummaryAction: "none"}
+	reqFull := cli.PRReviewRequest{Gate: "high", Format: "full", Approval: approve}
+	if err := publishReview(stdctx.Background(), clientFull, runner, dir, mkInfo(), cleanRes, prFull, reqFull, nil, embedWriter{}, nil, nil, ""); err != nil {
+		t.Fatalf("full clean publishReview: %v", err)
+	}
+	if len(fakeFull.issueComments) == 0 {
+		t.Fatalf("full format clean review must still post the summary comment")
+	}
+}
+
 func TestReviewErrorSummaryUsesFreshContext(t *testing.T) {
 	fake := &fakeGitHub{}
 	ctx, cancel := stdctx.WithCancel(stdctx.Background())

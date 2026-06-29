@@ -4,9 +4,11 @@ import "sort"
 
 // presentation is the section-flag set a review output format resolves to. Each
 // flag gates one human-facing block of the summary/inline comment; the hidden
-// upsert markers, the plain Result line, inline findings, and the footer render
-// in every format and are NOT flagged. Adding a format = one entry in modes
-// plus a golden test; a new block adds a flag here and a gate at its render site.
+// upsert markers, the plain Result line, and inline findings render in every
+// format and are NOT flagged. Adding a format = one entry in modes plus a golden
+// test; a new block adds a flag here and a gate at its render site. Footer-off
+// formats still embed a hidden `<!-- Reviewed commit … -->` marker so the
+// resolution-sync (parseReviewedCommit) keeps finding the reviewed head.
 type presentation struct {
 	Heading       bool // "## Code Review Summary" H2
 	Walkthrough   bool // "What changed:" narrative
@@ -15,12 +17,13 @@ type presentation struct {
 	ChangesTable  bool // "Important Files Changed" per-file table
 	ReviewRef     bool // collapsed "Review reference" (priority legend + effort/context)
 	PriorityBadge bool // per-finding shields priority badge on inline comments
+	Footer        bool // visible "Last reviewed commit … · Posted by miu-cr" sub-line
 }
 
 // modes is the closed registry of named output formats. The empty/unset format
 // resolves to "full" so existing output stays byte-identical.
 var modes = map[string]presentation{
-	"full":    {Heading: true, Walkthrough: true, Diagram: true, ResultBadges: true, ChangesTable: true, ReviewRef: true, PriorityBadge: true},
+	"full":    {Heading: true, Walkthrough: true, Diagram: true, ResultBadges: true, ChangesTable: true, ReviewRef: true, PriorityBadge: true, Footer: true},
 	"minimal": {},
 }
 
