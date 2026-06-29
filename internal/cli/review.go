@@ -24,7 +24,32 @@ import (
 // error passes through unchanged (preserving an already-typed CLIError or a bare
 // %w). This is the timeout owner; backends keep the ctx chain via %w so the
 // errors.Is below still reaches it through the engine pass-through.
-func classifyReviewErr(err error, timeout time.Duration) error {
+func classifyReviewErr(err error, timeout time.Duration, ctxs ...stdctx.Context) error {
+	for _, ctx := range ctxs {
+		if ctx == nil {
+			continue
+		}
+		if stalled := reviewStalledCause(stdctx.Cause(ctx)); stalled != nil {
+			return &CLIError{
+				Code:    "review.stalled",
+				Message: stalled.Error(),
+				Hint:    "raise [review].stalled_timeout / repos[].review.stalled_timeout or narrow the diff",
+				Exit:    1,
+				Retry:   true,
+				Cause:   err,
+			}
+		}
+	}
+	if stalled := reviewStalledCause(err); stalled != nil {
+		return &CLIError{
+			Code:    "review.stalled",
+			Message: stalled.Error(),
+			Hint:    "raise [review].stalled_timeout / repos[].review.stalled_timeout or narrow the diff",
+			Exit:    1,
+			Retry:   true,
+			Cause:   err,
+		}
+	}
 	switch {
 	case errors.Is(err, stdctx.DeadlineExceeded):
 		msg := "review timed out"
@@ -51,6 +76,67 @@ func classifyReviewErr(err error, timeout time.Duration) error {
 	}
 }
 
+var errReviewStalled = errors.New("review stalled")
+
+type stalledReviewError struct {
+	Timeout time.Duration
+}
+
+func (e *stalledReviewError) Error() string {
+	return fmt.Sprintf("review stalled: no progress for %s", e.Timeout)
+}
+
+func (e *stalledReviewError) Is(target error) bool {
+	return target == errReviewStalled
+}
+
+func reviewStalledCause(err error) *stalledReviewError {
+	var stalled *stalledReviewError
+	if errors.As(err, &stalled) {
+		return stalled
+	}
+	return nil
+}
+
+func withReviewProgressWatchdog(ctx stdctx.Context, stalledTimeout time.Duration, progress func(string)) (stdctx.Context, func(string), func()) {
+	if stalledTimeout <= 0 {
+		return ctx, progress, func() {}
+	}
+	wctx, cancel := stdctx.WithCancelCause(ctx)
+	reset := make(chan struct{}, 1)
+	go func() {
+		timer := time.NewTimer(stalledTimeout)
+		defer timer.Stop()
+		for {
+			select {
+			case <-wctx.Done():
+				return
+			case <-timer.C:
+				cancel(&stalledReviewError{Timeout: stalledTimeout})
+				return
+			case <-reset:
+				if !timer.Stop() {
+					select {
+					case <-timer.C:
+					default:
+					}
+				}
+				timer.Reset(stalledTimeout)
+			}
+		}
+	}()
+	wrapped := func(msg string) {
+		select {
+		case reset <- struct{}{}:
+		default:
+		}
+		if progress != nil {
+			progress(msg)
+		}
+	}
+	return wctx, wrapped, func() { cancel(nil) }
+}
+
 // ReviewRequest is the mode-agnostic review invocation passed to the injected
 // Reviewer. It mirrors engine.Request but lives in cli so the engine (which
 // transitively imports cli for CLIError) is not imported here, avoiding a cycle.
@@ -70,12 +156,15 @@ type ReviewRequest struct {
 	AuthToken       string
 	Model           string
 	Timeout         time.Duration
+	StalledTimeout  time.Duration
+	ProviderRetry   config.ProviderRetry
 	ExpandWindow    int
 	TokenBudget     int
 	DeepContext     bool
 	ContextHops     int
 	ContextHopsAuto bool
 	Subagents       config.ReviewSubagents
+	Tools           config.ReviewTools
 	SymbolContext   config.SymbolContext
 	FilterMode      string // added|diff_context|file|nofilter (default diff_context)
 	WantDiagram     bool   // opt into the mermaid change diagram (default off)
@@ -183,19 +272,21 @@ func SetReviewer(r Reviewer) { reviewer = r }
 // in-memory-only GitHub token (PAT) and whether to post. The LLM-credential
 // fields mirror ReviewRequest (findings still require the LLM).
 type PRReviewRequest struct {
-	Ref         string
-	Token       string
-	Post        bool
-	Suggest     bool
-	PatchRepair bool
-	Approval    config.ApprovalPolicy
-	Gate        string
-	Provider    string
-	APIKey      string
-	BaseURL     string
-	AuthToken   string
-	Model       string
-	Timeout     time.Duration
+	Ref            string
+	Token          string
+	Post           bool
+	Suggest        bool
+	PatchRepair    bool
+	Approval       config.ApprovalPolicy
+	Gate           string
+	Provider       string
+	APIKey         string
+	BaseURL        string
+	AuthToken      string
+	Model          string
+	Timeout        time.Duration
+	StalledTimeout time.Duration
+	ProviderRetry  config.ProviderRetry
 
 	// Quota is the resolved provider's usage quota (nil = none). Threaded by the
 	// serve host whose host-config provider quota is not in the user config.toml;
@@ -214,6 +305,7 @@ type PRReviewRequest struct {
 	ContextHops     int
 	ContextHopsAuto bool
 	Subagents       config.ReviewSubagents
+	Tools           config.ReviewTools
 	SymbolContext   config.SymbolContext
 	FilterMode      string // added|diff_context|file|nofilter (default diff_context)
 	MinSeverity     string // inline-posting floor: none|info|low|medium|high|critical (default keeps current behavior)
@@ -310,6 +402,7 @@ func nudgeIfUnconfigured(apiKey, authToken string) error {
 
 const defaultTokenBudget = 0
 const defaultReviewTimeout = 15 * time.Minute
+const defaultReviewStalledTimeout = 5 * time.Minute
 const maxContextHops = 5
 
 func reviewCommand(opts *options) *cobra.Command {
@@ -402,6 +495,7 @@ func reviewCommand(opts *options) *cobra.Command {
 			if !cmd.Flags().Changed("timeout") {
 				opts.timeout = reviewTimeoutDefault(rcfg)
 			}
+			stalledTimeout := reviewStalledTimeoutDefault(rcfg)
 			if deepContext {
 				if !cmd.Flags().Changed("expand") && rcfg.Expand == nil {
 					expand = 20
@@ -441,6 +535,7 @@ func reviewCommand(opts *options) *cobra.Command {
 					authToken:        authToken,
 					model:            model,
 					timeout:          opts.timeout,
+					stalledTimeout:   stalledTimeout,
 					include:          include,
 					exclude:          exclude,
 					exts:             exts,
@@ -450,6 +545,8 @@ func reviewCommand(opts *options) *cobra.Command {
 					contextHops:      contextHops,
 					contextHopsAuto:  contextHopsAuto,
 					subagents:        rcfg.Subagents,
+					providerRetry:    rcfg.ProviderRetry,
+					tools:            rcfg.Tools,
 					symbolContext:    rcfg.Tools.SymbolContext,
 					filterMode:       filterMode,
 					minSeverity:      minSeverity,
@@ -489,12 +586,15 @@ func reviewCommand(opts *options) *cobra.Command {
 				AuthToken:        authToken,
 				Model:            model,
 				Timeout:          opts.timeout,
+				StalledTimeout:   stalledTimeout,
+				ProviderRetry:    rcfg.ProviderRetry,
 				ExpandWindow:     expand,
 				TokenBudget:      tokenBudget,
 				DeepContext:      deepContext,
 				ContextHops:      contextHops,
 				ContextHopsAuto:  contextHopsAuto,
 				Subagents:        rcfg.Subagents,
+				Tools:            rcfg.Tools,
 				SymbolContext:    rcfg.Tools.SymbolContext,
 				FilterMode:       filterMode,
 				WantDiagram:      wantDiagram,
@@ -511,9 +611,12 @@ func reviewCommand(opts *options) *cobra.Command {
 				ctx, cancel = stdctx.WithTimeout(ctx, opts.timeout)
 				defer cancel()
 			}
+			var stopWatchdog func()
+			ctx, req.Progress, stopWatchdog = withReviewProgressWatchdog(ctx, stalledTimeout, prog)
+			defer stopWatchdog()
 			out, err := reviewer.Review(ctx, req)
 			if err != nil {
-				return classifyReviewErr(err, opts.timeout)
+				return classifyReviewErr(err, opts.timeout, ctx)
 			}
 			if prog != nil {
 				prog(fmt.Sprintf("done: %d findings", len(out.Findings)))
@@ -595,19 +698,20 @@ func reviewCommand(opts *options) *cobra.Command {
 
 // prRunArgs bundles the --pr invocation values RunE forwards to runPRReview.
 type prRunArgs struct {
-	ref         string
-	token       string
-	post        bool
-	suggest     bool
-	patchRepair bool
-	approval    config.ApprovalPolicy
-	gate        string
-	provider    string
-	apiKey      string
-	baseURL     string
-	authToken   string
-	model       string
-	timeout     time.Duration
+	ref            string
+	token          string
+	post           bool
+	suggest        bool
+	patchRepair    bool
+	approval       config.ApprovalPolicy
+	gate           string
+	provider       string
+	apiKey         string
+	baseURL        string
+	authToken      string
+	model          string
+	timeout        time.Duration
+	stalledTimeout time.Duration
 
 	include          []string
 	exclude          []string
@@ -618,6 +722,8 @@ type prRunArgs struct {
 	contextHops      int
 	contextHopsAuto  bool
 	subagents        config.ReviewSubagents
+	providerRetry    config.ProviderRetry
+	tools            config.ReviewTools
 	symbolContext    config.SymbolContext
 	filterMode       string
 	minSeverity      string
@@ -658,6 +764,8 @@ func runPRReview(cmd *cobra.Command, a prRunArgs) error {
 		ctx, cancel = stdctx.WithTimeout(ctx, a.timeout)
 		defer cancel()
 	}
+	ctx, progress, stopWatchdog := withReviewProgressWatchdog(ctx, a.stalledTimeout, a.progress)
+	defer stopWatchdog()
 
 	out, err := prReviewer.ReviewPR(ctx, PRReviewRequest{
 		Ref:              a.ref,
@@ -673,6 +781,8 @@ func runPRReview(cmd *cobra.Command, a prRunArgs) error {
 		AuthToken:        a.authToken,
 		Model:            a.model,
 		Timeout:          a.timeout,
+		StalledTimeout:   a.stalledTimeout,
+		ProviderRetry:    a.providerRetry,
 		IncludeGlobs:     a.include,
 		ExcludeGlobs:     a.exclude,
 		Extensions:       a.exts,
@@ -682,6 +792,7 @@ func runPRReview(cmd *cobra.Command, a prRunArgs) error {
 		ContextHops:      a.contextHops,
 		ContextHopsAuto:  a.contextHopsAuto,
 		Subagents:        a.subagents,
+		Tools:            a.tools,
 		SymbolContext:    a.symbolContext,
 		FilterMode:       a.filterMode,
 		MinSeverity:      a.minSeverity,
@@ -693,13 +804,13 @@ func runPRReview(cmd *cobra.Command, a prRunArgs) error {
 		Mode:             a.mode,
 		NoSave:           a.noSave,
 		Force:            a.force,
-		Progress:         a.progress,
+		Progress:         progress,
 		TraceSink:        a.traceSink,
 		CaptureReasoning: a.captureReasoning,
 		ActionsOut:       cmd.OutOrStdout(),
 	})
 	if err != nil {
-		return classifyReviewErr(err, a.timeout)
+		return classifyReviewErr(err, a.timeout, ctx)
 	}
 
 	// Incremental-skip path (additive, back-compatible): an unchanged head SHA
@@ -825,6 +936,15 @@ func reviewTimeoutDefault(r config.Review) time.Duration {
 		}
 	}
 	return defaultReviewTimeout
+}
+
+func reviewStalledTimeoutDefault(r config.Review) time.Duration {
+	if r.StalledTimeout != "" {
+		if d, err := time.ParseDuration(r.StalledTimeout); err == nil && d >= 0 {
+			return d
+		}
+	}
+	return defaultReviewStalledTimeout
 }
 
 // validatePRFlags rejects --post together with --no-post and (defense-in-depth)

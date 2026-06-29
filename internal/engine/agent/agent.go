@@ -69,6 +69,8 @@ type Context struct {
 	PromptFormat string
 	// OperatorPrompt is trusted host policy. LOCKSTEP: mirror Conversation in ALL backends.
 	OperatorPrompt string
+	ProviderRetry  config.ProviderRetry
+	Tools          config.ReviewTools
 	SymbolContext  config.SymbolContext
 	RepoDir        string
 	Rev            string
@@ -232,9 +234,11 @@ func (a *anthropicAgent) Review(ctx stdctx.Context, rc Context) (engine.ReviewOu
 			params.Messages[last].Content = append(params.Messages[last].Content, anthropic.NewTextBlock(forceFinalizeNudge))
 		}
 
-		msg, err := a.client.newMessage(ctx, params)
+		msg, err := retryProviderCall(ctx, rc.ProviderRetry, rc.Progress, "anthropic.messages", func() (*anthropic.Message, error) {
+			return a.client.newMessage(ctx, params)
+		}, classifyAnthropicErr, anthropicProviderRetryable)
 		if err != nil {
-			return engine.ReviewOutput{}, classifyAnthropicErr(err)
+			return engine.ReviewOutput{}, err
 		}
 		usage.InputTokens += msg.Usage.InputTokens
 		usage.OutputTokens += msg.Usage.OutputTokens
@@ -273,17 +277,19 @@ func (a *anthropicAgent) RepairPatch(ctx stdctx.Context, rr RepairRequest) (stri
 		ctx, cancel = stdctx.WithTimeout(ctx, a.timeout)
 		defer cancel()
 	}
-	msg, err := a.client.newMessage(ctx, anthropic.MessageNewParams{
-		MaxTokens:   repairMaxTokens,
-		Temperature: anthropic.Float(a.temperature),
-		Model:       anthropic.Model(a.model),
-		System:      []anthropic.TextBlockParam{{Text: repairSystemPrompt}},
-		Messages: []anthropic.MessageParam{
-			anthropic.NewUserMessage(anthropic.NewTextBlock(BuildRepairPrompt(rr))),
-		},
-	})
+	msg, err := retryProviderCall(ctx, rr.ProviderRetry, nil, "anthropic.repair", func() (*anthropic.Message, error) {
+		return a.client.newMessage(ctx, anthropic.MessageNewParams{
+			MaxTokens:   repairMaxTokens,
+			Temperature: anthropic.Float(a.temperature),
+			Model:       anthropic.Model(a.model),
+			System:      []anthropic.TextBlockParam{{Text: repairSystemPrompt}},
+			Messages: []anthropic.MessageParam{
+				anthropic.NewUserMessage(anthropic.NewTextBlock(BuildRepairPrompt(rr))),
+			},
+		})
+	}, classifyAnthropicErr, anthropicProviderRetryable)
 	if err != nil {
-		return "", engine.Usage{}, classifyAnthropicErr(err)
+		return "", engine.Usage{}, err
 	}
 	var text strings.Builder
 	for _, block := range msg.Content {
@@ -335,14 +341,106 @@ func (a *anthropicAgent) dispatch(ctx stdctx.Context, rc Context, turn int, msg 
 // runTool executes one tool against the reviewed revision. Provider-agnostic so
 // all agent loops share it (and record the dispatch into the trace). Returns
 // (content, isError).
+var executeTool = enginetools.Execute
+
 func runTool(ctx stdctx.Context, rc Context, turn int, name string, input json.RawMessage) (string, bool) {
-	return enginetools.Execute(ctx, rc.SymbolContext, enginetools.Context{
+	attempts := toolAttempts(rc.Tools)
+	backoff := toolRetryBackoff(rc.Tools)
+	var last string
+	for attempt := 1; attempt <= attempts; attempt++ {
+		if err := ctx.Err(); err != nil {
+			return err.Error(), true
+		}
+		out, isErr := executeTool(ctx, rc.SymbolContext, toolContext(rc), turn, name, input)
+		if err := ctx.Err(); err != nil {
+			return err.Error(), true
+		}
+		if !isErr || !retryToolError(out) || attempt == attempts {
+			return out, isErr
+		}
+		last = out
+		if rc.Progress != nil {
+			rc.Progress(fmt.Sprintf("→ %s retry %d/%d after transient error", name, attempt, attempts-1))
+		}
+		if err := sleepCtx(ctx, backoffForAttempt(backoff, attempt)); err != nil {
+			return err.Error(), true
+		}
+	}
+	return last, true
+}
+
+func toolAttempts(tools config.ReviewTools) int {
+	retries := 2
+	if tools.MaxRetries != nil {
+		retries = *tools.MaxRetries
+	}
+	if retries < 0 {
+		retries = 0
+	}
+	if retries > 5 {
+		retries = 5
+	}
+	return retries + 1
+}
+
+func toolRetryBackoff(tools config.ReviewTools) time.Duration {
+	if tools.RetryBackoff != "" {
+		if d, err := time.ParseDuration(tools.RetryBackoff); err == nil && d >= 0 {
+			return d
+		}
+	}
+	return 250 * time.Millisecond
+}
+
+func backoffForAttempt(base time.Duration, attempt int) time.Duration {
+	if base <= 0 {
+		return 0
+	}
+	d := base << (attempt - 1)
+	if d > 2*time.Second {
+		return 2 * time.Second
+	}
+	return d
+}
+
+func retryToolError(out string) bool {
+	s := strings.ToLower(out)
+	if strings.Contains(s, "invalid arguments") ||
+		strings.Contains(s, "requires a non-empty") ||
+		strings.Contains(s, "unknown tool") ||
+		strings.Contains(s, "not a directory") ||
+		strings.Contains(s, "does not exist") ||
+		strings.Contains(s, "no such file") ||
+		strings.Contains(s, "bad revision") ||
+		strings.Contains(s, "ambiguous argument") {
+		return false
+	}
+	for _, marker := range []string{
+		"temporary failure",
+		"resource temporarily unavailable",
+		"i/o timeout",
+		"operation timed out",
+		"connection reset",
+		"connection refused",
+		"broken pipe",
+		"device or resource busy",
+		"text file busy",
+	} {
+		if strings.Contains(s, marker) {
+			return true
+		}
+	}
+	return false
+}
+
+func toolContext(rc Context) enginetools.Context {
+	return enginetools.Context{
 		RepoDir:  rc.RepoDir,
 		Rev:      rc.Rev,
 		Runner:   rc.Runner,
 		Progress: rc.Progress,
 		Trace:    rc.Trace,
-	}, turn, name, input)
+	}
 }
 
 // parseFindings strips markdown fences and unmarshals the model's JSON into a

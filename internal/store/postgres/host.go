@@ -175,6 +175,16 @@ WITH picked_queued AS (
 	FROM picked
 	WHERE j.id = picked.id
 	RETURNING j.id, j.repo_id, j.session_id, j.number, j.head_sha, j.base_sha, j.policy_hash, j.prompt_hash, j.rules_hash, j.dedupe_key, j.priority, j.available_at, j.status, j.attempts, j.lease_owner, j.lease_until, j.review_id, j.error, j.created_at, j.updated_at, j.completed_at
+), stale_attempts AS (
+	UPDATE host_job_attempts a
+	SET status='canceled',
+	    error='stale running job reclaimed',
+	    finished_at=$1
+	FROM updated u
+	WHERE a.job_id = u.id
+	  AND a.status = 'running'
+	  AND a.attempt < u.attempts
+	RETURNING a.id
 ), attempt AS (
 	INSERT INTO host_job_attempts (job_id, attempt, worker_id, started_at, status)
 	SELECT id, attempts, $2, $1, 'running'
@@ -314,10 +324,11 @@ SET status='queued',
     error=$3,
     available_at=$4,
     updated_at=$5,
-    completed_at=NULL
+    completed_at=NULL,
+    attempts=CASE WHEN $6::boolean AND $2::bigint <> 0 AND attempts > 0 THEN attempts - 1 ELSE attempts END
 WHERE id=$1
   AND ($2::bigint = 0 OR attempts = (SELECT attempt FROM host_job_attempts WHERE id=$2 AND job_id=$1))`,
-		in.JobID, in.AttemptID, in.Error, availableAt, now)
+		in.JobID, in.AttemptID, in.Error, availableAt, now, in.DiscardAttempt)
 	if err != nil {
 		return err
 	}
@@ -335,6 +346,12 @@ WHERE id=$1`, in.AttemptID, now); err != nil {
 		return tx.Commit()
 	}
 	if in.AttemptID != 0 {
+		if in.DiscardAttempt {
+			if _, err := tx.ExecContext(ctx, `DELETE FROM host_job_attempts WHERE id=$1`, in.AttemptID); err != nil {
+				return err
+			}
+			return tx.Commit()
+		}
 		if _, err := tx.ExecContext(ctx, `
 UPDATE host_job_attempts
 SET status='canceled',

@@ -38,6 +38,7 @@ import (
 // even with no user/repo rules the embedded defaults flow within a bounded slice
 // of the prompt.
 const defaultRulesTokenBudget = 4096
+const reviewErrorSummaryTimeout = 30 * time.Second
 
 // loadRules discovers + trust-tags rules for a review. repoDir is the working
 // tree (local) or the PR temp clone (--pr). allowRepo gates the Untrusted repo
@@ -244,6 +245,8 @@ func (engineReviewer) Review(ctx stdctx.Context, req cli.ReviewRequest) (cli.Rev
 		ContextHops:     req.ContextHops,
 		ContextHopsAuto: req.ContextHopsAuto,
 		Subagents:       engineSubagents(req.Subagents),
+		ProviderRetry:   req.ProviderRetry,
+		Tools:           req.Tools,
 		SymbolContext:   req.SymbolContext,
 		Provider:        string(creds.Kind),
 		Model:           creds.Model,
@@ -464,6 +467,8 @@ func (prReviewer) ReviewPR(ctx stdctx.Context, req cli.PRReviewRequest) (cli.Rev
 		ContextHops:     contextHopsForPR(req.ContextHops, info.IsFork),
 		ContextHopsAuto: contextHopsAutoForPR(req.ContextHopsAuto, info.IsFork),
 		Subagents:       engineSubagents(req.Subagents),
+		ProviderRetry:   req.ProviderRetry,
+		Tools:           req.Tools,
 		SymbolContext:   req.SymbolContext,
 		Provider:        string(creds.Kind),
 		Model:           creds.Model,
@@ -493,7 +498,7 @@ func (prReviewer) ReviewPR(ctx stdctx.Context, req cli.PRReviewRequest) (cli.Rev
 		// comment so a later good run replaces it) instead of failing silently. Fork
 		// PRs skip it: the token can't write an issue comment (403). Best-effort.
 		if req.Post && !info.IsFork {
-			if _, uerr := mgithub.UpsertSummaryComment(ctx, client, info, mgithub.RenderError(info, config.RedactString(err.Error()), cli.Version())); uerr != nil {
+			if uerr := upsertReviewErrorSummary(ctx, client, info, err); uerr != nil {
 				slog.Warn("review-error summary upsert failed: " + config.RedactString(uerr.Error()))
 			}
 		}
@@ -533,6 +538,13 @@ func (prReviewer) ReviewPR(ctx stdctx.Context, req cli.PRReviewRequest) (cli.Rev
 		PR:       prResult,
 		ReviewID: res.ID,
 	}, nil
+}
+
+func upsertReviewErrorSummary(ctx stdctx.Context, client mgithub.Client, info *mgithub.PRInfo, reviewErr error) error {
+	cctx, cancel := stdctx.WithTimeout(stdctx.WithoutCancel(ctx), reviewErrorSummaryTimeout)
+	defer cancel()
+	_, err := mgithub.UpsertSummaryComment(cctx, client, info, mgithub.RenderError(info, config.RedactString(reviewErr.Error()), cli.Version()))
+	return err
 }
 
 // skipUnchanged reports whether the desired PR review state already exists.
@@ -594,6 +606,8 @@ type reviewReuseShape struct {
 	ContextHops     int
 	ContextHopsAuto bool
 	Subagents       config.ReviewSubagents
+	ProviderRetry   config.ProviderRetry
+	Tools           config.ReviewTools
 	SymbolContext   config.SymbolContext
 	FilterMode      string
 	MinSeverity     string
@@ -671,6 +685,8 @@ func newReviewReuseShape(req cli.PRReviewRequest, cfg config.Config, providerNam
 		ContextHops:     req.ContextHops,
 		ContextHopsAuto: req.ContextHopsAuto,
 		Subagents:       req.Subagents,
+		ProviderRetry:   req.ProviderRetry,
+		Tools:           req.Tools,
 		SymbolContext:   req.SymbolContext,
 		FilterMode:      req.FilterMode,
 		MinSeverity:     req.MinSeverity,
@@ -1101,6 +1117,8 @@ func (a agentAdapter) Review(ctx stdctx.Context, rc engine.AgentContext) (engine
 		Conversation:     rc.Conversation,    // lockstep: forgetting this silently drops the PR conversation
 		PromptFormat:     rc.PromptFormat,    // lockstep: forgetting this silently renders legacy under xml request
 		OperatorPrompt:   rc.OperatorPrompt,
+		ProviderRetry:    rc.ProviderRetry,
+		Tools:            rc.Tools,
 		SymbolContext:    rc.SymbolContext,
 		RepoDir:          rc.RepoDir,
 		Rev:              rc.Rev,
@@ -1115,10 +1133,11 @@ func (a agentAdapter) Review(ctx stdctx.Context, rc engine.AgentContext) (engine
 // lockstep: a missed forward silently no-ops repair for the real agent.
 func (a agentAdapter) RepairPatch(ctx stdctx.Context, rr engine.RepairRequest) (string, engine.Usage, error) {
 	return a.inner.RepairPatch(ctx, agent.RepairRequest{
-		Span:      rr.Span,
-		Rationale: rr.Rationale,
-		Category:  rr.Category,
-		Severity:  rr.Severity,
+		Span:          rr.Span,
+		Rationale:     rr.Rationale,
+		Category:      rr.Category,
+		Severity:      rr.Severity,
+		ProviderRetry: rr.ProviderRetry,
 	})
 }
 

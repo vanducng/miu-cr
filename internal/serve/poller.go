@@ -96,6 +96,7 @@ type PollConfig struct {
 	Dispatcher   Dispatcher
 	Logger       *slog.Logger
 	ReviewTO     time.Duration
+	StalledTO    time.Duration
 }
 
 // Poller is the poll-mode trigger: a ticker loop that enumerates candidates,
@@ -111,6 +112,7 @@ type Poller struct {
 	resolveToken func() (string, error)
 	log          *slog.Logger
 	reviewTO     time.Duration
+	stalledTO    time.Duration
 
 	mu     sync.Mutex // guards cursor; the Pool may run OnDone on a worker goroutine
 	cursor *Cursor
@@ -144,6 +146,7 @@ func NewPoller(cfg PollConfig, gh notifGetter) *Poller {
 		resolveToken: cfg.ResolveToken,
 		log:          log,
 		reviewTO:     cfg.ReviewTO,
+		stalledTO:    cfg.StalledTO,
 		cursor:       cur,
 	}
 }
@@ -270,10 +273,11 @@ func (p *Poller) dispatchCandidate(ctx stdctx.Context, c candidate, token string
 
 	pk := prKey{Owner: c.owner, Repo: c.repo, Number: c.number}
 	job := Job{
-		Key:     pk,
-		Ref:     pk.String(),
-		Token:   token,
-		Timeout: p.reviewTO,
+		Key:            pk,
+		Ref:            pk.String(),
+		Token:          token,
+		Timeout:        p.reviewTO,
+		StalledTimeout: p.stalledTO,
 		OnDone: func(err error) {
 			if err != nil {
 				return // failed review stays retryable next tick (NotifSeen left unrecorded too)

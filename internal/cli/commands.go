@@ -333,6 +333,7 @@ func serveCommand(opts *options) *cobra.Command {
 					Dispatcher:   disp,
 					Logger:       log,
 					ReviewTO:     reviewTO,
+					StalledTO:    defaultReviewStalledTimeout,
 				}
 			}
 
@@ -347,14 +348,15 @@ func serveCommand(opts *options) *cobra.Command {
 			// Webhook (+ optional poll). Server.Run is the SOLE Drainer. The REST
 			// /v1 routes are registered only when APIToken + ReviewStore are set.
 			srv, pool, err := serve.New(serve.Config{
-				Addr:          addr,
-				Secret:        []byte(secret),
-				Repos:         repos,
-				ResolveToken:  resolveToken,
-				Logger:        log,
-				ReviewTimeout: reviewTO,
-				APIToken:      []byte(apiToken),
-				ReviewStore:   reviewStore,
+				Addr:                 addr,
+				Secret:               []byte(secret),
+				Repos:                repos,
+				ResolveToken:         resolveToken,
+				Logger:               log,
+				ReviewTimeout:        reviewTO,
+				ReviewStalledTimeout: defaultReviewStalledTimeout,
+				APIToken:             []byte(apiToken),
+				ReviewStore:          reviewStore,
 			}, reviewFn)
 			if err != nil {
 				return &CLIError{Code: "config.invalid", Message: err.Error(), Hint: "check the serve configuration (secret, token, repos)", Exit: 2}
@@ -609,6 +611,8 @@ func buildServeHostRepos(ctx stdctx.Context, cfg config.HostConfig, path string)
 		Gate:                 "high",
 		FilterMode:           "diff_context",
 		Timeout:              "900s",
+		StalledTimeout:       "5m",
+		ProviderRetry:        config.DefaultProviderRetry(),
 		Post:                 boolSetting(true),
 		Suggest:              boolSetting(false),
 		PatchRepair:          boolSetting(false),
@@ -673,64 +677,71 @@ func buildServeHostRepos(ctx stdctx.Context, cfg config.HostConfig, path string)
 }
 
 type hostReviewAnalysisFields struct {
-	Gate         string
-	FilterMode   string
-	MinSeverity  string
-	PromptFormat string
-	Timeout      string
-	Expand       *int
-	TokenBudget  *int
-	ContextHops  *int
-	Mode         string
-	DeepContext  *bool
-	Conversation *bool
-	Force        *bool
-	PatchRepair  *bool
-	Tools        config.ReviewTools
-	Subagents    config.ReviewSubagents
+	Gate           string
+	FilterMode     string
+	MinSeverity    string
+	PromptFormat   string
+	Timeout        string
+	StalledTimeout string
+	ProviderRetry  config.ProviderRetry
+	Expand         *int
+	TokenBudget    *int
+	ContextHops    *int
+	Mode           string
+	DeepContext    *bool
+	Conversation   *bool
+	Force          *bool
+	PatchRepair    *bool
+	Tools          config.ReviewTools
+	Subagents      config.ReviewSubagents
 }
 
 func hostReviewAnalysisShape(review config.HostReview) any {
 	return hostReviewAnalysisFields{
-		Gate:         review.Gate,
-		FilterMode:   review.FilterMode,
-		MinSeverity:  review.MinSeverity,
-		Timeout:      review.Timeout,
-		Expand:       review.Expand,
-		TokenBudget:  review.TokenBudget,
-		ContextHops:  review.ContextHops,
-		Mode:         review.Mode,
-		DeepContext:  review.DeepContext,
-		Conversation: review.Conversation,
-		Force:        review.Force,
-		PatchRepair:  review.PatchRepair,
-		Tools:        review.Tools,
-		Subagents:    review.Subagents,
-		PromptFormat: review.PromptFormat,
+		Gate:           review.Gate,
+		FilterMode:     review.FilterMode,
+		MinSeverity:    review.MinSeverity,
+		Timeout:        review.Timeout,
+		StalledTimeout: review.StalledTimeout,
+		ProviderRetry:  review.ProviderRetry,
+		Expand:         review.Expand,
+		TokenBudget:    review.TokenBudget,
+		ContextHops:    review.ContextHops,
+		Mode:           review.Mode,
+		DeepContext:    review.DeepContext,
+		Conversation:   review.Conversation,
+		Force:          review.Force,
+		PatchRepair:    review.PatchRepair,
+		Tools:          review.Tools,
+		Subagents:      review.Subagents,
+		PromptFormat:   review.PromptFormat,
 	}
 }
 
 func hostReviewOptions(providerName string, provider config.HostProvider, secret string, review config.HostReview) (serve.JobReviewOptions, error) {
 	opts := serve.JobReviewOptions{
-		Post:          boolValue(review.Post),
-		Suggest:       boolValue(review.Suggest),
-		PatchRepair:   boolValue(review.PatchRepair),
-		Approval:      review.Approval,
-		Force:         boolValue(review.Force),
-		Conversation:  boolValue(review.Conversation),
-		Gate:          review.Gate,
-		FilterMode:    review.FilterMode,
-		MinSeverity:   review.MinSeverity,
-		Format:        review.Format,
-		PromptFormat:  review.PromptFormat,
-		Mode:          review.Mode,
-		BaseURL:       provider.BaseURL,
-		Model:         provider.Model,
-		DeepContext:   boolValue(review.DeepContext),
-		Subagents:     review.Subagents,
-		SymbolContext: review.Tools.SymbolContext,
-		Quota:         provider.Quota,
-		QuotaProvider: providerName,
+		Post:           boolValue(review.Post),
+		Suggest:        boolValue(review.Suggest),
+		PatchRepair:    boolValue(review.PatchRepair),
+		Approval:       review.Approval,
+		Force:          boolValue(review.Force),
+		Conversation:   boolValue(review.Conversation),
+		Gate:           review.Gate,
+		FilterMode:     review.FilterMode,
+		MinSeverity:    review.MinSeverity,
+		Format:         review.Format,
+		PromptFormat:   review.PromptFormat,
+		Mode:           review.Mode,
+		BaseURL:        provider.BaseURL,
+		Model:          provider.Model,
+		StalledTimeout: durationOrDefaultAllowZero(review.StalledTimeout, defaultReviewStalledTimeout),
+		ProviderRetry:  review.ProviderRetry,
+		DeepContext:    boolValue(review.DeepContext),
+		Subagents:      review.Subagents,
+		Tools:          review.Tools,
+		SymbolContext:  review.Tools.SymbolContext,
+		Quota:          provider.Quota,
+		QuotaProvider:  providerName,
 	}
 	if review.Expand != nil {
 		opts.ExpandWindow = *review.Expand
@@ -1125,6 +1136,10 @@ func mergeHostReview(base, over config.HostReview) config.HostReview {
 	if over.Timeout != "" {
 		out.Timeout = over.Timeout
 	}
+	if over.StalledTimeout != "" {
+		out.StalledTimeout = over.StalledTimeout
+	}
+	out.ProviderRetry = config.MergeProviderRetry(base.ProviderRetry, over.ProviderRetry)
 	if over.Expand != nil {
 		out.Expand = over.Expand
 	}
@@ -1196,6 +1211,17 @@ func durationOrDefault(raw string, fallback time.Duration) time.Duration {
 		return d
 	}
 	return fallback
+}
+
+func durationOrDefaultAllowZero(raw string, fallback time.Duration) time.Duration {
+	if raw == "" {
+		return fallback
+	}
+	d, err := time.ParseDuration(raw)
+	if err != nil || d < 0 {
+		return fallback
+	}
+	return d
 }
 
 func hostPruneConfig(h config.HostRuntime) serve.HostPruneConfig {
@@ -1292,11 +1318,17 @@ func buildServeReviewFn(log *slog.Logger, gate string, st serve.ReviewStore, tra
 		if timeout <= 0 {
 			timeout = 15 * time.Minute
 		}
+		stalledTimeout := j.StalledTimeout
+		if j.Review != nil {
+			stalledTimeout = review.StalledTimeout
+		}
 		jobCtx, cancel := stdctx.WithTimeout(stdctx.Background(), timeout)
 		defer cancel()
 		progress := func(stage string) {
 			log.Debug("review progress", serveJobLogAttrs(j, "stage", config.RedactString(stage))...)
 		}
+		jobCtx, progress, stopWatchdog := withReviewProgressWatchdog(jobCtx, stalledTimeout, progress)
+		defer stopWatchdog()
 		out, err := ReviewPRForServe(jobCtx, PRReviewRequest{
 			Ref:              j.Ref,
 			Token:            j.Token,
@@ -1318,6 +1350,8 @@ func buildServeReviewFn(log *slog.Logger, gate string, st serve.ReviewStore, tra
 			DeepContext:      review.DeepContext,
 			ContextHops:      review.ContextHops,
 			Subagents:        review.Subagents,
+			ProviderRetry:    review.ProviderRetry,
+			Tools:            review.Tools,
 			SymbolContext:    review.SymbolContext,
 			FilterMode:       review.FilterMode,
 			MinSeverity:      review.MinSeverity,
@@ -1332,6 +1366,7 @@ func buildServeReviewFn(log *slog.Logger, gate string, st serve.ReviewStore, tra
 			CaptureReasoning: captureReasoning,
 		})
 		if err != nil {
+			err = classifyReviewErr(err, timeout, jobCtx)
 			// A quota-exhausted provider is a terminal skip for THIS job, not a
 			// failure: returning err would retry it every poll until the window
 			// resets, spamming the provider. Mark done + log; a later push or

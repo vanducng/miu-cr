@@ -40,6 +40,15 @@ func (f *fakeReviewer) GateFailed(findings []ReviewFinding, gate string) bool {
 	return max >= rank[gate]
 }
 
+type blockingReviewer struct{}
+
+func (blockingReviewer) Review(ctx stdctx.Context, req ReviewRequest) (ReviewOutcome, error) {
+	<-ctx.Done()
+	return ReviewOutcome{}, ctx.Err()
+}
+
+func (blockingReviewer) GateFailed([]ReviewFinding, string) bool { return false }
+
 func runReview(t *testing.T, r Reviewer, args ...string) (string, error) {
 	t.Helper()
 	t.Setenv("HOME", t.TempDir())                       // hermetic config dir: no real ~/.config/miu/cr leaks in
@@ -112,6 +121,20 @@ func TestReviewClassifiesTimeout(t *testing.T) {
 	}
 	if env.Error == nil || !env.Error.Retryable || env.Error.Code != "review.timeout" {
 		t.Fatalf("envelope did not reflect a retryable review.timeout: %+v", env.Error)
+	}
+}
+
+func TestReviewClassifiesStalledProgress(t *testing.T) {
+	writeUserConfig(t, `[review]
+stalled_timeout = "20ms"
+`)
+	_, err := runReviewKeepHome(t, blockingReviewer{}, "--staged", "--gate", "high")
+	var ce *CLIError
+	if !asCLIError(err, &ce) || ce.Code != "review.stalled" {
+		t.Fatalf("want review.stalled, got %+v", err)
+	}
+	if !ce.Retry || !strings.Contains(ce.Hint, "stalled_timeout") {
+		t.Fatalf("review.stalled must be retryable with stalled_timeout hint, got %+v", ce)
 	}
 }
 

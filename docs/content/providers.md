@@ -90,6 +90,7 @@ filter_mode  = "diff_context"  # CLI default --filter-mode (--pr): added|diff_co
 min_severity = "low"           # optional --min-severity inline floor; unset means no floor
 format       = "full"          # CLI default --format: full|minimal
 timeout      = "900s"          # review timeout (a Go duration; CLI review default is 900s)
+stalled_timeout = "5m"         # no-progress watchdog; "0s" disables it
 expand       = 5               # CLI default --expand; --deep-context raises it to 20
 token_budget = 0               # CLI default --token-budget; 0 = no cap
 deep_context = false           # CLI default --deep-context
@@ -105,6 +106,16 @@ temperature  = 0               # LLM sampling temperature (0–2), used when thi
                                # openai chat models; reasoning models (which need temp 1) ignore it.
 suggest      = false           # CLI default --suggest (Action input defaults true)
 patch_repair = false           # CLI default --patch-repair; requires suggest=true
+
+[review.provider_retry]        # provider API retry behavior
+max_retries = 10               # retries after the first failed provider request; 0 disables
+initial_backoff = "5s"         # jittered exponential backoff starts here
+max_backoff = "2m"             # cap each provider retry sleep
+max_elapsed = "10m"            # cap total retry sleep budget inside the review timeout
+
+[review.tools]                 # built-in reviewer tool behavior
+max_retries = 2                # transient tool execution retries; 0 disables
+retry_backoff = "250ms"        # initial retry delay, doubled per retry and capped
 
 [review.tools.symbol_context]  # internal symbol_context tool limits
 max_bytes = 16000              # cap returned text before it reaches the model
@@ -132,6 +143,16 @@ system_prompt = "Focus on correctness, concurrency, error handling, and API comp
 [review.category_urls]         # map a finding Category → a docs URL (clickable link + SARIF helpUri)
 "security" = "https://example.com/docs/security"
 ```
+
+`timeout` caps total review wall clock. `stalled_timeout` cancels a run that
+stops emitting progress, which catches stuck provider/tool turns sooner in host
+mode; set it to `"0s"` only when debugging. `[review.provider_retry]` retries
+transient provider failures (`429`, `5xx`, `529`, and temporary transport
+errors) with bounded jittered exponential backoff. It does not retry auth,
+invalid request, content-policy, or context cancellation errors. `[review.tools]`
+retries transient tool execution failures such as temporary filesystem/process
+errors, but does not retry malformed tool calls, unknown tools, missing files, or
+context cancellation.
 
 `symbol_context` is part of the core read-only reviewer toolset, alongside
 `file_read` and `grep`. `[review.tools.symbol_context]` tunes its bounds. The

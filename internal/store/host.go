@@ -123,11 +123,12 @@ type HostJobCompleteInput struct {
 }
 
 type HostJobReleaseInput struct {
-	JobID       int64
-	AttemptID   int64
-	Error       string
-	Now         time.Time
-	AvailableAt time.Time
+	JobID          int64
+	AttemptID      int64
+	Error          string
+	Now            time.Time
+	AvailableAt    time.Time
+	DiscardAttempt bool
 }
 
 // HostClosedPRsInput reconciles durable state against the authoritative set of

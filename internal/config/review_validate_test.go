@@ -43,7 +43,7 @@ func TestValidateReview(t *testing.T) {
 		wantErr bool
 	}{
 		{"empty ok", Review{}, false},
-		{"all valid", Review{Gate: "high", FilterMode: "file", MinSeverity: "low", Timeout: "5m", Expand: intPtr(20), TokenBudget: intPtr(0), DeepContext: boolPtr(true), ContextHops: intPtr(5), Conversation: boolPtr(true), Suggest: boolPtr(true), Tools: ReviewTools{SymbolContext: SymbolContext{MaxBytes: 12000, MaxFiles: 500, MaxParallel: 6}}, Approval: ApprovalPolicy{Mode: "threshold", MaxPriority: "P3", Note: "on_findings"}}, false},
+		{"all valid", Review{Gate: "high", FilterMode: "file", MinSeverity: "low", Timeout: "5m", StalledTimeout: "30s", ProviderRetry: ProviderRetry{MaxRetries: intPtr(10), InitialBackoff: "5s", MaxBackoff: "2m", MaxElapsed: "10m"}, Expand: intPtr(20), TokenBudget: intPtr(0), DeepContext: boolPtr(true), ContextHops: intPtr(5), Conversation: boolPtr(true), Suggest: boolPtr(true), Tools: ReviewTools{MaxRetries: intPtr(2), RetryBackoff: "250ms", SymbolContext: SymbolContext{MaxBytes: 12000, MaxFiles: 500, MaxParallel: 6}}, Approval: ApprovalPolicy{Mode: "threshold", MaxPriority: "P3", Note: "on_findings"}}, false},
 		{"bad gate", Review{Gate: "huge"}, true},
 		{"bad filter_mode", Review{FilterMode: "bogus"}, true},
 		{"bad min_severity", Review{MinSeverity: "meh"}, true},
@@ -53,6 +53,14 @@ func TestValidateReview(t *testing.T) {
 		{"prompt_format xml ok", Review{PromptFormat: "xml"}, false},
 		{"bad prompt_format", Review{PromptFormat: "yaml"}, true},
 		{"bad timeout", Review{Timeout: "5 fortnights"}, true},
+		{"stalled timeout zero ok", Review{StalledTimeout: "0s"}, false},
+		{"bad stalled timeout", Review{StalledTimeout: "-1s"}, true},
+		{"provider retry zero ok", Review{ProviderRetry: ProviderRetry{MaxRetries: intPtr(0), InitialBackoff: "0s", MaxBackoff: "0s", MaxElapsed: "0s"}}, false},
+		{"bad provider retry max retries negative", Review{ProviderRetry: ProviderRetry{MaxRetries: intPtr(-1)}}, true},
+		{"bad provider retry max retries too high", Review{ProviderRetry: ProviderRetry{MaxRetries: intPtr(21)}}, true},
+		{"bad provider retry initial backoff", Review{ProviderRetry: ProviderRetry{InitialBackoff: "soon"}}, true},
+		{"bad provider retry max backoff", Review{ProviderRetry: ProviderRetry{MaxBackoff: "-1s"}}, true},
+		{"bad provider retry max elapsed", Review{ProviderRetry: ProviderRetry{MaxElapsed: "later"}}, true},
 		{"bad expand", Review{Expand: intPtr(-1)}, true},
 		{"bad token budget", Review{TokenBudget: intPtr(-1)}, true},
 		{"context hops zero ok", Review{ContextHops: intPtr(0)}, false},
@@ -65,6 +73,9 @@ func TestValidateReview(t *testing.T) {
 		{"bad symbol max bytes", Review{Tools: ReviewTools{SymbolContext: SymbolContext{MaxBytes: -1}}}, true},
 		{"bad symbol max files", Review{Tools: ReviewTools{SymbolContext: SymbolContext{MaxFiles: -1}}}, true},
 		{"bad symbol max parallel", Review{Tools: ReviewTools{SymbolContext: SymbolContext{MaxParallel: -1}}}, true},
+		{"bad tool max retries negative", Review{Tools: ReviewTools{MaxRetries: intPtr(-1)}}, true},
+		{"bad tool max retries too high", Review{Tools: ReviewTools{MaxRetries: intPtr(6)}}, true},
+		{"bad tool retry backoff", Review{Tools: ReviewTools{RetryBackoff: "soon"}}, true},
 		{"subagents valid", Review{Subagents: ReviewSubagents{Mode: "auto", MaxParallel: 2, MinFiles: 4, Agents: []ReviewSubagent{{Name: "go", Include: []string{"**/*.go"}}}}}, false},
 		{"subagents bad mode", Review{Subagents: ReviewSubagents{Mode: "sometimes", Agents: []ReviewSubagent{{Name: "go", Include: []string{"**/*.go"}}}}}, true},
 		{"subagents empty include", Review{Subagents: ReviewSubagents{Mode: "always", Agents: []ReviewSubagent{{Name: "go"}}}}, true},
@@ -93,10 +104,13 @@ func TestValidateReview(t *testing.T) {
 
 func TestMergeReviewMergesNewFields(t *testing.T) {
 	base := Review{Approval: ApprovalPolicy{Mode: "clean"}}
-	file := Review{Gate: "low", FilterMode: "file", MinSeverity: "medium", PromptFormat: "markdown", Timeout: "120s", Expand: intPtr(12), TokenBudget: intPtr(0), DeepContext: boolPtr(true), ContextHops: intPtr(3), Conversation: boolPtr(true), Suggest: boolPtr(false), Tools: ReviewTools{SymbolContext: SymbolContext{MaxBytes: 12000}}, Approval: ApprovalPolicy{Mode: "threshold", MaxPriority: "P3"}, Subagents: ReviewSubagents{Mode: "auto", Agents: []ReviewSubagent{{Name: "go", Include: []string{"**/*.go"}}}}}
+	file := Review{Gate: "low", FilterMode: "file", MinSeverity: "medium", PromptFormat: "markdown", Timeout: "120s", StalledTimeout: "45s", ProviderRetry: ProviderRetry{MaxRetries: intPtr(7), InitialBackoff: "3s", MaxBackoff: "45s", MaxElapsed: "8m"}, Expand: intPtr(12), TokenBudget: intPtr(0), DeepContext: boolPtr(true), ContextHops: intPtr(3), Conversation: boolPtr(true), Suggest: boolPtr(false), Tools: ReviewTools{MaxRetries: intPtr(3), RetryBackoff: "500ms", SymbolContext: SymbolContext{MaxBytes: 12000}}, Approval: ApprovalPolicy{Mode: "threshold", MaxPriority: "P3"}, Subagents: ReviewSubagents{Mode: "auto", Agents: []ReviewSubagent{{Name: "go", Include: []string{"**/*.go"}}}}}
 	out := mergeReview(base, file)
-	if out.Gate != "low" || out.FilterMode != "file" || out.MinSeverity != "medium" || out.PromptFormat != "markdown" || out.Timeout != "120s" {
+	if out.Gate != "low" || out.FilterMode != "file" || out.MinSeverity != "medium" || out.PromptFormat != "markdown" || out.Timeout != "120s" || out.StalledTimeout != "45s" {
 		t.Fatalf("scalar review fields not merged: %+v", out)
+	}
+	if out.ProviderRetry.MaxRetries == nil || *out.ProviderRetry.MaxRetries != 7 || out.ProviderRetry.InitialBackoff != "3s" || out.ProviderRetry.MaxBackoff != "45s" || out.ProviderRetry.MaxElapsed != "8m" {
+		t.Fatalf("ProviderRetry not merged: %+v", out.ProviderRetry)
 	}
 	if out.Expand == nil || *out.Expand != 12 || out.TokenBudget == nil || *out.TokenBudget != 0 || out.DeepContext == nil || !*out.DeepContext || out.ContextHops == nil || *out.ContextHops != 3 || out.Conversation == nil || !*out.Conversation {
 		t.Fatalf("context review fields not merged: %+v", out)
@@ -104,7 +118,7 @@ func TestMergeReviewMergesNewFields(t *testing.T) {
 	if out.Suggest == nil || *out.Suggest != false {
 		t.Fatalf("Suggest not merged: %+v", out.Suggest)
 	}
-	if out.Tools.SymbolContext.MaxBytes != 12000 {
+	if out.Tools.MaxRetries == nil || *out.Tools.MaxRetries != 3 || out.Tools.RetryBackoff != "500ms" || out.Tools.SymbolContext.MaxBytes != 12000 {
 		t.Fatalf("Tools not merged: %+v", out.Tools)
 	}
 	if out.Approval.Mode != "threshold" || out.Approval.MaxPriority != "P3" || out.Approval.Note != "" {

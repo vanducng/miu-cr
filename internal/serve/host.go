@@ -889,16 +889,17 @@ func (h *HostRunner) claimReady(ctx stdctx.Context, snap hostRunnerSnapshot, rep
 		heartbeatLease := hostJobLeaseDuration(timeout)
 		stopHeartbeat := h.startHostJobHeartbeat(ctx, jobID, attemptID, attempts, claim.Job.HeadSHA, heartbeatLease, fmt.Sprintf("%s/%s#%d", repo.Owner, repo.Repo, claim.Job.Number))
 		job := Job{
-			Key:           prKey{Owner: repo.Owner, Repo: repo.Repo, Number: int(claim.Job.Number)},
-			Ref:           fmt.Sprintf("%s/%s#%d", repo.Owner, repo.Repo, claim.Job.Number),
-			Token:         token,
-			Timeout:       timeout,
-			Review:        &review,
-			HeadSHA:       claim.Job.HeadSHA,
-			Title:         claim.Title,
-			HostJobID:     jobID,
-			HostAttemptID: attemptID,
-			HostAttempt:   attempts,
+			Key:            prKey{Owner: repo.Owner, Repo: repo.Repo, Number: int(claim.Job.Number)},
+			Ref:            fmt.Sprintf("%s/%s#%d", repo.Owner, repo.Repo, claim.Job.Number),
+			Token:          token,
+			Timeout:        timeout,
+			StalledTimeout: review.StalledTimeout,
+			Review:         &review,
+			HeadSHA:        claim.Job.HeadSHA,
+			Title:          claim.Title,
+			HostJobID:      jobID,
+			HostAttemptID:  attemptID,
+			HostAttempt:    attempts,
 			OnDone: func(runErr error) {
 				stopHeartbeat()
 				status := "done"
@@ -925,22 +926,22 @@ func (h *HostRunner) claimReady(ctx stdctx.Context, snap hostRunnerSnapshot, rep
 		case SubmitDuplicate:
 			stopHeartbeat()
 			now := h.now().UTC()
-			_ = h.store.ReleaseHostJob(ctx, store.HostJobReleaseInput{JobID: jobID, AttemptID: attemptID, Error: "duplicate review already in flight", Now: now, AvailableAt: now.Add(timeout + time.Minute)})
+			_ = h.store.ReleaseHostJob(ctx, store.HostJobReleaseInput{JobID: jobID, AttemptID: attemptID, Error: "duplicate review already in flight", Now: now, AvailableAt: now.Add(timeout + time.Minute), DiscardAttempt: true})
 			continue
 		case SubmitCoalesced:
 			stopHeartbeat()
 			now := h.now().UTC()
-			_ = h.store.ReleaseHostJob(ctx, store.HostJobReleaseInput{JobID: jobID, AttemptID: attemptID, Error: "review already in flight for PR", Now: now, AvailableAt: now.Add(snap.interval)})
+			_ = h.store.ReleaseHostJob(ctx, store.HostJobReleaseInput{JobID: jobID, AttemptID: attemptID, Error: "review already in flight for PR", Now: now, AvailableAt: now.Add(snap.interval), DiscardAttempt: true})
 			continue
 		case SubmitFull:
 			stopHeartbeat()
 			now := h.now().UTC()
-			_ = h.store.ReleaseHostJob(ctx, store.HostJobReleaseInput{JobID: jobID, AttemptID: attemptID, Error: "dispatcher rejected job", Now: now, AvailableAt: now.Add(snap.interval)})
+			_ = h.store.ReleaseHostJob(ctx, store.HostJobReleaseInput{JobID: jobID, AttemptID: attemptID, Error: "dispatcher rejected job", Now: now, AvailableAt: now.Add(snap.interval), DiscardAttempt: true})
 			continue
 		default:
 			stopHeartbeat()
 			now := h.now().UTC()
-			_ = h.store.ReleaseHostJob(ctx, store.HostJobReleaseInput{JobID: jobID, AttemptID: attemptID, Error: "dispatcher rejected job", Now: now, AvailableAt: now})
+			_ = h.store.ReleaseHostJob(ctx, store.HostJobReleaseInput{JobID: jobID, AttemptID: attemptID, Error: "dispatcher rejected job", Now: now, AvailableAt: now, DiscardAttempt: true})
 			return nil
 		}
 	}

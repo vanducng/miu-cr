@@ -112,10 +112,11 @@ func (s *Server) handleWebhook(w http.ResponseWriter, r *http.Request) {
 
 	pk := prKey{Owner: owner, Repo: repo, Number: number}
 	job := Job{
-		Key:     pk,
-		Ref:     pk.String(), // single source of truth (server.go); no format drift
-		Token:   token,
-		Timeout: s.reviewTO,
+		Key:            pk,
+		Ref:            pk.String(), // single source of truth (server.go); no format drift
+		Token:          token,
+		Timeout:        s.reviewTO,
+		StalledTimeout: s.stalledTO,
 	}
 	if s.dispatcher.Submit(job) != SubmitQueued {
 		// Dropped (queue full): the 200'd delivery won't be redelivered by GitHub,

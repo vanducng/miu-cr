@@ -118,8 +118,16 @@ default_provider = "anthropic"
 # prompt_format = "xml"           # review prompt format: xml (default, injection-hardened) | markdown
 # min_severity = "low"           # --pr inline floor: none|info|low|medium|high|critical
 # timeout      = "300s"          # review timeout (a Go duration: 300s, 5m, …)
+# stalled_timeout = "5m"         # no-progress watchdog; "0s" disables
 # suggest      = false           # emit GitHub one-click suggestions on --post (default off)
 # patch_repair = false           # 2nd-pass recovery of one-click suggestions; only effective with suggest=true (default off)
+#
+# # Provider API retry behavior (all optional; values shown are defaults).
+# [review.provider_retry]
+# max_retries = 10
+# initial_backoff = "5s"
+# max_backoff = "2m"
+# max_elapsed = "10m"
 #
 # # Internal symbol_context tool limits (all optional; values shown are defaults).
 # [review.tools.symbol_context]

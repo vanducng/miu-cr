@@ -3,6 +3,8 @@ package agent
 import (
 	"strings"
 	"unicode"
+
+	"github.com/vanducng/miu-cr/internal/config"
 )
 
 const systemPrompt = `You are a meticulous senior code reviewer. You review a unified git diff plus surrounding context and report concrete, actionable problems in the CHANGED code.
@@ -175,10 +177,11 @@ const maxRepairSpanLen = 4000
 // the verbatim anchored new-file lines; Rationale/Category/Severity describe the
 // issue (model-origin, fenced as context only).
 type RepairRequest struct {
-	Span      string
-	Rationale string
-	Category  string
-	Severity  string
+	Span          string
+	Rationale     string
+	Category      string
+	Severity      string
+	ProviderRetry config.ProviderRetry
 }
 
 // BuildRepairPrompt renders the USER turn for a repair call: category/severity +

@@ -64,7 +64,7 @@ func newOpenAIAgent(creds Credentials, timeout time.Duration) *openaiAgent {
 	opts := []openaiopt.RequestOption{
 		openaiopt.WithAPIKey(creds.APIKey),
 		openaiopt.WithBaseURL(baseURL),
-		openaiopt.WithMaxRetries(3),
+		openaiopt.WithMaxRetries(0),
 	}
 	sdk := openai.NewClient(opts...)
 	return &openaiAgent{client: sdkOpenAIClient{sdk: sdk}, model: creds.Model, timeout: timeout, temperature: creds.Temperature, thinking: creds.Thinking}
@@ -121,9 +121,11 @@ func (a *openaiAgent) RepairPatch(ctx stdctx.Context, rr RepairRequest) (string,
 		repairParams.Temperature = openai.Float(a.temperature)
 		repairParams.MaxTokens = openai.Int(int64(repairMaxTokens))
 	}
-	resp, err := a.client.create(ctx, repairParams)
+	resp, err := retryProviderCall(ctx, rr.ProviderRetry, nil, "openai.repair", func() (*openai.ChatCompletion, error) {
+		return a.client.create(ctx, repairParams)
+	}, classifyOpenAIErr, openAIProviderRetryable)
 	if err != nil {
-		return "", engine.Usage{}, classifyOpenAIErr(err)
+		return "", engine.Usage{}, err
 	}
 	if len(resp.Choices) == 0 {
 		return "", engine.Usage{}, fmt.Errorf("agent: empty completion (no choices)")
@@ -193,9 +195,11 @@ func (a *openaiAgent) Review(ctx stdctx.Context, rc Context) (engine.ReviewOutpu
 			params.Messages = append(params.Messages, openai.UserMessage(forceFinalizeNudge))
 		}
 
-		resp, err := a.client.create(ctx, params)
+		resp, err := retryProviderCall(ctx, rc.ProviderRetry, rc.Progress, "openai.chat", func() (*openai.ChatCompletion, error) {
+			return a.client.create(ctx, params)
+		}, classifyOpenAIErr, openAIProviderRetryable)
 		if err != nil {
-			return engine.ReviewOutput{}, classifyOpenAIErr(err)
+			return engine.ReviewOutput{}, err
 		}
 		if len(resp.Choices) == 0 {
 			return engine.ReviewOutput{}, fmt.Errorf("agent: empty completion (no choices)")

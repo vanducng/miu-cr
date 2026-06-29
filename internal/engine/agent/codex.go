@@ -159,7 +159,7 @@ func (a *codexAgent) RepairPatch(ctx stdctx.Context, rr RepairRequest) (string, 
 		ctx, cancel = stdctx.WithTimeout(ctx, a.timeout)
 		defer cancel()
 	}
-	resp, err := a.post(ctx, codexReq{
+	resp, err := a.post(ctx, rr.ProviderRetry, nil, codexReq{
 		Model:        a.model,
 		Instructions: repairSystemPrompt,
 		Input: []codexItem{{
@@ -243,7 +243,7 @@ func (a *codexAgent) Review(ctx stdctx.Context, rc Context) (engine.ReviewOutput
 			req.Input = input
 		}
 
-		resp, err := a.post(ctx, req)
+		resp, err := a.post(ctx, rc.ProviderRetry, rc.Progress, req)
 		if err != nil {
 			return engine.ReviewOutput{}, err
 		}
@@ -301,9 +301,20 @@ func (a *codexAgent) dispatch(ctx stdctx.Context, rc Context, turn int, resp *co
 // retry the SDK backends already get. The sleep is always gated on ctx so a
 // cancel/deadline aborts promptly; on give-up a 429 surfaces the usage-cap reset
 // window. The response body is never logged; errors carry only a status code.
-func (a *codexAgent) post(ctx stdctx.Context, body codexReq) (*codexResp, error) {
+func (a *codexAgent) post(ctx stdctx.Context, retry config.ProviderRetry, progress func(string), body codexReq) (*codexResp, error) {
+	policy := resolveProviderRetryPolicy(retry, codexMaxAttempts-1)
+	if strings.TrimSpace(retry.InitialBackoff) == "" {
+		policy.initialBackoff = codexBaseBackoff
+	}
+	if strings.TrimSpace(retry.MaxBackoff) == "" {
+		policy.maxBackoff = codexMaxBackoff
+	}
+	if strings.TrimSpace(retry.MaxElapsed) == "" {
+		policy.maxElapsed = 0
+	}
 	var lastTransient *codexRetryable
-	for attempt := 1; attempt <= codexMaxAttempts; attempt++ {
+	start := time.Now()
+	for attempt := 0; attempt <= policy.maxRetries; attempt++ {
 		if err := ctx.Err(); err != nil {
 			return nil, err
 		}
@@ -316,7 +327,7 @@ func (a *codexAgent) post(ctx stdctx.Context, body codexReq) (*codexResp, error)
 			return nil, err // ctx error or a terminal typed/bare error
 		}
 		lastTransient = tr
-		if attempt == codexMaxAttempts {
+		if attempt == policy.maxRetries {
 			break
 		}
 		var suggested time.Duration
@@ -325,7 +336,20 @@ func (a *codexAgent) post(ctx stdctx.Context, body codexReq) (*codexResp, error)
 		} else if tr.resetsIn > 0 {
 			suggested = tr.resetsIn
 		}
-		if serr := sleepCtx(ctx, codexBackoff(attempt, suggested)); serr != nil {
+		wait := providerBackoff(policy, attempt+1, suggested)
+		if policy.maxElapsed > 0 {
+			remaining := policy.maxElapsed - time.Since(start)
+			if remaining <= 0 {
+				break
+			}
+			if wait > remaining {
+				wait = remaining
+			}
+		}
+		if progress != nil {
+			progress(fmt.Sprintf("provider retry %d/%d for codex.responses after %s; waiting %s", attempt+1, policy.maxRetries, tr, wait))
+		}
+		if serr := sleepCtx(ctx, wait); serr != nil {
 			return nil, serr
 		}
 	}

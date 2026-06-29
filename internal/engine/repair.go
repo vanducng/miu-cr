@@ -87,10 +87,11 @@ func (e *Engine) repairPatches(ctx stdctx.Context, kept []Finding, selected []di
 		attempted++
 		f := kept[c.idx]
 		reply, u, err := e.Agent.RepairPatch(ctx, RepairRequest{
-			Span:      c.span,
-			Rationale: f.Rationale,
-			Category:  f.Category,
-			Severity:  f.Severity,
+			Span:          c.span,
+			Rationale:     f.Rationale,
+			Category:      f.Category,
+			Severity:      f.Severity,
+			ProviderRetry: req.ProviderRetry,
 		})
 		usage.Add(u) // count tokens even for a rejected/failed repair — they were spent
 		if err != nil || strings.TrimSpace(reply) == "" {

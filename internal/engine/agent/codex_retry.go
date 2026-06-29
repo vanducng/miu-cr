@@ -5,7 +5,6 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"math/rand"
 	"net/http"
 	"strconv"
 	"strings"
@@ -15,13 +14,11 @@ import (
 	"github.com/vanducng/miu-cr/internal/config"
 )
 
-// Backoff knobs are vars (not consts) only so a test can shrink the sleeps;
-// production uses these defaults.
+// Fallback knobs are vars only so tests can shrink direct Codex retries.
 var (
-	codexMaxAttempts   = 3 // initial try + 2 retries, matching the SDK backends
-	codexBaseBackoff   = 500 * time.Millisecond
-	codexMaxBackoff    = 8 * time.Second
-	codexMaxRetryAfter = 30 * time.Second // cap an honored Retry-After/resets_in so we never block on a long usage-cap window
+	codexMaxAttempts = 3
+	codexBaseBackoff = 500 * time.Millisecond
+	codexMaxBackoff  = 8 * time.Second
 )
 
 // codexRetryable wraps a transient codex failure (429/502/503/504 or a
@@ -145,24 +142,6 @@ func parseRetryAfter(h http.Header) time.Duration {
 		return time.Duration(secs) * time.Second
 	}
 	return 0
-}
-
-// codexBackoff returns the wait before attempt n (1-based): exponential base*2^(n-1),
-// capped, with full jitter. An upstream-suggested wait (resets_in/Retry-After),
-// when set and within cap, wins so we honor the server. ctx-gating is the caller's.
-func codexBackoff(attempt int, suggested time.Duration) time.Duration {
-	if suggested > 0 {
-		if suggested > codexMaxRetryAfter {
-			suggested = codexMaxRetryAfter
-		}
-		return suggested
-	}
-	d := codexBaseBackoff << (attempt - 1)
-	if d > codexMaxBackoff {
-		d = codexMaxBackoff
-	}
-	half := int64(d) / 2
-	return time.Duration(half + rand.Int63n(half+1)) // equal jitter [d/2, d], never 0, so a 429 burst actually backs off
 }
 
 // sleepCtx waits d, aborting promptly on ctx cancel/deadline (returns the ctx error).

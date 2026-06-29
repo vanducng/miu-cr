@@ -11,6 +11,7 @@ import (
 	"github.com/anthropics/anthropic-sdk-go"
 
 	"github.com/vanducng/miu-cr/internal/cli/clierr"
+	"github.com/vanducng/miu-cr/internal/config"
 	"github.com/vanducng/miu-cr/internal/engine"
 )
 
@@ -21,10 +22,18 @@ type fakeAnthropic struct {
 	calls     int
 	seen      []anthropic.MessageNewParams
 	err       error
+	errs      []error
 }
 
 func (f *fakeAnthropic) newMessage(_ stdctx.Context, params anthropic.MessageNewParams) (*anthropic.Message, error) {
 	f.seen = append(f.seen, params)
+	if len(f.errs) > 0 {
+		err := f.errs[0]
+		f.errs = f.errs[1:]
+		if err != nil {
+			return nil, err
+		}
+	}
 	if f.err != nil {
 		return nil, f.err
 	}
@@ -38,6 +47,19 @@ func (f *fakeAnthropic) newMessage(_ stdctx.Context, params anthropic.MessageNew
 }
 
 var _ anthropicClient = (*fakeAnthropic)(nil)
+
+func fastProviderRetry(maxRetries int) config.ProviderRetry {
+	return config.ProviderRetry{MaxRetries: &maxRetries, InitialBackoff: "0s", MaxBackoff: "0s", MaxElapsed: "0s"}
+}
+
+func containsProgress(progress []string, needle string) bool {
+	for _, s := range progress {
+		if strings.Contains(s, needle) {
+			return true
+		}
+	}
+	return false
+}
 
 func textMessage(content string) string {
 	b, _ := json.Marshal(map[string]any{
@@ -98,6 +120,34 @@ func TestAnthropicAgentParsesFindings(t *testing.T) {
 	}
 	if !fc.seen[0].Temperature.Valid() || fc.seen[0].Temperature.Value != 0 {
 		t.Fatalf("review temperature = %+v, want 0", fc.seen[0].Temperature)
+	}
+}
+
+func TestAnthropicAgentRetriesProviderOverloadThenSucceeds(t *testing.T) {
+	req, resp := fakeReqResp(529)
+	fc := &fakeAnthropic{
+		errs:      []error{&anthropic.Error{StatusCode: 529, Request: req, Response: resp}, nil},
+		responses: []string{textMessage(`{"findings":[]}`)},
+	}
+	var progress []string
+	a := &anthropicAgent{client: fc, model: "claude-test"}
+	out, err := a.Review(stdctx.Background(), Context{
+		Text:          "ctx",
+		RepoDir:       t.TempDir(),
+		ProviderRetry: fastProviderRetry(2),
+		Progress:      func(s string) { progress = append(progress, s) },
+	})
+	if err != nil {
+		t.Fatalf("Review: %v", err)
+	}
+	if len(out.Findings) != 0 {
+		t.Fatalf("findings = %d, want 0", len(out.Findings))
+	}
+	if len(fc.seen) != 2 || fc.calls != 1 {
+		t.Fatalf("seen=%d calls=%d, want 2 attempts/1 success", len(fc.seen), fc.calls)
+	}
+	if !containsProgress(progress, "provider retry 1/2") {
+		t.Fatalf("retry progress missing: %#v", progress)
 	}
 }
 
