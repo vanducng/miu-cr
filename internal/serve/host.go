@@ -988,6 +988,7 @@ func (h *HostRunner) claimReady(ctx stdctx.Context, snap hostRunnerSnapshot, rep
 		jobCtx, cleanupActive := h.registerActiveHostJob(jobKey, ref, jobID, attemptID, attempts, claim.Job.HeadSHA)
 		heartbeatLease := hostJobLeaseDuration(timeout)
 		stopHeartbeat := h.startHostJobHeartbeat(ctx, jobID, attemptID, attempts, claim.Job.HeadSHA, heartbeatLease, ref)
+		jobStart := h.now()
 		job := Job{
 			Context:        jobCtx,
 			Key:            jobKey,
@@ -1021,6 +1022,7 @@ func (h *HostRunner) claimReady(ctx stdctx.Context, snap hostRunnerSnapshot, rep
 				if status == "failed" {
 					availableAt = now.Add(hostFailedRetryDelay(attempts))
 				}
+				h.log.Info("review lifecycle", "phase", "completed", "ref", ref, "session_id", claim.Job.SessionID, "job_id", jobID, "attempt_id", attemptID, "attempt", attempts, "head_sha", ShortSHA(claim.Job.HeadSHA), "status", status, "duration_ms", now.Sub(jobStart).Milliseconds(), "err", msg)
 				if err := h.store.CompleteHostJob(cctx, store.HostJobCompleteInput{JobID: jobID, AttemptID: attemptID, Status: status, Error: msg, Now: now, AvailableAt: availableAt}); err != nil {
 					if errors.Is(err, store.ErrHostStaleAttempt) && status == "canceled" {
 						h.log.Debug("host: canceled job already stale", "ref", ref, "job_id", jobID, "attempt_id", attemptID, "attempt", attempts, "head_sha", ShortSHA(claim.Job.HeadSHA))
@@ -1032,14 +1034,16 @@ func (h *HostRunner) claimReady(ctx stdctx.Context, snap hostRunnerSnapshot, rep
 		}
 		switch h.disp.Submit(job) {
 		case SubmitQueued:
-			h.log.Debug("host: review job submitted", "ref", job.Ref, "pr_title", config.RedactString(claim.Title), "job_id", jobID, "attempt_id", attemptID, "attempt", attempts, "head_sha", ShortSHA(claim.Job.HeadSHA), "lease_seconds", int(heartbeatLease.Seconds()))
+			h.log.Info("review lifecycle", "phase", "submitted", "ref", job.Ref, "pr_title", config.RedactString(claim.Title), "session_id", claim.Job.SessionID, "job_id", jobID, "attempt_id", attemptID, "attempt", attempts, "head_sha", ShortSHA(claim.Job.HeadSHA), "dedupe_key", ShortSHA(claim.Job.DedupeKey), "lease_seconds", int(heartbeatLease.Seconds()))
 		case SubmitDuplicate:
+			h.log.Info("review lifecycle", "phase", "duplicate", "ref", job.Ref, "session_id", claim.Job.SessionID, "job_id", jobID, "attempt_id", attemptID, "head_sha", ShortSHA(claim.Job.HeadSHA), "reason", "duplicate review already in flight")
 			cleanupActive()
 			stopHeartbeat()
 			now := h.now().UTC()
 			_ = h.store.ReleaseHostJob(ctx, store.HostJobReleaseInput{JobID: jobID, AttemptID: attemptID, Error: "duplicate review already in flight", Now: now, AvailableAt: now.Add(timeout + time.Minute), DiscardAttempt: true})
 			continue
 		case SubmitCoalesced:
+			h.log.Info("review lifecycle", "phase", "coalesced", "ref", job.Ref, "session_id", claim.Job.SessionID, "job_id", jobID, "attempt_id", attemptID, "head_sha", ShortSHA(claim.Job.HeadSHA), "reason", "review already in flight for PR")
 			cleanupActive()
 			stopHeartbeat()
 			now := h.now().UTC()
