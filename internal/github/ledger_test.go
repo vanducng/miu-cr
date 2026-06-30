@@ -298,8 +298,8 @@ func TestLedgerResultLineAllClearShowsStats(t *testing.T) {
 	ledger := []LedgerEntry{
 		{FP: "aaaaaaaaaaaaaaaa", Path: "a.go", Status: statusResolved, Sev: "high", FirstSev: "high", OpenSHA: "aaaaaa1", ResSHA: "bbbbbb2"},
 	}
-	line := ledgerResultLine(ledger)
-	want := "<sub><sub>![Review passed 1 resolved](https://img.shields.io/badge/Review_passed_%7C_1_resolved-brightgreen?style=flat)</sub></sub>"
+	line := ledgerResultLine(ledger, 2, "bbbbbb2", reviewChangeSize{})
+	want := "<sub><sub>![Review passed 1 resolved](https://img.shields.io/badge/Review_passed_%7C_1_resolved-brightgreen?style=flat)</sub></sub> <sub>That finding is cleared. Nice follow-through.</sub>"
 	if line != want {
 		t.Fatalf("all-clear Result line should be one combined badge\n got: %q\nwant: %q", line, want)
 	}
@@ -313,6 +313,44 @@ func TestLedgerResultLineAllClearShowsStats(t *testing.T) {
 	}
 }
 
+func TestLedgerResultLineReviewPassedNotes(t *testing.T) {
+	clean := ledgerResultLine(nil, 1, "clean-head", reviewChangeSize{})
+	if !strings.Contains(clean, "Review passed") || !strings.Contains(clean, "<sub>") {
+		t.Fatalf("clean pass should include badge plus note, got %q", clean)
+	}
+
+	resolved := make([]LedgerEntry, 8)
+	for i := range resolved {
+		resolved[i] = LedgerEntry{FP: fpStr(i + 1), Status: statusResolved, Sev: "low"}
+	}
+	line := ledgerResultLine(resolved, 4, "resolved-head", reviewChangeSize{})
+	if !strings.Contains(line, "8 resolved") || !containsAny(line, "Big cleanup", "Strong recovery", "Great follow-through", "Clean finish") {
+		t.Fatalf("large resolved pass should include an intense cleanup note, got %q", line)
+	}
+}
+
+func containsAny(s string, needles ...string) bool {
+	for _, needle := range needles {
+		if strings.Contains(s, needle) {
+			return true
+		}
+	}
+	return false
+}
+
+func TestLedgerResultLineReviewPassedNotesUseChangeSize(t *testing.T) {
+	small := ledgerResultLine(nil, 1, "size-head", reviewChangeSize{files: 1, churn: 12})
+	if !containsAny(small, "Small clean", "focused diff", "Focused change", "first pass") {
+		t.Fatalf("small clean pass should use focused-change language, got %q", small)
+	}
+
+	largeLedger := []LedgerEntry{{FP: fpStr(1), Status: statusResolved, Sev: "medium"}}
+	large := ledgerResultLine(largeLedger, 2, "size-head", reviewChangeSize{files: 24, churn: 1500})
+	if !containsAny(large, "broad diff", "larger change", "across the diff", "broad review") {
+		t.Fatalf("large resolved pass should use broad-change language, got %q", large)
+	}
+}
+
 func TestLedgerResultLineOpenOmitsCountSuffix(t *testing.T) {
 	// With open findings the Result line is just the per-severity chips; the open
 	// total is NOT appended (it lives in the "⚠️ Open (N)" table heading).
@@ -320,7 +358,7 @@ func TestLedgerResultLineOpenOmitsCountSuffix(t *testing.T) {
 		{FP: fpStr(1), Status: statusOpen, Sev: "high"},
 		{FP: fpStr(2), Status: statusOpen, Sev: "low"},
 	}
-	line := ledgerResultLine(ledger)
+	line := ledgerResultLine(ledger, 1, "headsha1", reviewChangeSize{})
 	if strings.Contains(line, "open") {
 		t.Fatalf("Result line must not append the open count, got %q", line)
 	}

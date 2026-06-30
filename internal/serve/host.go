@@ -666,10 +666,13 @@ func (h *HostRunner) pruneThreadResolutionSync(slug string, openNumbers []int64)
 
 func (h *HostRunner) enqueueThreadResolutionSync(ctx stdctx.Context, client mgithub.Client, repo HostRepoConfig, pr *github.PullRequest, now time.Time) {
 	snap := threadResolutionSyncPR{
-		Number:   pr.GetNumber(),
-		HeadSHA:  pr.GetHead().GetSHA(),
-		BaseSHA:  pr.GetBase().GetSHA(),
-		HTMLBase: pr.GetBase().GetRepo().GetHTMLURL(),
+		Number:       pr.GetNumber(),
+		HeadSHA:      pr.GetHead().GetSHA(),
+		BaseSHA:      pr.GetBase().GetSHA(),
+		HTMLBase:     pr.GetBase().GetRepo().GetHTMLURL(),
+		ChangedFiles: pr.GetChangedFiles(),
+		Additions:    int64(pr.GetAdditions()),
+		Deletions:    int64(pr.GetDeletions()),
 	}
 	if snap.HTMLBase == "" && repo.Slug != "" {
 		snap.HTMLBase = "https://github.com/" + repo.Slug
@@ -693,10 +696,13 @@ func (h *HostRunner) enqueueThreadResolutionSync(ctx stdctx.Context, client mgit
 }
 
 type threadResolutionSyncPR struct {
-	Number   int
-	HeadSHA  string
-	BaseSHA  string
-	HTMLBase string
+	Number       int
+	HeadSHA      string
+	BaseSHA      string
+	HTMLBase     string
+	ChangedFiles int
+	Additions    int64
+	Deletions    int64
 }
 
 func (h *HostRunner) finishThreadResolutionSync() {
@@ -714,12 +720,15 @@ func (h *HostRunner) finishThreadResolutionSync() {
 
 func (h *HostRunner) syncThreadResolution(ctx stdctx.Context, client mgithub.Client, repo HostRepoConfig, pr threadResolutionSyncPR, now time.Time) {
 	info := &mgithub.PRInfo{
-		Owner:    repo.Owner,
-		Repo:     repo.Repo,
-		Number:   pr.Number,
-		HeadSHA:  pr.HeadSHA,
-		BaseSHA:  pr.BaseSHA,
-		HTMLBase: pr.HTMLBase,
+		Owner:        repo.Owner,
+		Repo:         repo.Repo,
+		Number:       pr.Number,
+		HeadSHA:      pr.HeadSHA,
+		BaseSHA:      pr.BaseSHA,
+		HTMLBase:     pr.HTMLBase,
+		ChangedFiles: pr.ChangedFiles,
+		Additions:    pr.Additions,
+		Deletions:    pr.Deletions,
 	}
 	res, err := mgithub.SyncSummaryConversationResolved(ctx, client, info, now)
 	attrs := []any{"repo", repo.Slug, "pr", pr.Number, "head_sha", info.HeadSHA, "reason", res.Reason, "resolved", res.Resolved, "reopened", res.Reopened, "entries", res.Entries}
