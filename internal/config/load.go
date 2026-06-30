@@ -173,6 +173,12 @@ func mergeReview(base, file Review) Review {
 	if file.PatchRepair != nil {
 		out.PatchRepair = file.PatchRepair
 	}
+	if file.CodeSummary.Walkthrough != nil {
+		out.CodeSummary.Walkthrough = file.CodeSummary.Walkthrough
+	}
+	if file.CodeSummary.FileChangeSummary != nil {
+		out.CodeSummary.FileChangeSummary = file.CodeSummary.FileChangeSummary
+	}
 	out.Tools = MergeReviewTools(base.Tools, file.Tools)
 	out.Approval = MergeApprovalPolicy(base.Approval, file.Approval)
 	out.Subagents = MergeReviewSubagents(base.Subagents, file.Subagents)

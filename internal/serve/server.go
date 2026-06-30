@@ -67,33 +67,35 @@ func ShortSHA(s string) string {
 }
 
 type JobReviewOptions struct {
-	Post           bool
-	Suggest        bool
-	PatchRepair    bool
-	Approval       config.ApprovalPolicy
-	Force          bool
-	Conversation   bool
-	Gate           string
-	FilterMode     string
-	MinSeverity    string
-	Format         string
-	PromptFormat   string
-	Mode           string
-	Provider       string
-	APIKey         string
-	BaseURL        string
-	AuthToken      string
-	Model          string
-	StalledTimeout time.Duration
-	ProviderRetry  config.ProviderRetry
-	OperatorPrompt string
-	ExpandWindow   int
-	TokenBudget    int
-	DeepContext    bool
-	ContextHops    int
-	Subagents      config.ReviewSubagents
-	Tools          config.ReviewTools
-	SymbolContext  config.SymbolContext
+	Post                bool
+	Suggest             bool
+	PatchRepair         bool
+	Approval            config.ApprovalPolicy
+	Force               bool
+	Conversation        bool
+	Gate                string
+	FilterMode          string
+	MinSeverity         string
+	Format              string
+	SuppressWalkthrough bool
+	FileChangeSummary   bool
+	PromptFormat        string
+	Mode                string
+	Provider            string
+	APIKey              string
+	BaseURL             string
+	AuthToken           string
+	Model               string
+	StalledTimeout      time.Duration
+	ProviderRetry       config.ProviderRetry
+	OperatorPrompt      string
+	ExpandWindow        int
+	TokenBudget         int
+	DeepContext         bool
+	ContextHops         int
+	Subagents           config.ReviewSubagents
+	Tools               config.ReviewTools
+	SymbolContext       config.SymbolContext
 	// Quota is the host provider's usage quota (nil = none); QuotaProvider is the
 	// counter key (the provider instance name, since Provider above carries the
 	// kind). Threaded to the review path because the host config provider quota is

@@ -106,6 +106,7 @@ type HostReview struct {
 	FilterMode           string                     `yaml:"filter_mode" json:"filter_mode,omitempty"`
 	MinSeverity          string                     `yaml:"min_severity" json:"min_severity,omitempty"`
 	Format               string                     `yaml:"format" json:"format,omitempty"`
+	CodeSummary          CodeSummary                `yaml:"code_summary" json:"code_summary,omitempty"`
 	PromptFormat         string                     `yaml:"prompt_format" json:"prompt_format,omitempty"`
 	Timeout              string                     `yaml:"timeout" json:"timeout,omitempty"`
 	StalledTimeout       string                     `yaml:"stalled_timeout" json:"stalled_timeout,omitempty"`

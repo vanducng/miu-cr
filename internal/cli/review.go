@@ -310,15 +310,19 @@ type PRReviewRequest struct {
 	FilterMode      string // added|diff_context|file|nofilter (default diff_context)
 	MinSeverity     string // inline-posting floor: none|info|low|medium|high|critical (default keeps current behavior)
 	Format          string // review-comment presentation preset: full (default) | minimal
-	WantDiagram     bool   // opt into the mermaid change diagram (default off)
-	Instruction     string // optional per-review developer steer; injected fenced/context-only into the USER turn
-	OperatorPrompt  string
-	PromptFormat    string       // "xml" (default) | "markdown"
-	Conversation    bool         // opt into fetching the prior PR conversation; injected fenced/context-only, Untrusted, dropped on fork PRs
-	Mode            string       // review (default: inline+summary) | checks (GitHub Checks-API reporter)
-	NoSave          bool         // opt out of persisting this run to the local history store
-	Force           bool         // re-review even when the head SHA is unchanged since the last review (bypass the incremental skip)
-	Progress        func(string) // nil = silent; stderr milestones, never the stdout envelope
+	// SuppressWalkthrough drops the "What changed" walkthrough bullets. Zero-value
+	// safe: false = rendered (the default); a minimal req keeps the walkthrough.
+	SuppressWalkthrough bool
+	FileChangeSummary   bool   // render the "Important Files Changed" table (default false = off)
+	WantDiagram         bool   // opt into the mermaid change diagram (default off)
+	Instruction         string // optional per-review developer steer; injected fenced/context-only into the USER turn
+	OperatorPrompt      string
+	PromptFormat        string       // "xml" (default) | "markdown"
+	Conversation        bool         // opt into fetching the prior PR conversation; injected fenced/context-only, Untrusted, dropped on fork PRs
+	Mode                string       // review (default: inline+summary) | checks (GitHub Checks-API reporter)
+	NoSave              bool         // opt out of persisting this run to the local history store
+	Force               bool         // re-review even when the head SHA is unchanged since the last review (bypass the incremental skip)
+	Progress            func(string) // nil = silent; stderr milestones, never the stdout envelope
 	// TraceSink streams live trace steps to stderr as NDJSON (--trace); nil = off.
 	TraceSink func(step string, payload any)
 	// CaptureReasoning opts into capturing model reasoning into the trace.
@@ -407,45 +411,47 @@ const maxContextHops = 5
 
 func reviewCommand(opts *options) *cobra.Command {
 	var (
-		staged       bool
-		from         string
-		to           string
-		commit       string
-		gate         string
-		repoDir      string
-		include      []string
-		exclude      []string
-		exts         []string
-		provider     string
-		apiKey       string
-		baseURL      string
-		authToken    string
-		model        string
-		expand       int
-		tokenBudget  int
-		deepContext  bool
-		contextHops  int
-		filterMode   string
-		minSeverity  string
-		format       string
-		promptFormat string
-		wantDiagram  bool
-		instruction  string
-		conversation bool
-		mode         string
-		sarifOut     string
-		pr           string
-		token        string
-		post         bool
-		noPost       bool
-		suggest      bool
-		patchRepair  bool
-		approval     config.ApprovalPolicy
-		noSave       bool
-		force        bool
-		verbose      bool
-		quiet        bool
-		traceLive    bool
+		staged            bool
+		from              string
+		to                string
+		commit            string
+		gate              string
+		repoDir           string
+		include           []string
+		exclude           []string
+		exts              []string
+		provider          string
+		apiKey            string
+		baseURL           string
+		authToken         string
+		model             string
+		expand            int
+		tokenBudget       int
+		deepContext       bool
+		contextHops       int
+		filterMode        string
+		minSeverity       string
+		format            string
+		walkthrough       bool
+		fileChangeSummary bool
+		promptFormat      string
+		wantDiagram       bool
+		instruction       string
+		conversation      bool
+		mode              string
+		sarifOut          string
+		pr                string
+		token             string
+		post              bool
+		noPost            bool
+		suggest           bool
+		patchRepair       bool
+		approval          config.ApprovalPolicy
+		noSave            bool
+		force             bool
+		verbose           bool
+		quiet             bool
+		traceLive         bool
 	)
 
 	cmd := &cobra.Command{
@@ -485,6 +491,14 @@ func reviewCommand(opts *options) *cobra.Command {
 			if err := validateApprovalPolicy(approval); err != nil {
 				return err
 			}
+			// code_summary toggles: flag wins when set, else config, else documented
+			// default (walkthrough on, file-change table off).
+			if !cmd.Flags().Changed("walkthrough") {
+				walkthrough = rcfg.CodeSummary.WantWalkthrough()
+			}
+			if !cmd.Flags().Changed("file-change-summary") {
+				fileChangeSummary = rcfg.CodeSummary.WantFileChangeSummary()
+			}
 			// Fail loud: --patch-repair only recovers one-click suggestions, so it is
 			// meaningless without --suggest. A new intentional flag-combination guard
 			// (config.invalid), not a silent no-op.
@@ -522,46 +536,48 @@ func reviewCommand(opts *options) *cobra.Command {
 			}
 			if pr != "" {
 				return runPRReview(cmd, prRunArgs{
-					ref:              pr,
-					token:            token,
-					post:             post && !noPost,
-					suggest:          suggest,
-					patchRepair:      patchRepair,
-					approval:         approval,
-					gate:             gate,
-					provider:         provider,
-					apiKey:           apiKey,
-					baseURL:          baseURL,
-					authToken:        authToken,
-					model:            model,
-					timeout:          opts.timeout,
-					stalledTimeout:   stalledTimeout,
-					include:          include,
-					exclude:          exclude,
-					exts:             exts,
-					expand:           expand,
-					tokenBudget:      tokenBudget,
-					deepContext:      deepContext,
-					contextHops:      contextHops,
-					contextHopsAuto:  contextHopsAuto,
-					subagents:        rcfg.Subagents,
-					providerRetry:    rcfg.ProviderRetry,
-					tools:            rcfg.Tools,
-					symbolContext:    rcfg.Tools.SymbolContext,
-					filterMode:       filterMode,
-					minSeverity:      minSeverity,
-					format:           format,
-					promptFormat:     promptFormat,
-					wantDiagram:      wantDiagram,
-					instruction:      instruction,
-					conversation:     conversation,
-					mode:             mode,
-					sarifOut:         sarifOut,
-					noSave:           noSave,
-					force:            force,
-					progress:         prog,
-					traceSink:        traceSink,
-					captureReasoning: captureReasoning,
+					ref:               pr,
+					token:             token,
+					post:              post && !noPost,
+					suggest:           suggest,
+					patchRepair:       patchRepair,
+					approval:          approval,
+					gate:              gate,
+					provider:          provider,
+					apiKey:            apiKey,
+					baseURL:           baseURL,
+					authToken:         authToken,
+					model:             model,
+					timeout:           opts.timeout,
+					stalledTimeout:    stalledTimeout,
+					include:           include,
+					exclude:           exclude,
+					exts:              exts,
+					expand:            expand,
+					tokenBudget:       tokenBudget,
+					deepContext:       deepContext,
+					contextHops:       contextHops,
+					contextHopsAuto:   contextHopsAuto,
+					subagents:         rcfg.Subagents,
+					providerRetry:     rcfg.ProviderRetry,
+					tools:             rcfg.Tools,
+					symbolContext:     rcfg.Tools.SymbolContext,
+					filterMode:        filterMode,
+					minSeverity:       minSeverity,
+					format:            format,
+					walkthrough:       walkthrough,
+					fileChangeSummary: fileChangeSummary,
+					promptFormat:      promptFormat,
+					wantDiagram:       wantDiagram,
+					instruction:       instruction,
+					conversation:      conversation,
+					mode:              mode,
+					sarifOut:          sarifOut,
+					noSave:            noSave,
+					force:             force,
+					progress:          prog,
+					traceSink:         traceSink,
+					captureReasoning:  captureReasoning,
 				})
 			}
 			if err := nudgeIfUnconfigured(apiKey, authToken); err != nil {
@@ -670,6 +686,8 @@ func reviewCommand(opts *options) *cobra.Command {
 	f.StringVar(&filterMode, "filter-mode", "diff_context", "Inline-eligibility filter on --pr: added|diff_context|file|nofilter (default diff_context; file/nofilter route off-diff findings to the summary/SARIF/local output, never inline)")
 	f.StringVar(&minSeverity, "min-severity", "", "Minimum severity posted INLINE on --pr: none|info|low|medium|high|critical (default keeps current behavior; below-threshold findings still appear in the summary histogram + SARIF, never inline)")
 	f.StringVar(&format, "format", "", "Review-comment presentation on --pr: full (default) | minimal (minimal drops the summary section + severity/priority badges, keeping inline findings)")
+	f.BoolVar(&walkthrough, "walkthrough", true, "Render the PR-level \"What changed\" walkthrough bullets in the summary (default on; also [review].code_summary.walkthrough)")
+	f.BoolVar(&fileChangeSummary, "file-change-summary", false, "Render the \"Important Files Changed\" per-file table in the summary (default off; also [review].code_summary.file_change_summary)")
 	f.StringVar(&promptFormat, "prompt-format", "", "Review prompt format: xml (default, injection-hardened) | markdown (fenced)")
 	f.BoolVar(&wantDiagram, "walkthrough-diagram", false, "Ask the model to also emit an optional mermaid change diagram in the summary (opt-in; diagram quality varies; a malformed/omitted diagram degrades to a plain note)")
 	f.StringVar(&instruction, "instruction", "", "Extra free-text steer for THIS review (e.g. 'focus on the auth changes'); injected fenced, context-only, and length-capped, so it never redefines the finding schema")
@@ -713,32 +731,34 @@ type prRunArgs struct {
 	timeout        time.Duration
 	stalledTimeout time.Duration
 
-	include          []string
-	exclude          []string
-	exts             []string
-	expand           int
-	tokenBudget      int
-	deepContext      bool
-	contextHops      int
-	contextHopsAuto  bool
-	subagents        config.ReviewSubagents
-	providerRetry    config.ProviderRetry
-	tools            config.ReviewTools
-	symbolContext    config.SymbolContext
-	filterMode       string
-	minSeverity      string
-	format           string
-	promptFormat     string
-	wantDiagram      bool
-	instruction      string
-	conversation     bool
-	mode             string
-	sarifOut         string
-	noSave           bool
-	force            bool
-	progress         func(string)
-	traceSink        func(step string, payload any)
-	captureReasoning bool
+	include           []string
+	exclude           []string
+	exts              []string
+	expand            int
+	tokenBudget       int
+	deepContext       bool
+	contextHops       int
+	contextHopsAuto   bool
+	subagents         config.ReviewSubagents
+	providerRetry     config.ProviderRetry
+	tools             config.ReviewTools
+	symbolContext     config.SymbolContext
+	filterMode        string
+	minSeverity       string
+	format            string
+	walkthrough       bool
+	fileChangeSummary bool
+	promptFormat      string
+	wantDiagram       bool
+	instruction       string
+	conversation      bool
+	mode              string
+	sarifOut          string
+	noSave            bool
+	force             bool
+	progress          func(string)
+	traceSink         func(step string, payload any)
+	captureReasoning  bool
 }
 
 // runPRReview drives the --pr path: resolve the GitHub token (empty-tolerant for
@@ -768,46 +788,48 @@ func runPRReview(cmd *cobra.Command, a prRunArgs) error {
 	defer stopWatchdog()
 
 	out, err := prReviewer.ReviewPR(ctx, PRReviewRequest{
-		Ref:              a.ref,
-		Token:            ghToken,
-		Post:             a.post,
-		Suggest:          a.suggest,
-		PatchRepair:      a.patchRepair,
-		Approval:         a.approval,
-		Gate:             a.gate,
-		Provider:         a.provider,
-		APIKey:           a.apiKey,
-		BaseURL:          a.baseURL,
-		AuthToken:        a.authToken,
-		Model:            a.model,
-		Timeout:          a.timeout,
-		StalledTimeout:   a.stalledTimeout,
-		ProviderRetry:    a.providerRetry,
-		IncludeGlobs:     a.include,
-		ExcludeGlobs:     a.exclude,
-		Extensions:       a.exts,
-		ExpandWindow:     a.expand,
-		TokenBudget:      a.tokenBudget,
-		DeepContext:      a.deepContext,
-		ContextHops:      a.contextHops,
-		ContextHopsAuto:  a.contextHopsAuto,
-		Subagents:        a.subagents,
-		Tools:            a.tools,
-		SymbolContext:    a.symbolContext,
-		FilterMode:       a.filterMode,
-		MinSeverity:      a.minSeverity,
-		Format:           a.format,
-		PromptFormat:     a.promptFormat,
-		WantDiagram:      a.wantDiagram,
-		Instruction:      a.instruction,
-		Conversation:     a.conversation,
-		Mode:             a.mode,
-		NoSave:           a.noSave,
-		Force:            a.force,
-		Progress:         progress,
-		TraceSink:        a.traceSink,
-		CaptureReasoning: a.captureReasoning,
-		ActionsOut:       cmd.OutOrStdout(),
+		Ref:                 a.ref,
+		Token:               ghToken,
+		Post:                a.post,
+		Suggest:             a.suggest,
+		PatchRepair:         a.patchRepair,
+		Approval:            a.approval,
+		Gate:                a.gate,
+		Provider:            a.provider,
+		APIKey:              a.apiKey,
+		BaseURL:             a.baseURL,
+		AuthToken:           a.authToken,
+		Model:               a.model,
+		Timeout:             a.timeout,
+		StalledTimeout:      a.stalledTimeout,
+		ProviderRetry:       a.providerRetry,
+		IncludeGlobs:        a.include,
+		ExcludeGlobs:        a.exclude,
+		Extensions:          a.exts,
+		ExpandWindow:        a.expand,
+		TokenBudget:         a.tokenBudget,
+		DeepContext:         a.deepContext,
+		ContextHops:         a.contextHops,
+		ContextHopsAuto:     a.contextHopsAuto,
+		Subagents:           a.subagents,
+		Tools:               a.tools,
+		SymbolContext:       a.symbolContext,
+		FilterMode:          a.filterMode,
+		MinSeverity:         a.minSeverity,
+		Format:              a.format,
+		SuppressWalkthrough: !a.walkthrough,
+		FileChangeSummary:   a.fileChangeSummary,
+		PromptFormat:        a.promptFormat,
+		WantDiagram:         a.wantDiagram,
+		Instruction:         a.instruction,
+		Conversation:        a.conversation,
+		Mode:                a.mode,
+		NoSave:              a.noSave,
+		Force:               a.force,
+		Progress:            progress,
+		TraceSink:           a.traceSink,
+		CaptureReasoning:    a.captureReasoning,
+		ActionsOut:          cmd.OutOrStdout(),
 	})
 	if err != nil {
 		return classifyReviewErr(err, a.timeout, ctx)

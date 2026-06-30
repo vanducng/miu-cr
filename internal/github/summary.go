@@ -164,6 +164,12 @@ type SummaryOptions struct {
 	// the legacy byte-for-byte summary; "minimal" drops the heading, walkthrough,
 	// result badges, changes table, and review reference.
 	Format string
+	// SuppressWalkthrough drops the "What changed" walkthrough block; FileChangeSummary
+	// opts INTO the "Important Files Changed" table. Both AND with the format preset:
+	// minimal already has them off. Zero-value safe — the walkthrough defaults on, the
+	// file table defaults off (= [review].code_summary defaults).
+	SuppressWalkthrough bool
+	FileChangeSummary   bool
 }
 
 // RenderSummaryFull is RenderSummaryWithOverflow plus the LLM-free reviewer-trust
@@ -201,7 +207,7 @@ func RenderSummaryFull(info *PRInfo, findings []engine.Finding, stats map[string
 			result = ledgerResultPlain(opts.Ledger)
 		}
 		fmt.Fprintf(&b, "**Result:** %s\n\n", result)
-		if p.Walkthrough {
+		if p.Walkthrough && !opts.SuppressWalkthrough {
 			renderWalkthrough(&b, opts.Walkthrough)
 		}
 		renderLedger(&b, info, opts.Ledger, opts.InlineURLs, offDiffSet(findings, opts.Diffs, opts.FilterMode))
@@ -224,7 +230,7 @@ func RenderSummaryFull(info *PRInfo, findings []engine.Finding, stats map[string
 			b.WriteString(fmt.Sprintf("→ Review the %d inline comment%s below.", posted, plural(posted)))
 			b.WriteString("\n\n")
 		}
-		if p.Walkthrough {
+		if p.Walkthrough && !opts.SuppressWalkthrough {
 			renderWalkthrough(&b, opts.Walkthrough)
 		}
 	}
@@ -243,7 +249,7 @@ func RenderSummaryFull(info *PRInfo, findings []engine.Finding, stats map[string
 		renderOverflow(&b, info, omitted, categoryURLs, opts.RuleCitations)
 	}
 
-	if p.ChangesTable {
+	if p.ChangesTable && opts.FileChangeSummary {
 		renderPresentation(&b, info, findings, opts.Diffs, opts.FileSummaries)
 	}
 
