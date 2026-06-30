@@ -296,110 +296,134 @@ func ledgerResultLine(entries []LedgerEntry, reviewCount int, headSHA string, si
 	return strings.Join(chips, " ")
 }
 
+type reviewPassedNoteBand string
+
+const (
+	noteCleanFirst   reviewPassedNoteBand = "clean_first"
+	noteCleanRepeat  reviewPassedNoteBand = "clean_repeat"
+	noteOneResolved  reviewPassedNoteBand = "one_resolved"
+	noteFewResolved  reviewPassedNoteBand = "few_resolved"
+	noteSomeResolved reviewPassedNoteBand = "some_resolved"
+	noteManyResolved reviewPassedNoteBand = "many_resolved"
+)
+
+type reviewPassedNoteKey struct {
+	band reviewPassedNoteBand
+	tier string
+}
+
+var reviewPassedNotes = map[reviewPassedNoteKey][]string{
+	{noteCleanFirst, "large"}: {
+		"Clean first pass across a broad diff.",
+		"Large review, clean on the first pass.",
+		"Broad change, clean first pass.",
+		"Clean first shot for a wide change.",
+	},
+	{noteCleanFirst, "medium"}: {
+		"Clean first pass across the changed files.",
+		"First-pass clean for a solid diff.",
+		"No findings on the first review pass.",
+		"Clean start across this change.",
+	},
+	{noteCleanFirst, "small"}: {
+		"Small clean pass. Nice.",
+		"Clean first pass on a focused diff.",
+		"Focused change, clean review.",
+		"Clean on the first pass.",
+	},
+	{noteCleanFirst, ""}: {
+		"Clean on the first pass.",
+		"First-pass clean. Nice.",
+		"No findings on the first shot.",
+		"Clean start. Good shape.",
+	},
+	{noteCleanRepeat, "large"}: {
+		"Still clean across a broad diff.",
+		"Large review stayed clean.",
+		"Broad change, still clean.",
+		"All clear across the larger change.",
+	},
+	{noteCleanRepeat, ""}: {
+		"Still clean on this pass.",
+		"No findings this round.",
+		"Clean review. Good shape.",
+		"All clear on this pass.",
+	},
+	{noteOneResolved, "large"}: {
+		"That finding is cleared across a broad diff.",
+		"One issue down on a larger change. Clean now.",
+		"Clean after one fix across the broader review.",
+		"Tracked issue cleared on a wide review.",
+	},
+	{noteOneResolved, "medium"}: {
+		"That finding is cleared across the changed files.",
+		"One issue down on this review. Clean now.",
+		"Fixed and clean across this pass.",
+		"Tracked issue cleared across the diff.",
+	},
+	{noteOneResolved, ""}: {
+		"That finding is cleared. Nice follow-through.",
+		"One issue down. Clean now.",
+		"Fixed and clean on this pass.",
+		"Tracked issue cleared.",
+	},
+	{noteFewResolved, "large"}: {
+		"Clean after a focused fix pass across a broad diff.",
+		"Good cleanup across the larger change.",
+		"All tracked findings are cleared across the diff.",
+		"Solid follow-through on a broad review.",
+	},
+	{noteFewResolved, ""}: {
+		"All tracked findings are cleared. Good cleanup.",
+		"Clean after a focused fix pass.",
+		"The review ledger is cleared.",
+		"Good follow-through. Nothing open now.",
+	},
+	{noteSomeResolved, "large"}: {
+		"Strong cleanup across a broad review.",
+		"Nice turnaround on a larger diff.",
+		"Solid fix pass across the review thread.",
+		"Good cleanup across the changed surface.",
+	},
+	{noteSomeResolved, ""}: {
+		"Strong cleanup. All tracked findings are cleared.",
+		"Nice turnaround. The review is clean now.",
+		"Solid fix pass. Nothing remains open.",
+		"Good cleanup across the review thread.",
+	},
+	{noteManyResolved, ""}: {
+		"Big cleanup. Every tracked finding is cleared.",
+		"Strong recovery. The ledger is clean.",
+		"Great follow-through across a large review.",
+		"Clean finish after a heavy fix pass.",
+	},
+}
+
 func reviewPassedNote(resolved, reviewCount int, headSHA string, size reviewChangeSize) string {
-	var phrases []string
+	band := reviewPassedBand(resolved, reviewCount)
 	tier := size.tier()
-	switch {
-	case resolved == 0 && reviewCount <= 1 && tier == "large":
-		phrases = []string{
-			"Clean first pass across a broad diff.",
-			"Large review, clean on the first pass.",
-			"Broad change, clean first pass.",
-			"Clean first shot for a wide change.",
-		}
-	case resolved == 0 && reviewCount <= 1 && tier == "medium":
-		phrases = []string{
-			"Clean first pass across the changed files.",
-			"First-pass clean for a solid diff.",
-			"No findings on the first review pass.",
-			"Clean start across this change.",
-		}
-	case resolved == 0 && reviewCount <= 1 && tier == "small":
-		phrases = []string{
-			"Small clean pass. Nice.",
-			"Clean first pass on a focused diff.",
-			"Focused change, clean review.",
-			"Clean on the first pass.",
-		}
-	case resolved == 0 && reviewCount <= 1:
-		phrases = []string{
-			"Clean on the first pass.",
-			"First-pass clean. Nice.",
-			"No findings on the first shot.",
-			"Clean start. Good shape.",
-		}
-	case resolved == 0 && tier == "large":
-		phrases = []string{
-			"Still clean across a broad diff.",
-			"Large review stayed clean.",
-			"Broad change, still clean.",
-			"All clear across the larger change.",
-		}
-	case resolved == 0:
-		phrases = []string{
-			"Still clean on this pass.",
-			"No findings this round.",
-			"Clean review. Good shape.",
-			"All clear on this pass.",
-		}
-	case resolved == 1 && tier == "large":
-		phrases = []string{
-			"That finding is cleared across a broad diff.",
-			"One issue down on a larger change. Clean now.",
-			"Clean after one fix across the broader review.",
-			"Tracked issue cleared on a wide review.",
-		}
-	case resolved == 1 && tier == "medium":
-		phrases = []string{
-			"That finding is cleared across the changed files.",
-			"One issue down on this review. Clean now.",
-			"Fixed and clean across this pass.",
-			"Tracked issue cleared across the diff.",
-		}
-	case resolved == 1:
-		phrases = []string{
-			"That finding is cleared. Nice follow-through.",
-			"One issue down. Clean now.",
-			"Fixed and clean on this pass.",
-			"Tracked issue cleared.",
-		}
-	case resolved <= 3 && tier == "large":
-		phrases = []string{
-			"Clean after a focused fix pass across a broad diff.",
-			"Good cleanup across the larger change.",
-			"All tracked findings are cleared across the diff.",
-			"Solid follow-through on a broad review.",
-		}
-	case resolved <= 3:
-		phrases = []string{
-			"All tracked findings are cleared. Good cleanup.",
-			"Clean after a focused fix pass.",
-			"The review ledger is cleared.",
-			"Good follow-through. Nothing open now.",
-		}
-	case resolved <= 7 && tier == "large":
-		phrases = []string{
-			"Strong cleanup across a broad review.",
-			"Nice turnaround on a larger diff.",
-			"Solid fix pass across the review thread.",
-			"Good cleanup across the changed surface.",
-		}
-	case resolved <= 7:
-		phrases = []string{
-			"Strong cleanup. All tracked findings are cleared.",
-			"Nice turnaround. The review is clean now.",
-			"Solid fix pass. Nothing remains open.",
-			"Good cleanup across the review thread.",
-		}
-	default:
-		phrases = []string{
-			"Big cleanup. Every tracked finding is cleared.",
-			"Strong recovery. The ledger is clean.",
-			"Great follow-through across a large review.",
-			"Clean finish after a heavy fix pass.",
-		}
+	phrases := reviewPassedNotes[reviewPassedNoteKey{band: band, tier: tier}]
+	if len(phrases) == 0 {
+		phrases = reviewPassedNotes[reviewPassedNoteKey{band: band}]
 	}
 	return phrases[stableIndex(headSHA, resolved, reviewCount, size, len(phrases))]
+}
+
+func reviewPassedBand(resolved, reviewCount int) reviewPassedNoteBand {
+	switch {
+	case resolved == 0 && reviewCount <= 1:
+		return noteCleanFirst
+	case resolved == 0:
+		return noteCleanRepeat
+	case resolved == 1:
+		return noteOneResolved
+	case resolved <= 3:
+		return noteFewResolved
+	case resolved <= 7:
+		return noteSomeResolved
+	default:
+		return noteManyResolved
+	}
 }
 
 func stableIndex(headSHA string, resolved, reviewCount int, size reviewChangeSize, n int) int {
