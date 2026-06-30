@@ -145,7 +145,7 @@ func TestReplaceSummaryLedgerBodyIgnoresInlineResultText(t *testing.T) {
 	if !strings.Contains(out, "model text mentions **Result:** before the summary") {
 		t.Fatalf("untrusted result text was modified:\n%s", out)
 	}
-	if !strings.Contains(out, "\n**Result:** <sub") || !strings.Contains(out, "💬 conversation") {
+	if !strings.Contains(out, "\n**Result:** Review passed!") || !strings.Contains(out, "💬 conversation") {
 		t.Fatalf("summary result line not updated:\n%s", out)
 	}
 }
