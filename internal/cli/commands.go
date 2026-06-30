@@ -1132,6 +1132,12 @@ func mergeHostReview(base, over config.HostReview) config.HostReview {
 	if over.Format != "" {
 		out.Format = over.Format
 	}
+	if over.CodeSummary.Walkthrough != nil {
+		out.CodeSummary.Walkthrough = over.CodeSummary.Walkthrough
+	}
+	if over.CodeSummary.FileChangeSummary != nil {
+		out.CodeSummary.FileChangeSummary = over.CodeSummary.FileChangeSummary
+	}
 	if over.PromptFormat != "" {
 		out.PromptFormat = over.PromptFormat
 	}
