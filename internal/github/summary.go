@@ -500,19 +500,68 @@ func ruleCitation(info *PRInfo, ruleStem string, cites map[string]RuleCitation) 
 // and re-runs don't stack. msg is untrusted (provider-originated), escaped via
 // mdInline; the caller redacts secrets first.
 func RenderError(info *PRInfo, msg, version string) string {
+	return RenderErrorNotice(info, ErrorNotice{
+		Level:   "warning",
+		Title:   "miucr could not complete the review",
+		Message: msg,
+	}, version)
+}
+
+// ErrorNotice is the operator-facing failure rendered into the PR summary.
+type ErrorNotice struct {
+	Level   string
+	Title   string
+	Code    string
+	Message string
+	Hint    string
+}
+
+// RenderErrorNotice renders a GitHub alert summary for a failed review run.
+func RenderErrorNotice(info *PRInfo, notice ErrorNotice, version string) string {
 	var b strings.Builder
 	b.WriteString(ReviewMarker + "\n")
 	b.WriteString(runsCountToken(max(info.ReviewCount, 1)) + "\n")
 	b.WriteString("## Code Review Summary\n\n")
-	b.WriteString("⚠️ **miucr could not complete the review.**\n\n")
-	if m := mdInline(msg); m != "" {
-		b.WriteString("> " + m + "\n\n")
+
+	level := errorNoticeLevel(notice.Level)
+	title := strings.TrimSpace(notice.Title)
+	if title == "" {
+		if level == "CAUTION" {
+			title = "miucr hit an internal error"
+		} else {
+			title = "miucr could not complete the review"
+		}
 	}
-	b.WriteString("This is usually a transient provider/network error or a misconfigured API key — not a problem with your changes. Re-run the job to retry; the summary updates with findings once a review completes.")
+	b.WriteString("> [!" + level + "]\n")
+	b.WriteString("> **" + mdInline(title) + "**\n")
+	if code := mdInline(notice.Code); code != "" {
+		b.WriteString(">\n> Code: " + code + "\n")
+	}
+	if m := mdInline(notice.Message); m != "" {
+		b.WriteString(">\n> " + m + "\n")
+	}
+	if h := mdInline(notice.Hint); h != "" {
+		b.WriteString(">\n> Hint: " + h + "\n")
+	}
+	b.WriteString("\n")
+	if level == "CAUTION" {
+		b.WriteString("This looks like an internal miu-cr failure. Re-run after the issue is fixed; a later successful review replaces this notice with findings.")
+	} else {
+		b.WriteString("This is an operational review issue, not a problem with your changes. Re-run the job to retry; a later successful review replaces this notice with findings.")
+	}
 	if strings.TrimSpace(version) != "" {
 		b.WriteString("\n\n<sub>miucr " + mdInline(version) + "</sub>")
 	}
 	return b.String()
+}
+
+func errorNoticeLevel(level string) string {
+	switch strings.ToUpper(strings.TrimSpace(level)) {
+	case "CAUTION", "ERROR":
+		return "CAUTION"
+	default:
+		return "WARNING"
+	}
 }
 
 func mdInline(s string) string {

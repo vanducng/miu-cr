@@ -153,6 +153,12 @@ The day-1 provider/auth/timeout failures classify into a **stable taxonomy** (th
 
 An unrecognized failure stays `internal.error`; it is never mislabeled as `retryable`. Classified messages are redacted: no token fragment ever appears.
 
+On `miucr review --pr --post`, these failures also update the PR summary comment:
+operational/provider/infrastructure errors render as GitHub `[!WARNING]`
+alerts, while unknown `internal.error` failures render as `[!CAUTION]`. The
+alert keeps the stable `error.code` and hint so a later agent can decide whether
+to retry, wait, or inspect host logs.
+
 Provider calls retry transient overload/rate-limit failures before surfacing an error: Anthropic/OpenAI-compatible backends retry `429`, any `5xx` including `529`, and temporary transport failures; the codex backend also retries `response.failed` stream events and honors `Retry-After`/`resets_in_seconds`. The retry loop uses `[review.provider_retry]`, aborts promptly on cancel/timeout, and never retries auth or invalid-request failures. On a persistent codex usage cap, `provider.rate_limited` carries `error.details.resets_in_seconds` (or `retry_after_seconds`) with a hint like `usage cap reached, resets in ~2h`.
 
 ## Exit codes

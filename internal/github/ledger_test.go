@@ -246,13 +246,14 @@ func TestRenderSummaryLedgerGroupedTables(t *testing.T) {
 func TestRenderSummaryLedgerReviewPassed(t *testing.T) {
 	// Non-nil but empty ledger (clean review) → "Review passed", not "No findings".
 	out := RenderSummaryFull(&PRInfo{HeadSHA: "h"}, nil, nil, 0, nil, nil, SummaryOptions{Ledger: []LedgerEntry{}})
-	// A clean review renders the Review passed pill in the same <sub><sub> chip
-	// style as the severity chips (consistent + baseline-aligned).
-	if !strings.Contains(out, "<sub><sub>![Review passed](https://img.shields.io/badge/Review_passed-brightgreen?style=flat)</sub></sub>") {
-		t.Fatalf("clean ledger review should show the Review passed chip in the shields-chip style:\n%s", out)
+	if !strings.Contains(out, "**Result:** Review passed!") {
+		t.Fatalf("clean ledger review should show simple Review passed prose:\n%s", out)
 	}
 	if strings.Contains(out, "No_findings") {
 		t.Fatalf("ledger mode must not use the legacy No findings badge:\n%s", out)
+	}
+	if strings.Contains(out, "Review_passed") || strings.Contains(out, "img.shields.io/badge/Review") {
+		t.Fatalf("clean ledger review must not render a Review passed badge:\n%s", out)
 	}
 }
 
@@ -293,30 +294,23 @@ func TestRenderSummaryLedgerNoMarkerWithoutDiff(t *testing.T) {
 }
 
 func TestLedgerResultLineAllClearShowsStats(t *testing.T) {
-	// All findings resolved (0 open): the all-clear Result line is ONE combined
-	// all-green badge — "Review passed | N resolved" — not two separate chips.
 	ledger := []LedgerEntry{
 		{FP: "aaaaaaaaaaaaaaaa", Path: "a.go", Status: statusResolved, Sev: "high", FirstSev: "high", OpenSHA: "aaaaaa1", ResSHA: "bbbbbb2"},
 	}
 	line := ledgerResultLine(ledger, 2, "bbbbbb2", reviewChangeSize{})
-	want := "<sub><sub>![Review passed 1 resolved](https://img.shields.io/badge/Review_passed_%7C_1_resolved-brightgreen?style=flat)</sub></sub> <sub>That finding is cleared. Nice follow-through.</sub>"
+	want := "Review passed! 1 finding resolved. That finding is cleared. Nice follow-through."
 	if line != want {
-		t.Fatalf("all-clear Result line should be one combined badge\n got: %q\nwant: %q", line, want)
+		t.Fatalf("all-clear Result line should be simple prose\n got: %q\nwant: %q", line, want)
 	}
-	// Exactly one badge image, not two separate chips.
-	if n := strings.Count(line, "img.shields.io"); n != 1 {
-		t.Fatalf("all-clear line should render exactly one badge, got %d in %q", n, line)
-	}
-	// No code-span pills or trailing emoji — pure chip, like the open-findings line.
-	if strings.Contains(line, "`0 open`") || strings.Contains(line, "🎉") {
-		t.Fatalf("all-clear line should be a pure chip (no code-span/emoji), got %q", line)
+	if strings.Contains(line, "img.shields.io") || strings.Contains(line, "<sub>") || strings.Contains(line, "`0 open`") {
+		t.Fatalf("all-clear line should not use badges, subtext, or code-span pills, got %q", line)
 	}
 }
 
 func TestLedgerResultLineReviewPassedNotes(t *testing.T) {
 	clean := ledgerResultLine(nil, 1, "clean-head", reviewChangeSize{})
-	if !strings.Contains(clean, "Review passed") || !strings.Contains(clean, "<sub>") {
-		t.Fatalf("clean pass should include badge plus note, got %q", clean)
+	if !strings.HasPrefix(clean, "Review passed! ") || strings.Contains(clean, "<sub>") || strings.Contains(clean, "img.shields.io") {
+		t.Fatalf("clean pass should use plain text plus note, got %q", clean)
 	}
 
 	resolved := make([]LedgerEntry, 8)
@@ -324,7 +318,7 @@ func TestLedgerResultLineReviewPassedNotes(t *testing.T) {
 		resolved[i] = LedgerEntry{FP: fpStr(i + 1), Status: statusResolved, Sev: "low"}
 	}
 	line := ledgerResultLine(resolved, 4, "resolved-head", reviewChangeSize{})
-	if !strings.Contains(line, "8 resolved") || !containsAny(line, "Big cleanup", "Strong recovery", "Great follow-through", "Clean finish") {
+	if !strings.Contains(line, "8 findings resolved") || !containsAny(line, "Big cleanup", "Strong recovery", "Great follow-through", "Clean finish") {
 		t.Fatalf("large resolved pass should include an intense cleanup note, got %q", line)
 	}
 }

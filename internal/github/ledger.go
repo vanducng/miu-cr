@@ -215,33 +215,8 @@ func capLedger(entries []LedgerEntry) []LedgerEntry {
 	return out
 }
 
-// greenChip renders a small green shields pill in the same <sub><sub> style as
-// severityCountBadge, so the all-clear Result line aligns with the severity
-// chips. text is internal (no user input → no escaping); spaces map to the
-// shields underscore separator.
-func greenChip(text string) string {
-	return fmt.Sprintf("<sub><sub>![%s](https://img.shields.io/badge/%s-brightgreen?style=flat)</sub></sub>",
-		text, strings.ReplaceAll(text, " ", "_"))
-}
-
-// greenResultBadge renders one all-green shields pill "label | msg". The bar is a
-// single segment (not shields' label/message split, which shows no divider when
-// both halves are green). Escaping mirrors shields' own conventions: a literal "-"
-// doubles to "--" (else shields reads it as the message/color delimiter), and the
-// "|" becomes %7C so it stays valid in the URL and safe inside a table cell.
-func greenResultBadge(label, msg string) string {
-	enc := strings.ReplaceAll(label+" | "+msg, " ", "_")
-	enc = strings.ReplaceAll(enc, "-", "--")
-	enc = strings.ReplaceAll(enc, "|", "%7C")
-	return fmt.Sprintf("<sub><sub>![%s %s](https://img.shields.io/badge/%s-brightgreen?style=flat)</sub></sub>",
-		label, msg, enc)
-}
-
 // ledgerResultLine builds the **Result:** lead for ledger mode: open-severity
-// count chips when findings are open, else one combined all-green "Review passed
-// | N resolved" badge (or just "Review passed" when nothing was resolved) in the
-// SAME <sub><sub> shields-chip style as the severity chips, so the all-clear line
-// is visually consistent and baseline-aligned.
+// count chips when findings are open, else plain all-clear prose.
 type reviewChangeSize struct {
 	files int
 	churn int64
@@ -277,13 +252,11 @@ func ledgerResultLine(entries []LedgerEntry, reviewCount int, headSHA string, si
 	}
 
 	if open == 0 {
-		var badge string
+		note := mdInline(reviewPassedNote(resolved, reviewCount, headSHA, size))
 		if resolved > 0 {
-			badge = greenResultBadge("Review passed", fmt.Sprintf("%d resolved", resolved))
-		} else {
-			badge = greenChip("Review passed")
+			return fmt.Sprintf("Review passed! %d finding%s resolved. %s", resolved, plural(resolved), note)
 		}
-		return badge + " <sub>" + mdInline(reviewPassedNote(resolved, reviewCount, headSHA, size)) + "</sub>"
+		return "Review passed! " + note
 	}
 	// Just the per-severity chips. The open total is NOT appended — it already
 	// shows in the "⚠️ Open (N)" tracking-table heading below.

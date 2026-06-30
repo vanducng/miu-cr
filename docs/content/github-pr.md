@@ -121,12 +121,14 @@ written back for the next upsert), a clean `## Code Review Summary` header (no s
 the H2 - it stays small), then an INLINE `**Result:**` line driven by the finding **lifecycle
 ledger** (per-level **shields.io count badges** for currently-OPEN findings — each badge reads
 `Px | severity | count`, with the `Px` label in its severity color and the rest neutral grey,
-critical/high first; a review with nothing open renders a green "Review passed" badge, optionally
-combined with `N resolved`, followed by a short deterministic encouragement note. First-pass clean
-reviews get lighter copy; reviews that clear prior findings get stronger cleanup copy as the resolved
-count grows; small diffs and broad diffs use different phrase pools. The note is selected from the head
-SHA, result shape, and change size, so repeated renders of the same review do not churn the upserted
-comment. The open total still lives in the `⚠️ Open (N)` heading.
+critical/high first; a review with nothing open renders natural all-clear prose
+like `Review passed! No findings on the first review pass.` or
+`Review passed! 3 findings resolved. Good cleanup.` First-pass clean reviews get
+lighter copy; reviews that clear prior findings get stronger cleanup copy as the
+resolved count grows; small diffs and broad diffs use different phrase pools.
+The note is selected from the head SHA, result shape, and change size, so
+repeated renders of the same review do not churn the upserted comment. The open
+total still lives in the `⚠️ Open (N)` heading.
 There is no identity line, no confidence line, and no inline-comment pointer: the prior
 `**Reviews (N)**` identity line, the `Confidence: N/5` line, and the `→ Review the N inline
 comment(s) below` pointer were removed (the run count now lives only in the footer; GitHub
@@ -159,6 +161,15 @@ the JSON envelope). All model-supplied text is escaped at the render boundary. T
 ledger state is persisted **storelessly** in a third hidden marker — `<!-- miu-cr-ledger:<base64> -->`,
 written at the end of the comment like the runs counter — so the open/resolved history survives
 across pushes and **ephemeral CI runners with no database**.
+
+If the review fails before findings are produced, `--post` still upserts the
+same summary comment instead of going silent. Operational failures such as
+provider auth, provider `429`/`5xx`/`529`, quota, review timeout/stall, GitHub
+API availability, or review-store availability render as a GitHub
+`[!WARNING]` alert with the stable error code and hint. Unknown/unclassified
+miu-cr failures render as `[!CAUTION]` so operators can distinguish internal
+tool failures from provider or infrastructure noise. A later successful review
+replaces the alert with the normal findings summary.
 
 This anatomy describes the default **`full`** presentation. The [`--format`](/usage/#--format) knob (`[review].format` / host `review.format`) selects it; `--format minimal` drops the entire `## Code Review Summary` section and every shields badge — both the summary chips and the per-inline `P0`/`P1` priority badge — while keeping the inline findings, the footer, and all three hidden markers, so re-runs still upsert the same comment. It is render-only: the same findings are produced either way.
 
