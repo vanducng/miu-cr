@@ -18,6 +18,9 @@ func upsertReviewErrorSummary(ctx stdctx.Context, client mgithub.Client, info *m
 }
 
 func reviewErrorNotice(err error) mgithub.ErrorNotice {
+	if err == nil {
+		err = errors.New("unknown review error")
+	}
 	notice := mgithub.ErrorNotice{
 		Level:   "caution",
 		Title:   "miucr hit an internal error",
