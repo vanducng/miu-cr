@@ -18,8 +18,34 @@ func TestRenderError(t *testing.T) {
 	if strings.Contains(out, "<script>") || strings.Contains(out, "</details>") {
 		t.Fatalf("untrusted message not escaped: %q", out)
 	}
-	if !strings.Contains(out, "could not complete the review") || !strings.Contains(out, "miucr v9.9.9") {
+	if !strings.Contains(out, "> [!WARNING]") || !strings.Contains(out, "could not complete the review") || !strings.Contains(out, "miucr v9.9.9") {
 		t.Fatalf("missing notice or version: %q", out)
+	}
+}
+
+func TestRenderErrorNoticeCaution(t *testing.T) {
+	info := &PRInfo{Owner: "o", Repo: "r", Number: 3, ReviewCount: 1}
+	out := RenderErrorNotice(info, ErrorNotice{
+		Level:   "caution",
+		Title:   "miucr hit an internal error",
+		Code:    "internal.error",
+		Message: "panic in renderer",
+		Hint:    "check host logs",
+	}, "v1.2.3")
+	for _, want := range []string{
+		"> [!CAUTION]",
+		"**miucr hit an internal error**",
+		"Code: internal.error",
+		"panic in renderer",
+		"Hint: check host logs",
+		"miucr v1.2.3",
+	} {
+		if !strings.Contains(out, want) {
+			t.Fatalf("want %q in caution notice:\n%s", want, out)
+		}
+	}
+	if strings.Contains(out, "[!WARNING]") {
+		t.Fatalf("caution notice must not render warning:\n%s", out)
 	}
 }
 

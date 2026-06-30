@@ -540,13 +540,6 @@ func (prReviewer) ReviewPR(ctx stdctx.Context, req cli.PRReviewRequest) (cli.Rev
 	}, nil
 }
 
-func upsertReviewErrorSummary(ctx stdctx.Context, client mgithub.Client, info *mgithub.PRInfo, reviewErr error) error {
-	cctx, cancel := stdctx.WithTimeout(stdctx.WithoutCancel(ctx), reviewErrorSummaryTimeout)
-	defer cancel()
-	_, err := mgithub.UpsertSummaryComment(cctx, client, info, mgithub.RenderError(info, config.RedactString(reviewErr.Error()), cli.Version()))
-	return err
-}
-
 // skipUnchanged reports whether the desired PR review state already exists.
 func skipUnchanged(ctx stdctx.Context, hist store.Store, info *mgithub.PRInfo, force, post bool, mode, reuseKey string) (store.LatestReview, bool) {
 	if force {

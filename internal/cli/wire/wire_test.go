@@ -2,6 +2,7 @@ package wire
 
 import (
 	stdctx "context"
+	"errors"
 	"net/http"
 	"os"
 	"path/filepath"
@@ -336,6 +337,44 @@ func TestReviewErrorSummaryUsesFreshContext(t *testing.T) {
 	}
 	if len(fake.issueListCtxErrs) == 0 || fake.issueListCtxErrs[0] != nil {
 		t.Fatalf("summary upsert used canceled parent context: %v", fake.issueListCtxErrs)
+	}
+}
+
+func TestReviewErrorSummaryAlertLevels(t *testing.T) {
+	info := &mgithub.PRInfo{Owner: "o", Repo: "r", Number: 7, HeadSHA: "headsha"}
+
+	warnGitHub := &fakeGitHub{}
+	providerErr := &cli.CLIError{
+		Code:    "agent.unavailable",
+		Message: "POST https://api.example.invalid/messages: 529 overloaded",
+		Hint:    "provider unavailable, retry shortly",
+		Retry:   true,
+	}
+	if err := upsertReviewErrorSummary(stdctx.Background(), warnGitHub, info, providerErr); err != nil {
+		t.Fatalf("warning upsert: %v", err)
+	}
+	warn := warnGitHub.issueComments[0].GetBody()
+	for _, want := range []string{"> [!WARNING]", "Provider unavailable", "Code: agent.unavailable", "provider unavailable, retry shortly"} {
+		if !strings.Contains(warn, want) {
+			t.Fatalf("want %q in warning notice:\n%s", want, warn)
+		}
+	}
+	if strings.Contains(warn, "[!CAUTION]") {
+		t.Fatalf("provider issue must not render caution:\n%s", warn)
+	}
+
+	cautionGitHub := &fakeGitHub{}
+	if err := upsertReviewErrorSummary(stdctx.Background(), cautionGitHub, info, errors.New("panic <script>")); err != nil {
+		t.Fatalf("caution upsert: %v", err)
+	}
+	caution := cautionGitHub.issueComments[0].GetBody()
+	for _, want := range []string{"> [!CAUTION]", "miucr hit an internal error", "panic &lt;script&gt;"} {
+		if !strings.Contains(caution, want) {
+			t.Fatalf("want %q in caution notice:\n%s", want, caution)
+		}
+	}
+	if strings.Contains(caution, "<script>") || strings.Contains(caution, "[!WARNING]") {
+		t.Fatalf("internal issue rendered incorrectly:\n%s", caution)
 	}
 }
 
