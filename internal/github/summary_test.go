@@ -138,7 +138,12 @@ func presentationFixture() (*PRInfo, []diff.Diff, []engine.Finding) {
 
 func TestRenderSummaryFullChangesTable(t *testing.T) {
 	info, diffs, findings := presentationFixture()
-	out := RenderSummaryFull(info, findings, nil, 0, nil, nil, SummaryOptions{Diffs: diffs})
+	// The file-change table is OFF by default now (code_summary.file_change_summary);
+	// full alone no longer renders it.
+	if def := RenderSummaryFull(info, findings, nil, 0, nil, nil, SummaryOptions{Diffs: diffs}); strings.Contains(def, "Important Files Changed") {
+		t.Fatalf("file-change table must be off unless opted in:\n%s", def)
+	}
+	out := RenderSummaryFull(info, findings, nil, 0, nil, nil, SummaryOptions{Diffs: diffs, FileChangeSummary: true})
 	if !strings.Contains(out, "<summary>Important Files Changed (2)</summary>") {
 		t.Fatalf("want a changes table for 2 changed files (deleted excluded):\n%s", out)
 	}
@@ -150,6 +155,27 @@ func TestRenderSummaryFullChangesTable(t *testing.T) {
 	}
 	if !strings.Contains(out, "https://github.com/o/r/blob/abc123/pkg/a.go") {
 		t.Fatalf("want a blob permalink for the file cell:\n%s", out)
+	}
+}
+
+func TestRenderSummaryCodeSummaryToggles(t *testing.T) {
+	info, diffs, findings := presentationFixture()
+	const wt = "DISTINCTIVE-WALKTHROUGH-LINE"
+	// Default: walkthrough on, file-change table off.
+	def := RenderSummaryFull(info, findings, nil, 0, nil, nil, SummaryOptions{Diffs: diffs, Walkthrough: wt})
+	if !strings.Contains(def, wt) {
+		t.Fatalf("walkthrough must render by default:\n%s", def)
+	}
+	if strings.Contains(def, "Important Files Changed") {
+		t.Fatalf("file-change table must be off by default:\n%s", def)
+	}
+	// SuppressWalkthrough drops the walkthrough; FileChangeSummary adds the table.
+	noWT := RenderSummaryFull(info, findings, nil, 0, nil, nil, SummaryOptions{Diffs: diffs, Walkthrough: wt, SuppressWalkthrough: true, FileChangeSummary: true})
+	if strings.Contains(noWT, wt) {
+		t.Fatalf("SuppressWalkthrough must drop the walkthrough:\n%s", noWT)
+	}
+	if !strings.Contains(noWT, "Important Files Changed") {
+		t.Fatalf("FileChangeSummary must render the table:\n%s", noWT)
 	}
 }
 
@@ -395,7 +421,7 @@ func TestRenderSummaryHandoffNeverShowsReviewID(t *testing.T) {
 
 func TestRenderSummaryFullEmptyFindingsStillClean(t *testing.T) {
 	info, diffs, _ := presentationFixture()
-	out := RenderSummaryFull(info, nil, nil, 0, nil, nil, SummaryOptions{Diffs: diffs, ReviewID: "rev_x"})
+	out := RenderSummaryFull(info, nil, nil, 0, nil, nil, SummaryOptions{Diffs: diffs, ReviewID: "rev_x", FileChangeSummary: true})
 	if !strings.Contains(out, "No_findings-brightgreen") {
 		t.Fatalf("empty-findings review must still render a clean summary:\n%s", out)
 	}
@@ -424,7 +450,7 @@ func TestRenderChangesTableCapsRows(t *testing.T) {
 	for i := range diffs {
 		diffs[i] = diff.Diff{NewPath: "f", Insertions: 1}
 	}
-	out := RenderSummaryFull(info, nil, nil, 0, nil, nil, SummaryOptions{Diffs: diffs})
+	out := RenderSummaryFull(info, nil, nil, 0, nil, nil, SummaryOptions{Diffs: diffs, FileChangeSummary: true})
 	if !strings.Contains(out, "5 more file(s)") {
 		t.Fatalf("want an overflow note for capped rows:\n%s", out)
 	}
@@ -433,7 +459,7 @@ func TestRenderChangesTableCapsRows(t *testing.T) {
 func TestRenderSummaryFullWalkthrough(t *testing.T) {
 	info, diffs, findings := presentationFixture()
 	out := RenderSummaryFull(info, findings, nil, 0, nil, nil, SummaryOptions{
-		Diffs: diffs, ReviewID: "rev_x", Walkthrough: "This PR refactors the parser and adds a cache."})
+		Diffs: diffs, ReviewID: "rev_x", Walkthrough: "This PR refactors the parser and adds a cache.", FileChangeSummary: true})
 	if !strings.Contains(out, "This PR refactors the parser and adds a cache.") {
 		t.Fatalf("want the walkthrough text (lead prose):\n%s", out)
 	}
@@ -475,7 +501,7 @@ func TestRenderSummaryFullWalkthroughOmittedWhenEmpty(t *testing.T) {
 func TestRenderSummaryFullPerFileDigest(t *testing.T) {
 	info, diffs, findings := presentationFixture()
 	summaries := map[string]string{"pkg/a.go": "adds a leak guard"}
-	out := RenderSummaryFull(info, findings, nil, 0, nil, nil, SummaryOptions{Diffs: diffs, FileSummaries: summaries})
+	out := RenderSummaryFull(info, findings, nil, 0, nil, nil, SummaryOptions{Diffs: diffs, FileSummaries: summaries, FileChangeSummary: true})
 	if !strings.Contains(out, "| File | Δ | Findings | Overview |") {
 		t.Fatalf("want a Summary column header when any file has a digest:\n%s", out)
 	}
@@ -491,7 +517,7 @@ func TestRenderSummaryFullPerFileDigest(t *testing.T) {
 func TestRenderSummaryFullNoSummaryColumnWhenAbsent(t *testing.T) {
 	info, diffs, findings := presentationFixture()
 	// No file_summaries → the table keeps the legacy 3-column layout byte-for-byte.
-	out := RenderSummaryFull(info, findings, nil, 0, nil, nil, SummaryOptions{Diffs: diffs})
+	out := RenderSummaryFull(info, findings, nil, 0, nil, nil, SummaryOptions{Diffs: diffs, FileChangeSummary: true})
 	if strings.Contains(out, "Overview |") {
 		t.Fatalf("no digests must keep the 3-column table:\n%s", out)
 	}
@@ -499,7 +525,7 @@ func TestRenderSummaryFullNoSummaryColumnWhenAbsent(t *testing.T) {
 		t.Fatalf("want the legacy 3-column header:\n%s", out)
 	}
 	// A summary map with only an entry for a non-changed file adds no column.
-	out2 := RenderSummaryFull(info, findings, nil, 0, nil, nil, SummaryOptions{Diffs: diffs, FileSummaries: map[string]string{"other.go": "x"}})
+	out2 := RenderSummaryFull(info, findings, nil, 0, nil, nil, SummaryOptions{Diffs: diffs, FileSummaries: map[string]string{"other.go": "x"}, FileChangeSummary: true})
 	if strings.Contains(out2, "Overview |") {
 		t.Fatalf("a digest only for an unchanged file must add no column:\n%s", out2)
 	}
@@ -540,7 +566,7 @@ func TestRenderSummaryFullEscapesUntrustedTableCell(t *testing.T) {
 	info, diffs, findings := presentationFixture()
 	breakout := "# Injected Heading </details>**bad**|col`x`[y](z)<script>"
 	out := RenderSummaryFull(info, findings, nil, 0, nil, nil, SummaryOptions{
-		Diffs: diffs, ReviewID: "rev_x", FileSummaries: map[string]string{"pkg/a.go": breakout}})
+		Diffs: diffs, ReviewID: "rev_x", FileSummaries: map[string]string{"pkg/a.go": breakout}, FileChangeSummary: true})
 	if strings.Contains(out, "<script>") {
 		t.Fatalf("table cell must be HTML-escaped, found raw <script>:\n%s", out)
 	}
@@ -659,7 +685,7 @@ func TestRenderChangesTableSortsByImportance(t *testing.T) {
 		{NewPath: "buggy.go", Insertions: 1, Deletions: 0}, // tiny churn, has a finding
 	}
 	findings := []engine.Finding{{File: "buggy.go", Line: 1, Severity: "high", Rationale: "x"}}
-	out := RenderSummaryFull(info, findings, nil, 0, nil, nil, SummaryOptions{Diffs: diffs})
+	out := RenderSummaryFull(info, findings, nil, 0, nil, nil, SummaryOptions{Diffs: diffs, FileChangeSummary: true})
 	bi, gi := strings.Index(out, "buggy.go"), strings.Index(out, "big.go")
 	if bi < 0 || gi < 0 || bi > gi {
 		t.Fatalf("a file with a finding must sort before a bigger no-finding file:\n%s", out)

@@ -73,12 +73,13 @@ func TestReplaceSummaryLedgerBodyPreservesSummarySections(t *testing.T) {
 	f := engine.Finding{File: "a.go", Line: 5, Severity: "low", Category: "bug", Title: "thing", QuotedCode: "x"}
 	ledger := MergeLedger(nil, []engine.Finding{f}, "aaaaaa1", map[string]bool{"a.go": true}, now)
 	body := RenderSummaryFull(info, []engine.Finding{f}, map[string]any{"truncation_level": "full"}, 0, nil, nil, SummaryOptions{
-		Diffs:       []diff.Diff{{NewPath: "a.go", Insertions: 1}},
-		Walkthrough: "- changed a thing",
-		Ledger:      ledger,
-		InlineURLs:  map[string]string{Fingerprint(f): "https://github.com/o/r/pull/1#discussion_r1"},
-		Published:   true,
-		PublishKey:  "0123456789abcdef",
+		Diffs:             []diff.Diff{{NewPath: "a.go", Insertions: 1}},
+		Walkthrough:       "- changed a thing",
+		FileChangeSummary: true,
+		Ledger:            ledger,
+		InlineURLs:        map[string]string{Fingerprint(f): "https://github.com/o/r/pull/1#discussion_r1"},
+		Published:         true,
+		PublishKey:        "0123456789abcdef",
 	})
 	next := append([]LedgerEntry(nil), ledger...)
 	next[0].Status = statusResolved

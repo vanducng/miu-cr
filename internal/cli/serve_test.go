@@ -602,6 +602,7 @@ func TestHostReviewAnalysisShapeClassifiesEveryField(t *testing.T) {
 	}
 	ignored := map[string]bool{
 		"Format":               true,
+		"CodeSummary":          true,
 		"Post":                 true,
 		"Suggest":              true,
 		"Approval":             true,

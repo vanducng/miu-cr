@@ -138,6 +138,7 @@ type Review struct {
 	FilterMode     string            `toml:"filter_mode,omitempty"`
 	MinSeverity    string            `toml:"min_severity,omitempty"`
 	Format         string            `toml:"format,omitempty"`        // full (default) | minimal — review-comment presentation preset
+	CodeSummary    CodeSummary       `toml:"code_summary,omitempty"`  // model-generated walkthrough + per-file change table toggles
 	PromptFormat   string            `toml:"prompt_format,omitempty"` // xml (default) | markdown
 	Timeout        string            `toml:"timeout,omitempty"`
 	StalledTimeout string            `toml:"stalled_timeout,omitempty"`
@@ -156,6 +157,24 @@ type Review struct {
 	Subagents      ReviewSubagents   `toml:"subagents,omitempty"`
 	PRFilter       HostPRFilter      `toml:"pr_filter,omitempty"`
 	CategoryURLs   map[string]string `toml:"category_urls,omitempty"`
+}
+
+// CodeSummary toggles the two model-generated PR-overview blocks in the review
+// comment. Pointers distinguish unset (nil → documented default) from an explicit
+// false: Walkthrough defaults ON (the "What changed" bullets), FileChangeSummary
+// defaults OFF (the "Important Files Changed" table — extra per-file output the
+// review does not need). Render-gated only; generation is unchanged.
+type CodeSummary struct {
+	Walkthrough       *bool `toml:"walkthrough,omitempty" yaml:"walkthrough,omitempty" json:"walkthrough,omitempty"`
+	FileChangeSummary *bool `toml:"file_change_summary,omitempty" yaml:"file_change_summary,omitempty" json:"file_change_summary,omitempty"`
+}
+
+// WantWalkthrough resolves the walkthrough toggle (nil → true).
+func (c CodeSummary) WantWalkthrough() bool { return c.Walkthrough == nil || *c.Walkthrough }
+
+// WantFileChangeSummary resolves the file-change-table toggle (nil → false).
+func (c CodeSummary) WantFileChangeSummary() bool {
+	return c.FileChangeSummary != nil && *c.FileChangeSummary
 }
 
 const (
