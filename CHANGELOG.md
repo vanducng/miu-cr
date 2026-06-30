@@ -55,6 +55,13 @@ comment with a new marker); subsequent re-runs dedupe normally. On a
 first M5 review **manually** (or off-hours) to absorb the one-time re-post before
 the next scheduled run.
 
+## [0.80.0](https://github.com/vanducng/miu-cr/compare/v0.79.0...v0.80.0) (2026-06-30)
+
+
+### Features
+
+* **review:** code_summary config — walkthrough on, file-change table off by default ([#237](https://github.com/vanducng/miu-cr/issues/237)) ([5526170](https://github.com/vanducng/miu-cr/commit/55261704a076bc7e9875ff83923177a140018250))
+
 ## [0.79.0](https://github.com/vanducng/miu-cr/compare/v0.78.0...v0.79.0) (2026-06-30)
 
 
