@@ -55,6 +55,13 @@ comment with a new marker); subsequent re-runs dedupe normally. On a
 first M5 review **manually** (or off-hours) to absorb the one-time re-post before
 the next scheduled run.
 
+## [0.80.2](https://github.com/vanducng/miu-cr/compare/v0.80.1...v0.80.2) (2026-06-30)
+
+
+### Bug Fixes
+
+* **serve:** don't post an error summary when a review is canceled ([#241](https://github.com/vanducng/miu-cr/issues/241)) ([038f440](https://github.com/vanducng/miu-cr/commit/038f4400111f3056fa413ab55767d4fa03a8c0aa))
+
 ## [0.80.1](https://github.com/vanducng/miu-cr/compare/v0.80.0...v0.80.1) (2026-06-30)
 
 
