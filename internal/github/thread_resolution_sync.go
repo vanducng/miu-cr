@@ -42,6 +42,9 @@ func SyncSummaryConversationResolved(ctx stdctx.Context, client Client, info *PR
 	if reviewed := parseReviewedCommit(body); reviewed != "" {
 		renderInfo.HeadSHA = reviewed
 	}
+	if runs := parseRunsCount(body); runs > 0 {
+		renderInfo.ReviewCount = runs
+	}
 	inlineURLs, err := ExistingFingerprints(ctx, client, info)
 	updateReason := "updated"
 	if err != nil {
@@ -124,7 +127,7 @@ func replaceSummaryLedgerBody(body string, info *PRInfo, ledger []LedgerEntry, i
 	if !strings.Contains(body, ReviewMarker) || !strings.Contains(body, ledgerPrefix) {
 		return "", false
 	}
-	next, ok := replaceResultLine(body, ledgerResultLine(ledger))
+	next, ok := replaceResultLine(body, ledgerResultLine(ledger, info.ReviewCount, info.HeadSHA, reviewChangeSizeOf(info, nil)))
 	if !ok {
 		return "", false
 	}

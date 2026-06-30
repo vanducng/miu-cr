@@ -34,6 +34,9 @@ type PRInfo struct {
 	// approve resolver treats the untrusted set as a hard block.
 	AuthorAssociation string
 	Files             []string
+	ChangedFiles      int
+	Additions         int64
+	Deletions         int64
 	// HTMLBase is the BASE repo's HTML URL (e.g. https://github.com/owner/repo),
 	// used to build repo-relative blob permalinks. Never contains a token.
 	HTMLBase string
@@ -112,6 +115,9 @@ func FetchPR(ctx stdctx.Context, client Client, ref PRRef) (*PRInfo, error) {
 		for _, f := range files {
 			if name := f.GetFilename(); name != "" {
 				info.Files = append(info.Files, name)
+				info.ChangedFiles++
+				info.Additions += int64(f.GetAdditions())
+				info.Deletions += int64(f.GetDeletions())
 			}
 		}
 		if resp == nil || resp.NextPage == 0 {

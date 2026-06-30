@@ -121,9 +121,12 @@ written back for the next upsert), a clean `## Code Review Summary` header (no s
 the H2 - it stays small), then an INLINE `**Result:**` line driven by the finding **lifecycle
 ledger** (per-level **shields.io count badges** for currently-OPEN findings — each badge reads
 `Px | severity | count`, with the `Px` label in its severity color and the rest neutral grey,
-critical/high first; a review with nothing open renders a green "Review passed" badge plus a
-friendly `· all clear 🎉`. Neither the open total nor the resolved count is repeated on the
-Result line — both already show in the `⚠️ Open (N)` / `✅ Resolved (N)` table headings).
+critical/high first; a review with nothing open renders a green "Review passed" badge, optionally
+combined with `N resolved`, followed by a short deterministic encouragement note. First-pass clean
+reviews get lighter copy; reviews that clear prior findings get stronger cleanup copy as the resolved
+count grows; small diffs and broad diffs use different phrase pools. The note is selected from the head
+SHA, result shape, and change size, so repeated renders of the same review do not churn the upserted
+comment. The open total still lives in the `⚠️ Open (N)` heading.
 There is no identity line, no confidence line, and no inline-comment pointer: the prior
 `**Reviews (N)**` identity line, the `Confidence: N/5` line, and the `→ Review the N inline
 comment(s) below` pointer were removed (the run count now lives only in the footer; GitHub

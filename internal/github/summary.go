@@ -196,7 +196,7 @@ func RenderSummaryFull(info *PRInfo, findings []engine.Finding, stats map[string
 		// Lifecycle mode: Result → a concise PR summary → the always-visible
 		// Open/Resolved tracking tables. No inline-comment pointer (GitHub already
 		// surfaces the inline review thread below).
-		result := ledgerResultLine(opts.Ledger)
+		result := ledgerResultLine(opts.Ledger, info.ReviewCount, info.HeadSHA, reviewChangeSizeOf(info, opts.Diffs))
 		if !p.ResultBadges {
 			result = ledgerResultPlain(opts.Ledger)
 		}
@@ -385,6 +385,21 @@ func diffStats(diffs []diff.Diff) (files int, adds, dels int64) {
 		dels += diffs[i].Deletions
 	}
 	return files, adds, dels
+}
+
+func reviewChangeSizeOf(info *PRInfo, diffs []diff.Diff) reviewChangeSize {
+	files, adds, dels := diffStats(diffs)
+	if files > 0 || adds+dels > 0 {
+		return reviewChangeSize{files: files, churn: adds + dels}
+	}
+	if info == nil {
+		return reviewChangeSize{}
+	}
+	files = info.ChangedFiles
+	if files == 0 {
+		files = len(info.Files)
+	}
+	return reviewChangeSize{files: files, churn: info.Additions + info.Deletions}
 }
 
 // renderOverflow appends a collapsible block listing the omitted inline findings.
