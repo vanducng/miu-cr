@@ -497,7 +497,11 @@ func (prReviewer) ReviewPR(ctx stdctx.Context, req cli.PRReviewRequest) (cli.Rev
 		// --post run, leave a visible error on the PR (upserting miucr's summary
 		// comment so a later good run replaces it) instead of failing silently. Fork
 		// PRs skip it: the token can't write an issue comment (403). Best-effort.
-		if req.Post && !info.IsFork {
+		//
+		// A context.Canceled is NOT a failure: the host cancels an in-flight review
+		// when a newer head supersedes it (or on shutdown). See
+		// shouldPostReviewErrorSummary.
+		if shouldPostReviewErrorSummary(req.Post, info.IsFork, err) {
 			if uerr := upsertReviewErrorSummary(ctx, client, info, err); uerr != nil {
 				slog.Warn("review-error summary upsert failed: " + config.RedactString(uerr.Error()))
 			}

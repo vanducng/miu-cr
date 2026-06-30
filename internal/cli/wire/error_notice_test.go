@@ -1,6 +1,36 @@
 package wire
 
-import "testing"
+import (
+	stdctx "context"
+	"errors"
+	"fmt"
+	"testing"
+)
+
+func TestShouldPostReviewErrorSummary(t *testing.T) {
+	tests := []struct {
+		name   string
+		post   bool
+		isFork bool
+		err    error
+		want   bool
+	}{
+		{"genuine failure posts", true, false, errors.New("provider 500"), true},
+		{"canceled (superseded/shutdown) skips", true, false, stdctx.Canceled, false},
+		{"wrapped canceled skips", true, false, fmt.Errorf("agent loop: %w", stdctx.Canceled), false},
+		{"deadline exceeded still posts", true, false, stdctx.DeadlineExceeded, true},
+		{"fork skips", true, true, errors.New("provider 500"), false},
+		{"no-post skips", false, false, errors.New("provider 500"), false},
+		{"nil error skips", true, false, nil, false},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := shouldPostReviewErrorSummary(tt.post, tt.isFork, tt.err); got != tt.want {
+				t.Fatalf("shouldPostReviewErrorSummary(%v,%v,%v)=%v want %v", tt.post, tt.isFork, tt.err, got, tt.want)
+			}
+		})
+	}
+}
 
 func TestReviewErrorIsOperational(t *testing.T) {
 	tests := []struct {
