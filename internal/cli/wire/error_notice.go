@@ -10,6 +10,17 @@ import (
 	mgithub "github.com/vanducng/miu-cr/internal/github"
 )
 
+// shouldPostReviewErrorSummary reports whether a failed review should upsert a
+// visible error summary on the PR. A context.Canceled is NOT a failure: the host
+// cancels an in-flight review when a newer head supersedes it (or on shutdown),
+// and the superseding run posts the real summary — so an error notice here would
+// flash a misleading "miucr hit an internal error" on a PR that's merely being
+// re-reviewed. DeadlineExceeded (review.timeout) is a genuine failure and posts.
+// Fork PRs are skipped: the token can't write an issue comment (403).
+func shouldPostReviewErrorSummary(post, isFork bool, reviewErr error) bool {
+	return post && !isFork && reviewErr != nil && !errors.Is(reviewErr, stdctx.Canceled)
+}
+
 func upsertReviewErrorSummary(ctx stdctx.Context, client mgithub.Client, info *mgithub.PRInfo, reviewErr error) error {
 	cctx, cancel := stdctx.WithTimeout(stdctx.WithoutCancel(ctx), reviewErrorSummaryTimeout)
 	defer cancel()
