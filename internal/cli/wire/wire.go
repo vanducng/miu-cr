@@ -357,6 +357,13 @@ func (prReviewer) ReviewPR(ctx stdctx.Context, req cli.PRReviewRequest) (cli.Rev
 	if lerr != nil {
 		slog.Warn("config load failed, using built-in defaults: " + config.RedactString(lerr.Error()))
 	}
+	// A request-level thinking override (the host sets it per-repo from HostReview;
+	// cfg.Review.Thinking is only populated on the standalone CLI path) must flow to
+	// BOTH the resolved creds and the cache-reuse fingerprint — set it on cfg so the
+	// single source (cfg.Review.Thinking) stays consistent everywhere downstream.
+	if strings.TrimSpace(req.Thinking) != "" {
+		cfg.Review.Thinking = req.Thinking
+	}
 	hist, closeHist := openHistoryStore(ctx, cfg, req.NoSave)
 	if closeHist != nil {
 		defer closeHist()

@@ -106,6 +106,7 @@ type HostReview struct {
 	FilterMode           string                     `yaml:"filter_mode" json:"filter_mode,omitempty"`
 	MinSeverity          string                     `yaml:"min_severity" json:"min_severity,omitempty"`
 	Format               string                     `yaml:"format" json:"format,omitempty"`
+	Thinking             string                     `yaml:"thinking" json:"thinking,omitempty"`
 	CodeSummary          CodeSummary                `yaml:"code_summary" json:"code_summary,omitempty"`
 	PromptFormat         string                     `yaml:"prompt_format" json:"prompt_format,omitempty"`
 	Timeout              string                     `yaml:"timeout" json:"timeout,omitempty"`
@@ -465,6 +466,11 @@ func validateHostReview(path, field string, r HostReview) error {
 	}
 	if r.Mode != "" && r.Mode != "review" && r.Mode != "checks" {
 		return invalidHost(path, field+".mode", r.Mode, "review|checks")
+	}
+	switch r.Thinking {
+	case "", "auto", "off", "low", "medium", "high":
+	default:
+		return invalidHost(path, field+".thinking", r.Thinking, "auto|off|low|medium|high")
 	}
 	switch r.Approval.Mode {
 	case "", "off", "clean", "threshold":
