@@ -77,6 +77,7 @@ type JobReviewOptions struct {
 	FilterMode          string
 	MinSeverity         string
 	Format              string
+	Thinking            string
 	SuppressWalkthrough bool
 	FileChangeSummary   bool
 	PromptFormat        string

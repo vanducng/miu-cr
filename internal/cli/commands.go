@@ -688,6 +688,7 @@ type hostReviewAnalysisFields struct {
 	TokenBudget    *int
 	ContextHops    *int
 	Mode           string
+	Thinking       string
 	DeepContext    *bool
 	Conversation   *bool
 	Force          *bool
@@ -708,6 +709,7 @@ func hostReviewAnalysisShape(review config.HostReview) any {
 		TokenBudget:    review.TokenBudget,
 		ContextHops:    review.ContextHops,
 		Mode:           review.Mode,
+		Thinking:       review.Thinking,
 		DeepContext:    review.DeepContext,
 		Conversation:   review.Conversation,
 		Force:          review.Force,
@@ -730,6 +732,7 @@ func hostReviewOptions(providerName string, provider config.HostProvider, secret
 		FilterMode:          review.FilterMode,
 		MinSeverity:         review.MinSeverity,
 		Format:              review.Format,
+		Thinking:            review.Thinking,
 		SuppressWalkthrough: !review.CodeSummary.WantWalkthrough(),
 		FileChangeSummary:   review.CodeSummary.WantFileChangeSummary(),
 		PromptFormat:        review.PromptFormat,
@@ -1132,6 +1135,9 @@ func mergeHostReview(base, over config.HostReview) config.HostReview {
 	if over.Format != "" {
 		out.Format = over.Format
 	}
+	if over.Thinking != "" {
+		out.Thinking = over.Thinking
+	}
 	if over.CodeSummary.Walkthrough != nil {
 		out.CodeSummary.Walkthrough = over.CodeSummary.Walkthrough
 	}
@@ -1368,6 +1374,7 @@ func buildServeReviewFn(log *slog.Logger, gate string, st serve.ReviewStore, tra
 			FilterMode:          review.FilterMode,
 			MinSeverity:         review.MinSeverity,
 			Format:              review.Format,
+			Thinking:            review.Thinking,
 			SuppressWalkthrough: review.SuppressWalkthrough,
 			FileChangeSummary:   review.FileChangeSummary,
 			PromptFormat:        review.PromptFormat,

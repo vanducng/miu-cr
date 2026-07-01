@@ -38,6 +38,9 @@ x:
     gate: high
     filter_mode: diff_context
     min_severity: low
+    # thinking: auto            # auto|off|low|medium|high — extended-thinking depth for
+                                # host reviews ("" → auto). Lower it (e.g. medium) to cut
+                                # per-review latency; can be overridden per repo below.
     timeout: 900s
     stalled_timeout: 5m
     provider_retry:
