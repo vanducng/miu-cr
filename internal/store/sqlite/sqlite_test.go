@@ -69,6 +69,17 @@ func TestOpenLocksDownPermissions(t *testing.T) {
 	if got := fi.Mode().Perm(); got != 0o600 {
 		t.Errorf("state.db mode = %o, want 600 (holds diffs/transcripts)", got)
 	}
+	// WAL -wal/-shm sidecars hold committed page data too; when present they must
+	// be locked down like the main DB (the schema write above materializes them).
+	for _, sidecar := range []string{path + "-wal", path + "-shm"} {
+		si, err := os.Stat(sidecar)
+		if err != nil {
+			continue // may not exist depending on SQLite's WAL state
+		}
+		if got := si.Mode().Perm(); got != 0o600 {
+			t.Errorf("%s mode = %o, want 600 (holds committed page data)", filepath.Base(sidecar), got)
+		}
+	}
 }
 
 func TestSaveGetRoundTrip(t *testing.T) {

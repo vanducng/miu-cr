@@ -91,11 +91,14 @@ func Open(path string) (*Store, error) {
 		_ = db.Close()
 		return nil, fmt.Errorf("migrate schema: %w", err)
 	}
-	// SchemaSQL is the first write, so the DB file is now guaranteed to exist
-	// (WAL mode may not materialize it on Ping alone). Lock it to owner-only —
-	// defense-in-depth atop the 0700 dir — so the persisted diffs/transcripts
-	// aren't world-readable.
+	// SchemaSQL is the first write, so the DB file — and, in WAL mode, its -wal/-shm
+	// sidecars (which also hold committed page data) — now exist. Lock them all to
+	// owner-only, defense-in-depth atop the 0700 dir, so the persisted
+	// diffs/transcripts aren't world-readable. Sidecars may be absent on some paths,
+	// so ignore errors.
 	_ = os.Chmod(path, 0o600)
+	_ = os.Chmod(path+"-wal", 0o600)
+	_ = os.Chmod(path+"-shm", 0o600)
 	if err := migrateReviewColumns(db); err != nil {
 		_ = db.Close()
 		return nil, fmt.Errorf("migrate reviews columns: %w", err)
