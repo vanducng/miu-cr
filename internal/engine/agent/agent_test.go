@@ -113,6 +113,39 @@ func TestParseFindingsFenceStripping(t *testing.T) {
 	}
 }
 
+// parseFindings must bound an adversarial/injected model reply: the finding
+// count and the per-finding field lengths are capped so it can't drive an
+// O(findings × diff-lines) anchoring pass or push unbounded strings downstream.
+func TestParseFindingsCapsCountAndFieldLengths(t *testing.T) {
+	var sb strings.Builder
+	sb.WriteString(`{"findings":[`)
+	for i := 0; i < maxFindings+50; i++ {
+		if i > 0 {
+			sb.WriteString(",")
+		}
+		sb.WriteString(`{"file":"a.go","severity":"critical","category":"bug","rationale":"` +
+			strings.Repeat("x", maxRationaleLen+500) + `","suggested_patch":"` +
+			strings.Repeat("y", maxPatchLen+500) + `"}`)
+	}
+	sb.WriteString(`]}`)
+
+	out, ok := parseFindings(sb.String())
+	if !ok {
+		t.Fatal("parse failed")
+	}
+	if len(out.Findings) != maxFindings {
+		t.Fatalf("finding count = %d, want capped at %d", len(out.Findings), maxFindings)
+	}
+	f := out.Findings[0]
+	// capProse cuts to <= maxRationaleLen then appends a one-rune ellipsis.
+	if len([]rune(f.Rationale)) > maxRationaleLen+1 {
+		t.Errorf("rationale len = %d, want <= %d", len([]rune(f.Rationale)), maxRationaleLen+1)
+	}
+	if len([]rune(f.SuggestedPatch)) > maxPatchLen {
+		t.Errorf("patch len = %d, want <= %d", len([]rune(f.SuggestedPatch)), maxPatchLen)
+	}
+}
+
 // Regression: the model must report "file" per finding and parseFindings must
 // carry it onto engine.Finding.File, otherwise the anchor resolver keys on ""
 // and silently drops every finding. This also proves the agent->anchor handoff.

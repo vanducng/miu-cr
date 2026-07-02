@@ -377,6 +377,16 @@ const (
 	maxDiagramLen      = 2000
 	maxTitleLen        = 120
 	maxRuleLen         = 80
+	// Per-finding field + count caps bound an adversarial/injected model reply so
+	// it can't drive an O(findings × diff-lines) anchoring pass or push unbounded
+	// strings into SARIF/Markdown/the DB. Over-long is truncated, not rejected.
+	maxFindings      = 200
+	maxRationaleLen  = 4000
+	maxPatchLen      = 4000
+	maxQuotedCodeLen = 2000
+	maxSeverityLen   = 40
+	maxCategoryLen   = 60
+	maxFilePathLen   = 300
 )
 
 // capRunes truncates s to at most n runes (rune-safe so multi-byte text is not

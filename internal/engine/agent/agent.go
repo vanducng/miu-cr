@@ -470,17 +470,20 @@ func parseFindings(text string) (engine.ReviewOutput, bool) {
 	if err := json.Unmarshal([]byte(body), &raw); err != nil {
 		return engine.ReviewOutput{}, false
 	}
+	if len(raw.Findings) > maxFindings {
+		raw.Findings = raw.Findings[:maxFindings]
+	}
 	findings := make([]engine.Finding, 0, len(raw.Findings))
 	for _, r := range raw.Findings {
 		findings = append(findings, engine.Finding{
-			File:           r.File,
+			File:           capRunes(r.File, maxFilePathLen),
 			Title:          capRunes(r.Title, maxTitleLen),
 			Rule:           capRunes(strings.TrimSpace(r.Rule), maxRuleLen),
-			Severity:       r.Severity,
-			Category:       r.Category,
-			Rationale:      r.Rationale,
-			SuggestedPatch: r.SuggestedPatch,
-			QuotedCode:     r.ExistingCode,
+			Severity:       capRunes(r.Severity, maxSeverityLen),
+			Category:       capRunes(r.Category, maxCategoryLen),
+			Rationale:      capProse(r.Rationale, maxRationaleLen),
+			SuggestedPatch: capRunes(r.SuggestedPatch, maxPatchLen),
+			QuotedCode:     capRunes(r.ExistingCode, maxQuotedCodeLen),
 		})
 	}
 	out := engine.ReviewOutput{
