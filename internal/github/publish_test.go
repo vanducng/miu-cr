@@ -577,6 +577,27 @@ func TestCommentBodyEscapesEmbeddedFence(t *testing.T) {
 	}
 }
 
+// A rationale's inline `code` spans are preserved (rendered monospace), but an
+// unbalanced backtick still cannot leak into the trailing one-click suggestion
+// fence: the fence sits after a blank line, so any open inline span closes at that
+// paragraph boundary. This guards the mdProse change that stopped escaping all
+// backticks in favour of preserving code spans.
+func TestCommentBodyRationaleInlineCodeSafeWithPatch(t *testing.T) {
+	f := engine.Finding{
+		Severity:       "medium",
+		Category:       "bug",
+		Rationale:      "column `delivered_at` is missing; an unbalanced ` cannot reach the fence",
+		SuggestedPatch: "ORDER BY created_at DESC",
+	}
+	body, _ := commentBody(nil, f, "", PostReviewOptions{}, false)
+	if !strings.Contains(body, "`delivered_at`") {
+		t.Errorf("inline code span in rationale must be preserved as monospace:\n%s", body)
+	}
+	if !strings.Contains(body, "```\nORDER BY created_at DESC\n```") {
+		t.Errorf("the patch fence must render intact after a backtick-bearing rationale:\n%s", body)
+	}
+}
+
 // commentBody leads with the bold title when present; absent, the body is
 // byte-for-byte today's body; an untrusted title is mdInline-escaped (no breakout).
 func TestCommentBodyTitle(t *testing.T) {
