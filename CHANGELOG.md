@@ -55,6 +55,13 @@ comment with a new marker); subsequent re-runs dedupe normally. On a
 first M5 review **manually** (or off-hours) to absorb the one-time re-post before
 the next scheduled run.
 
+## [0.82.4](https://github.com/vanducng/miu-cr/compare/v0.82.3...v0.82.4) (2026-07-02)
+
+
+### Bug Fixes
+
+* **store,agent:** lock WAL sidecars; report real turn ceiling on finalize ([#254](https://github.com/vanducng/miu-cr/issues/254)) ([b08d7c5](https://github.com/vanducng/miu-cr/commit/b08d7c5b6c880a00e35363f1b2b51e03f6a8f9e6))
+
 ## [0.82.3](https://github.com/vanducng/miu-cr/compare/v0.82.2...v0.82.3) (2026-07-02)
 
 
