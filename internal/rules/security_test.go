@@ -97,6 +97,33 @@ func TestInlineContextFileRejectsSymlinkEscape(t *testing.T) {
 	}
 }
 
+func TestInlineContextFileRejectsIntermediateSymlinkEscape(t *testing.T) {
+	ruleDir := t.TempDir()
+	outsideDir := t.TempDir()
+	if err := os.WriteFile(filepath.Join(outsideDir, "passwd"), []byte("TOP SECRET"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	// An intermediate symlinked DIR (not the final component) — openNoFollow's
+	// O_NOFOLLOW only guards the final element, so this is the gap the lexical
+	// withinBase check missed: .miu/cr/rules/leak -> outsideDir, then read leak/passwd.
+	if err := os.Symlink(outsideDir, filepath.Join(ruleDir, "leak")); err != nil {
+		t.Skipf("symlinks unsupported: %v", err)
+	}
+	r := Rule{
+		Stem:       "withctx",
+		Path:       filepath.Join(ruleDir, "withctx.md"),
+		Provenance: RepoUntrusted,
+		FM:         Frontmatter{AlwaysApply: true, ContextFiles: []string{"leak/passwd"}},
+	}
+	text, _, _ := BuildRulesSection([]Rule{r}, true, 0, false)
+	if strings.Contains(text, "TOP SECRET") {
+		t.Errorf("intermediate symlinked dir escaped the rule directory: %q", text)
+	}
+	if !strings.Contains(text, "symlink not allowed") {
+		t.Errorf("expected symlink-skip note for intermediate symlink: %q", text)
+	}
+}
+
 func TestLoadRulesWarnsIntraRepoStemCollision(t *testing.T) {
 	dir := t.TempDir()
 	write := func(name, body string) {
