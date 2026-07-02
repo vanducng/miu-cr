@@ -577,32 +577,29 @@ func mdInline(s string) string {
 	).Replace(s)
 }
 
-// mdProse escapes the structural breakout vectors in untrusted model prose (a
-// finding's rationale): the HTML/comment vectors (< >, neutralizing </details>,
-// the <!-- miucr:fp --> sentinel, <script>) AND backticks (so a ``` fence in the
-// rationale can't open a code block that swallows the suggestion/patch fence
-// rendered right after it). It does NOT collapse whitespace or escape brackets/
-// links, so prose stays readable. GitHub renders &lt;/&gt; back to </>.
+// mdProse neutralizes the structural breakout vectors in untrusted model prose (a
+// finding's rationale, a walkthrough) while keeping it readable and scannable:
+//   - HTML/comment vectors (< >, so </details>, the <!-- miucr:fp --> sentinel, and
+//     <script> can't break out) are escaped.
+//   - Runs of 3+ backticks (``` fences) are DEFUSED backtick-by-backtick so they
+//     can't open a code block that swallows a suggestion/patch fence or the tables
+//     rendered after the prose.
+//   - Single/double backticks are PRESERVED so the model's `inline code` (columns,
+//     tables, functions, paths) renders as monospace instead of literal backticks.
+//
+// A stray unbalanced inline backtick cannot leak into a trailing patch fence: the
+// fence sits on its own line after a blank line (a CommonMark paragraph boundary),
+// where an unclosed inline span ends and renders as a literal backtick. Whitespace
+// and brackets/links are left intact. GitHub renders &lt;/&gt; back to </>.
 func mdProse(s string) string {
-	return strings.NewReplacer("<", "&lt;", ">", "&gt;", "`", "\\`").Replace(s)
-}
-
-// fenceRe matches a run of 3+ backticks (a fenced code-block delimiter).
-var fenceRe = regexp.MustCompile("`{3,}")
-
-// mdWalkthrough escapes the HTML/comment breakout vectors in the untrusted model
-// walkthrough (< >) and DEFUSES triple-backtick fences (which would otherwise
-// open a code block that swallows the tracking tables rendered after it), while
-// PRESERVING single/double backticks so the model's `code` spans render as
-// monospace. Unlike mdProse — used for an inline rationale that is immediately
-// followed by a patch fence, so it must escape every backtick — the walkthrough
-// has no trailing fence, so inline code spans are safe and desirable.
-func mdWalkthrough(s string) string {
 	s = strings.NewReplacer("<", "&lt;", ">", "&gt;").Replace(s)
 	return fenceRe.ReplaceAllStringFunc(s, func(run string) string {
 		return strings.Repeat("\\`", len(run))
 	})
 }
+
+// fenceRe matches a run of 3+ backticks (a fenced code-block delimiter).
+var fenceRe = regexp.MustCompile("`{3,}")
 
 func known(sev string) bool {
 	for _, s := range severityOrder {

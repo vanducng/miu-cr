@@ -627,39 +627,28 @@ func TestRenderSummaryFullDiagramFenceInjectionFallsBack(t *testing.T) {
 }
 
 func TestMdProseEscapesBreakoutKeepsFormatting(t *testing.T) {
-	out := mdProse("see </details> and <!-- x --> and ```fence``` but keep [link](u) and a < b")
+	out := mdProse("run `miucr serve --host`, a ``co`de`` span, see </details> and <!-- x --> and ```bash\nfence\n``` but keep [link](u) and a < b")
+	// HTML/comment breakout escaped.
 	if strings.Contains(out, "</details>") || strings.Contains(out, "<!--") {
 		t.Fatalf("HTML/comment breakout not escaped: %q", out)
 	}
+	// 3+ backtick fences DEFUSED (would otherwise swallow the suggestion/patch block).
 	if strings.Contains(out, "```") {
-		t.Fatalf("triple-backtick fence not neutralized (would swallow the suggestion block): %q", out)
+		t.Fatalf("triple-backtick fence not neutralized: %q", out)
 	}
-	if !strings.Contains(out, "[link](u)") { // brackets/links stay readable
-		t.Fatalf("intentional Markdown was over-escaped: %q", out)
+	if !strings.Contains(out, "\\`\\`\\`bash") {
+		t.Fatalf("the fence run must be escaped backtick-by-backtick: %q", out)
 	}
-}
-
-func TestMdWalkthrough(t *testing.T) {
-	out := mdWalkthrough("run `miucr serve --host`, a ``co`de`` span, ```bash\nfence\n``` and </details><script> a < b")
-	// Single/double backtick code spans are PRESERVED (the whole point — they must
-	// render as monospace, not literal backticks).
+	// Single/double backtick code spans PRESERVED so identifiers render as monospace.
 	if !strings.Contains(out, "`miucr serve --host`") {
 		t.Fatalf("single-backtick code span must be preserved: %q", out)
 	}
 	if !strings.Contains(out, "``co`de``") {
 		t.Fatalf("double-backtick code span must be preserved: %q", out)
 	}
-	// 3+ backtick fences are DEFUSED (escaped) so they can't open a block that
-	// swallows the tables that follow.
-	if strings.Contains(out, "```") {
-		t.Fatalf("triple-backtick fence must be defused: %q", out)
-	}
-	if !strings.Contains(out, "\\`\\`\\`bash") {
-		t.Fatalf("the fence run must be escaped backtick-by-backtick: %q", out)
-	}
-	// HTML/comment breakout escaped; newlines preserved.
-	if strings.Contains(out, "</details>") || strings.Contains(out, "<script>") {
-		t.Fatalf("HTML breakout must be escaped: %q", out)
+	// Brackets/links and newlines stay intact so prose is readable/scannable.
+	if !strings.Contains(out, "[link](u)") {
+		t.Fatalf("intentional Markdown was over-escaped: %q", out)
 	}
 	if !strings.Contains(out, "\nfence\n") {
 		t.Fatalf("newlines must be preserved: %q", out)
