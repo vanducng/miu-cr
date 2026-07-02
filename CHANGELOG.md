@@ -55,6 +55,13 @@ comment with a new marker); subsequent re-runs dedupe normally. On a
 first M5 review **manually** (or off-hours) to absorb the one-time re-post before
 the next scheduled run.
 
+## [0.82.2](https://github.com/vanducng/miu-cr/compare/v0.82.1...v0.82.2) (2026-07-02)
+
+
+### Bug Fixes
+
+* **agent:** give forced finalization bounded JSON-repair rounds ([#250](https://github.com/vanducng/miu-cr/issues/250)) ([0ae84ce](https://github.com/vanducng/miu-cr/commit/0ae84ce0f203cb90c667bbcf4628a5b7e32f1873))
+
 ## [0.82.1](https://github.com/vanducng/miu-cr/compare/v0.82.0...v0.82.1) (2026-07-02)
 
 
