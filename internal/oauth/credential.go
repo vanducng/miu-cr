@@ -14,12 +14,31 @@ import (
 	"sync"
 	"time"
 
+	"golang.org/x/sync/singleflight"
+
 	"github.com/vanducng/miu-cr/internal/cli/clierr"
 	"github.com/vanducng/miu-cr/internal/config"
 )
 
 // refreshSkew refreshes proactively when the token expires within this window.
 const refreshSkew = 5 * time.Minute
+
+// refreshGroup collapses concurrent refreshes for the same provider into one
+// grant. Without it, parallel reviews (serve-pool workers) each POST the same
+// rotating refresh_token: the first consumes it, the rest get invalid_grant and
+// surface a spurious "re-login required", and the losing SaveOAuth persists a
+// stale token. Mirrors the GitHub App token_source singleflight.
+var refreshGroup singleflight.Group
+
+func dedupedRefresh(ctx stdctx.Context, meta Meta, rec config.OAuthRecord, httpClient *http.Client, now func() time.Time) (config.OAuthRecord, error) {
+	v, err, _ := refreshGroup.Do(meta.Provider, func() (any, error) {
+		return refresh(ctx, meta, rec, httpClient, now)
+	})
+	if err != nil {
+		return config.OAuthRecord{}, err
+	}
+	return v.(config.OAuthRecord), nil
+}
 
 // Meta is the per-provider routing the resolver needs, supplied by the cli layer
 // (so this package need not import the cli provider registry). It carries no
@@ -60,7 +79,7 @@ func Credential(ctx stdctx.Context, meta Meta, httpClient *http.Client, now func
 		return Resolved{}, false, nil
 	}
 	if rec.ExpiringWithin(refreshSkew, now()) {
-		rec, err = refresh(ctx, meta, rec, httpClient, now)
+		rec, err = dedupedRefresh(ctx, meta, rec, httpClient, now)
 		if err != nil {
 			return Resolved{}, false, err
 		}
@@ -75,7 +94,7 @@ func Credential(ctx stdctx.Context, meta Meta, httpClient *http.Client, now func
 		Refresh: func(ctx stdctx.Context) (string, error) {
 			mu.Lock()
 			defer mu.Unlock()
-			refreshed, rerr := refresh(ctx, meta, rec, httpClient, now)
+			refreshed, rerr := dedupedRefresh(ctx, meta, rec, httpClient, now)
 			if rerr != nil {
 				return "", rerr
 			}
