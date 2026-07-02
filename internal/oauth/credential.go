@@ -45,8 +45,11 @@ func dedupedRefresh(ctx stdctx.Context, meta Meta, httpClient *http.Client, now 
 		rctx, cancel := stdctx.WithTimeout(stdctx.WithoutCancel(ctx), refreshTimeout)
 		defer cancel()
 		rec, ok, lerr := config.LoadOAuth()
-		if lerr != nil || !ok {
+		if lerr != nil {
 			return config.OAuthRecord{}, fmt.Errorf("oauth: reload before refresh: %w", lerr)
+		}
+		if !ok {
+			return config.OAuthRecord{}, fmt.Errorf("oauth: cached credential vanished before refresh")
 		}
 		return refresh(rctx, meta, rec, httpClient, now)
 	})
