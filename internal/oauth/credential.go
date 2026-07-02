@@ -23,6 +23,10 @@ import (
 // refreshSkew refreshes proactively when the token expires within this window.
 const refreshSkew = 5 * time.Minute
 
+// refreshTimeout bounds the shared (detached) refresh grant so it can't hang the
+// singleflight after we've cut it loose from any single caller's cancellation.
+const refreshTimeout = 30 * time.Second
+
 // refreshGroup collapses concurrent refreshes for the same provider into one
 // grant. Without it, parallel reviews (serve-pool workers) each POST the same
 // rotating refresh_token: the first consumes it, the rest get invalid_grant and
@@ -30,9 +34,21 @@ const refreshSkew = 5 * time.Minute
 // stale token. Mirrors the GitHub App token_source singleflight.
 var refreshGroup singleflight.Group
 
-func dedupedRefresh(ctx stdctx.Context, meta Meta, rec config.OAuthRecord, httpClient *http.Client, now func() time.Time) (config.OAuthRecord, error) {
+// dedupedRefresh runs one shared refresh per provider. It detaches from the
+// caller's ctx (WithoutCancel + a bound) so a collapsed refresh isn't cancelled
+// just because one waiter timed out — every collapsed caller would otherwise get
+// oauth.refresh_unavailable — and re-reads the record inside the closure so the
+// grant uses the current rotating refresh_token, not a snapshot a caller captured
+// before an earlier rotation.
+func dedupedRefresh(ctx stdctx.Context, meta Meta, httpClient *http.Client, now func() time.Time) (config.OAuthRecord, error) {
 	v, err, _ := refreshGroup.Do(meta.Provider, func() (any, error) {
-		return refresh(ctx, meta, rec, httpClient, now)
+		rctx, cancel := stdctx.WithTimeout(stdctx.WithoutCancel(ctx), refreshTimeout)
+		defer cancel()
+		rec, ok, lerr := config.LoadOAuth()
+		if lerr != nil || !ok {
+			return config.OAuthRecord{}, fmt.Errorf("oauth: reload before refresh: %w", lerr)
+		}
+		return refresh(rctx, meta, rec, httpClient, now)
 	})
 	if err != nil {
 		return config.OAuthRecord{}, err
@@ -79,7 +95,7 @@ func Credential(ctx stdctx.Context, meta Meta, httpClient *http.Client, now func
 		return Resolved{}, false, nil
 	}
 	if rec.ExpiringWithin(refreshSkew, now()) {
-		rec, err = dedupedRefresh(ctx, meta, rec, httpClient, now)
+		rec, err = dedupedRefresh(ctx, meta, httpClient, now)
 		if err != nil {
 			return Resolved{}, false, err
 		}
@@ -94,7 +110,7 @@ func Credential(ctx stdctx.Context, meta Meta, httpClient *http.Client, now func
 		Refresh: func(ctx stdctx.Context) (string, error) {
 			mu.Lock()
 			defer mu.Unlock()
-			refreshed, rerr := dedupedRefresh(ctx, meta, rec, httpClient, now)
+			refreshed, rerr := dedupedRefresh(ctx, meta, httpClient, now)
 			if rerr != nil {
 				return "", rerr
 			}

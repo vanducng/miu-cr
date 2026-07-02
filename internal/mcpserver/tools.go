@@ -2,12 +2,23 @@ package mcpserver
 
 import (
 	"context"
+	"time"
 
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 
 	"github.com/vanducng/miu-cr/internal/engine"
 	"github.com/vanducng/miu-cr/internal/engine/diff"
 )
+
+// withCallTimeout bounds a single MCP tool call so neither review_run nor
+// review_get can hang the server. A non-positive d disables the bound (an
+// explicit "no timeout"); withDefaults sets 30s so callers get one by default.
+func withCallTimeout(ctx context.Context, d time.Duration) (context.Context, context.CancelFunc) {
+	if d <= 0 {
+		return ctx, func() {}
+	}
+	return context.WithTimeout(ctx, d)
+}
 
 func registerTools(server *mcp.Server, deps Deps, opts Options, policy safetyPolicy) {
 	mcp.AddTool(server, &mcp.Tool{
@@ -25,11 +36,8 @@ func registerTools(server *mcp.Server, deps Deps, opts Options, policy safetyPol
 		if err := engine.ValidateInvocation(in.Staged, in.From, in.To, in.Commit, gate); err != nil {
 			return nil, reviewRunOutput{}, policy.toolErr("review.invalid_request", err)
 		}
-		if opts.Timeout > 0 {
-			var cancel context.CancelFunc
-			ctx, cancel = context.WithTimeout(ctx, opts.Timeout)
-			defer cancel()
-		}
+		ctx, cancel := withCallTimeout(ctx, opts.Timeout)
+		defer cancel()
 		res, err := deps.Engine.Review(ctx, engine.Request{
 			Mode:         modeFor(in),
 			Staged:       in.Staged,
@@ -53,6 +61,8 @@ func registerTools(server *mcp.Server, deps Deps, opts Options, policy safetyPol
 		Name:        "review_get",
 		Description: "Fetch a persisted review by id, as returned from a prior review_run.",
 	}, func(ctx context.Context, req *mcp.CallToolRequest, in reviewGetInput) (*mcp.CallToolResult, reviewGetOutput, error) {
+		ctx, cancel := withCallTimeout(ctx, opts.Timeout)
+		defer cancel()
 		rec, err := deps.Engine.GetReview(ctx, in.ID)
 		if err != nil {
 			return nil, reviewGetOutput{}, policy.toolErr("review.get_failed", err)

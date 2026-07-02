@@ -87,13 +87,15 @@ func Open(path string) (*Store, error) {
 		_ = db.Close()
 		return nil, err
 	}
-	// Ping creates the file lazily; lock it to owner-only (defense-in-depth atop
-	// the 0700 dir) so the persisted diffs/transcripts aren't world-readable.
-	_ = os.Chmod(path, 0o600)
 	if _, err := db.Exec(SchemaSQL); err != nil {
 		_ = db.Close()
 		return nil, fmt.Errorf("migrate schema: %w", err)
 	}
+	// SchemaSQL is the first write, so the DB file is now guaranteed to exist
+	// (WAL mode may not materialize it on Ping alone). Lock it to owner-only —
+	// defense-in-depth atop the 0700 dir — so the persisted diffs/transcripts
+	// aren't world-readable.
+	_ = os.Chmod(path, 0o600)
 	if err := migrateReviewColumns(db); err != nil {
 		_ = db.Close()
 		return nil, fmt.Errorf("migrate reviews columns: %w", err)

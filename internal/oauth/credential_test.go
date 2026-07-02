@@ -73,6 +73,33 @@ func TestCredentialFreshNoRefresh(t *testing.T) {
 	}
 }
 
+// The shared singleflight refresh is detached from the caller's context, so a
+// caller whose ctx is already cancelled (e.g. its review timed out) must not
+// poison the grant for the collapsed callers that are still waiting.
+func TestCredentialRefreshDetachesFromCallerCancel(t *testing.T) {
+	fakeHome(t)
+	if err := config.SaveOAuth(config.OAuthRecord{
+		Provider: "openai", AccessToken: "old", RefreshToken: "ref-1",
+		ExpiresAt: time.Now().Add(time.Minute), // within refreshSkew → triggers refresh
+	}); err != nil {
+		t.Fatal(err)
+	}
+	hits := 0
+	body, _ := json.Marshal(map[string]any{"access_token": "new", "refresh_token": "ref-2", "expires_in": 3600})
+	srv := tokenServer(t, string(body), 200, &hits)
+	defer srv.Close()
+
+	ctx, cancel := stdctx.WithCancel(stdctx.Background())
+	cancel() // cancelled before the refresh runs
+	res, ok, err := Credential(ctx, metaFor(srv), srv.Client(), nil)
+	if err != nil || !ok {
+		t.Fatalf("refresh must survive a cancelled caller ctx: ok=%v err=%v", ok, err)
+	}
+	if res.AccessToken != "new" {
+		t.Errorf("access token = %q, want new", res.AccessToken)
+	}
+}
+
 func TestCredentialRefreshesWhenExpiring(t *testing.T) {
 	fakeHome(t)
 	if err := config.SaveOAuth(config.OAuthRecord{
