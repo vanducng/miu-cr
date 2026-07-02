@@ -55,6 +55,13 @@ comment with a new marker); subsequent re-runs dedupe normally. On a
 first M5 review **manually** (or off-hours) to absorb the one-time re-post before
 the next scheduled run.
 
+## [0.82.3](https://github.com/vanducng/miu-cr/compare/v0.82.2...v0.82.3) (2026-07-02)
+
+
+### Bug Fixes
+
+* **oauth:** don't wrap a nil error when the cached record vanishes ([#252](https://github.com/vanducng/miu-cr/issues/252)) ([d6d5043](https://github.com/vanducng/miu-cr/commit/d6d504377a6cb078638462a347751e040a6e3f2b))
+
 ## [0.82.2](https://github.com/vanducng/miu-cr/compare/v0.82.1...v0.82.2) (2026-07-02)
 
 
