@@ -578,6 +578,35 @@ func TestRenderSummaryFullEscapesUntrustedTableCell(t *testing.T) {
 	}
 }
 
+// mdInline escaping completeness is a security invariant (AGENTS.md: neutralize
+// backticks AND brackets — partial escaping leaves a render-boundary vector).
+// This guards every replacement directly, so dropping one fails loudly instead
+// of silently reopening the vector while incidental coverage stays green.
+func TestMdInlineEscapesEveryBreakoutChar(t *testing.T) {
+	cases := []struct{ in, want string }{
+		{"<", "&lt;"},
+		{">", "&gt;"},
+		{"`", "\\`"},
+		{"[", "\\["},
+		{"]", "\\]"},
+		{"*", "\\*"},
+		{"_", "\\_"},
+		{"|", "\\|"},
+		{"#", "\\#"},
+	}
+	for _, c := range cases {
+		if got := mdInline(c.in); got != c.want {
+			t.Errorf("mdInline(%q) = %q, want %q", c.in, got, c.want)
+		}
+	}
+	// Combined payload: every markdown/HTML breakout construct is neutralized.
+	got := mdInline("[x](y) `code` *b* _i_ |c| #h <s>")
+	want := "\\[x\\](y) \\`code\\` \\*b\\* \\_i\\_ \\|c\\| \\#h &lt;s&gt;"
+	if got != want {
+		t.Errorf("mdInline combined payload = %q, want %q", got, want)
+	}
+}
+
 func TestRenderSummaryFullDegradesByteForByteWithoutNewFields(t *testing.T) {
 	info, diffs, findings := presentationFixture()
 	withFields := RenderSummaryFull(info, findings, nil, 0, nil, nil, SummaryOptions{Diffs: diffs, ReviewID: "rev_x"})

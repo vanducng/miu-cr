@@ -182,7 +182,11 @@ func (a *openaiAgent) Review(ctx stdctx.Context, rc Context) (engine.ReviewOutpu
 	emptyRounds := 0
 	var usage engine.Usage
 	maxTurns := toolTurns(rc.Tools)
-	for turn := 0; turn < maxTurns; turn++ {
+	// Loop past maxTurns by maxEmptyRounds: once tools are withdrawn on turn
+	// maxTurns-1 the forced finalize gets the same bounded JSON-repair rounds an
+	// interior turn gets (params.Tools stays nil), rather than discarding the whole
+	// attempt to a full retry on one non-JSON reply.
+	for turn := 0; turn < maxTurns+maxEmptyRounds; turn++ {
 		if err := ctx.Err(); err != nil {
 			return engine.ReviewOutput{}, err
 		}
