@@ -25,6 +25,11 @@ func registerTools(server *mcp.Server, deps Deps, opts Options, policy safetyPol
 		if err := engine.ValidateInvocation(in.Staged, in.From, in.To, in.Commit, gate); err != nil {
 			return nil, reviewRunOutput{}, policy.toolErr("review.invalid_request", err)
 		}
+		if opts.Timeout > 0 {
+			var cancel context.CancelFunc
+			ctx, cancel = context.WithTimeout(ctx, opts.Timeout)
+			defer cancel()
+		}
 		res, err := deps.Engine.Review(ctx, engine.Request{
 			Mode:         modeFor(in),
 			Staged:       in.Staged,
