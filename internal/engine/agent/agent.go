@@ -269,7 +269,7 @@ func (a *anthropicAgent) Review(ctx stdctx.Context, rc Context) (engine.ReviewOu
 		emptyRounds = 0
 		params.Messages = append(params.Messages, anthropic.NewUserMessage(toolResults...))
 	}
-	return engine.ReviewOutput{}, fmt.Errorf("agent: forced finalization produced no parseable findings after %d turns", maxTurns)
+	return engine.ReviewOutput{}, fmt.Errorf("agent: forced finalization produced no parseable findings after %d turns", maxTurns+maxEmptyRounds)
 }
 
 // RepairPatch issues one tools-less, code-only completion (system =

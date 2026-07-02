@@ -273,7 +273,7 @@ func (a *codexAgent) Review(ctx stdctx.Context, rc Context) (engine.ReviewOutput
 		emptyRounds = 0
 		input = append(input, toolItems...)
 	}
-	return engine.ReviewOutput{}, fmt.Errorf("agent: forced finalization produced no parseable findings after %d turns", maxTurns)
+	return engine.ReviewOutput{}, fmt.Errorf("agent: forced finalization produced no parseable findings after %d turns", maxTurns+maxEmptyRounds)
 }
 
 // dispatch runs every function_call in resp, returning function_call_output

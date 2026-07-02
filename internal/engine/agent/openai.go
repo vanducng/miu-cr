@@ -250,5 +250,5 @@ func (a *openaiAgent) Review(ctx stdctx.Context, rc Context) (engine.ReviewOutpu
 			params.Messages = append(params.Messages, openai.ToolMessage(out, tc.ID))
 		}
 	}
-	return engine.ReviewOutput{}, fmt.Errorf("agent: forced finalization produced no parseable findings after %d turns", maxTurns)
+	return engine.ReviewOutput{}, fmt.Errorf("agent: forced finalization produced no parseable findings after %d turns", maxTurns+maxEmptyRounds)
 }
