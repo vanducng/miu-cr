@@ -55,6 +55,13 @@ comment with a new marker); subsequent re-runs dedupe normally. On a
 first M5 review **manually** (or off-hours) to absorb the one-time re-post before
 the next scheduled run.
 
+## [0.82.0](https://github.com/vanducng/miu-cr/compare/v0.81.0...v0.82.0) (2026-07-02)
+
+
+### Features
+
+* **github:** preserve inline code spans in finding rationales ([#245](https://github.com/vanducng/miu-cr/issues/245)) ([2482b00](https://github.com/vanducng/miu-cr/commit/2482b003b1b31556adec1c9d84040bd2649ffca7))
+
 ## [0.81.0](https://github.com/vanducng/miu-cr/compare/v0.80.2...v0.81.0) (2026-07-01)
 
 
