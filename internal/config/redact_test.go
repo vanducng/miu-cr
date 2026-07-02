@@ -96,6 +96,7 @@ func TestRedactStringDelimiterlessProviderTokens(t *testing.T) {
 	}{
 		{"github pat", "error: bad credentials ghp_AbCdEf0123456789AbCdEf0123456789 rejected", "ghp_AbCdEf0123456789AbCdEf0123456789"},
 		{"github oauth", "401 with gho_0123456789ABCDEFGHIJ0123456789abcd here", "gho_0123456789ABCDEFGHIJ0123456789abcd"},
+		{"github fine-grained pat", "bad creds github_pat_11ABCDEF0_aBcDeF0123456789AbCdEf0123456789 nope", "github_pat_11ABCDEF0_aBcDeF0123456789AbCdEf0123456789"},
 		{"gateway token bare", "upstream said: token 1a2b3c4d5e6f7890.abc_DEF-123456 invalid", "1a2b3c4d5e6f7890.abc_DEF-123456"},
 	}
 	for _, tt := range tests {
