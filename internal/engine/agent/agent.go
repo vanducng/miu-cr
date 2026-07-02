@@ -219,7 +219,11 @@ func (a *anthropicAgent) Review(ctx stdctx.Context, rc Context) (engine.ReviewOu
 	emptyRounds := 0
 	var usage engine.Usage
 	maxTurns := toolTurns(rc.Tools)
-	for turn := 0; turn < maxTurns; turn++ {
+	// Loop past maxTurns by maxEmptyRounds: once tools are withdrawn on turn
+	// maxTurns-1 the forced finalize gets the same bounded JSON-repair rounds an
+	// interior turn gets (params.Tools stays nil), rather than discarding the whole
+	// attempt to a full retry on one non-JSON reply.
+	for turn := 0; turn < maxTurns+maxEmptyRounds; turn++ {
 		if err := ctx.Err(); err != nil {
 			return engine.ReviewOutput{}, err
 		}
@@ -470,17 +474,20 @@ func parseFindings(text string) (engine.ReviewOutput, bool) {
 	if err := json.Unmarshal([]byte(body), &raw); err != nil {
 		return engine.ReviewOutput{}, false
 	}
+	if len(raw.Findings) > maxFindings {
+		raw.Findings = raw.Findings[:maxFindings]
+	}
 	findings := make([]engine.Finding, 0, len(raw.Findings))
 	for _, r := range raw.Findings {
 		findings = append(findings, engine.Finding{
-			File:           r.File,
+			File:           capRunes(r.File, maxFilePathLen),
 			Title:          capRunes(r.Title, maxTitleLen),
 			Rule:           capRunes(strings.TrimSpace(r.Rule), maxRuleLen),
-			Severity:       r.Severity,
-			Category:       r.Category,
-			Rationale:      r.Rationale,
-			SuggestedPatch: r.SuggestedPatch,
-			QuotedCode:     r.ExistingCode,
+			Severity:       capRunes(r.Severity, maxSeverityLen),
+			Category:       capRunes(r.Category, maxCategoryLen),
+			Rationale:      capProse(r.Rationale, maxRationaleLen),
+			SuggestedPatch: capRunes(r.SuggestedPatch, maxPatchLen),
+			QuotedCode:     capRunes(r.ExistingCode, maxQuotedCodeLen),
 		})
 	}
 	out := engine.ReviewOutput{

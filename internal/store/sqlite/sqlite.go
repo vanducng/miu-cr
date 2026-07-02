@@ -67,9 +67,15 @@ func dsn(path string) string {
 // Open opens (creating parent dirs) the state DB at path and idempotently
 // migrates the schema. Driver name "sqlite" is modernc's pure-Go registration.
 func Open(path string) (*Store, error) {
-	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+	dir := filepath.Dir(path)
+	if err := os.MkdirAll(dir, 0o700); err != nil {
 		return nil, fmt.Errorf("create state dir: %w", err)
 	}
+	// state.db holds raw_prompt (diff+rules), raw_response and transcripts. Force
+	// the dir to 0700 — MkdirAll won't downgrade a dir a prior `review` (before
+	// init/login) created 0755, which would leave the review corpus and the
+	// -wal/-shm sidecars traversable by other local users on a shared host.
+	_ = os.Chmod(dir, 0o700)
 	// DSN-level pragmas so EVERY pooled connection inherits them (busy_timeout
 	// is per-connection, a one-shot db.Exec only sets it on one connection,
 	// leaving other/cross-process writers to fail SQLITE_BUSY immediately).
@@ -85,6 +91,11 @@ func Open(path string) (*Store, error) {
 		_ = db.Close()
 		return nil, fmt.Errorf("migrate schema: %w", err)
 	}
+	// SchemaSQL is the first write, so the DB file is now guaranteed to exist
+	// (WAL mode may not materialize it on Ping alone). Lock it to owner-only —
+	// defense-in-depth atop the 0700 dir — so the persisted diffs/transcripts
+	// aren't world-readable.
+	_ = os.Chmod(path, 0o600)
 	if err := migrateReviewColumns(db); err != nil {
 		_ = db.Close()
 		return nil, fmt.Errorf("migrate reviews columns: %w", err)

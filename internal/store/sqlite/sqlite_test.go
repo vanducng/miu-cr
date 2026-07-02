@@ -5,6 +5,7 @@ import (
 	"os"
 	"path/filepath"
 	"reflect"
+	"runtime"
 	"strings"
 	"testing"
 
@@ -34,6 +35,39 @@ func sampleRecord() store.ReviewRecord {
 			{File: "b.go", Line: 3, Severity: "low", Category: "style", Rationale: "rename"},
 		},
 		Stats: map[string]any{"files_reviewed": float64(2), "max_severity": "high"},
+	}
+}
+
+func TestOpenLocksDownPermissions(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("unix file modes not enforced on windows")
+	}
+	dir := t.TempDir()
+	// Simulate a prior `review` (before init/login) that created the dir 0755.
+	sub := filepath.Join(dir, "cr")
+	if err := os.MkdirAll(sub, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	path := filepath.Join(sub, "state.db")
+	s, err := Open(path)
+	if err != nil {
+		t.Fatalf("Open: %v", err)
+	}
+	defer s.Close()
+
+	di, err := os.Stat(sub)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := di.Mode().Perm(); got != 0o700 {
+		t.Errorf("state dir mode = %o, want 700 (must downgrade a pre-existing 755)", got)
+	}
+	fi, err := os.Stat(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := fi.Mode().Perm(); got != 0o600 {
+		t.Errorf("state.db mode = %o, want 600 (holds diffs/transcripts)", got)
 	}
 }
 

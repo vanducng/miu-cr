@@ -193,6 +193,14 @@ func inlineContextFile(r Rule, cf string, totalContext *int, xml bool) string {
 		return skipContext(cf, "path escapes the rule directory", xml)
 	}
 
+	// openNoFollow only guards the FINAL component; an intermediate symlinked dir
+	// (e.g. .miu/cr/rules/leak -> /etc with context_files: ["leak/passwd"]) would
+	// otherwise be followed at open, escaping the rule directory into an arbitrary
+	// host-file read. Reject any symlinked component between base and the final.
+	if hasSymlinkComponent(base, clean) {
+		return skipContext(cf, "symlink not allowed", xml)
+	}
+
 	if *totalContext >= maxContextTotalBytes {
 		return skipContext(cf, "total context byte cap reached", xml)
 	}
@@ -281,4 +289,26 @@ func withinBase(base, full string) bool {
 		return false
 	}
 	return rel != ".." && !strings.HasPrefix(rel, ".."+string(filepath.Separator))
+}
+
+// hasSymlinkComponent reports whether any path component of clean UNDER base
+// (excluding the final element, which openNoFollow guards atomically) is a
+// symlink. base itself is not lstat'd — the trusted rule dir may legitimately sit
+// under a symlinked temp clone. A missing intermediate is not a symlink; the
+// subsequent open reports it as "missing". TOCTOU on intermediates is out of
+// scope here: the repo files are committed, not mutated by a concurrent attacker.
+func hasSymlinkComponent(base, clean string) bool {
+	parts := strings.Split(clean, string(filepath.Separator))
+	cur := base
+	for _, p := range parts[:len(parts)-1] {
+		cur = filepath.Join(cur, p)
+		fi, err := os.Lstat(cur)
+		if err != nil {
+			return !os.IsNotExist(err)
+		}
+		if fi.Mode()&os.ModeSymlink != 0 {
+			return true
+		}
+	}
+	return false
 }

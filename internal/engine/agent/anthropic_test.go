@@ -258,6 +258,55 @@ func TestAnthropicAgentForcedFinalizeReturnsFindings(t *testing.T) {
 	}
 }
 
+// finalizeThenRepairAnthropic explores with tools, then on the FIRST tools-less
+// (forced-finalize) turn returns prose, and only on the next (repair) turn returns
+// valid findings JSON — modelling a model that fumbles the finalize once.
+type finalizeThenRepairAnthropic struct {
+	findings      string
+	calls         int
+	toollessCalls int
+}
+
+func (f *finalizeThenRepairAnthropic) newMessage(_ stdctx.Context, params anthropic.MessageNewParams) (*anthropic.Message, error) {
+	f.calls++
+	body := toolUseMessage(fmt.Sprintf("tu_%d", f.calls), "grep", map[string]any{"pattern": "x"})
+	if len(params.Tools) == 0 {
+		f.toollessCalls++
+		if f.toollessCalls == 1 {
+			body = textMessage("Here is my analysis in prose, no JSON yet.") // unparseable
+		} else {
+			body = textMessage(f.findings)
+		}
+	}
+	var msg anthropic.Message
+	if err := json.Unmarshal([]byte(body), &msg); err != nil {
+		return nil, err
+	}
+	return &msg, nil
+}
+
+var _ anthropicClient = (*finalizeThenRepairAnthropic)(nil)
+
+// A single non-JSON forced-finalize must NOT fail the whole attempt: the loop
+// gives it bounded repair rounds (was a bug — the repair nudge was appended on the
+// last turn then never sent, so one fumble discarded 20+ turns to a full retry).
+func TestAnthropicAgentForcedFinalizeRepairsNonJSON(t *testing.T) {
+	maxTurns := 3
+	fc := &finalizeThenRepairAnthropic{findings: `{"findings":[{"file":"a.go","existing_code":"x","severity":"warning","category":"bug","rationale":"r"}]}`}
+	a := &anthropicAgent{client: fc, model: "claude-test"}
+	out, err := a.Review(stdctx.Background(), Context{Text: "ctx", RepoDir: t.TempDir(), Tools: config.ReviewTools{MaxTurns: &maxTurns}})
+	if err != nil {
+		t.Fatalf("Review: %v", err)
+	}
+	if len(out.Findings) != 1 {
+		t.Fatalf("want 1 finding after one repair round, got %d", len(out.Findings))
+	}
+	// maxTurns explore/finalize calls + exactly one repair round.
+	if fc.calls != maxTurns+1 {
+		t.Fatalf("want %d calls (explore+finalize+1 repair), got %d", maxTurns+1, fc.calls)
+	}
+}
+
 func TestAnthropicAgentHonorsConfiguredToolTurns(t *testing.T) {
 	maxTurns := 3
 	fc := &toolHungryAnthropic{findings: `{"findings":[{"file":"a.go","existing_code":"x","severity":"warning","category":"bug","rationale":"r"}]}`}

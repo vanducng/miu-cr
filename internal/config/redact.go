@@ -24,8 +24,9 @@ var (
 	bearerToken = regexp.MustCompile(`(?i)bearer\s+` + secretTokenChars)
 	// provider-key shape (sk-..., sk-ant-...) as a last-resort net for delimiter-less prose.
 	providerKey = regexp.MustCompile(`sk-[A-Za-z0-9_-]{8,}`)
-	// GitHub-style PATs (ghp_, gho_, ghu_, ghs_, ghr_) in delimiter-less prose.
-	githubToken = regexp.MustCompile(`gh[pousr]_[A-Za-z0-9]{20,}`)
+	// GitHub tokens in delimiter-less prose: classic/app PATs (ghp_, gho_, ghu_,
+	// ghs_, ghr_) and fine-grained PATs (github_pat_, which embed underscores).
+	githubToken = regexp.MustCompile(`(?:gh[pousr]_[A-Za-z0-9]{20,}|github_pat_[A-Za-z0-9_]{20,})`)
 	// gateway tokens of shape `<hex>.<base64url>`, e.g. a Bearer value that
 	// leaked into prose without a header/bearer prefix.
 	gatewayToken = regexp.MustCompile(`\b[0-9a-fA-F]{16,}\.[A-Za-z0-9_-]{8,}\b`)

@@ -215,7 +215,11 @@ func (a *codexAgent) Review(ctx stdctx.Context, rc Context) (engine.ReviewOutput
 
 	emptyRounds := 0
 	maxTurns := toolTurns(rc.Tools)
-	for turn := 0; turn < maxTurns; turn++ {
+	// Loop past maxTurns by maxEmptyRounds so the forced finalize (tools withdrawn
+	// on turn maxTurns-1) gets the same bounded JSON-repair rounds an interior turn
+	// gets, rather than discarding the whole attempt to a full retry on one non-JSON
+	// reply. req is rebuilt each turn, so tools stay withdrawn via turn >= maxTurns-1.
+	for turn := 0; turn < maxTurns+maxEmptyRounds; turn++ {
 		if err := ctx.Err(); err != nil {
 			return engine.ReviewOutput{}, err
 		}
@@ -235,10 +239,13 @@ func (a *codexAgent) Review(ctx stdctx.Context, rc Context) (engine.ReviewOutput
 		if wantOn, effort := thinkingSetting(a.thinking); wantOn {
 			req.Reasoning = &codexReasoning{Effort: effort}
 		}
-		// Final allowed turn: withdraw tools and force a finalize so a
-		// budget-exhausted diff yields a real review, not a hard failure.
-		if turn == maxTurns-1 {
+		// Final exploration turn onward: withdraw tools (req is rebuilt each turn, so
+		// this must persist through the repair rounds) so the model must answer. The
+		// finalize nudge is added to input once; later turns are JSON-repair rounds.
+		if turn >= maxTurns-1 {
 			req.Tools = nil
+		}
+		if turn == maxTurns-1 {
 			input = append(input, codexItem{Type: "message", Role: "user",
 				Content: []codexContent{{Type: "input_text", Text: forceFinalizeNudge}}})
 			req.Input = input
