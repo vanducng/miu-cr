@@ -55,6 +55,13 @@ comment with a new marker); subsequent re-runs dedupe normally. On a
 first M5 review **manually** (or off-hours) to absorb the one-time re-post before
 the next scheduled run.
 
+## [0.82.1](https://github.com/vanducng/miu-cr/compare/v0.82.0...v0.82.1) (2026-07-02)
+
+
+### Bug Fixes
+
+* **engine:** structure finding rationales into scannable lines ([#247](https://github.com/vanducng/miu-cr/issues/247)) ([59a63d5](https://github.com/vanducng/miu-cr/commit/59a63d546c08e6fc95fbe66a332964d8c333cd89))
+
 ## [0.82.0](https://github.com/vanducng/miu-cr/compare/v0.81.0...v0.82.0) (2026-07-02)
 
 
