@@ -111,6 +111,9 @@ func (f *fakeClient) CreateIssueComment(stdctx.Context, string, string, int, *gh
 func (f *fakeClient) EditIssueComment(stdctx.Context, string, string, int64, *gh.IssueComment) (*gh.IssueComment, error) {
 	return nil, nil
 }
+func (f *fakeClient) CreateIssueReaction(stdctx.Context, string, string, int, string) (*gh.Reaction, error) {
+	return &gh.Reaction{}, nil
+}
 func (f *fakeClient) CreateCheckRun(stdctx.Context, string, string, gh.CreateCheckRunOptions) (*gh.CheckRun, error) {
 	return &gh.CheckRun{ID: gh.Ptr(int64(1))}, nil
 }

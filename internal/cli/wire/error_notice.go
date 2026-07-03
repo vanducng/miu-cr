@@ -3,6 +3,7 @@ package wire
 import (
 	stdctx "context"
 	"errors"
+	"log/slog"
 	"strings"
 
 	"github.com/vanducng/miu-cr/internal/cli"
@@ -24,8 +25,17 @@ func shouldPostReviewErrorSummary(post, isFork bool, reviewErr error) bool {
 func upsertReviewErrorSummary(ctx stdctx.Context, client mgithub.Client, info *mgithub.PRInfo, reviewErr error) error {
 	cctx, cancel := stdctx.WithTimeout(stdctx.WithoutCancel(ctx), reviewErrorSummaryTimeout)
 	defer cancel()
-	_, err := mgithub.UpsertSummaryComment(cctx, client, info, mgithub.RenderErrorNotice(info, reviewErrorNotice(reviewErr), cli.Version()))
+	_, _, err := mgithub.UpsertSummaryComment(cctx, client, info, mgithub.RenderErrorNotice(info, reviewErrorNotice(reviewErr), cli.Version()))
 	return err
+}
+
+func maybeUpsertReviewErrorSummary(ctx stdctx.Context, client mgithub.Client, info *mgithub.PRInfo, req cli.PRReviewRequest, reviewErr error) {
+	if !shouldPostReviewErrorSummary(req.Post, info.IsFork, reviewErr) {
+		return
+	}
+	if uerr := upsertReviewErrorSummary(ctx, client, info, reviewErr); uerr != nil {
+		slog.Warn("review-error summary upsert failed: " + config.RedactString(uerr.Error()))
+	}
 }
 
 func reviewErrorNotice(err error) mgithub.ErrorNotice {

@@ -301,14 +301,17 @@ Every review gets a built-in baseline plus any project rules under `.miu/cr/rule
 `review` can review a GitHub pull request directly and (with `--post`) publish results back to it:
 
 - `--pr <url|owner/repo#N>`: review a GitHub PR (no PAT needed for public repos in dry-run).
-- `--post` / `--no-post`: publish inline comments + a summary, or dry-run (`--no-post` is the default for `--pr`).
+- `--post` / `--no-post`: publish inline comments + a summary, or dry-run (`--no-post` is the default for `--pr`). Review-mode posting reacts 👀 and writes a `Review running` summary before the final result replaces it.
 - `--token <pat>`: GitHub PAT, required only for `--post`.
 - `--mode review|checks`: inline review comments (default) or a GitHub CheckRun (survives force-push, works on fork PRs).
 - `--suggest`: emit one-click GitHub suggestions for proven fixes: single-line replacements and wrap/guard/insert fixes (a multi-line patch on a QuotedCode-proven single-line anchor).
 - `--approval off|clean|threshold`: submit `APPROVE` by policy. `clean` requires
   zero findings; `threshold` allows findings at or below `--approval-max-priority`
-  (default `P4`: only P4 findings allowed, P0-P3 blocked) and can add a note via
-  `--approval-note`.
+  (default `P4`: only P4 findings allowed, P0-P3 blocked). Approval reviews include
+  short LGTM-style text with a link to the summary by default. Approval is
+  head-SHA scoped, so a later push can be approved again. Clean re-approvals can
+  stay bodyless; threshold re-approvals include the threshold note. Tune body text
+  with `--approval-note`.
 - `--conversation`: on `--pr`, also fetch the prior PR conversation (the miucr summary, review overviews, finding threads, and developer replies) and inject it fenced/context-only as Untrusted context (dropped on fork PRs); one extra read pass, no extra LLM call (default OFF).
 - `--force`: re-review even when the head SHA is unchanged since the last saved review. By default an unchanged head SHA short-circuits (`skipped_unchanged`, no LLM pass); a new commit always re-reviews. See [GitHub PR review](/github-pr/).
 

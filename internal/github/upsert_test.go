@@ -11,16 +11,21 @@ import (
 	"github.com/vanducng/miu-cr/internal/cli/clierr"
 )
 
-func upsertInfo() *PRInfo { return &PRInfo{Owner: "o", Repo: "r", Number: 1} }
+func upsertInfo() *PRInfo {
+	return &PRInfo{Owner: "o", Repo: "r", Number: 1, HTMLBase: "https://github.com/o/r"}
+}
 
 func TestUpsertSummaryCommentCreatesOnFirstRun(t *testing.T) {
 	c := &recordClient{issueStore: []*gh.IssueComment{}}
-	act, err := UpsertSummaryComment(stdctx.Background(), c, upsertInfo(), ReviewMarker+"\n## Code Review Summary\nbody")
+	act, url, err := UpsertSummaryComment(stdctx.Background(), c, upsertInfo(), ReviewMarker+"\n## Code Review Summary\nbody")
 	if err != nil {
 		t.Fatalf("upsert: %v", err)
 	}
 	if act != UpsertCreated {
 		t.Fatalf("want created, got %q", act)
+	}
+	if url != "https://github.com/o/r/pull/1#issuecomment-1" {
+		t.Fatalf("summary URL = %q", url)
 	}
 	if len(c.issueStore) != 1 {
 		t.Fatalf("want 1 comment, got %d", len(c.issueStore))
@@ -35,12 +40,15 @@ func TestUpsertSummaryCommentEditsNotStacks(t *testing.T) {
 		{ID: gh.Ptr(int64(7)), Body: gh.Ptr(ReviewMarker + "\nold summary")},
 	}}
 	c.issueIDSeq = 7
-	act, err := UpsertSummaryComment(stdctx.Background(), c, upsertInfo(), ReviewMarker+"\nnew summary")
+	act, url, err := UpsertSummaryComment(stdctx.Background(), c, upsertInfo(), ReviewMarker+"\nnew summary")
 	if err != nil {
 		t.Fatalf("upsert: %v", err)
 	}
 	if act != UpsertEdited {
 		t.Fatalf("want edited, got %q", act)
+	}
+	if url != "https://github.com/o/r/pull/1#issuecomment-7" {
+		t.Fatalf("summary URL = %q", url)
 	}
 	if len(c.issueStore) != 1 {
 		t.Fatalf("must not stack: want 1 comment, got %d", len(c.issueStore))
@@ -59,7 +67,7 @@ func TestUpsertSummaryCommentEditsLowestID(t *testing.T) {
 		{ID: gh.Ptr(int64(5)), Body: gh.Ptr(ReviewMarker + "\ndup five")},
 	}}
 	c.issueIDSeq = 9
-	act, err := UpsertSummaryComment(stdctx.Background(), c, upsertInfo(), ReviewMarker+"\nedited")
+	act, _, err := UpsertSummaryComment(stdctx.Background(), c, upsertInfo(), ReviewMarker+"\nedited")
 	if err != nil {
 		t.Fatalf("upsert: %v", err)
 	}
@@ -82,7 +90,7 @@ func TestUpsertSummaryCommentIgnoresUnmarked(t *testing.T) {
 		{ID: gh.Ptr(int64(3)), Body: gh.Ptr("a human comment, no marker")},
 	}}
 	c.issueIDSeq = 3
-	act, err := UpsertSummaryComment(stdctx.Background(), c, upsertInfo(), ReviewMarker+"\nsummary")
+	act, _, err := UpsertSummaryComment(stdctx.Background(), c, upsertInfo(), ReviewMarker+"\nsummary")
 	if err != nil {
 		t.Fatalf("upsert: %v", err)
 	}
@@ -99,7 +107,7 @@ func TestUpsertSummaryCommentIgnoresUnmarked(t *testing.T) {
 
 func TestUpsertSummaryCommentEmptyBodyIsNoop(t *testing.T) {
 	c := &recordClient{issueStore: []*gh.IssueComment{}}
-	act, err := UpsertSummaryComment(stdctx.Background(), c, upsertInfo(), "   \n  ")
+	act, _, err := UpsertSummaryComment(stdctx.Background(), c, upsertInfo(), "   \n  ")
 	if err != nil {
 		t.Fatalf("upsert: %v", err)
 	}
@@ -114,7 +122,7 @@ func TestUpsertSummaryCommentEmptyBodyIsNoop(t *testing.T) {
 func TestUpsertSummaryCommentForkFallbackOnCreate(t *testing.T) {
 	t.Setenv("GITHUB_ACTIONS", "true")
 	c := &recordClient{issueStore: []*gh.IssueComment{}, createIssueErr: forbidden403()}
-	act, err := UpsertSummaryComment(stdctx.Background(), c, upsertInfo(), ReviewMarker+"\nsummary")
+	act, _, err := UpsertSummaryComment(stdctx.Background(), c, upsertInfo(), ReviewMarker+"\nsummary")
 	if err != nil {
 		t.Fatalf("fork 403 must not hard-fail: %v", err)
 	}
@@ -130,7 +138,7 @@ func TestUpsertSummaryCommentForkFallbackOnEdit(t *testing.T) {
 		editErr:    forbidden403(),
 	}
 	c.issueIDSeq = 2
-	act, err := UpsertSummaryComment(stdctx.Background(), c, upsertInfo(), ReviewMarker+"\nnew")
+	act, _, err := UpsertSummaryComment(stdctx.Background(), c, upsertInfo(), ReviewMarker+"\nnew")
 	if err != nil {
 		t.Fatalf("fork 403 on edit must not hard-fail: %v", err)
 	}
@@ -141,7 +149,7 @@ func TestUpsertSummaryCommentForkFallbackOnEdit(t *testing.T) {
 
 func TestUpsertSummaryCommentTypedErrorOnOtherFailure(t *testing.T) {
 	c := &recordClient{issueStore: []*gh.IssueComment{}, createIssueErr: errors.New("boom 500")}
-	act, err := UpsertSummaryComment(stdctx.Background(), c, upsertInfo(), ReviewMarker+"\nsummary")
+	act, _, err := UpsertSummaryComment(stdctx.Background(), c, upsertInfo(), ReviewMarker+"\nsummary")
 	if err == nil {
 		t.Fatal("a non-403 API error must surface")
 	}
@@ -164,7 +172,7 @@ func TestUpsertSummaryCommentStorelessRunsRoundTrip(t *testing.T) {
 	info := upsertInfo()
 
 	body1 := runsCountToken(1) + "\n" + ReviewMarker + "\n## Code Review Summary"
-	if act, err := UpsertSummaryComment(stdctx.Background(), c, info, body1); err != nil || act != UpsertCreated {
+	if act, _, err := UpsertSummaryComment(stdctx.Background(), c, info, body1); err != nil || act != UpsertCreated {
 		t.Fatalf("first run: act=%q err=%v", act, err)
 	}
 	if got := parseRunsCount(c.issueStore[0].GetBody()); got != 1 {
@@ -172,7 +180,7 @@ func TestUpsertSummaryCommentStorelessRunsRoundTrip(t *testing.T) {
 	}
 
 	body2 := runsCountToken(2) + "\n" + ReviewMarker + "\n## Code Review Summary"
-	if act, err := UpsertSummaryComment(stdctx.Background(), c, info, body2); err != nil || act != UpsertEdited {
+	if act, _, err := UpsertSummaryComment(stdctx.Background(), c, info, body2); err != nil || act != UpsertEdited {
 		t.Fatalf("second run: act=%q err=%v", act, err)
 	}
 	if len(c.issueStore) != 1 {

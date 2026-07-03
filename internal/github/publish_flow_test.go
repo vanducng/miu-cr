@@ -68,6 +68,10 @@ func (c *statefulClient) EditIssueComment(stdctx.Context, string, string, int64,
 	return nil, nil
 }
 
+func (c *statefulClient) CreateIssueReaction(stdctx.Context, string, string, int, string) (*gh.Reaction, error) {
+	return &gh.Reaction{}, nil
+}
+
 func (c *statefulClient) CreateCheckRun(stdctx.Context, string, string, gh.CreateCheckRunOptions) (*gh.CheckRun, error) {
 	return &gh.CheckRun{ID: gh.Ptr(int64(1))}, nil
 }

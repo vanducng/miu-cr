@@ -207,8 +207,8 @@ type ReviewOutcome struct {
 // and on re-runs where everything was already posted); SummaryAction reports the
 // fate of the single upserted summary issue comment:
 // none|created|edited|fork_fallback|failed ("none" on --no-post, checks mode, or
-// a clean no-summary run; created vs edited on --post; failed if the upsert
-// errored after the inline review already posted).
+// when summary posting is skipped; created vs edited on --post; failed if the
+// upsert errored after the inline review already posted).
 type PRResult struct {
 	Owner         string `json:"owner"`
 	Repo          string `json:"repo"`
@@ -708,7 +708,7 @@ func reviewCommand(opts *options) *cobra.Command {
 	f.BoolVar(&patchRepair, "patch-repair", false, "On --suggest, run a focused 2nd LLM pass per finding whose suggested patch was rejected, to recover a one-click suggestion (highest-severity-first, capped). Requires --suggest; one extra LLM call per repaired candidate (default OFF)")
 	f.StringVar(&approval.Mode, "approval", "off", "Approval policy on --pr --post: off|clean|threshold. A PAT APPROVE counts toward required reviews. Requires --post (inert in dry-run)")
 	f.StringVar(&approval.MaxPriority, "approval-max-priority", "", "For --approval threshold, approve only when the worst active finding is at or below this priority: P0|P1|P2|P3|P4 (default P4)")
-	f.StringVar(&approval.Note, "approval-note", "", "Approval review body policy: none|on_findings|always (default none for clean, on_findings for threshold)")
+	f.StringVar(&approval.Note, "approval-note", "", "Approval review body policy: none|on_findings|always (default always)")
 	f.BoolVar(&noSave, "no-save", false, "Do not persist this review to the local history store (default: every review is saved to ~/.config/miu/cr/state.db)")
 	f.BoolVar(&force, "force", false, "On --pr, re-review even when the head SHA is unchanged since the last saved review (default: an unchanged head SHA short-circuits with skipped_unchanged, no LLM pass)")
 	f.BoolVarP(&verbose, "verbose", "v", false, "Print progress to stderr (default when stderr is a terminal; stdout envelope unchanged)")

@@ -101,6 +101,12 @@ opt-in write-actions (`--suggest`, `--approval`, both default OFF) are described
 under **Opt-in write-actions** below. miu-cr never requests changes and never
 pushes commits.
 
+Before the review work starts, a non-fork `--post --mode review` run reacts to
+the PR with 👀 and upserts the summary issue comment with a short "Review
+running" status. The final result, or a typed error alert if the run fails,
+edits that same comment. This acknowledgement happens after the unchanged-head
+skip check, so same-commit no-op reruns do not churn the PR timeline.
+
 When a finding is motivated by one of your project rules, the inline comment cites
 it as `(per <rule>)`. The rule stem is validated against the rules actually loaded
 for the review (a hallucinated citation is dropped); a repo rule
@@ -210,13 +216,14 @@ re-run:
 
 - The **summary is ONE upserted issue comment**. miucr lists the PR's issue comments, finds
   the lowest-id one carrying the `<!-- miu-cr-review -->` marker, and **edits it in place**;
-  if none exists it creates one. A successful publish finalizes that same comment with a
-  hidden completed-publish marker, so the reported `summary_action` can be `edited` even
-  on the first run. Re-runs update the single summary rather than stacking a review per
-  commit.
-- Inline findings post as a PR **review** with an **empty body** (the summary moved out),
-  so a no-inline-comment run never trips an empty-review 422 while the summary comment still
-  upserts (and `--approval` can still submit APPROVE).
+  if none exists it creates one. At review start, the comment says `Review running`; a
+  successful publish finalizes that same comment with a hidden completed-publish marker, so
+  the reported `summary_action` can be `edited` even on the first run. Re-runs update the
+  single summary rather than stacking a review per commit.
+- Inline findings post as a PR **review**. Normal comment reviews use an empty body because
+  the summary moved out, so a no-inline-comment run never trips an empty-review 422 while
+  the summary comment still upserts. First approval reviews carry a short LGTM-style body
+  with a link back to the summary unless `--approval-note none` is set.
 - A **same-commit `--post` re-run short-circuits** after the summary has a completed-publish
   marker for that head. It skips the clone and model call; pass `--force` to review anyway.
 - Each **inline** comment carries a hidden fingerprint (`<!-- miucr:fp=... -->`), so a
@@ -406,8 +413,19 @@ Submits `Event=APPROVE` instead of `COMMENT` when the configured policy and ever
 safety precondition hold. `--approval clean` requires **zero findings**.
 `--approval threshold --approval-max-priority P3` approves when the worst active
 finding is P3 or P4; P0, P1, and P2 block approval. If findings remain, the
-approval review includes a short note. Threshold `max_priority` accepts
+approval review notes the configured threshold. The first approval body is short,
+starts with LGTM-style copy, and links to the code review summary by default;
+set `--approval-note none` to suppress it, or `on_findings` to keep clean
+approvals bodyless. Clean re-approvals after a later push may use an empty body
+to avoid repeated approval comments. Threshold `max_priority` accepts
 `P0|P1|P2|P3|P4` and defaults to `P4`.
+
+Approvals are head-SHA scoped. A re-run does not post a second approval for the
+same commit, but if the PR author pushes more commits after an approval, miu-cr
+can approve the newly reviewed head again. Clean re-approvals stay bodyless; if
+findings remain under a configured threshold, the re-approval body says it
+re-reviewed the latest commit so readers know the approval covers the current
+push and threshold.
 
 All approval modes still require: no finding reaches the gate, the PR is **not a
 fork**, the author is **trusted** (`AuthorAssociation` not `NONE` /

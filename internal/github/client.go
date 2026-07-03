@@ -37,6 +37,7 @@ type Client interface {
 	ListIssueComments(ctx stdctx.Context, owner, repo string, number int, opts *gh.IssueListCommentsOptions) ([]*gh.IssueComment, *gh.Response, error)
 	CreateIssueComment(ctx stdctx.Context, owner, repo string, number int, comment *gh.IssueComment) (*gh.IssueComment, error)
 	EditIssueComment(ctx stdctx.Context, owner, repo string, commentID int64, comment *gh.IssueComment) (*gh.IssueComment, error)
+	CreateIssueReaction(ctx stdctx.Context, owner, repo string, number int, content string) (*gh.Reaction, error)
 
 	// CreateCheckRun/UpdateCheckRun back the --mode checks reporter: create the run
 	// (first ≤50 annotations) then update it with each further ≤50-annotation batch,
@@ -110,6 +111,11 @@ func (g ghClient) CreateIssueComment(ctx stdctx.Context, owner, repo string, num
 func (g ghClient) EditIssueComment(ctx stdctx.Context, owner, repo string, commentID int64, comment *gh.IssueComment) (*gh.IssueComment, error) {
 	c, _, err := g.c.Issues.EditComment(ctx, owner, repo, commentID, comment)
 	return c, err
+}
+
+func (g ghClient) CreateIssueReaction(ctx stdctx.Context, owner, repo string, number int, content string) (*gh.Reaction, error) {
+	r, _, err := g.c.Reactions.CreateIssueReaction(ctx, owner, repo, number, content)
+	return r, err
 }
 
 func (g ghClient) CreateCheckRun(ctx stdctx.Context, owner, repo string, opts gh.CreateCheckRunOptions) (*gh.CheckRun, error) {
