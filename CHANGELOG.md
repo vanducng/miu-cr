@@ -55,6 +55,13 @@ comment with a new marker); subsequent re-runs dedupe normally. On a
 first M5 review **manually** (or off-hours) to absorb the one-time re-post before
 the next scheduled run.
 
+## [0.82.5](https://github.com/vanducng/miu-cr/compare/v0.82.4...v0.82.5) (2026-07-03)
+
+
+### Bug Fixes
+
+* **agent:** tick waiting progress during long provider calls ([#256](https://github.com/vanducng/miu-cr/issues/256)) ([268ea10](https://github.com/vanducng/miu-cr/commit/268ea10e423b9b405ce1aa21f470789b215d9a8e))
+
 ## [0.82.4](https://github.com/vanducng/miu-cr/compare/v0.82.3...v0.82.4) (2026-07-02)
 
 
