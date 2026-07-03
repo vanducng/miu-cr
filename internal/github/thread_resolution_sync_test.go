@@ -10,6 +10,7 @@ import (
 	gh "github.com/google/go-github/v84/github"
 
 	"github.com/vanducng/miu-cr/internal/cli/clierr"
+	"github.com/vanducng/miu-cr/internal/config"
 	"github.com/vanducng/miu-cr/internal/engine"
 	"github.com/vanducng/miu-cr/internal/engine/diff"
 )
@@ -193,7 +194,7 @@ func TestSyncSummaryConversationResolvedEditsExistingComment(t *testing.T) {
 		threads: []ReviewThread{{Resolved: true, Comments: []ReviewThreadComment{{Body: fpMarker(fp)}}}},
 	}
 
-	res, err := SyncSummaryConversationResolved(stdctx.Background(), client, info, now.Add(time.Hour))
+	res, err := SyncSummaryConversationResolved(stdctx.Background(), client, info, config.ApprovalPolicy{}, now.Add(time.Hour))
 	if err != nil {
 		t.Fatalf("SyncSummaryConversationResolved: %v", err)
 	}
@@ -222,7 +223,7 @@ func TestSyncSummaryConversationResolvedContinuesWithoutInlineURLs(t *testing.T)
 		threads:      []ReviewThread{{Resolved: true, Comments: []ReviewThreadComment{{Body: fpMarker(fp)}}}},
 	}}
 
-	res, err := SyncSummaryConversationResolved(stdctx.Background(), client, info, now.Add(time.Hour))
+	res, err := SyncSummaryConversationResolved(stdctx.Background(), client, info, config.ApprovalPolicy{}, now.Add(time.Hour))
 	if err != nil {
 		t.Fatalf("SyncSummaryConversationResolved: %v", err)
 	}
@@ -249,12 +250,67 @@ func TestSyncSummaryConversationResolvedWrapsThreadFetchError(t *testing.T) {
 		threadErr:    errors.New("boom"),
 	}
 
-	res, err := SyncSummaryConversationResolved(stdctx.Background(), client, info, now.Add(time.Hour))
+	res, err := SyncSummaryConversationResolved(stdctx.Background(), client, info, config.ApprovalPolicy{}, now.Add(time.Hour))
 	if err == nil || res.Reason != "thread_fetch_failed" {
 		t.Fatalf("expected thread fetch error, res=%+v err=%v", res, err)
 	}
 	var ce *clierr.CLIError
 	if !errors.As(err, &ce) || ce.Code != "github.thread_resolution_sync_failed" {
 		t.Fatalf("error not wrapped as CLIError: %#v", err)
+	}
+}
+
+// When resolving the last thread clears the ledger and the current head IS the
+// reviewed head, a trusted-author PR under a clean policy gets an APPROVE.
+func TestSyncSummaryConversationResolvedApprovesClearedLedger(t *testing.T) {
+	now := time.Date(2026, 6, 28, 10, 0, 0, 0, time.UTC)
+	info := &PRInfo{Owner: "o", Repo: "r", Number: 1, HeadSHA: "bbbbbb2", HTMLBase: "https://github.com/o/r", ReviewCount: 1, AuthorAssociation: "MEMBER"}
+	f := engine.Finding{File: "a.go", Line: 5, Severity: "low", Category: "bug", Title: "thing", QuotedCode: "x"}
+	fp := Fingerprint(f)
+	body := RenderSummaryFull(info, []engine.Finding{f}, nil, 0, nil, nil, SummaryOptions{
+		Ledger: MergeLedger(nil, []engine.Finding{f}, "aaaaaa1", map[string]bool{"a.go": true}, now),
+	})
+	client := &syncRecordClient{
+		recordClient: recordClient{issueStore: []*gh.IssueComment{{ID: gh.Ptr(int64(7)), Body: gh.Ptr(body)}}},
+		threads:      []ReviewThread{{Resolved: true, Comments: []ReviewThreadComment{{Body: fpMarker(fp)}}}},
+	}
+
+	res, err := SyncSummaryConversationResolved(stdctx.Background(), client, info, config.ApprovalPolicy{Mode: "clean"}, now.Add(time.Hour))
+	if err != nil {
+		t.Fatalf("sync: %v", err)
+	}
+	if !res.Approved {
+		t.Fatalf("want Approved=true for a cleared clean ledger on the reviewed head, got %+v", res)
+	}
+	if client.createReviewN != 1 || client.gotReview.GetEvent() != "APPROVE" {
+		t.Fatalf("want one APPROVE CreateReview, got n=%d event=%q", client.createReviewN, client.gotReview.GetEvent())
+	}
+	if client.gotReview.GetCommitID() != "bbbbbb2" {
+		t.Fatalf("APPROVE must target the reviewed head, got %q", client.gotReview.GetCommitID())
+	}
+}
+
+// If the current head moved past the reviewed head, resolving does NOT approve —
+// approving a commit we never reviewed would be unsafe; a fresh review handles it.
+func TestSyncSummaryConversationResolvedSkipsApproveOnMovedHead(t *testing.T) {
+	now := time.Date(2026, 6, 28, 10, 0, 0, 0, time.UTC)
+	reviewed := &PRInfo{Owner: "o", Repo: "r", Number: 1, HeadSHA: "bbbbbb2", HTMLBase: "https://github.com/o/r", ReviewCount: 1}
+	info := &PRInfo{Owner: "o", Repo: "r", Number: 1, HeadSHA: "cccccc3", HTMLBase: "https://github.com/o/r", ReviewCount: 1, AuthorAssociation: "MEMBER"}
+	f := engine.Finding{File: "a.go", Line: 5, Severity: "low", Category: "bug", Title: "thing", QuotedCode: "x"}
+	fp := Fingerprint(f)
+	body := RenderSummaryFull(reviewed, []engine.Finding{f}, nil, 0, nil, nil, SummaryOptions{
+		Ledger: MergeLedger(nil, []engine.Finding{f}, "aaaaaa1", map[string]bool{"a.go": true}, now),
+	})
+	client := &syncRecordClient{
+		recordClient: recordClient{issueStore: []*gh.IssueComment{{ID: gh.Ptr(int64(7)), Body: gh.Ptr(body)}}},
+		threads:      []ReviewThread{{Resolved: true, Comments: []ReviewThreadComment{{Body: fpMarker(fp)}}}},
+	}
+
+	res, err := SyncSummaryConversationResolved(stdctx.Background(), client, info, config.ApprovalPolicy{Mode: "clean"}, now.Add(time.Hour))
+	if err != nil {
+		t.Fatalf("sync: %v", err)
+	}
+	if res.Approved || client.createReviewN != 0 {
+		t.Fatalf("must NOT approve when the head moved past the reviewed head: approved=%v n=%d", res.Approved, client.createReviewN)
 	}
 }
