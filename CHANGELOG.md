@@ -55,6 +55,13 @@ comment with a new marker); subsequent re-runs dedupe normally. On a
 first M5 review **manually** (or off-hours) to absorb the one-time re-post before
 the next scheduled run.
 
+## [0.84.1](https://github.com/vanducng/miu-cr/compare/v0.84.0...v0.84.1) (2026-07-03)
+
+
+### Bug Fixes
+
+* **review:** lead walkthrough with substance; flag tests that miss the changed path ([#264](https://github.com/vanducng/miu-cr/issues/264)) ([bed460d](https://github.com/vanducng/miu-cr/commit/bed460da865ca3bf0dd017a4cff256bf976b9c4b))
+
 ## [0.84.0](https://github.com/vanducng/miu-cr/compare/v0.83.0...v0.84.0) (2026-07-03)
 
 
