@@ -406,8 +406,13 @@ func nudgeIfUnconfigured(apiKey, authToken string) error {
 }
 
 const defaultTokenBudget = 0
-const defaultReviewTimeout = 15 * time.Minute
-const defaultReviewStalledTimeout = 5 * time.Minute
+
+// defaultReviewTimeout is generous so a large PR (90+ files, ~180k-token prompt,
+// 20+ tool turns, minutes-long provider calls) completes rather than being cut
+// off mid-review. The stalled-timeout watchdog catches genuinely-hung reviews far
+// sooner, so a long ceiling costs nothing on healthy small PRs.
+const defaultReviewTimeout = 30 * time.Minute
+const defaultReviewStalledTimeout = 8 * time.Minute
 const maxContextHops = 5
 
 func reviewCommand(opts *options) *cobra.Command {
