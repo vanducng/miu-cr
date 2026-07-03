@@ -511,11 +511,7 @@ func (prReviewer) ReviewPR(ctx stdctx.Context, req cli.PRReviewRequest) (cli.Rev
 		// A context.Canceled is NOT a failure: the host cancels an in-flight review
 		// when a newer head supersedes it (or on shutdown). See
 		// shouldPostReviewErrorSummary.
-		if shouldPostReviewErrorSummary(req.Post, info.IsFork, err) {
-			if uerr := upsertReviewErrorSummary(ctx, client, info, err); uerr != nil {
-				slog.Warn("review-error summary upsert failed: " + config.RedactString(uerr.Error()))
-			}
-		}
+		maybeUpsertReviewErrorSummary(ctx, client, info, req, err)
 		return cli.ReviewOutcome{}, err
 	}
 	pruneHistory(ctx, hist, cfg)
@@ -532,6 +528,7 @@ func (prReviewer) ReviewPR(ctx stdctx.Context, req cli.PRReviewRequest) (cli.Rev
 	if req.Post {
 		prStore, closeStore, serr := newPRThreadStore(ctx, cfg)
 		if serr != nil {
+			maybeUpsertReviewErrorSummary(ctx, client, info, req, serr)
 			return cli.ReviewOutcome{}, serr
 		}
 		if closeStore != nil {
@@ -539,6 +536,7 @@ func (prReviewer) ReviewPR(ctx stdctx.Context, req cli.PRReviewRequest) (cli.Rev
 		}
 		ew := embedWriter{emb: emb, store: embStore, repo: repo}
 		if err := publishReview(ctx, client, runner, dir, info, res, prResult, req, prStore, ew, cfg.Review.CategoryURLMap(), ruleCitations(loaded, dir), reuseKey); err != nil {
+			maybeUpsertReviewErrorSummary(ctx, client, info, req, err)
 			return cli.ReviewOutcome{}, err
 		}
 		// Source of truth is the engine stat (repair ran in the engine, not github);

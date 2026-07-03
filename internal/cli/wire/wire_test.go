@@ -389,6 +389,22 @@ func TestReviewErrorSummaryUsesFreshContext(t *testing.T) {
 	}
 }
 
+func TestMaybeUpsertReviewErrorSummaryForPostFailure(t *testing.T) {
+	fake := &fakeGitHub{}
+	info := &mgithub.PRInfo{Owner: "o", Repo: "r", Number: 7, HeadSHA: "headsha"}
+
+	maybeUpsertReviewErrorSummary(stdctx.Background(), fake, info, cli.PRReviewRequest{Post: true}, errors.New("publish failed"))
+	if fake.createIssueN != 1 {
+		t.Fatalf("post failure must create an error summary, got createIssueN=%d", fake.createIssueN)
+	}
+	body := fake.issueComments[0].GetBody()
+	for _, want := range []string{"> [!CAUTION]", "publish failed"} {
+		if !strings.Contains(body, want) {
+			t.Fatalf("want %q in post-failure notice:\n%s", want, body)
+		}
+	}
+}
+
 func TestReviewPRDoesNotAckBeforeSetupSucceeds(t *testing.T) {
 	t.Setenv("HOME", t.TempDir())
 	fake := &fakeGitHub{}
