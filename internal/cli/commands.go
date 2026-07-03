@@ -668,6 +668,7 @@ func buildServeHostRepos(ctx stdctx.Context, cfg config.HostConfig, path string)
 			PromptHash:           promptHash,
 			RulesHash:            rulesHash,
 			ReviewTimeout:        durationOrDefault(review.Timeout, reviewTO),
+			Debounce:             durationOrDefaultAllowZero(review.Debounce, 0),
 			ThreadResolutionSync: threadResolutionSync,
 			Review:               opts,
 			PRFilter:             review.PRFilter,
@@ -1152,6 +1153,9 @@ func mergeHostReview(base, over config.HostReview) config.HostReview {
 	}
 	if over.StalledTimeout != "" {
 		out.StalledTimeout = over.StalledTimeout
+	}
+	if over.Debounce != "" {
+		out.Debounce = over.Debounce
 	}
 	out.ProviderRetry = config.MergeProviderRetry(base.ProviderRetry, over.ProviderRetry)
 	if over.Expand != nil {

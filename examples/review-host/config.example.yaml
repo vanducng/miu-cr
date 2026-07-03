@@ -43,6 +43,10 @@ x:
                                 # per-review latency; can be overridden per repo below.
     timeout: 900s
     stalled_timeout: 5m
+    # debounce: 2m                  # wait for the head to be stable this long before
+                                    # reviewing, so a burst of pushes coalesces into one
+                                    # review on the settled head ("" / 0s → review at once).
+                                    # Raise it per repo for PRs that get pushed rapidly.
     provider_retry:
       max_retries: 10
       initial_backoff: 5s

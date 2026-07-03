@@ -608,6 +608,9 @@ func TestHostReviewAnalysisShapeClassifiesEveryField(t *testing.T) {
 		"Approval":             true,
 		"PRFilter":             true,
 		"ThreadResolutionSync": true,
+		// Debounce only delays WHEN a review runs; it must NOT enter the policy hash,
+		// or changing the window would rewrite every dedupe_key and re-review all PRs.
+		"Debounce": true,
 	}
 	review := reflect.TypeOf(config.HostReview{})
 	for i := 0; i < review.NumField(); i++ {

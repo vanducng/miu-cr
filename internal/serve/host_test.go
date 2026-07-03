@@ -493,6 +493,30 @@ func TestHostRunnerRepeatedPollSameHeadDoesNotDuplicate(t *testing.T) {
 	}
 }
 
+// Debounce makes a fresh head's job not-claimable until it has been stable for
+// the window: enqueue must set available_at = now + debounce (a newer head then
+// supersedes the queued job before it becomes claimable, coalescing a push burst).
+func TestHostRunnerDebounceDelaysJobAvailability(t *testing.T) {
+	cfg := hostRunnerConfig(t)
+	base := time.Date(2026, 7, 3, 12, 0, 0, 0, time.UTC)
+	cfg.Now = func() time.Time { return base }
+	cfg.Repos[0].Debounce = 2 * time.Minute
+	st := cfg.Store.(*fakeHostStore)
+	r, err := NewHostRunner(cfg)
+	if err != nil {
+		t.Fatalf("NewHostRunner: %v", err)
+	}
+	if err := r.Tick(stdctx.Background()); err != nil {
+		t.Fatalf("tick: %v", err)
+	}
+	st.mu.Lock()
+	defer st.mu.Unlock()
+	want := base.Add(2 * time.Minute)
+	if !st.lastEnqueue.AvailableAt.Equal(want) {
+		t.Fatalf("debounced enqueue available_at = %s, want %s (now+debounce)", st.lastEnqueue.AvailableAt, want)
+	}
+}
+
 func TestHostRunnerPollCancelsQueuedJobsForClosedPRs(t *testing.T) {
 	cfg := hostRunnerConfig(t)
 	gh := &fakeNotifGetter{prs: map[string][]*github.PullRequest{
@@ -1236,6 +1260,7 @@ type fakeHostStore struct {
 	queued         []string
 	cursorWrites   int
 	releaseCount   int
+	lastEnqueue    store.HostJobInput
 	lastRelease    store.HostJobReleaseInput
 	lastClaim      store.HostJobClaimInput
 	heartbeats     []store.HostJobHeartbeatInput
@@ -1354,6 +1379,7 @@ func (s *fakeHostStore) EnqueueHostJob(_ stdctx.Context, in store.HostJobInput) 
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	in.DedupeKey = store.HostJobDedupeKey(in)
+	s.lastEnqueue = in
 	if j, ok := s.jobs[in.DedupeKey]; ok {
 		if j.Status == "failed" && j.AvailableAt.After(in.Now) {
 			return j, false, nil
