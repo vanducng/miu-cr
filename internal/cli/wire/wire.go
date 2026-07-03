@@ -401,10 +401,6 @@ func (prReviewer) ReviewPR(ctx stdctx.Context, req cli.PRReviewRequest) (cli.Rev
 		}
 	}
 
-	if req.Post && req.Mode == "review" && !info.IsFork {
-		ackPRReviewStarted(ctx, client, info)
-	}
-
 	creds, err := agent.Resolve(agent.ResolveInput{
 		Ctx:           ctx,
 		Provider:      req.Provider,
@@ -462,6 +458,9 @@ func (prReviewer) ReviewPR(ctx stdctx.Context, req cli.PRReviewRequest) (cli.Rev
 	conversation := ""
 	if wantConversation(req.Conversation, info.IsFork) {
 		conversation = mgithub.FetchConversation(ctx, client, info)
+	}
+	if req.Post && req.Mode == "review" && !info.IsFork {
+		ackPRReviewStarted(ctx, client, info)
 	}
 	res, err := eng.Review(ctx, engine.Request{
 		Mode:            diff.ModeRange,

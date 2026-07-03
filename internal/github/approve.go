@@ -191,6 +191,9 @@ func approvalReviews(ctx stdctx.Context, client Client, info *PRInfo) (approvalR
 		} else if commitID != "" {
 			out.prior = true
 		}
+		if out.current && out.prior {
+			break
+		}
 	}
 	return out, nil
 }

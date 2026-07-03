@@ -47,7 +47,12 @@ func (f *fakeGitHub) GetPR(stdctx.Context, string, string, int) (*gh.PullRequest
 	if sha == "" {
 		sha = "headsha"
 	}
-	return &gh.PullRequest{Head: &gh.PullRequestBranch{SHA: gh.Ptr(sha)}}, nil
+	repo := &gh.Repository{HTMLURL: gh.Ptr("https://github.com/o/r"), FullName: gh.Ptr("o/r")}
+	return &gh.PullRequest{
+		Head:              &gh.PullRequestBranch{SHA: gh.Ptr(sha), Repo: repo},
+		Base:              &gh.PullRequestBranch{SHA: gh.Ptr("basesha"), Ref: gh.Ptr("main"), Repo: repo},
+		AuthorAssociation: gh.Ptr("MEMBER"),
+	}, nil
 }
 func (f *fakeGitHub) ListFiles(stdctx.Context, string, string, int, *gh.ListOptions) ([]*gh.CommitFile, *gh.Response, error) {
 	return nil, &gh.Response{}, nil
@@ -381,6 +386,31 @@ func TestReviewErrorSummaryUsesFreshContext(t *testing.T) {
 	}
 	if len(fake.issueListCtxErrs) == 0 || fake.issueListCtxErrs[0] != nil {
 		t.Fatalf("summary upsert used canceled parent context: %v", fake.issueListCtxErrs)
+	}
+}
+
+func TestReviewPRDoesNotAckBeforeSetupSucceeds(t *testing.T) {
+	t.Setenv("HOME", t.TempDir())
+	fake := &fakeGitHub{}
+	restore := newGitHubClient
+	newGitHubClient = func(string) mgithub.Client { return fake }
+	t.Cleanup(func() { newGitHubClient = restore })
+
+	_, err := (prReviewer{}).ReviewPR(stdctx.Background(), cli.PRReviewRequest{
+		Ref:      "o/r#7",
+		Post:     true,
+		Mode:     "review",
+		NoSave:   true,
+		Provider: "missing-provider-for-test",
+	})
+	if err == nil {
+		t.Fatal("expected setup failure")
+	}
+	if fake.createIssueN != 0 || fake.editN != 0 {
+		t.Fatalf("setup failure must not create or edit a running summary: create=%d edit=%d", fake.createIssueN, fake.editN)
+	}
+	if indexOf(fake.order, "react_issue") >= 0 {
+		t.Fatalf("setup failure must not react before review starts; order=%v", fake.order)
 	}
 }
 
