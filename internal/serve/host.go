@@ -77,20 +77,24 @@ func (c HostThreadResolutionSync) Enabled() bool {
 }
 
 type HostRepoConfig struct {
-	Name                 string
-	Owner                string
-	Repo                 string
-	Slug                 string
-	GitURL               string
-	DefaultBranch        string
-	GithubAccount        string
-	Enabled              bool
-	Poll                 bool
-	ConfigHash           string
-	PolicyHash           string
-	PromptHash           string
-	RulesHash            string
-	ReviewTimeout        time.Duration
+	Name          string
+	Owner         string
+	Repo          string
+	Slug          string
+	GitURL        string
+	DefaultBranch string
+	GithubAccount string
+	Enabled       bool
+	Poll          bool
+	ConfigHash    string
+	PolicyHash    string
+	PromptHash    string
+	RulesHash     string
+	ReviewTimeout time.Duration
+	// Debounce delays enqueue-availability of a new head's review by this long, so a
+	// burst of pushes coalesces (each newer head supersedes the prior queued job
+	// before it becomes claimable). 0 = review immediately.
+	Debounce             time.Duration
 	ThreadResolutionSync HostThreadResolutionSync
 	Review               JobReviewOptions
 	PRFilter             config.HostPRFilter
@@ -575,15 +579,19 @@ func (h *HostRunner) pollRepo(ctx stdctx.Context, snap hostRunnerSnapshot, repo 
 			continue
 		}
 		_, _, err = h.store.EnqueueHostJob(ctx, store.HostJobInput{
-			RepoID:      repoID,
-			SessionID:   session.ID,
-			Number:      number,
-			HeadSHA:     head,
-			BaseSHA:     pr.GetBase().GetSHA(),
-			PolicyHash:  repo.PolicyHash,
-			PromptHash:  repo.PromptHash,
-			RulesHash:   repo.RulesHash,
-			AvailableAt: now,
+			RepoID:     repoID,
+			SessionID:  session.ID,
+			Number:     number,
+			HeadSHA:    head,
+			BaseSHA:    pr.GetBase().GetSHA(),
+			PolicyHash: repo.PolicyHash,
+			PromptHash: repo.PromptHash,
+			RulesHash:  repo.RulesHash,
+			// Debounce: not claimable until the head has been stable this long. ON
+			// CONFLICT(dedupe_key) DO NOTHING anchors this to the head's first enqueue
+			// (no forward slide on later polls); a newer head supersedes this queued
+			// job before it becomes claimable. 0 => now (review immediately).
+			AvailableAt: now.Add(repo.Debounce),
 			Now:         now,
 		})
 		if err != nil {

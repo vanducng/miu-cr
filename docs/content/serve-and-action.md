@@ -321,6 +321,13 @@ fails as `review.stalled` instead of consuming the full total `timeout`. Use
 `0s` only to disable the watchdog for debugging; otherwise tune it per large
 repo alongside `timeout`.
 
+`debounce` (default off / `0s`) delays a review until the PR head has been
+stable for that long, so a burst of pushes coalesces into one review on the
+settled head instead of each push superseding the prior in-flight review. It
+follows the same review/`repos[].review` layering — raise it for repos whose
+PRs are pushed rapidly. It changes only *when* a review runs, never the review
+itself, so tuning it does not re-review already-reviewed heads.
+
 `provider_retry` is the provider API retry policy. The default retries `429`,
 `5xx`/`529`, and temporary transport failures 10 times with jittered exponential
 backoff (`5s` initial, `2m` max, `10m` elapsed) inside the same review timeout.
