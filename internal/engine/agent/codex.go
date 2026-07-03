@@ -331,7 +331,9 @@ func (a *codexAgent) post(ctx stdctx.Context, retry config.ProviderRetry, progre
 		if err := ctx.Err(); err != nil {
 			return nil, err
 		}
-		resp, err := a.postOnce(ctx, body)
+		resp, err := callWithWaitProgress(ctx, progress, "codex.responses", func() (*codexResp, error) {
+			return a.postOnce(ctx, body)
+		})
 		if err == nil {
 			return resp, nil
 		}

@@ -34,6 +34,41 @@ func (r providerRetryReason) String() string {
 	return r.code
 }
 
+// providerWaitProgressInterval is how often an in-flight provider call reports
+// waiting progress. A single call on a huge diff can legitimately run for many
+// minutes (observed: 4-8+ min per turn on a 90-file PR); without these ticks the
+// stalled-review watchdog (which cancels after N minutes of progress silence)
+// kills a review the provider is still working on. Var so tests can shorten it.
+var providerWaitProgressInterval = time.Minute
+
+// callWithWaitProgress runs call, ticking progress with "waiting on <label>
+// (elapsed)" every providerWaitProgressInterval until it returns, so a long
+// provider call keeps resetting the stalled-review watchdog. A genuinely dead
+// call is still bounded by the overall review timeout.
+func callWithWaitProgress[T any](ctx stdctx.Context, progress func(string), label string, call func() (T, error)) (T, error) {
+	if progress == nil {
+		return call()
+	}
+	done := make(chan struct{})
+	defer close(done)
+	start := time.Now()
+	go func() {
+		ticker := time.NewTicker(providerWaitProgressInterval)
+		defer ticker.Stop()
+		for {
+			select {
+			case <-done:
+				return
+			case <-ctx.Done():
+				return
+			case <-ticker.C:
+				progress(fmt.Sprintf("waiting on %s (%s)", label, time.Since(start).Round(time.Second)))
+			}
+		}
+	}()
+	return call()
+}
+
 func retryProviderCall[T any](ctx stdctx.Context, retry config.ProviderRetry, progress func(string), label string, call func() (T, error), classify func(error) error, retryable func(error) (providerRetryReason, bool)) (T, error) {
 	policy := resolveProviderRetryPolicy(retry, config.DefaultProviderRetryMaxRetries)
 	var zero T
@@ -42,7 +77,7 @@ func retryProviderCall[T any](ctx stdctx.Context, retry config.ProviderRetry, pr
 		if err := ctx.Err(); err != nil {
 			return zero, err
 		}
-		out, err := call()
+		out, err := callWithWaitProgress(ctx, progress, label, call)
 		if err == nil {
 			return out, nil
 		}
