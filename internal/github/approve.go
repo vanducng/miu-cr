@@ -3,6 +3,7 @@ package github
 import (
 	stdctx "context"
 	"fmt"
+	"strings"
 
 	gh "github.com/google/go-github/v84/github"
 
@@ -175,4 +176,46 @@ func alreadyApproved(ctx stdctx.Context, client Client, info *PRInfo) (bool, err
 // HasApprovedReview exposes the approval idempotency check for reuse checks.
 func HasApprovedReview(ctx stdctx.Context, client Client, info *PRInfo) (bool, error) {
 	return alreadyApproved(ctx, client, info)
+}
+
+// ApproveResolvedLedger submits an APPROVE when a resolution-cleared ledger leaves
+// the PR approvable: the policy would approve zero open findings on info.HeadSHA and
+// no APPROVE exists there yet. The caller MUST have verified info.HeadSHA is the
+// reviewed head (so we approve what was actually reviewed). Best-effort from the
+// background resolution sync: expected approval rejections (self-approve, 403/401,
+// 422) degrade to "not approved" without erroring; only info is required non-nil.
+func ApproveResolvedLedger(ctx stdctx.Context, client Client, info *PRInfo, policy config.ApprovalPolicy) (bool, string) {
+	if info == nil || info.HeadSHA == "" {
+		return false, approveReasonHeadUnknown
+	}
+	// gateClean + zero findings: a fully-resolved ledger has no open finding above
+	// any gate. reviewedFiles=1 because a ledger only exists after a real review.
+	if !ApprovalWouldApprove(*info, policy, true, nil, 1) {
+		return false, approveReasonThresholdFailed
+	}
+	if approved, err := alreadyApproved(ctx, client, info); err != nil {
+		return false, "list_reviews_failed"
+	} else if approved {
+		return false, approveReasonApproved
+	}
+	req := &gh.PullRequestReviewRequest{
+		CommitID: gh.Ptr(info.HeadSHA),
+		Event:    gh.Ptr("APPROVE"),
+	}
+	if body := approvalBody(policy, nil); strings.TrimSpace(body) != "" {
+		req.Body = gh.Ptr(body)
+	}
+	if _, err := client.CreateReview(ctx, info.Owner, info.Repo, info.Number, req); err != nil {
+		switch {
+		case isSelfApprove422(err):
+			return false, approveReasonSelfForbidden
+		case is422(err):
+			return false, approveReasonRejected
+		case is403(err) || is401(err):
+			return false, approveReasonForbidden
+		default:
+			return false, "create_review_failed"
+		}
+	}
+	return true, approveReasonApproved
 }

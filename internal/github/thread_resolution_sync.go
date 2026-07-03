@@ -7,17 +7,35 @@ import (
 	"time"
 
 	gh "github.com/google/go-github/v84/github"
+
+	"github.com/vanducng/miu-cr/internal/config"
 )
 
 type ThreadResolutionSyncResult struct {
-	Action   UpsertAction
-	Reason   string
-	Resolved int
-	Reopened int
-	Entries  int
+	Action        UpsertAction
+	Reason        string
+	Resolved      int
+	Reopened      int
+	Entries       int
+	Approved      bool
+	ApproveReason string
 }
 
-func SyncSummaryConversationResolved(ctx stdctx.Context, client Client, info *PRInfo, now time.Time) (ThreadResolutionSyncResult, error) {
+// LedgerFullyResolved reports whether the ledger has at least one entry and every
+// entry is resolved (no open or reopened findings) — i.e. clean by resolution.
+func LedgerFullyResolved(entries []LedgerEntry) bool {
+	if len(entries) == 0 {
+		return false
+	}
+	for _, e := range entries {
+		if e.Status != statusResolved {
+			return false
+		}
+	}
+	return true
+}
+
+func SyncSummaryConversationResolved(ctx stdctx.Context, client Client, info *PRInfo, policy config.ApprovalPolicy, now time.Time) (ThreadResolutionSyncResult, error) {
 	targetID, body, err := lowestMarkedComment(ctx, client, info)
 	if err != nil {
 		return ThreadResolutionSyncResult{Reason: "summary_fetch_failed"}, err
@@ -60,6 +78,13 @@ func SyncSummaryConversationResolved(ctx stdctx.Context, client Client, info *PR
 	}
 	result.Action = UpsertEdited
 	result.Reason = updateReason
+	// Approve-on-resolution: the ledger is now clean by resolution. Approve only when
+	// the current head IS the reviewed head (parseReviewedCommit non-empty and equal),
+	// so we never approve a commit we did not review; ApproveResolvedLedger applies the
+	// policy + trusted-author + already-approved guards and degrades silently on reject.
+	if reviewedHead := parseReviewedCommit(body); LedgerFullyResolved(next) && reviewedHead != "" && reviewedHead == info.HeadSHA {
+		result.Approved, result.ApproveReason = ApproveResolvedLedger(ctx, client, info, policy)
+	}
 	return result, nil
 }
 

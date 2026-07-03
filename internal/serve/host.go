@@ -673,14 +673,20 @@ func (h *HostRunner) pruneThreadResolutionSync(slug string, openNumbers []int64)
 }
 
 func (h *HostRunner) enqueueThreadResolutionSync(ctx stdctx.Context, client mgithub.Client, repo HostRepoConfig, pr *github.PullRequest, now time.Time) {
+	head := pr.GetHead().GetRepo()
+	isFork := head == nil ||
+		!strings.EqualFold(head.GetOwner().GetLogin(), repo.Owner) ||
+		!strings.EqualFold(head.GetName(), repo.Repo)
 	snap := threadResolutionSyncPR{
-		Number:       pr.GetNumber(),
-		HeadSHA:      pr.GetHead().GetSHA(),
-		BaseSHA:      pr.GetBase().GetSHA(),
-		HTMLBase:     pr.GetBase().GetRepo().GetHTMLURL(),
-		ChangedFiles: pr.GetChangedFiles(),
-		Additions:    int64(pr.GetAdditions()),
-		Deletions:    int64(pr.GetDeletions()),
+		Number:            pr.GetNumber(),
+		HeadSHA:           pr.GetHead().GetSHA(),
+		BaseSHA:           pr.GetBase().GetSHA(),
+		HTMLBase:          pr.GetBase().GetRepo().GetHTMLURL(),
+		ChangedFiles:      pr.GetChangedFiles(),
+		Additions:         int64(pr.GetAdditions()),
+		Deletions:         int64(pr.GetDeletions()),
+		AuthorAssociation: pr.GetAuthorAssociation(),
+		IsFork:            isFork,
 	}
 	if snap.HTMLBase == "" && repo.Slug != "" {
 		snap.HTMLBase = "https://github.com/" + repo.Slug
@@ -704,13 +710,15 @@ func (h *HostRunner) enqueueThreadResolutionSync(ctx stdctx.Context, client mgit
 }
 
 type threadResolutionSyncPR struct {
-	Number       int
-	HeadSHA      string
-	BaseSHA      string
-	HTMLBase     string
-	ChangedFiles int
-	Additions    int64
-	Deletions    int64
+	Number            int
+	HeadSHA           string
+	BaseSHA           string
+	HTMLBase          string
+	ChangedFiles      int
+	Additions         int64
+	Deletions         int64
+	AuthorAssociation string
+	IsFork            bool
 }
 
 func (h *HostRunner) finishThreadResolutionSync() {
@@ -728,18 +736,25 @@ func (h *HostRunner) finishThreadResolutionSync() {
 
 func (h *HostRunner) syncThreadResolution(ctx stdctx.Context, client mgithub.Client, repo HostRepoConfig, pr threadResolutionSyncPR, now time.Time) {
 	info := &mgithub.PRInfo{
-		Owner:        repo.Owner,
-		Repo:         repo.Repo,
-		Number:       pr.Number,
-		HeadSHA:      pr.HeadSHA,
-		BaseSHA:      pr.BaseSHA,
-		HTMLBase:     pr.HTMLBase,
-		ChangedFiles: pr.ChangedFiles,
-		Additions:    pr.Additions,
-		Deletions:    pr.Deletions,
+		Owner:             repo.Owner,
+		Repo:              repo.Repo,
+		Number:            pr.Number,
+		HeadSHA:           pr.HeadSHA,
+		BaseSHA:           pr.BaseSHA,
+		HTMLBase:          pr.HTMLBase,
+		ChangedFiles:      pr.ChangedFiles,
+		Additions:         pr.Additions,
+		Deletions:         pr.Deletions,
+		AuthorAssociation: pr.AuthorAssociation,
+		IsFork:            pr.IsFork,
 	}
-	res, err := mgithub.SyncSummaryConversationResolved(ctx, client, info, now)
+	res, err := mgithub.SyncSummaryConversationResolved(ctx, client, info, repo.Review.Approval, now)
 	attrs := []any{"repo", repo.Slug, "pr", pr.Number, "head_sha", info.HeadSHA, "reason", res.Reason, "resolved", res.Resolved, "reopened", res.Reopened, "entries", res.Entries}
+	if res.Approved {
+		attrs = append(attrs, "approved", true)
+	} else if res.ApproveReason != "" {
+		attrs = append(attrs, "approve_skipped", res.ApproveReason)
+	}
 	if err != nil {
 		attrs = append(attrs, "error", config.RedactString(err.Error()))
 		h.log.Warn("host: conversation resolution sync failed", attrs...)
