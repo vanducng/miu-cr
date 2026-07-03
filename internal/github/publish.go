@@ -546,6 +546,7 @@ func PostReview(ctx stdctx.Context, client Client, info *PRInfo, findings []engi
 	if event == "APPROVE" && priorApproval && len(findings) == 0 {
 		summary = ""
 	}
+	commentSummary := summary
 	if note := approvalBody(opts.Approval, findings, opts.SummaryURL, priorApproval, info.HeadSHA); event == "APPROVE" && strings.TrimSpace(note) != "" {
 		if strings.TrimSpace(summary) == "" {
 			summary = note
@@ -603,6 +604,7 @@ func PostReview(ctx stdctx.Context, client Client, info *PRInfo, findings []engi
 			return PostReviewResult{Omitted: omitted, Event: "COMMENT"}, mapWriteError("github.create_review_failed", "creating review", err)
 		}
 		slog.Warn("approval rejected; degrading to comment", "reason", result.Reason)
+		summary = commentSummary
 		// Re-apply the empty-review guard once the event is COMMENT: don't submit a
 		// review with no inline comments and no body: GitHub 422s an empty COMMENT.
 		if len(comments) == 0 && strings.TrimSpace(summary) == "" {
@@ -610,6 +612,11 @@ func PostReview(ctx stdctx.Context, client Client, info *PRInfo, findings []engi
 			return result, nil
 		}
 		req.Event = gh.Ptr("COMMENT")
+		if strings.TrimSpace(summary) == "" {
+			req.Body = nil
+		} else {
+			req.Body = gh.Ptr(summary)
+		}
 		if _, rerr := client.CreateReview(ctx, info.Owner, info.Repo, info.Number, req); rerr != nil {
 			return PostReviewResult{Omitted: omitted, Event: "COMMENT"}, mapWriteError("github.create_review_failed", "creating review", rerr)
 		}

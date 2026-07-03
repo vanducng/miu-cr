@@ -310,6 +310,8 @@ func TestPostReviewSelfApprove422DegradesToComment(t *testing.T) {
 	}
 	if last := c.gotReviews[len(c.gotReviews)-1]; last.GetEvent() != "COMMENT" {
 		t.Fatalf("retry Event must be COMMENT, got %q", last.GetEvent())
+	} else if body := last.GetBody(); strings.Contains(body, "LGTM") || strings.Contains(body, "code review summary") {
+		t.Fatalf("COMMENT retry must not carry approval body, got:\n%s", body)
 	}
 }
 
@@ -527,7 +529,6 @@ func TestPostReviewApprove422EmptyDegradeSkipsPost(t *testing.T) {
 	// to post, so skip the empty COMMENT review.
 	c := &recordClient{createReviewErrFirst: selfApprove422()}
 	opts := approveOpts()
-	opts.Approval.Note = "none"
 	res, err := PostReview(stdctx.Background(), c, approveInfo(), nil, nil, staticSummary(""), nil, opts)
 	if err != nil {
 		t.Fatalf("empty degrade must not error: %v", err)
