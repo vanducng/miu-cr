@@ -55,6 +55,13 @@ comment with a new marker); subsequent re-runs dedupe normally. On a
 first M5 review **manually** (or off-hours) to absorb the one-time re-post before
 the next scheduled run.
 
+## [0.84.0](https://github.com/vanducng/miu-cr/compare/v0.83.0...v0.84.0) (2026-07-03)
+
+
+### Features
+
+* **host:** approve on resolution when the ledger clears ([#262](https://github.com/vanducng/miu-cr/issues/262)) ([fd5855c](https://github.com/vanducng/miu-cr/commit/fd5855cef269de9976d9ff7cf235e20c0aa2c31d))
+
 ## [0.83.0](https://github.com/vanducng/miu-cr/compare/v0.82.6...v0.83.0) (2026-07-03)
 
 
