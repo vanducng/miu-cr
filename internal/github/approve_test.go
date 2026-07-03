@@ -268,8 +268,8 @@ func TestPostReviewApproveReevaluatesAtNewSHA(t *testing.T) {
 	if res.Event != "APPROVE" {
 		t.Fatalf("a stale-SHA approval must not block a new APPROVE, got %q", res.Event)
 	}
-	if body := c.gotReview.GetBody(); !strings.Contains(body, "LGTM after re-reviewing latest commit `headsha`") || !strings.Contains(body, "code review summary") {
-		t.Fatalf("approval after old SHA should use dynamic latest-commit body, got:\n%s", body)
+	if body := strings.TrimSpace(c.gotReview.GetBody()); body != "" {
+		t.Fatalf("clean approval after old SHA should stay bodyless, got:\n%s", body)
 	}
 }
 

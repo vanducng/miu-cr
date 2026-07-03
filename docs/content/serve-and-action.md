@@ -387,8 +387,9 @@ contexts are returned to the model immediately.
 `mode: clean` approves only zero-finding reviews. `mode: threshold` approves
 when the worst active finding is at or below `max_priority`. For example,
 `max_priority: P3` allows P3/P4 findings and blocks approval for P0-P2. By
-default, an approval body is short LGTM-style copy with a link to the code review
-summary. Set `note: none` to suppress it, or `note: on_findings` to keep clean
+default, a first approval body is short LGTM-style copy with a link to the code
+review summary. Clean re-approvals after a later push can stay bodyless. Set
+`note: none` to suppress approval text, or `note: on_findings` to keep clean
 approvals bodyless and add text only when findings remain. The old
 clean-approval key is removed; use `review.approval` in host and repo configs.
 

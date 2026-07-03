@@ -543,6 +543,9 @@ func PostReview(ctx stdctx.Context, client Client, info *PRInfo, findings []engi
 
 	event, reason, priorApproval := resolveApproveEvent(ctx, client, info, opts, findings)
 	result := PostReviewResult{Posted: len(comments), Omitted: omitted, OmittedFindings: omittedFindings, Ranges: ranges, Suggestions: suggestions, Event: event, Reason: reason}
+	if event == "APPROVE" && priorApproval && len(findings) == 0 {
+		summary = ""
+	}
 	if note := approvalBody(opts.Approval, findings, opts.SummaryURL, priorApproval, info.HeadSHA); event == "APPROVE" && strings.TrimSpace(note) != "" {
 		if strings.TrimSpace(summary) == "" {
 			summary = note

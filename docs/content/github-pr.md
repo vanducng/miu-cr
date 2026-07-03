@@ -222,8 +222,8 @@ re-run:
   single summary rather than stacking a review per commit.
 - Inline findings post as a PR **review**. Normal comment reviews use an empty body because
   the summary moved out, so a no-inline-comment run never trips an empty-review 422 while
-  the summary comment still upserts. Approval reviews carry a short LGTM-style body with a
-  link back to the summary unless `--approval-note none` is set.
+  the summary comment still upserts. First approval reviews carry a short LGTM-style body
+  with a link back to the summary unless `--approval-note none` is set.
 - A **same-commit `--post` re-run short-circuits** after the summary has a completed-publish
   marker for that head. It skips the clone and model call; pass `--force` to review anyway.
 - Each **inline** comment carries a hidden fingerprint (`<!-- miucr:fp=... -->`), so a
@@ -413,17 +413,19 @@ Submits `Event=APPROVE` instead of `COMMENT` when the configured policy and ever
 safety precondition hold. `--approval clean` requires **zero findings**.
 `--approval threshold --approval-max-priority P3` approves when the worst active
 finding is P3 or P4; P0, P1, and P2 block approval. If findings remain, the
-approval review notes the configured threshold. Every approval body is short,
+approval review notes the configured threshold. The first approval body is short,
 starts with LGTM-style copy, and links to the code review summary by default;
 set `--approval-note none` to suppress it, or `on_findings` to keep clean
-approvals bodyless. Threshold `max_priority` accepts
+approvals bodyless. Clean re-approvals after a later push may use an empty body
+to avoid repeated approval comments. Threshold `max_priority` accepts
 `P0|P1|P2|P3|P4` and defaults to `P4`.
 
 Approvals are head-SHA scoped. A re-run does not post a second approval for the
 same commit, but if the PR author pushes more commits after an approval, miu-cr
-can approve the newly reviewed head again. That re-approval body says it
+can approve the newly reviewed head again. Clean re-approvals stay bodyless; if
+findings remain under a configured threshold, the re-approval body says it
 re-reviewed the latest commit so readers know the approval covers the current
-push, not only an earlier one.
+push and threshold.
 
 All approval modes still require: no finding reaches the gate, the PR is **not a
 fork**, the author is **trusted** (`AuthorAssociation` not `NONE` /

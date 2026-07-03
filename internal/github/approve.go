@@ -137,6 +137,9 @@ func approvalBody(policy config.ApprovalPolicy, findings []engine.Finding, summa
 	if policy.Note == "none" || (policy.Note == "on_findings" && len(findings) == 0) {
 		return ""
 	}
+	if priorApproval && len(findings) == 0 {
+		return ""
+	}
 	summary := "See the code review summary."
 	if u := strings.TrimSpace(summaryURL); u != "" {
 		summary = fmt.Sprintf("See the [code review summary](%s).", u)
@@ -146,9 +149,6 @@ func approvalBody(policy config.ApprovalPolicy, findings []engine.Finding, summa
 			return fmt.Sprintf("LGTM after re-reviewing %s; only findings at or below `%s` remain. %s", approvalCommitLabel(headSHA), policy.MaxPriority, summary)
 		}
 		return fmt.Sprintf("LGTM with only findings at or below `%s` remaining. %s", policy.MaxPriority, summary)
-	}
-	if priorApproval {
-		return fmt.Sprintf("LGTM after re-reviewing %s. %s", approvalCommitLabel(headSHA), summary)
 	}
 	return "LGTM. " + summary
 }
