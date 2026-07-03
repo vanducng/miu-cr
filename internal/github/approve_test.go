@@ -105,7 +105,9 @@ func approveOpts() PostReviewOptions {
 
 func TestPostReviewApprovesCleanPR(t *testing.T) {
 	c := &recordClient{}
-	res, err := PostReview(stdctx.Background(), c, approveInfo(), nil, nil, staticSummary("looks good"), nil, approveOpts())
+	opts := approveOpts()
+	opts.SummaryURL = "https://github.com/o/r/pull/1#issuecomment-7"
+	res, err := PostReview(stdctx.Background(), c, approveInfo(), nil, nil, staticSummary("looks good"), nil, opts)
 	if err != nil {
 		t.Fatalf("PostReview: %v", err)
 	}
@@ -114,6 +116,9 @@ func TestPostReviewApprovesCleanPR(t *testing.T) {
 	}
 	if c.gotReview == nil || c.gotReview.GetEvent() != "APPROVE" {
 		t.Fatalf("CreateReview Event must be APPROVE, got %+v", c.gotReview)
+	}
+	if body := c.gotReview.GetBody(); !strings.Contains(body, "LGTM.") || !strings.Contains(body, "[code review summary](https://github.com/o/r/pull/1#issuecomment-7)") {
+		t.Fatalf("approval body must link to the summary, got:\n%s", body)
 	}
 }
 
@@ -254,12 +259,40 @@ func TestPostReviewApproveReevaluatesAtNewSHA(t *testing.T) {
 			{State: gh.Ptr("APPROVED"), CommitID: gh.Ptr("oldsha")},
 		},
 	}
-	res, err := PostReview(stdctx.Background(), c, approveInfo(), nil, nil, staticSummary("review"), nil, approveOpts())
+	opts := approveOpts()
+	opts.SummaryURL = "https://github.com/o/r/pull/1#issuecomment-7"
+	res, err := PostReview(stdctx.Background(), c, approveInfo(), nil, nil, staticSummary("review"), nil, opts)
 	if err != nil {
 		t.Fatalf("PostReview: %v", err)
 	}
 	if res.Event != "APPROVE" {
 		t.Fatalf("a stale-SHA approval must not block a new APPROVE, got %q", res.Event)
+	}
+	if body := c.gotReview.GetBody(); !strings.Contains(body, "LGTM after re-reviewing latest commit `headsha`") || !strings.Contains(body, "code review summary") {
+		t.Fatalf("approval after old SHA should use dynamic latest-commit body, got:\n%s", body)
+	}
+}
+
+func TestPostReviewThresholdApproveReevaluatesAtNewSHA(t *testing.T) {
+	c := &recordClient{
+		reviews: []*gh.PullRequestReview{
+			{State: gh.Ptr("APPROVED"), CommitID: gh.Ptr("oldsha")},
+		},
+	}
+	finding := engine.Finding{File: "p.go", Line: 2, Severity: "low", Category: "style", Rationale: "minor issue"}
+	opts := approveOpts()
+	opts.Approval = config.ApprovalPolicy{Mode: "threshold", MaxPriority: "P3"}
+	opts.SummaryURL = "https://github.com/o/r/pull/1#issuecomment-7"
+	res, err := PostReview(stdctx.Background(), c, approveInfo(), []engine.Finding{finding}, sampleDiffs(), staticSummary("review"), nil, opts)
+	if err != nil {
+		t.Fatalf("PostReview: %v", err)
+	}
+	if res.Event != "APPROVE" {
+		t.Fatalf("a stale-SHA approval must not block a threshold APPROVE, got %q", res.Event)
+	}
+	body := c.gotReview.GetBody()
+	if !strings.Contains(body, "LGTM after re-reviewing latest commit `headsha`; only findings at or below `P3` remain") {
+		t.Fatalf("threshold re-approval should explain latest commit and threshold, got:\n%s", body)
 	}
 }
 
@@ -490,10 +523,12 @@ func TestPostReviewApprove422CommentRetryFailureZeroesPostedAndErrors(t *testing
 }
 
 func TestPostReviewApprove422EmptyDegradeSkipsPost(t *testing.T) {
-	// APPROVE 422s, but with 0 inline comments AND no summary there is nothing to
-	// post, skip the empty COMMENT review (GitHub would 422 it anyway).
+	// APPROVE 422s, but with 0 inline comments and no review body there is nothing
+	// to post, so skip the empty COMMENT review.
 	c := &recordClient{createReviewErrFirst: selfApprove422()}
-	res, err := PostReview(stdctx.Background(), c, approveInfo(), nil, nil, staticSummary(""), nil, approveOpts())
+	opts := approveOpts()
+	opts.Approval.Note = "none"
+	res, err := PostReview(stdctx.Background(), c, approveInfo(), nil, nil, staticSummary(""), nil, opts)
 	if err != nil {
 		t.Fatalf("empty degrade must not error: %v", err)
 	}

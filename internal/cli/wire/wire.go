@@ -401,6 +401,10 @@ func (prReviewer) ReviewPR(ctx stdctx.Context, req cli.PRReviewRequest) (cli.Rev
 		}
 	}
 
+	if req.Post && req.Mode == "review" && !info.IsFork {
+		ackPRReviewStarted(ctx, client, info)
+	}
+
 	creds, err := agent.Resolve(agent.ResolveInput{
 		Ctx:           ctx,
 		Provider:      req.Provider,
@@ -814,14 +818,38 @@ func priorReviewShape(info *mgithub.PRInfo, rec store.ReviewRecord, haveRec bool
 	return findings, len(info.Files), !engine.GateFailed(findings, gate)
 }
 
-// publishReview posts the review THIS run: inline review comments first (skipping
-// any already-posted via the per-comment fingerprint), then UPSERTS the single
-// summary issue comment (one comment edited in place across re-runs, not stacked
-// per commit). The summary leaves the review body entirely (nil summaryFn → no
-// body), so a no-inline-comment review never 422s on an empty body while the
-// summary still upserts. It computes gateClean via engine.GateFailed +
-// reviewedFiles from stats, threads both opt-in write-actions (default OFF) into
-// PostReviewOptions, and fills the outcome fields.
+func ackPRReviewStarted(ctx stdctx.Context, client mgithub.Client, info *mgithub.PRInfo) {
+	if err := mgithub.ReactEyes(ctx, client, info); err != nil {
+		slog.Warn("review: PR acknowledgement reaction failed",
+			"repo", info.Owner+"/"+info.Repo, "pr", info.Number, "head_sha", shortSHA(info.HeadSHA),
+			"reaction", "eyes", "error", config.RedactString(err.Error()))
+	} else {
+		slog.Info("review: PR acknowledgement reaction posted",
+			"repo", info.Owner+"/"+info.Repo, "pr", info.Number, "head_sha", shortSHA(info.HeadSHA),
+			"reaction", "eyes")
+	}
+	action, url, err := mgithub.UpsertSummaryComment(ctx, client, info, mgithub.RenderRunningSummary(info, cli.Version()))
+	if err != nil {
+		slog.Warn("review: running summary upsert failed",
+			"repo", info.Owner+"/"+info.Repo, "pr", info.Number, "head_sha", shortSHA(info.HeadSHA),
+			"error", config.RedactString(err.Error()))
+		return
+	}
+	slog.Info("review: running summary upserted",
+		"repo", info.Owner+"/"+info.Repo, "pr", info.Number, "head_sha", shortSHA(info.HeadSHA),
+		"summary_action", string(action), "summary_url", url)
+}
+
+func shortSHA(s string) string {
+	if len(s) <= 7 {
+		return s
+	}
+	return s[:7]
+}
+
+// publishReview upserts the summary comment, posts inline review comments, then
+// finalizes the same summary. Normal COMMENT reviews keep the body empty;
+// approvals may carry a short note.
 func publishReview(ctx stdctx.Context, client mgithub.Client, runner *gitcmd.Runner, dir string, info *mgithub.PRInfo, res engine.ReviewResult, prResult *cli.PRResult, req cli.PRReviewRequest, prStore store.PRThreadStore, ew embedWriter, categoryURLs map[string]string, ruleCites map[string]mgithub.RuleCitation, publishKey string) error {
 	diffs, err := mgithub.DiffsForPR(ctx, runner, dir, info.BaseSHA, info.HeadSHA)
 	if err != nil {
@@ -922,31 +950,22 @@ func publishReview(ctx stdctx.Context, client mgithub.Client, runner *gitcmd.Run
 		})
 	}
 
-	// minimal + clean + first-attempt + would-approve → just approve, suppress the
-	// redundant "all clear" summary comment (the green approval IS the signal). Gated
-	// on ReviewCount<=1 (no prior summary comment) so a clean re-review that ALREADY
-	// has a findings ledger still updates it. The approval (commit_id) + persisted poll
-	// cursor keep dedup; the summary comment is not a dedup gate.
-	silentApprove := req.Format == "minimal" &&
-		len(publishFindings) == 0 &&
-		info.ReviewCount <= 1 &&
-		mgithub.ApprovalWouldApprove(*info, opts.Approval, opts.GateClean, publishFindings, opts.ReviewedFiles)
-
 	// Post the summary FIRST on a non-fork PR (with omitted=0) so it anchors ABOVE the
 	// inline review in the timeline (overview, then details); finalized after PostReview.
 	// A fork PR defers to after PostReview (an issue comment would 403 like the review).
-	summaryFirst := !info.IsFork && !silentApprove
+	summaryFirst := !info.IsFork
 	if summaryFirst {
-		if action, uerr := mgithub.UpsertSummaryComment(ctx, client, info, renderSummary(0, nil, false)); uerr != nil {
+		if action, url, uerr := mgithub.UpsertSummaryComment(ctx, client, info, renderSummary(0, nil, false)); uerr != nil {
 			slog.Warn("summary upsert failed, continuing to inline review: " + config.RedactString(uerr.Error()))
 			prResult.SummaryAction = "failed"
 		} else {
 			prResult.SummaryAction = string(action)
+			opts.SummaryURL = url
 		}
 	}
 
-	// nil summaryFn: inline comments only, NO review body (the summary is the upserted
-	// issue comment), so a re-run edits one comment instead of stacking a review.
+	// nil summaryFn: summary lives in the issue comment. COMMENT reviews keep the
+	// review body empty; APPROVE may add a short body.
 	pr, err := mgithub.PostReview(ctx, client, info, publishFindings, diffs, nil, skip, opts)
 	if err != nil {
 		return err
@@ -961,16 +980,7 @@ func publishReview(ctx stdctx.Context, client mgithub.Client, runner *gitcmd.Run
 		return nil
 	}
 
-	// Silent approve: skip the redundant summary comment ONLY if the approval landed.
-	// If it degraded (head moved / API error), fall back to posting the summary so the
-	// PR still carries a record.
-	if silentApprove && pr.Event == "APPROVE" {
-		prResult.SummaryAction = "skipped_silent_approve"
-		slog.Info("review: summary comment suppressed (silent approve)",
-			"repo", info.Owner+"/"+info.Repo, "pr", info.Number, "head_sha", info.HeadSHA,
-			"format", req.Format, "reason_code", "minimal_clean_silent_approve",
-			"reason", "clean first-attempt minimal review approved; redundant summary comment skipped")
-	} else if action, uerr := mgithub.UpsertSummaryComment(ctx, client, info, renderSummary(pr.Omitted, pr.OmittedFindings, true)); uerr != nil {
+	if action, _, uerr := mgithub.UpsertSummaryComment(ctx, client, info, renderSummary(pr.Omitted, pr.OmittedFindings, true)); uerr != nil {
 		// Only a successful PostReview earns the reusable publish marker.
 		slog.Warn("summary upsert failed (inline review still posted): " + config.RedactString(uerr.Error()))
 		prResult.SummaryAction = "failed"

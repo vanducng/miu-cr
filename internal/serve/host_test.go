@@ -1121,6 +1121,10 @@ func (c *threadSyncContextClient) EditIssueComment(stdctx.Context, string, strin
 	return nil, nil
 }
 
+func (c *threadSyncContextClient) CreateIssueReaction(stdctx.Context, string, string, int, string) (*github.Reaction, error) {
+	return &github.Reaction{}, nil
+}
+
 func (c *threadSyncContextClient) CreateCheckRun(stdctx.Context, string, string, github.CreateCheckRunOptions) (*github.CheckRun, error) {
 	return nil, nil
 }

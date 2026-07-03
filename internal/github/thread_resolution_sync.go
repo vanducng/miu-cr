@@ -83,7 +83,7 @@ func SyncSummaryConversationResolved(ctx stdctx.Context, client Client, info *PR
 	// so we never approve a commit we did not review; ApproveResolvedLedger applies the
 	// policy + trusted-author + already-approved guards and degrades silently on reject.
 	if reviewedHead := parseReviewedCommit(body); LedgerFullyResolved(next) && reviewedHead != "" && reviewedHead == info.HeadSHA {
-		result.Approved, result.ApproveReason = ApproveResolvedLedger(ctx, client, info, policy)
+		result.Approved, result.ApproveReason = ApproveResolvedLedger(ctx, client, info, policy, summaryCommentURL(info, targetID, ""))
 	}
 	return result, nil
 }

@@ -126,6 +126,25 @@ func RenderSummaryWithOverflow(info *PRInfo, findings []engine.Finding, stats ma
 	return RenderSummaryFull(info, findings, stats, omittedInline, omitted, categoryURLs, SummaryOptions{})
 }
 
+func RenderRunningSummary(info *PRInfo, version string) string {
+	var b strings.Builder
+	count := 1
+	if info != nil {
+		count = max(info.ReviewCount, 1)
+	}
+	b.WriteString(ReviewMarker + "\n")
+	b.WriteString(runsCountToken(count) + "\n")
+	b.WriteString("## Code Review Summary\n\n")
+	b.WriteString("**Result:** Review running. I will update this comment with the result shortly.\n")
+	if v := strings.TrimSpace(version); v != "" {
+		fmt.Fprintf(&b, "\n<sub>Posted by [miu-cr](https://github.com/vanducng/miu-cr) [%s](https://github.com/vanducng/miu-cr/releases/tag/%s)</sub>", mdInline(v), url.PathEscape(v))
+	}
+	if info != nil && info.PriorLedger != nil {
+		b.WriteString("\n" + renderLedgerMarker(info.PriorLedger))
+	}
+	return b.String()
+}
+
 // SummaryOptions bundles the additive reviewer-trust inputs to RenderSummaryFull:
 // the same review pass's walkthrough/per-file digest/diagram plus local diff +
 // review_id data. Grouping them in a struct keeps the call site readable and makes

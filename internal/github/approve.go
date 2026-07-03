@@ -99,11 +99,7 @@ func normalizeApprovalPolicy(policy config.ApprovalPolicy) config.ApprovalPolicy
 		return config.ApprovalPolicy{}
 	}
 	if policy.Note == "" {
-		if policy.Mode == "threshold" {
-			policy.Note = "on_findings"
-		} else {
-			policy.Note = "none"
-		}
+		policy.Note = "always"
 	}
 	return policy
 }
@@ -136,15 +132,36 @@ func approvalPriorityRank(priority string) int {
 	}
 }
 
-func approvalBody(policy config.ApprovalPolicy, findings []engine.Finding) string {
+func approvalBody(policy config.ApprovalPolicy, findings []engine.Finding, summaryURL string, priorApproval bool, headSHA string) string {
 	policy = normalizeApprovalPolicy(policy)
 	if policy.Note == "none" || (policy.Note == "on_findings" && len(findings) == 0) {
 		return ""
 	}
-	if policy.Mode == "threshold" && len(findings) > 0 {
-		return fmt.Sprintf("Approved: only findings at or below `%s` remain under the configured approval policy. Review the summary before merge.", policy.MaxPriority)
+	summary := "See the code review summary."
+	if u := strings.TrimSpace(summaryURL); u != "" {
+		summary = fmt.Sprintf("See the [code review summary](%s).", u)
 	}
-	return "Approved by the configured approval policy."
+	if policy.Mode == "threshold" && len(findings) > 0 {
+		if priorApproval {
+			return fmt.Sprintf("LGTM after re-reviewing %s; only findings at or below `%s` remain. %s", approvalCommitLabel(headSHA), policy.MaxPriority, summary)
+		}
+		return fmt.Sprintf("LGTM with only findings at or below `%s` remaining. %s", policy.MaxPriority, summary)
+	}
+	if priorApproval {
+		return fmt.Sprintf("LGTM after re-reviewing %s. %s", approvalCommitLabel(headSHA), summary)
+	}
+	return "LGTM. " + summary
+}
+
+func approvalCommitLabel(sha string) string {
+	sha = strings.TrimSpace(sha)
+	if sha == "" {
+		return "the latest commit"
+	}
+	if len(sha) > 7 {
+		sha = sha[:7]
+	}
+	return fmt.Sprintf("latest commit `%s`", sha)
 }
 
 // ApprovalWouldApprove exposes the dry approval decision for reuse checks.
@@ -153,24 +170,36 @@ func ApprovalWouldApprove(info PRInfo, policy config.ApprovalPolicy, gateClean b
 	return event == "APPROVE"
 }
 
-// alreadyApproved reports whether an APPROVED review already exists at the current
-// head SHA, so a re-run at the same SHA posts no second APPROVE. First page only
-// (PerPage:100): a PR with >100 reviews may miss an existing APPROVE and post a
-// duplicate, low-harm (a redundant APPROVE on an already-clean PR), so full
-// pagination's rate-limit cost isn't worth it (YAGNI).
-func alreadyApproved(ctx stdctx.Context, client Client, info *PRInfo) (bool, error) {
+type approvalReviewState struct {
+	current bool
+	prior   bool
+}
+
+func approvalReviews(ctx stdctx.Context, client Client, info *PRInfo) (approvalReviewState, error) {
+	var out approvalReviewState
 	reviews, _, err := client.ListReviews(ctx, info.Owner, info.Repo, info.Number, &gh.ListOptions{PerPage: 100})
 	if err != nil {
-		return false, mapWriteError("github.list_reviews_failed", "listing reviews", err)
+		return out, mapWriteError("github.list_reviews_failed", "listing reviews", err)
 	}
 	for _, r := range reviews {
-		// Guard the empty case: an empty HeadSHA must never match a review whose
-		// CommitID is also empty ("" == "" → a false-positive that blocks APPROVE).
-		if r.GetState() == "APPROVED" && info.HeadSHA != "" && r.GetCommitID() == info.HeadSHA {
-			return true, nil
+		if r.GetState() != "APPROVED" {
+			continue
+		}
+		commitID := strings.TrimSpace(r.GetCommitID())
+		if info.HeadSHA != "" && commitID == info.HeadSHA {
+			out.current = true
+		} else if commitID != "" {
+			out.prior = true
 		}
 	}
-	return false, nil
+	return out, nil
+}
+
+// alreadyApproved reports whether an APPROVED review already exists at the current
+// head SHA, so a re-run at the same SHA posts no second APPROVE.
+func alreadyApproved(ctx stdctx.Context, client Client, info *PRInfo) (bool, error) {
+	state, err := approvalReviews(ctx, client, info)
+	return state.current, err
 }
 
 // HasApprovedReview exposes the approval idempotency check for reuse checks.
@@ -184,7 +213,7 @@ func HasApprovedReview(ctx stdctx.Context, client Client, info *PRInfo) (bool, e
 // reviewed head (so we approve what was actually reviewed). Best-effort from the
 // background resolution sync: expected approval rejections (self-approve, 403/401,
 // 422) degrade to "not approved" without erroring; only info is required non-nil.
-func ApproveResolvedLedger(ctx stdctx.Context, client Client, info *PRInfo, policy config.ApprovalPolicy) (bool, string) {
+func ApproveResolvedLedger(ctx stdctx.Context, client Client, info *PRInfo, policy config.ApprovalPolicy, summaryURL string) (bool, string) {
 	if info == nil || info.HeadSHA == "" {
 		return false, approveReasonHeadUnknown
 	}
@@ -193,16 +222,18 @@ func ApproveResolvedLedger(ctx stdctx.Context, client Client, info *PRInfo, poli
 	if !ApprovalWouldApprove(*info, policy, true, nil, 1) {
 		return false, approveReasonThresholdFailed
 	}
-	if approved, err := alreadyApproved(ctx, client, info); err != nil {
+	state, err := approvalReviews(ctx, client, info)
+	if err != nil {
 		return false, "list_reviews_failed"
-	} else if approved {
+	}
+	if state.current {
 		return false, approveReasonApproved
 	}
 	req := &gh.PullRequestReviewRequest{
 		CommitID: gh.Ptr(info.HeadSHA),
 		Event:    gh.Ptr("APPROVE"),
 	}
-	if body := approvalBody(policy, nil); strings.TrimSpace(body) != "" {
+	if body := approvalBody(policy, nil, summaryURL, state.prior, info.HeadSHA); strings.TrimSpace(body) != "" {
 		req.Body = gh.Ptr(body)
 	}
 	if _, err := client.CreateReview(ctx, info.Owner, info.Repo, info.Number, req); err != nil {

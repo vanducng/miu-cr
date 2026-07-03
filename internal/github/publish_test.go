@@ -146,6 +146,10 @@ func (c *recordClient) EditIssueComment(_ stdctx.Context, _, _ string, id int64,
 	return com, nil
 }
 
+func (c *recordClient) CreateIssueReaction(stdctx.Context, string, string, int, string) (*gh.Reaction, error) {
+	return &gh.Reaction{}, nil
+}
+
 func (c *recordClient) CreateCheckRun(_ stdctx.Context, _, _ string, opts gh.CreateCheckRunOptions) (*gh.CheckRun, error) {
 	c.checkRunN++
 	o := opts

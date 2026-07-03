@@ -24,7 +24,7 @@ func shouldPostReviewErrorSummary(post, isFork bool, reviewErr error) bool {
 func upsertReviewErrorSummary(ctx stdctx.Context, client mgithub.Client, info *mgithub.PRInfo, reviewErr error) error {
 	cctx, cancel := stdctx.WithTimeout(stdctx.WithoutCancel(ctx), reviewErrorSummaryTimeout)
 	defer cancel()
-	_, err := mgithub.UpsertSummaryComment(cctx, client, info, mgithub.RenderErrorNotice(info, reviewErrorNotice(reviewErr), cli.Version()))
+	_, _, err := mgithub.UpsertSummaryComment(cctx, client, info, mgithub.RenderErrorNotice(info, reviewErrorNotice(reviewErr), cli.Version()))
 	return err
 }
 

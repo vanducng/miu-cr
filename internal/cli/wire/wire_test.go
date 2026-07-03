@@ -112,6 +112,11 @@ func (f *fakeGitHub) EditIssueComment(_ stdctx.Context, _, _ string, id int64, c
 	return com, nil
 }
 
+func (f *fakeGitHub) CreateIssueReaction(stdctx.Context, string, string, int, string) (*gh.Reaction, error) {
+	f.order = append(f.order, "react_issue")
+	return &gh.Reaction{}, nil
+}
+
 func (f *fakeGitHub) CreateCheckRun(_ stdctx.Context, _, _ string, opts gh.CreateCheckRunOptions) (*gh.CheckRun, error) {
 	f.order = append(f.order, "create_check")
 	f.checkRunN++
@@ -126,6 +131,45 @@ func (f *fakeGitHub) UpdateCheckRun(stdctx.Context, string, string, int64, gh.Up
 func (f *fakeGitHub) ListCheckRunsForRef(stdctx.Context, string, string, string, *gh.ListCheckRunsOptions) (*gh.ListCheckRunsResults, *gh.Response, error) {
 	f.order = append(f.order, "list_check")
 	return &gh.ListCheckRunsResults{}, &gh.Response{}, nil
+}
+
+func TestAckPRReviewStartedReactsAndPostsRunningSummary(t *testing.T) {
+	fake := &fakeGitHub{}
+	info := &mgithub.PRInfo{
+		Owner:       "o",
+		Repo:        "r",
+		Number:      7,
+		HeadSHA:     "abcdef123456",
+		HTMLBase:    "https://github.com/o/r",
+		ReviewCount: 2,
+		PriorLedger: []mgithub.LedgerEntry{{
+			FP:       "00112233aabbccdd",
+			Path:     "app.go",
+			Line:     3,
+			Title:    "old issue",
+			Status:   "open",
+			Sev:      "low",
+			FirstSev: "low",
+			OpenSHA:  "aaaaaaa",
+			FirstAt:  "2026-01-01T00:00:00Z",
+		}},
+	}
+
+	ackPRReviewStarted(stdctx.Background(), fake, info)
+
+	if got := strings.Join(fake.order, ","); got != "react_issue,list_issue,create_issue" {
+		t.Fatalf("ack order = %s", got)
+	}
+	if len(fake.issueComments) != 1 {
+		t.Fatalf("want one running summary, got %d", len(fake.issueComments))
+	}
+	body := fake.issueComments[0].GetBody()
+	if !strings.Contains(body, "Review running") {
+		t.Fatalf("running summary missing status:\n%s", body)
+	}
+	if led := mgithub.ParseLedger(body); len(led) != 1 || led[0].FP != "00112233aabbccdd" {
+		t.Fatalf("running summary must preserve prior ledger, got %+v", led)
+	}
 }
 
 // setupRepo builds a real two-commit repo (base→head) the publish flow's
@@ -273,10 +317,7 @@ func TestPublishReviewWireFlow(t *testing.T) {
 	}
 }
 
-// TestPublishReviewMinimalCleanSilentApprove: a clean first-attempt review under
-// format=minimal with an approving policy posts the green APPROVE and NO summary
-// issue comment. Contrast: format=full still posts the "all clear" summary.
-func TestPublishReviewMinimalCleanSilentApprove(t *testing.T) {
+func TestPublishReviewMinimalCleanApproveLinksSummary(t *testing.T) {
 	runner := gitcmd.New()
 	dir, base, head := setupRepo(t, runner)
 
@@ -290,7 +331,7 @@ func TestPublishReviewMinimalCleanSilentApprove(t *testing.T) {
 	// Clean (no findings), first attempt (ReviewCount 1), trusted author.
 	cleanRes := engine.ReviewResult{Findings: nil, Stats: map[string]any{"truncation_level": "full", "files_reviewed": float64(1)}}
 	mkInfo := func() *mgithub.PRInfo {
-		return &mgithub.PRInfo{Owner: "o", Repo: "r", Number: 7, HeadSHA: head, BaseSHA: base, BaseBranch: "main", ReviewCount: 1, AuthorAssociation: "OWNER"}
+		return &mgithub.PRInfo{Owner: "o", Repo: "r", Number: 7, HeadSHA: head, BaseSHA: base, BaseBranch: "main", ReviewCount: 1, AuthorAssociation: "OWNER", HTMLBase: "https://github.com/o/r"}
 	}
 	approve := config.ApprovalPolicy{Mode: "clean"}
 
@@ -299,14 +340,17 @@ func TestPublishReviewMinimalCleanSilentApprove(t *testing.T) {
 	if err := publishReview(stdctx.Background(), client, runner, dir, mkInfo(), cleanRes, pr, reqMin, nil, embedWriter{}, nil, nil, ""); err != nil {
 		t.Fatalf("minimal clean publishReview: %v", err)
 	}
-	if fake.createIssueN != 0 || fake.editN != 0 || len(fake.issueComments) != 0 {
-		t.Fatalf("clean minimal first-attempt must post NO summary comment: create=%d edit=%d comments=%d", fake.createIssueN, fake.editN, len(fake.issueComments))
+	if fake.createIssueN != 1 || fake.editN != 1 || len(fake.issueComments) != 1 {
+		t.Fatalf("clean minimal first-attempt must post and finalize one summary: create=%d edit=%d comments=%d", fake.createIssueN, fake.editN, len(fake.issueComments))
 	}
-	if pr.SummaryAction != "skipped_silent_approve" {
-		t.Fatalf("want SummaryAction skipped_silent_approve, got %q", pr.SummaryAction)
+	if pr.SummaryAction != "edited" {
+		t.Fatalf("want SummaryAction edited, got %q", pr.SummaryAction)
 	}
 	if fake.lastReviewed.GetEvent() != "APPROVE" {
 		t.Fatalf("clean minimal must still post the green APPROVE, got event %q", fake.lastReviewed.GetEvent())
+	}
+	if body := fake.lastReviewed.GetBody(); !strings.Contains(body, "LGTM.") || !strings.Contains(body, "code review summary") {
+		t.Fatalf("approval body must be short and point to the summary, got:\n%s", body)
 	}
 
 	// Contrast: same clean review under format=full still posts the summary comment.
@@ -662,9 +706,8 @@ func TestPublishReviewApprovalClean(t *testing.T) {
 	if fake.lastReviewed == nil || fake.lastReviewed.GetEvent() != "APPROVE" {
 		t.Fatalf("CreateReview Event must be APPROVE, got %v", fake.lastReviewed)
 	}
-	// The APPROVE review carries no body; the summary still upserts as an issue comment.
-	if strings.TrimSpace(fake.lastReviewed.GetBody()) != "" {
-		t.Fatalf("APPROVE review body must be empty (summary lives in the issue comment), got:\n%s", fake.lastReviewed.GetBody())
+	if body := fake.lastReviewed.GetBody(); !strings.Contains(body, "LGTM.") || !strings.Contains(body, "code review summary") {
+		t.Fatalf("APPROVE review body must be short and point to the summary, got:\n%s", body)
 	}
 	if pr.SummaryAction != "edited" || fake.createIssueN != 1 || fake.editN != 1 {
 		t.Fatalf("clean approve must still upsert the summary: action=%q create=%d edit=%d", pr.SummaryAction, fake.createIssueN, fake.editN)

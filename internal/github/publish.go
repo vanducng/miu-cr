@@ -416,6 +416,9 @@ type PostReviewOptions struct {
 	// Format selects the presentation preset (see modes.go); empty = "full".
 	// "minimal" drops the per-finding priority badge from the inline comment.
 	Format string
+	// SummaryURL points at the upserted summary issue comment. Approval bodies use
+	// it for a short handoff link instead of duplicating the summary content.
+	SummaryURL string
 	// ActionsOut is where the fork-PR 403 fallback writes ::error:: workflow commands.
 	// GitHub Actions parses workflow commands ONLY from the step's stdout, so this must
 	// resolve to the same stream as the miucr.cli/v1 envelope (the command's stdout
@@ -466,10 +469,9 @@ type PostedFinding struct {
 // A failed APPROVE degrades to COMMENT on expected approval-only rejection:
 // self_approve_forbidden, approve_rejected, or approve_forbidden.
 // Other API failures surface as errors and never report a phantom approval.
-// summaryFn is an optional review-body hook given the inline-omitted set (known only
-// after the cap is applied). In the current model the summary is a separate upserted
-// issue comment (UpsertSummaryComment), so the production caller passes nil and the
-// inline review has an empty body; a non-nil summaryFn is exercised by tests only.
+// summaryFn is an optional review-body hook given the inline-omitted set. Production
+// passes nil because the summary is the upserted issue comment; approval notes are
+// added separately.
 func PostReview(ctx stdctx.Context, client Client, info *PRInfo, findings []engine.Finding, diffs []diff.Diff, summaryFn func(omitted int, omittedFindings []engine.Finding) string, existingFPs map[string]bool, opts PostReviewOptions) (PostReviewResult, error) {
 	newFileContent := make(map[string]string, len(diffs))
 	for i := range diffs {
@@ -539,9 +541,9 @@ func PostReview(ctx stdctx.Context, client Client, info *PRInfo, findings []engi
 		submitted = append(submitted, PostedFinding{Fingerprint: fp, Path: f.File})
 	}
 
-	event, reason := resolveApproveEvent(ctx, client, info, opts, findings)
+	event, reason, priorApproval := resolveApproveEvent(ctx, client, info, opts, findings)
 	result := PostReviewResult{Posted: len(comments), Omitted: omitted, OmittedFindings: omittedFindings, Ranges: ranges, Suggestions: suggestions, Event: event, Reason: reason}
-	if note := approvalBody(opts.Approval, findings); event == "APPROVE" && strings.TrimSpace(note) != "" {
+	if note := approvalBody(opts.Approval, findings, opts.SummaryURL, priorApproval, info.HeadSHA); event == "APPROVE" && strings.TrimSpace(note) != "" {
 		if strings.TrimSpace(summary) == "" {
 			summary = note
 		} else {
@@ -619,19 +621,19 @@ func PostReview(ctx stdctx.Context, client Client, info *PRInfo, findings []engi
 // resolveEvent. It performs no writes; it returns the Event/reason PostReview
 // submits. Any read error degrades to COMMENT (never an error) so a precondition
 // check can't fail a run; the self-approve 422 is handled reactively in PostReview.
-func resolveApproveEvent(ctx stdctx.Context, client Client, info *PRInfo, opts PostReviewOptions, findings []engine.Finding) (event, reason string) {
+func resolveApproveEvent(ctx stdctx.Context, client Client, info *PRInfo, opts PostReviewOptions, findings []engine.Finding) (event, reason string, priorApproval bool) {
 	if normalizeApprovalPolicy(opts.Approval).Mode == "" {
-		return "COMMENT", approveReasonNotRequested
+		return "COMMENT", approveReasonNotRequested, false
 	}
 
 	// Idempotency guard. If the dedupe read itself fails we can't confirm there
 	// isn't already an APPROVE: degrade rather than risk a duplicate APPROVE.
-	done, err := alreadyApproved(ctx, client, info)
+	approvalState, err := approvalReviews(ctx, client, info)
 	if err != nil {
-		return "COMMENT", approveReasonIdempotencyUnverified
+		return "COMMENT", approveReasonIdempotencyUnverified, false
 	}
-	if done {
-		return "COMMENT", approveReasonAlreadyDone
+	if approvalState.current {
+		return "COMMENT", approveReasonAlreadyDone, false
 	}
 
 	// Re-fetch the head SHA right before deciding: the LLM pass can take long
@@ -641,7 +643,8 @@ func resolveApproveEvent(ctx stdctx.Context, client Client, info *PRInfo, opts P
 		headUnchanged = fresh.GetHead().GetSHA() == info.HeadSHA
 	}
 
-	return resolveEvent(opts, *info, opts.GateClean, findings, opts.ReviewedFiles, headUnchanged)
+	event, reason = resolveEvent(opts, *info, opts.GateClean, findings, opts.ReviewedFiles, headUnchanged)
+	return event, reason, approvalState.prior
 }
 
 // isSelfApprove422 reports whether err is a GitHub 422 specifically from approving
@@ -818,6 +821,17 @@ const (
 	UpsertForkFallback UpsertAction = "fork_fallback"
 )
 
+// ReactEyes acknowledges a PR review request on the PR's issue timeline.
+func ReactEyes(ctx stdctx.Context, client Client, info *PRInfo) error {
+	if info == nil || info.Number <= 0 {
+		return nil
+	}
+	if _, err := client.CreateIssueReaction(ctx, info.Owner, info.Repo, info.Number, "eyes"); err != nil {
+		return mapWriteError("github.react_failed", "reacting to PR", err)
+	}
+	return nil
+}
+
 // UpsertSummaryComment posts the rendered summary as ONE issue comment, upserted
 // across re-runs: list issue comments, find the lowest-id body carrying
 // ReviewMarker, EditIssueComment it in place; else CreateIssueComment. Editing the
@@ -828,17 +842,18 @@ const (
 // body is a no-op (UpsertNone). The marker lives on the ISSUE COMMENT here, distinct
 // from review bodies (ListReviews), so there is no cross-match with any historical
 // review bodies.
-func UpsertSummaryComment(ctx stdctx.Context, client Client, info *PRInfo, body string) (UpsertAction, error) {
+func UpsertSummaryComment(ctx stdctx.Context, client Client, info *PRInfo, body string) (UpsertAction, string, error) {
 	if strings.TrimSpace(body) == "" {
-		return UpsertNone, nil
+		return UpsertNone, "", nil
 	}
 
 	targetID := int64(0)
+	targetURL := ""
 	opts := &gh.IssueListCommentsOptions{ListOptions: gh.ListOptions{PerPage: 100}}
 	for page := 0; page < maxConvPages; page++ {
 		comments, resp, err := client.ListIssueComments(ctx, info.Owner, info.Repo, info.Number, opts)
 		if err != nil {
-			return UpsertNone, mapWriteError("github.upsert_summary_failed", "listing issue comments", err)
+			return UpsertNone, "", mapWriteError("github.upsert_summary_failed", "listing issue comments", err)
 		}
 		for _, c := range comments {
 			if !strings.Contains(c.GetBody(), ReviewMarker) {
@@ -846,6 +861,7 @@ func UpsertSummaryComment(ctx stdctx.Context, client Client, info *PRInfo, body 
 			}
 			if id := c.GetID(); id > 0 && (targetID == 0 || id < targetID) {
 				targetID = id
+				targetURL = c.GetHTMLURL()
 			}
 		}
 		if resp == nil || resp.NextPage == 0 {
@@ -855,22 +871,37 @@ func UpsertSummaryComment(ctx stdctx.Context, client Client, info *PRInfo, body 
 	}
 
 	if targetID != 0 {
-		if _, err := client.EditIssueComment(ctx, info.Owner, info.Repo, targetID, &gh.IssueComment{Body: gh.Ptr(body)}); err != nil {
+		edited, err := client.EditIssueComment(ctx, info.Owner, info.Repo, targetID, &gh.IssueComment{Body: gh.Ptr(body)})
+		if err != nil {
 			if is403(err) && inGitHubActions() {
-				return UpsertForkFallback, nil
+				return UpsertForkFallback, "", nil
 			}
-			return UpsertNone, mapWriteError("github.upsert_summary_failed", "editing summary comment", err)
+			return UpsertNone, "", mapWriteError("github.upsert_summary_failed", "editing summary comment", err)
 		}
-		return UpsertEdited, nil
+		if edited.GetHTMLURL() != "" {
+			targetURL = edited.GetHTMLURL()
+		}
+		return UpsertEdited, summaryCommentURL(info, targetID, targetURL), nil
 	}
 
-	if _, err := client.CreateIssueComment(ctx, info.Owner, info.Repo, info.Number, &gh.IssueComment{Body: gh.Ptr(body)}); err != nil {
+	created, err := client.CreateIssueComment(ctx, info.Owner, info.Repo, info.Number, &gh.IssueComment{Body: gh.Ptr(body)})
+	if err != nil {
 		if is403(err) && inGitHubActions() {
-			return UpsertForkFallback, nil
+			return UpsertForkFallback, "", nil
 		}
-		return UpsertNone, mapWriteError("github.upsert_summary_failed", "creating summary comment", err)
+		return UpsertNone, "", mapWriteError("github.upsert_summary_failed", "creating summary comment", err)
 	}
-	return UpsertCreated, nil
+	return UpsertCreated, summaryCommentURL(info, created.GetID(), created.GetHTMLURL()), nil
+}
+
+func summaryCommentURL(info *PRInfo, id int64, got string) string {
+	if strings.TrimSpace(got) != "" {
+		return got
+	}
+	if info == nil || info.HTMLBase == "" || id <= 0 {
+		return ""
+	}
+	return fmt.Sprintf("%s/pull/%d#issuecomment-%d", strings.TrimRight(info.HTMLBase, "/"), info.Number, id)
 }
 
 // mapWriteError maps go-github rate-limit errors to a retryable github.rate_limited
