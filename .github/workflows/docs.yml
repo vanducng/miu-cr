@@ -39,6 +39,24 @@ jobs:
       name: github-pages
       url: ${{ steps.deployment.outputs.page_url }}
     steps:
+      - name: Check latest ref
+        id: freshness
+        continue-on-error: true
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          if latest="$(gh api "repos/${GITHUB_REPOSITORY}/commits/${GITHUB_REF_NAME}" --jq .sha 2>/dev/null)" && [ -n "$latest" ]; then
+            if [ "$latest" != "$GITHUB_SHA" ]; then
+              echo "stale=true" >> "$GITHUB_OUTPUT"
+              echo "Skipping stale deployment for $GITHUB_SHA; latest ${GITHUB_REF_NAME} is $latest."
+            else
+              echo "stale=false" >> "$GITHUB_OUTPUT"
+            fi
+          else
+            echo "Unable to determine latest commit; proceeding with deployment."
+            echo "stale=false" >> "$GITHUB_OUTPUT"
+          fi
       - name: Deploy to GitHub Pages
         id: deployment
+        if: steps.freshness.outputs.stale != 'true'
         uses: actions/deploy-pages@v5
