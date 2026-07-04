@@ -857,13 +857,49 @@ func UpsertSummaryComment(ctx stdctx.Context, client Client, info *PRInfo, body 
 		return UpsertNone, "", nil
 	}
 
+	targetID, targetURL, err := findSummaryComment(ctx, client, info)
+	if err != nil {
+		return UpsertNone, "", err
+	}
+	if targetID != 0 {
+		edited, err := client.EditIssueComment(ctx, info.Owner, info.Repo, targetID, &gh.IssueComment{Body: gh.Ptr(body)})
+		if err != nil {
+			if is403(err) && inGitHubActions() {
+				return UpsertForkFallback, "", nil
+			}
+			return UpsertNone, "", mapWriteError("github.upsert_summary_failed", "editing summary comment", err)
+		}
+		if edited.GetHTMLURL() != "" {
+			targetURL = edited.GetHTMLURL()
+		}
+		return UpsertEdited, summaryCommentURL(info, targetID, targetURL), nil
+	}
+	return createSummaryComment(ctx, client, info, body)
+}
+
+// CreateSummaryCommentIfMissing creates the initial placeholder without hiding an existing result.
+func CreateSummaryCommentIfMissing(ctx stdctx.Context, client Client, info *PRInfo, body string) (UpsertAction, string, error) {
+	if strings.TrimSpace(body) == "" {
+		return UpsertNone, "", nil
+	}
+	targetID, targetURL, err := findSummaryComment(ctx, client, info)
+	if err != nil {
+		return UpsertNone, "", err
+	}
+	if targetID != 0 {
+		return UpsertNone, summaryCommentURL(info, targetID, targetURL), nil
+	}
+	return createSummaryComment(ctx, client, info, body)
+}
+
+func findSummaryComment(ctx stdctx.Context, client Client, info *PRInfo) (int64, string, error) {
 	targetID := int64(0)
 	targetURL := ""
 	opts := &gh.IssueListCommentsOptions{ListOptions: gh.ListOptions{PerPage: 100}}
 	for page := 0; page < maxConvPages; page++ {
 		comments, resp, err := client.ListIssueComments(ctx, info.Owner, info.Repo, info.Number, opts)
 		if err != nil {
-			return UpsertNone, "", mapWriteError("github.upsert_summary_failed", "listing issue comments", err)
+			return 0, "", mapWriteError("github.upsert_summary_failed", "listing issue comments", err)
 		}
 		for _, c := range comments {
 			if !strings.Contains(c.GetBody(), ReviewMarker) {
@@ -879,21 +915,10 @@ func UpsertSummaryComment(ctx stdctx.Context, client Client, info *PRInfo, body 
 		}
 		opts.Page = resp.NextPage
 	}
+	return targetID, targetURL, nil
+}
 
-	if targetID != 0 {
-		edited, err := client.EditIssueComment(ctx, info.Owner, info.Repo, targetID, &gh.IssueComment{Body: gh.Ptr(body)})
-		if err != nil {
-			if is403(err) && inGitHubActions() {
-				return UpsertForkFallback, "", nil
-			}
-			return UpsertNone, "", mapWriteError("github.upsert_summary_failed", "editing summary comment", err)
-		}
-		if edited.GetHTMLURL() != "" {
-			targetURL = edited.GetHTMLURL()
-		}
-		return UpsertEdited, summaryCommentURL(info, targetID, targetURL), nil
-	}
-
+func createSummaryComment(ctx stdctx.Context, client Client, info *PRInfo, body string) (UpsertAction, string, error) {
 	created, err := client.CreateIssueComment(ctx, info.Owner, info.Repo, info.Number, &gh.IssueComment{Body: gh.Ptr(body)})
 	if err != nil {
 		if is403(err) && inGitHubActions() {

@@ -216,10 +216,12 @@ re-run:
 
 - The **summary is ONE upserted issue comment**. miucr lists the PR's issue comments, finds
   the lowest-id one carrying the `<!-- miu-cr-review -->` marker, and **edits it in place**;
-  if none exists it creates one. At review start, the comment says `Review running`; a
-  successful publish finalizes that same comment with a hidden completed-publish marker, so
-  the reported `summary_action` can be `edited` even on the first run. Re-runs update the
-  single summary rather than stacking a review per commit.
+  if none exists it creates one. On the first posted review, miucr creates a `Review running`
+  placeholder before model work starts, then finalizes that same comment with a hidden
+  completed-publish marker. On later commits, it leaves the prior completed summary visible
+  while the new review runs, then replaces it only when the new result is ready. The reported
+  `summary_action` can be `edited` even on the first run, and re-runs update the single
+  summary rather than stacking a review per commit.
 - Inline findings post as a PR **review**. Normal comment reviews use an empty body because
   the summary moved out, so a no-inline-comment run never trips an empty-review 422 while
   the summary comment still upserts. First approval reviews carry a short LGTM-style body
