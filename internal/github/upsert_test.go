@@ -119,6 +119,50 @@ func TestUpsertSummaryCommentEmptyBodyIsNoop(t *testing.T) {
 	}
 }
 
+func TestCreateSummaryCommentIfMissingCreatesOnFirstRun(t *testing.T) {
+	c := &recordClient{issueStore: []*gh.IssueComment{}}
+	act, url, err := CreateSummaryCommentIfMissing(stdctx.Background(), c, upsertInfo(), ReviewMarker+"\n## Code Review Summary\nrunning")
+	if err != nil {
+		t.Fatalf("create missing: %v", err)
+	}
+	if act != UpsertCreated {
+		t.Fatalf("want created, got %q", act)
+	}
+	if url != "https://github.com/o/r/pull/1#issuecomment-1" {
+		t.Fatalf("summary URL = %q", url)
+	}
+	if c.createIssueN != 1 || c.editN != 0 {
+		t.Fatalf("first placeholder must create only: create=%d edit=%d", c.createIssueN, c.editN)
+	}
+	if got := c.issueStore[0].GetBody(); !strings.Contains(got, "running") {
+		t.Fatalf("created body = %q", got)
+	}
+}
+
+func TestCreateSummaryCommentIfMissingKeepsExistingSummary(t *testing.T) {
+	c := &recordClient{issueStore: []*gh.IssueComment{{
+		ID:      gh.Ptr(int64(8)),
+		HTMLURL: gh.Ptr("https://github.com/o/r/pull/1#issuecomment-8"),
+		Body:    gh.Ptr(ReviewMarker + "\n## Code Review Summary\n**Result:** Review passed!"),
+	}}}
+	act, url, err := CreateSummaryCommentIfMissing(stdctx.Background(), c, upsertInfo(), ReviewMarker+"\n## Code Review Summary\n**Result:** Review running.")
+	if err != nil {
+		t.Fatalf("create missing: %v", err)
+	}
+	if act != UpsertNone {
+		t.Fatalf("want none for existing summary, got %q", act)
+	}
+	if url != "https://github.com/o/r/pull/1#issuecomment-8" {
+		t.Fatalf("summary URL = %q", url)
+	}
+	if c.createIssueN != 0 || c.editN != 0 {
+		t.Fatalf("existing summary must not be touched: create=%d edit=%d", c.createIssueN, c.editN)
+	}
+	if got := c.issueStore[0].GetBody(); !strings.Contains(got, "Review passed") || strings.Contains(got, "Review running") {
+		t.Fatalf("existing body was overwritten:\n%s", got)
+	}
+}
+
 func TestUpsertSummaryCommentForkFallbackOnCreate(t *testing.T) {
 	t.Setenv("GITHUB_ACTIONS", "true")
 	c := &recordClient{issueStore: []*gh.IssueComment{}, createIssueErr: forbidden403()}

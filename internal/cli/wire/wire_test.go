@@ -177,6 +177,37 @@ func TestAckPRReviewStartedReactsAndPostsRunningSummary(t *testing.T) {
 	}
 }
 
+func TestAckPRReviewStartedKeepsExistingSummaryOnRerun(t *testing.T) {
+	fake := &fakeGitHub{issueComments: []*gh.IssueComment{{
+		ID:      gh.Ptr(int64(9)),
+		HTMLURL: gh.Ptr("https://github.com/o/r/pull/7#issuecomment-9"),
+		Body:    gh.Ptr(mgithub.ReviewMarker + "\n## Code Review Summary\n**Result:** Review passed!"),
+	}}}
+	info := &mgithub.PRInfo{
+		Owner:    "o",
+		Repo:     "r",
+		Number:   7,
+		HeadSHA:  "fedcba987654",
+		HTMLBase: "https://github.com/o/r",
+	}
+
+	ackPRReviewStarted(stdctx.Background(), fake, info)
+
+	if got := strings.Join(fake.order, ","); got != "react_issue,list_issue" {
+		t.Fatalf("ack order = %s", got)
+	}
+	if fake.createIssueN != 0 || fake.editN != 0 {
+		t.Fatalf("existing summary must not be replaced by running state: create=%d edit=%d", fake.createIssueN, fake.editN)
+	}
+	if len(fake.issueComments) != 1 {
+		t.Fatalf("want one summary, got %d", len(fake.issueComments))
+	}
+	body := fake.issueComments[0].GetBody()
+	if !strings.Contains(body, "Review passed") || strings.Contains(body, "Review running") {
+		t.Fatalf("existing result should stay visible during re-review:\n%s", body)
+	}
+}
+
 // setupRepo builds a real two-commit repo (base→head) the publish flow's
 // DiffsForPR can diff via ModeRange, returning the dir and both SHAs.
 func setupRepo(t *testing.T, runner *gitcmd.Runner) (string, string, string) {
