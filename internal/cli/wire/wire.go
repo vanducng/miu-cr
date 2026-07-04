@@ -832,6 +832,12 @@ func ackPRReviewStarted(ctx stdctx.Context, client mgithub.Client, info *mgithub
 			"error", config.RedactString(err.Error()))
 		return
 	}
+	if action == mgithub.UpsertNone {
+		slog.Info("review: existing summary preserved while new review runs",
+			"repo", info.Owner+"/"+info.Repo, "pr", info.Number, "head_sha", shortSHA(info.HeadSHA),
+			"summary_action", string(action), "summary_url", url)
+		return
+	}
 	slog.Info("review: running summary acknowledged",
 		"repo", info.Owner+"/"+info.Repo, "pr", info.Number, "head_sha", shortSHA(info.HeadSHA),
 		"summary_action", string(action), "summary_url", url)
