@@ -28,6 +28,9 @@ func GetDiff(ctx context.Context, mode Mode, repoDir, from, to, commit string, r
 		runner = gitcmd.New()
 	}
 	if _, err := runner.HeadSHA(ctx, repoDir); err != nil {
+		if cerr := ctx.Err(); cerr != nil {
+			return nil, cerr
+		}
 		return nil, &clierr.CLIError{
 			Code:    "git.not_a_repo",
 			Message: fmt.Sprintf("%s is not a git repository with commits", repoDir),
