@@ -258,6 +258,20 @@ func TestGetDiff_NonGitDir(t *testing.T) {
 	}
 }
 
+func TestGetDiff_CanceledContextNotMisclassifiedAsNotRepo(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+
+	_, err := GetDiff(ctx, ModeStaged, t.TempDir(), "", "", "", gitcmd.New())
+	if !errors.Is(err, context.Canceled) {
+		t.Fatalf("error = %v, want context.Canceled", err)
+	}
+	var cliErr *clierr.CLIError
+	if errors.As(err, &cliErr) && cliErr.Code == "git.not_a_repo" {
+		t.Fatalf("canceled context must not be reported as %s", cliErr.Code)
+	}
+}
+
 func TestGetDiff_RangeUnrelatedHistories(t *testing.T) {
 	repo := initRepo(t)
 	f := filepath.Join(repo, "a.txt")

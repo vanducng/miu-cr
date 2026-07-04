@@ -452,6 +452,18 @@ func (prReviewer) ReviewPR(ctx stdctx.Context, req cli.PRReviewRequest) (cli.Rev
 	// Hoisted so the same loaded (fork-dropped) rule set feeds BOTH the engine
 	// (injection) and the publish-layer citation map (validation/linking).
 	loaded := loadRules(dir, !info.IsFork)
+	var publishDiffs []diff.Diff
+	publishDiffsCaptured := false
+	if req.Post {
+		if ds, derr := mgithub.DiffsForPR(ctx, runner, dir, info.BaseSHA, info.HeadSHA); derr != nil {
+			slog.Warn("review: pre-publish diff snapshot failed, will retry after review",
+				"repo", info.Owner+"/"+info.Repo, "pr", info.Number, "head_sha", shortSHA(info.HeadSHA),
+				"error", config.RedactString(derr.Error()))
+		} else {
+			publishDiffs = ds
+			publishDiffsCaptured = true
+		}
+	}
 	// Opt-in conversation context: fetched only with --conversation. Dropped on fork
 	// PRs (Untrusted participant text gains no injection channel), mirroring the
 	// fork-dropped repo rules above. Best-effort: FetchConversation degrades to "".
@@ -535,7 +547,12 @@ func (prReviewer) ReviewPR(ctx stdctx.Context, req cli.PRReviewRequest) (cli.Rev
 			defer closeStore()
 		}
 		ew := embedWriter{emb: emb, store: embStore, repo: repo}
-		if err := publishReview(ctx, client, runner, dir, info, res, prResult, req, prStore, ew, cfg.Review.CategoryURLMap(), ruleCitations(loaded, dir), reuseKey); err != nil {
+		publishDiffs, err = publishDiffSnapshot(ctx, runner, dir, info, publishDiffsCaptured, publishDiffs)
+		if err != nil {
+			maybeUpsertReviewErrorSummary(ctx, client, info, req, err)
+			return cli.ReviewOutcome{}, err
+		}
+		if err := publishReviewWithDiffs(ctx, client, info, res, prResult, req, prStore, ew, cfg.Review.CategoryURLMap(), ruleCitations(loaded, dir), reuseKey, publishDiffs); err != nil {
 			maybeUpsertReviewErrorSummary(ctx, client, info, req, err)
 			return cli.ReviewOutcome{}, err
 		}
@@ -858,7 +875,17 @@ func publishReview(ctx stdctx.Context, client mgithub.Client, runner *gitcmd.Run
 	if err != nil {
 		return err
 	}
+	return publishReviewWithDiffs(ctx, client, info, res, prResult, req, prStore, ew, categoryURLs, ruleCites, publishKey, diffs)
+}
 
+func publishDiffSnapshot(ctx stdctx.Context, runner *gitcmd.Runner, dir string, info *mgithub.PRInfo, captured bool, diffs []diff.Diff) ([]diff.Diff, error) {
+	if captured {
+		return diffs, nil
+	}
+	return mgithub.DiffsForPR(ctx, runner, dir, info.BaseSHA, info.HeadSHA)
+}
+
+func publishReviewWithDiffs(ctx stdctx.Context, client mgithub.Client, info *mgithub.PRInfo, res engine.ReviewResult, prResult *cli.PRResult, req cli.PRReviewRequest, prStore store.PRThreadStore, ew embedWriter, categoryURLs map[string]string, ruleCites map[string]mgithub.RuleCitation, publishKey string, diffs []diff.Diff) error {
 	if req.Mode == "checks" {
 		return publishChecks(ctx, client, info, res, diffs, prResult, req, ew)
 	}

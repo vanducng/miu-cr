@@ -353,6 +353,73 @@ func TestPublishReviewWireFlow(t *testing.T) {
 	}
 }
 
+func TestPublishReviewWithDiffSnapshotDoesNotNeedRepoAfterReview(t *testing.T) {
+	runner := gitcmd.New()
+	dir, base, head := setupRepo(t, runner)
+	diffs, err := mgithub.DiffsForPR(stdctx.Background(), runner, dir, base, head)
+	if err != nil {
+		t.Fatalf("DiffsForPR: %v", err)
+	}
+	if err := os.RemoveAll(filepath.Join(dir, ".git")); err != nil {
+		t.Fatalf("remove .git: %v", err)
+	}
+
+	fake := &fakeGitHub{}
+	info := &mgithub.PRInfo{Owner: "o", Repo: "r", Number: 7, HeadSHA: head, BaseSHA: base, BaseBranch: "main", ReviewCount: 1, HTMLBase: "https://github.com/o/r"}
+	res := engine.ReviewResult{
+		Findings: []engine.Finding{
+			{File: "foo.go", Line: 4, Severity: "high", Category: "bug", Rationale: "boom", QuotedCode: "func B() {}"},
+		},
+		Stats: map[string]any{"truncation_level": "full", "files_reviewed": float64(1)},
+	}
+	pr := &cli.PRResult{SummaryAction: "none"}
+
+	if err := publishReviewWithDiffs(stdctx.Background(), fake, info, res, pr, cli.PRReviewRequest{Gate: "high"}, nil, embedWriter{}, nil, nil, testReuseKey, diffs); err != nil {
+		t.Fatalf("publishReviewWithDiffs: %v", err)
+	}
+	if pr.PostedInline != 1 || pr.SummaryAction != "edited" {
+		t.Fatalf("publish from snapshot failed: postedInline=%d summaryAction=%q", pr.PostedInline, pr.SummaryAction)
+	}
+	if fake.createIssueN != 1 || fake.editN != 1 {
+		t.Fatalf("summary must create then finalize: create=%d edit=%d", fake.createIssueN, fake.editN)
+	}
+}
+
+func TestPublishDiffSnapshotUsesCapturedDiffsWithoutRepo(t *testing.T) {
+	runner := gitcmd.New()
+	dir, base, head := setupRepo(t, runner)
+	info := &mgithub.PRInfo{BaseSHA: base, HeadSHA: head}
+	captured, err := mgithub.DiffsForPR(stdctx.Background(), runner, dir, base, head)
+	if err != nil {
+		t.Fatalf("DiffsForPR: %v", err)
+	}
+	if err := os.RemoveAll(filepath.Join(dir, ".git")); err != nil {
+		t.Fatalf("remove .git: %v", err)
+	}
+
+	got, err := publishDiffSnapshot(stdctx.Background(), runner, dir, info, true, captured)
+	if err != nil {
+		t.Fatalf("publishDiffSnapshot captured: %v", err)
+	}
+	if len(got) != len(captured) {
+		t.Fatalf("captured diff count = %d, want %d", len(got), len(captured))
+	}
+}
+
+func TestPublishDiffSnapshotRetriesWhenNotCaptured(t *testing.T) {
+	runner := gitcmd.New()
+	dir, base, head := setupRepo(t, runner)
+	info := &mgithub.PRInfo{BaseSHA: base, HeadSHA: head}
+
+	got, err := publishDiffSnapshot(stdctx.Background(), runner, dir, info, false, nil)
+	if err != nil {
+		t.Fatalf("publishDiffSnapshot retry: %v", err)
+	}
+	if len(got) == 0 {
+		t.Fatal("retry returned no diffs")
+	}
+}
+
 func TestPublishReviewMinimalCleanApproveLinksSummary(t *testing.T) {
 	runner := gitcmd.New()
 	dir, base, head := setupRepo(t, runner)
