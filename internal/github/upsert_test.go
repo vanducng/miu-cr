@@ -5,6 +5,7 @@ import (
 	"errors"
 	"strings"
 	"testing"
+	"time"
 
 	gh "github.com/google/go-github/v84/github"
 
@@ -185,6 +186,30 @@ func TestUpsertSummaryStatusEditsExistingSummary(t *testing.T) {
 	body := c.issueStore[0].GetBody()
 	if !strings.Contains(body, "Reviewing commit") || !strings.Contains(body, "Review passed") {
 		t.Fatalf("status overlay should keep prior result:\n%s", body)
+	}
+}
+
+func TestUpsertSummaryStatusCreatesFallbackOnFirstRun(t *testing.T) {
+	info := upsertInfo()
+	info.HeadSHA = "abcdef123456"
+	c := &recordClient{issueStore: []*gh.IssueComment{}}
+	availableAt := time.Date(2026, 7, 12, 1, 2, 0, 0, time.UTC)
+	act, _, err := UpsertSummaryStatus(stdctx.Background(), c, info, RenderQueuedSummaryStatus(info, availableAt, time.Minute), RenderQueuedSummary(info, availableAt, time.Minute, ""))
+	if err != nil {
+		t.Fatalf("upsert status: %v", err)
+	}
+	if act != UpsertCreated {
+		t.Fatalf("want created, got %q", act)
+	}
+	if len(c.issueStore) != 1 {
+		t.Fatalf("summary comments = %d, want 1", len(c.issueStore))
+	}
+	body := c.issueStore[0].GetBody()
+	if !strings.Contains(body, "**Result:** Review queued") || !strings.Contains(body, "2026-07-12 01:02 UTC") {
+		t.Fatalf("fallback summary should carry queued state:\n%s", body)
+	}
+	if strings.Contains(body, "Previous result remains visible below") {
+		t.Fatalf("first-run fallback should not imply a previous result:\n%s", body)
 	}
 }
 

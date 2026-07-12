@@ -191,12 +191,9 @@ func queuedSummaryText(info *PRInfo, availableAt time.Time, debounce time.Durati
 		parts[0] += " for commit " + commit
 	}
 	if !availableAt.IsZero() {
-		parts = append(parts, "waiting until "+availableAt.UTC().Format("2006-01-02 15:04 UTC"))
+		parts = append(parts, "starts after "+availableAt.UTC().Format("2006-01-02 15:04 UTC"))
 	} else if debounce > 0 {
-		parts = append(parts, "waiting for debounce")
-	}
-	if debounce > 0 {
-		parts = append(parts, "debounce "+debounce.String())
+		parts = append(parts, "waiting for "+debounce.String()+" debounce")
 	}
 	return strings.Join(parts, ". ") + "."
 }
@@ -216,8 +213,12 @@ func withSummaryStatus(body, status string) string {
 		return body
 	}
 	insert := status + "\n\n"
-	if idx := strings.Index(body, "## Code Review Summary\n\n"); idx >= 0 {
-		pos := idx + len("## Code Review Summary\n\n")
+	const heading = "## Code Review Summary"
+	if idx := strings.Index(body, heading); idx >= 0 {
+		pos := idx + len(heading)
+		for pos < len(body) && (body[pos] == ' ' || body[pos] == '\t' || body[pos] == '\r' || body[pos] == '\n') {
+			pos++
+		}
 		return body[:pos] + insert + body[pos:]
 	}
 	pos := summaryStatusFallbackPos(body)

@@ -920,11 +920,6 @@ func CreateSummaryCommentIfMissing(ctx stdctx.Context, client Client, info *PRIn
 	return createSummaryComment(ctx, client, info, body)
 }
 
-func findSummaryComment(ctx stdctx.Context, client Client, info *PRInfo) (int64, string, error) {
-	targetID, targetURL, _, err := findSummaryCommentBody(ctx, client, info)
-	return targetID, targetURL, err
-}
-
 func findSummaryCommentBody(ctx stdctx.Context, client Client, info *PRInfo) (int64, string, string, error) {
 	targetID := int64(0)
 	targetURL := ""
