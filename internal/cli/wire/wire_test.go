@@ -193,18 +193,18 @@ func TestAckPRReviewStartedKeepsExistingSummaryOnRerun(t *testing.T) {
 
 	ackPRReviewStarted(stdctx.Background(), fake, info)
 
-	if got := strings.Join(fake.order, ","); got != "react_issue,list_issue" {
+	if got := strings.Join(fake.order, ","); got != "react_issue,list_issue,edit_issue" {
 		t.Fatalf("ack order = %s", got)
 	}
-	if fake.createIssueN != 0 || fake.editN != 0 {
-		t.Fatalf("existing summary must not be replaced by running state: create=%d edit=%d", fake.createIssueN, fake.editN)
+	if fake.createIssueN != 0 || fake.editN != 1 {
+		t.Fatalf("existing summary must be edited with running status: create=%d edit=%d", fake.createIssueN, fake.editN)
 	}
 	if len(fake.issueComments) != 1 {
 		t.Fatalf("want one summary, got %d", len(fake.issueComments))
 	}
 	body := fake.issueComments[0].GetBody()
-	if !strings.Contains(body, "Review passed") || strings.Contains(body, "Review running") {
-		t.Fatalf("existing result should stay visible during re-review:\n%s", body)
+	if !strings.Contains(body, "Review passed") || !strings.Contains(body, "Reviewing commit") || strings.Contains(body, "**Result:** Review running") {
+		t.Fatalf("existing result should stay visible with review status:\n%s", body)
 	}
 }
 

@@ -5,6 +5,7 @@ import (
 	"errors"
 	"strings"
 	"testing"
+	"time"
 
 	gh "github.com/google/go-github/v84/github"
 
@@ -119,47 +120,73 @@ func TestUpsertSummaryCommentEmptyBodyIsNoop(t *testing.T) {
 	}
 }
 
-func TestCreateSummaryCommentIfMissingCreatesOnFirstRun(t *testing.T) {
-	c := &recordClient{issueStore: []*gh.IssueComment{}}
-	act, url, err := CreateSummaryCommentIfMissing(stdctx.Background(), c, upsertInfo(), ReviewMarker+"\n## Code Review Summary\nrunning")
-	if err != nil {
-		t.Fatalf("create missing: %v", err)
-	}
-	if act != UpsertCreated {
-		t.Fatalf("want created, got %q", act)
-	}
-	if url != "https://github.com/o/r/pull/1#issuecomment-1" {
-		t.Fatalf("summary URL = %q", url)
-	}
-	if c.createIssueN != 1 || c.editN != 0 {
-		t.Fatalf("first placeholder must create only: create=%d edit=%d", c.createIssueN, c.editN)
-	}
-	if got := c.issueStore[0].GetBody(); !strings.Contains(got, "running") {
-		t.Fatalf("created body = %q", got)
-	}
-}
-
-func TestCreateSummaryCommentIfMissingKeepsExistingSummary(t *testing.T) {
+func TestUpsertSummaryStatusEditsExistingSummary(t *testing.T) {
+	info := upsertInfo()
+	info.HeadSHA = "abcdef123456"
 	c := &recordClient{issueStore: []*gh.IssueComment{{
 		ID:      gh.Ptr(int64(8)),
 		HTMLURL: gh.Ptr("https://github.com/o/r/pull/1#issuecomment-8"),
-		Body:    gh.Ptr(ReviewMarker + "\n## Code Review Summary\n**Result:** Review passed!"),
+		Body:    gh.Ptr(ReviewMarker + "\n" + runsCountToken(1) + "\n## Code Review Summary\n\n**Result:** Review passed!"),
 	}}}
-	act, url, err := CreateSummaryCommentIfMissing(stdctx.Background(), c, upsertInfo(), ReviewMarker+"\n## Code Review Summary\n**Result:** Review running.")
+	c.issueIDSeq = 8
+	act, url, err := UpsertSummaryStatus(stdctx.Background(), c, info, RenderReviewingSummaryStatus(info), RenderRunningSummary(info, ""))
 	if err != nil {
-		t.Fatalf("create missing: %v", err)
+		t.Fatalf("upsert status: %v", err)
 	}
-	if act != UpsertNone {
-		t.Fatalf("want none for existing summary, got %q", act)
+	if act != UpsertEdited {
+		t.Fatalf("want edited, got %q", act)
 	}
 	if url != "https://github.com/o/r/pull/1#issuecomment-8" {
 		t.Fatalf("summary URL = %q", url)
 	}
-	if c.createIssueN != 0 || c.editN != 0 {
-		t.Fatalf("existing summary must not be touched: create=%d edit=%d", c.createIssueN, c.editN)
+	body := c.issueStore[0].GetBody()
+	if !strings.Contains(body, "Reviewing commit") || !strings.Contains(body, "Review passed") {
+		t.Fatalf("status overlay should keep prior result:\n%s", body)
 	}
-	if got := c.issueStore[0].GetBody(); !strings.Contains(got, "Review passed") || strings.Contains(got, "Review running") {
-		t.Fatalf("existing body was overwritten:\n%s", got)
+}
+
+func TestUpsertSummaryStatusCreatesFallbackOnFirstRun(t *testing.T) {
+	info := upsertInfo()
+	info.HeadSHA = "abcdef123456"
+	c := &recordClient{issueStore: []*gh.IssueComment{}}
+	availableAt := time.Date(2026, 7, 12, 1, 2, 0, 0, time.UTC)
+	act, _, err := UpsertSummaryStatus(stdctx.Background(), c, info, RenderQueuedSummaryStatus(info, availableAt, time.Minute), RenderQueuedSummary(info, availableAt, time.Minute, ""))
+	if err != nil {
+		t.Fatalf("upsert status: %v", err)
+	}
+	if act != UpsertCreated {
+		t.Fatalf("want created, got %q", act)
+	}
+	if len(c.issueStore) != 1 {
+		t.Fatalf("summary comments = %d, want 1", len(c.issueStore))
+	}
+	body := c.issueStore[0].GetBody()
+	if !strings.Contains(body, "**Result:** Review queued") || !strings.Contains(body, "2026-07-12 01:02 UTC") {
+		t.Fatalf("fallback summary should carry queued state:\n%s", body)
+	}
+	if strings.Contains(body, "Previous result remains visible below") {
+		t.Fatalf("first-run fallback should not imply a previous result:\n%s", body)
+	}
+}
+
+func TestUpsertSummaryStatusNoopsWhenUnchanged(t *testing.T) {
+	info := upsertInfo()
+	info.HeadSHA = "abcdef123456"
+	body := withSummaryStatus(ReviewMarker+"\n## Code Review Summary\n\n**Result:** Review passed!", RenderReviewingSummaryStatus(info))
+	c := &recordClient{issueStore: []*gh.IssueComment{{
+		ID:   gh.Ptr(int64(8)),
+		Body: gh.Ptr(body),
+	}}}
+	c.issueIDSeq = 8
+	act, _, err := UpsertSummaryStatus(stdctx.Background(), c, info, RenderReviewingSummaryStatus(info), RenderRunningSummary(info, ""))
+	if err != nil {
+		t.Fatalf("upsert status: %v", err)
+	}
+	if act != UpsertNone {
+		t.Fatalf("want none, got %q", act)
+	}
+	if c.editN != 0 {
+		t.Fatalf("unchanged status should not edit, edits=%d", c.editN)
 	}
 }
 

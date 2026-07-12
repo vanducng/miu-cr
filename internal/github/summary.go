@@ -5,6 +5,7 @@ import (
 	"net/url"
 	"regexp"
 	"strings"
+	"time"
 
 	"github.com/vanducng/miu-cr/internal/engine"
 	"github.com/vanducng/miu-cr/internal/engine/diff"
@@ -96,6 +97,9 @@ func offDiffSet(findings []engine.Finding, diffs []diff.Diff, mode FilterMode) m
 // commitRef renders the head SHA as a short (7-char) linked reference when an HTML base
 // is known, else a short code span, so the summary never repeats the full 40-char SHA.
 func commitRef(info *PRInfo) string {
+	if info == nil {
+		return ""
+	}
 	sha := info.HeadSHA
 	if sha == "" {
 		return ""
@@ -109,6 +113,11 @@ func commitRef(info *PRInfo) string {
 	}
 	return "`" + short + "`"
 }
+
+const (
+	summaryStatusStart = "<!-- miu-cr-status:start -->"
+	summaryStatusEnd   = "<!-- miu-cr-status:end -->"
+)
 
 // RenderSummary builds the PR summary upserted as the single miucr issue comment:
 // it leads with ReviewMarker (the owning sentinel) + the hidden runs token, then a
@@ -143,6 +152,126 @@ func RenderRunningSummary(info *PRInfo, version string) string {
 		b.WriteString("\n" + renderLedgerMarker(info.PriorLedger))
 	}
 	return b.String()
+}
+
+func RenderQueuedSummary(info *PRInfo, availableAt time.Time, debounce time.Duration, version string) string {
+	var b strings.Builder
+	count := 1
+	if info != nil {
+		count = max(info.ReviewCount, 1)
+	}
+	b.WriteString(ReviewMarker + "\n")
+	b.WriteString(runsCountToken(count) + "\n")
+	b.WriteString("## Code Review Summary\n\n")
+	fmt.Fprintf(&b, "**Result:** %s\n", queuedSummaryText(info, availableAt, debounce))
+	if v := strings.TrimSpace(version); v != "" {
+		fmt.Fprintf(&b, "\n<sub>Posted by [miu-cr](https://github.com/vanducng/miu-cr) [%s](https://github.com/vanducng/miu-cr/releases/tag/%s)</sub>", mdInline(v), url.PathEscape(v))
+	}
+	if info != nil && info.PriorLedger != nil {
+		b.WriteString("\n" + renderLedgerMarker(info.PriorLedger))
+	}
+	return b.String()
+}
+
+func RenderReviewingSummaryStatus(info *PRInfo) string {
+	commit := commitRef(info)
+	if commit == "" {
+		return renderSummaryStatus("**Status:** Reviewing now. The previous result remains visible below until this review finishes.")
+	}
+	return renderSummaryStatus(fmt.Sprintf("**Status:** Reviewing commit %s. The previous result remains visible below until this review finishes.", commit))
+}
+
+func RenderQueuedSummaryStatus(info *PRInfo, availableAt time.Time, debounce time.Duration) string {
+	return renderSummaryStatus("**Status:** " + queuedSummaryText(info, availableAt, debounce) + " Previous result remains visible below.")
+}
+
+func queuedSummaryText(info *PRInfo, availableAt time.Time, debounce time.Duration) string {
+	parts := []string{"Review queued"}
+	if commit := commitRef(info); commit != "" {
+		parts[0] += " for commit " + commit
+	}
+	if !availableAt.IsZero() {
+		parts = append(parts, "starts after "+availableAt.UTC().Format("2006-01-02 15:04 UTC"))
+	} else if debounce > 0 {
+		parts = append(parts, "waiting for "+debounce.String()+" debounce")
+	}
+	return strings.Join(parts, ". ") + "."
+}
+
+func renderSummaryStatus(line string) string {
+	line = strings.TrimSpace(line)
+	if line == "" {
+		return ""
+	}
+	return summaryStatusStart + "\n" + line + "\n" + summaryStatusEnd
+}
+
+func withSummaryStatus(body, status string) string {
+	body = stripSummaryStatus(body)
+	status = strings.TrimSpace(status)
+	if strings.TrimSpace(body) == "" || status == "" {
+		return body
+	}
+	insert := status + "\n\n"
+	const heading = "## Code Review Summary"
+	if idx := strings.Index(body, heading); idx >= 0 {
+		pos := idx + len(heading)
+		for pos < len(body) && (body[pos] == ' ' || body[pos] == '\t' || body[pos] == '\r' || body[pos] == '\n') {
+			pos++
+		}
+		return body[:pos] + insert + body[pos:]
+	}
+	pos := summaryStatusFallbackPos(body)
+	return body[:pos] + insert + body[pos:]
+}
+
+func stripSummaryStatus(body string) string {
+	for {
+		start := strings.Index(body, summaryStatusStart)
+		if start < 0 {
+			return body
+		}
+		endRel := strings.Index(body[start:], summaryStatusEnd)
+		if endRel < 0 {
+			return body
+		}
+		end := start + endRel + len(summaryStatusEnd)
+		removeStart := start
+		for removeStart > 0 && body[removeStart-1] == '\n' {
+			removeStart--
+		}
+		removeEnd := end
+		for removeEnd < len(body) && body[removeEnd] == '\n' {
+			removeEnd++
+		}
+		repl := ""
+		if removeStart > 0 && removeEnd < len(body) {
+			repl = "\n\n"
+		}
+		body = body[:removeStart] + repl + body[removeEnd:]
+	}
+}
+
+func summaryStatusFallbackPos(body string) int {
+	offset := 0
+	for offset < len(body) {
+		next := strings.IndexByte(body[offset:], '\n')
+		if next < 0 {
+			line := strings.TrimSpace(body[offset:])
+			if strings.HasPrefix(line, "<!--") && strings.HasSuffix(line, "-->") {
+				return len(body)
+			}
+			return offset
+		}
+		lineEnd := offset + next
+		line := strings.TrimSpace(body[offset:lineEnd])
+		if line == "" || (strings.HasPrefix(line, "<!--") && strings.HasSuffix(line, "-->")) {
+			offset = lineEnd + 1
+			continue
+		}
+		return offset
+	}
+	return len(body)
 }
 
 // SummaryOptions bundles the additive reviewer-trust inputs to RenderSummaryFull:

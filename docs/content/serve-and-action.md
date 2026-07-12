@@ -326,7 +326,10 @@ stable for that long, so a burst of pushes coalesces into one review on the
 settled head instead of each push superseding the prior in-flight review. It
 follows the same review/`repos[].review` layering — raise it for repos whose
 PRs are pushed rapidly. It changes only *when* a review runs, never the review
-itself, so tuning it does not re-review already-reviewed heads.
+itself, so tuning it does not re-review already-reviewed heads. When a debounced
+host job is first queued, miucr upserts the summary with a queued-until timestamp;
+once the review starts, the same comment switches to a reviewing status while the
+previous completed result remains visible.
 
 `provider_retry` is the provider API retry policy. The default retries `429`,
 `5xx`/`529`, and temporary transport failures 10 times with jittered exponential

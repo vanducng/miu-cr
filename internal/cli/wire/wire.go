@@ -842,15 +842,15 @@ func ackPRReviewStarted(ctx stdctx.Context, client mgithub.Client, info *mgithub
 			"repo", info.Owner+"/"+info.Repo, "pr", info.Number, "head_sha", shortSHA(info.HeadSHA),
 			"reaction", "eyes")
 	}
-	action, url, err := mgithub.CreateSummaryCommentIfMissing(ctx, client, info, mgithub.RenderRunningSummary(info, cli.Version()))
+	action, url, err := mgithub.UpsertSummaryStatus(ctx, client, info, mgithub.RenderReviewingSummaryStatus(info), mgithub.RenderRunningSummary(info, cli.Version()))
 	if err != nil {
-		slog.Warn("review: running summary create failed",
+		slog.Warn("review: running summary status failed",
 			"repo", info.Owner+"/"+info.Repo, "pr", info.Number, "head_sha", shortSHA(info.HeadSHA),
 			"error", config.RedactString(err.Error()))
 		return
 	}
 	if action == mgithub.UpsertNone {
-		slog.Info("review: existing summary preserved while new review runs",
+		slog.Info("review: running summary status unchanged",
 			"repo", info.Owner+"/"+info.Repo, "pr", info.Number, "head_sha", shortSHA(info.HeadSHA),
 			"summary_action", string(action), "summary_url", url)
 		return

@@ -3,6 +3,7 @@ package github
 import (
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/vanducng/miu-cr/internal/engine"
 	"github.com/vanducng/miu-cr/internal/engine/diff"
@@ -77,6 +78,69 @@ func TestBlobURLEmptyWhenBaseMissing(t *testing.T) {
 	}
 	if got := blobURL(&PRInfo{HTMLBase: "https://github.com/o/r"}, "a.go", 1, 0); got != "" {
 		t.Fatalf("missing HeadSHA must yield empty URL, got %q", got)
+	}
+}
+
+func TestQueuedSummaryTextUsesConcreteStartTime(t *testing.T) {
+	info := &PRInfo{HeadSHA: "abcdef123456", HTMLBase: "https://github.com/o/r"}
+	availableAt := time.Date(2026, 7, 12, 1, 2, 3, 0, time.UTC)
+	got := queuedSummaryText(info, availableAt, 2*time.Minute)
+	if !strings.Contains(got, "[`abcdef1`](<https://github.com/o/r/commit/abcdef123456>)") {
+		t.Fatalf("queued text must include linked commit:\n%s", got)
+	}
+	if !strings.Contains(got, "starts after 2026-07-12 01:02 UTC") {
+		t.Fatalf("queued text must include concrete start time:\n%s", got)
+	}
+	if strings.Contains(got, "debounce 2m") {
+		t.Fatalf("queued text must not repeat debounce when concrete start time is present:\n%s", got)
+	}
+}
+
+func TestQueuedSummaryTextWithoutStartTimeUsesDebounce(t *testing.T) {
+	got := queuedSummaryText(nil, time.Time{}, 90*time.Second)
+	if got != "Review queued. waiting for 1m30s debounce." {
+		t.Fatalf("queued text = %q", got)
+	}
+}
+
+func TestWithSummaryStatusInsertsAfterFlexibleHeading(t *testing.T) {
+	info := &PRInfo{HeadSHA: "abcdef123456"}
+	body := ReviewMarker + "\n" + runsCountToken(1) + "\n## Code Review Summary\n**Result:** Review passed!"
+	got := withSummaryStatus(body, RenderReviewingSummaryStatus(info))
+	if !strings.Contains(got, "## Code Review Summary\n") || !strings.Contains(got, "**Status:** Reviewing commit `abcdef1`.") {
+		t.Fatalf("status missing after heading:\n%s", got)
+	}
+	if strings.Index(got, "**Status:**") > strings.Index(got, "**Result:**") {
+		t.Fatalf("status should appear before prior result:\n%s", got)
+	}
+}
+
+func TestWithSummaryStatusReplacesPriorStatus(t *testing.T) {
+	body := ReviewMarker + "\n## Code Review Summary\n\n" + renderSummaryStatus("**Status:** old") + "\n\n**Result:** Review passed!"
+	got := withSummaryStatus(body, renderSummaryStatus("**Status:** new"))
+	if strings.Contains(got, "**Status:** old") || strings.Count(got, summaryStatusStart) != 1 {
+		t.Fatalf("status must be replaced, not stacked:\n%s", got)
+	}
+	if !strings.Contains(got, "**Status:** new") || !strings.Contains(got, "**Result:** Review passed!") {
+		t.Fatalf("replacement lost content:\n%s", got)
+	}
+}
+
+func TestWithSummaryStatusFallbackAfterMarkers(t *testing.T) {
+	body := ReviewMarker + "\n" + runsCountToken(1) + "\n**Result:** Review passed!"
+	got := withSummaryStatus(body, renderSummaryStatus("**Status:** reviewing"))
+	if strings.Index(got, "**Status:** reviewing") > strings.Index(got, "**Result:** Review passed!") {
+		t.Fatalf("fallback status should appear before first visible content:\n%s", got)
+	}
+}
+
+func TestWithSummaryStatusEmptyInputs(t *testing.T) {
+	if got := withSummaryStatus("", renderSummaryStatus("**Status:** x")); got != "" {
+		t.Fatalf("empty body must stay empty, got %q", got)
+	}
+	body := ReviewMarker + "\n## Code Review Summary\n\n**Result:** Review passed!"
+	if got := withSummaryStatus(body, " "); got != body {
+		t.Fatalf("empty status must leave body unchanged:\n%s", got)
 	}
 }
 

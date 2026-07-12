@@ -51,6 +51,7 @@ type HostRunnerConfig struct {
 	ReviewTO        time.Duration
 	WorkerID        string
 	NewNotifGetter  func(string) notifGetter
+	NewGitHubClient func(string) mgithub.Client
 	Prune           HostPruneConfig
 	JanitorInterval time.Duration
 	Now             func() time.Time
@@ -113,6 +114,7 @@ type HostRunner struct {
 	reviewTO         time.Duration
 	workerID         string
 	newGetter        func(string) notifGetter
+	newGitHubClient  func(string) mgithub.Client
 	prune            HostPruneConfig
 	janitorInterval  time.Duration
 	now              func() time.Time
@@ -159,6 +161,9 @@ func NewHostRunner(cfg HostRunnerConfig) (*HostRunner, error) {
 	if cfg.NewNotifGetter == nil {
 		cfg.NewNotifGetter = NewNotifGetter
 	}
+	if cfg.NewGitHubClient == nil {
+		cfg.NewGitHubClient = mgithub.NewClient
+	}
 	if cfg.Logger == nil {
 		cfg.Logger = slog.Default()
 	}
@@ -192,6 +197,7 @@ func NewHostRunner(cfg HostRunnerConfig) (*HostRunner, error) {
 		reviewTO:        cfg.ReviewTO,
 		workerID:        cfg.WorkerID,
 		newGetter:       cfg.NewNotifGetter,
+		newGitHubClient: cfg.NewGitHubClient,
 		prune:           cfg.Prune,
 		janitorInterval: cfg.JanitorInterval,
 		now:             cfg.Now,
@@ -538,7 +544,13 @@ func (h *HostRunner) pollRepo(ctx stdctx.Context, snap hostRunnerSnapshot, repo 
 	if err != nil {
 		return pollFloor, err
 	}
-	var threadSyncClient mgithub.Client
+	var ghClient mgithub.Client
+	getGitHubClient := func() mgithub.Client {
+		if ghClient == nil {
+			ghClient = h.newGitHubClient(token)
+		}
+		return ghClient
+	}
 	now := h.now().UTC()
 	if err := h.store.UpsertHostPollCursor(ctx, store.HostPollCursorInput{RepoID: repoID, Source: string(sourcePulls), Cursor: now.Format(time.RFC3339Nano), LastPolledAt: now}); err != nil {
 		return pollFloor, err
@@ -578,7 +590,7 @@ func (h *HostRunner) pollRepo(ctx stdctx.Context, snap hostRunnerSnapshot, repo 
 			h.log.Warn("host: failed to upsert PR session", "repo", repo.Slug, "pr", number, "error", config.RedactString(err.Error()))
 			continue
 		}
-		_, _, err = h.store.EnqueueHostJob(ctx, store.HostJobInput{
+		job, queued, err := h.store.EnqueueHostJob(ctx, store.HostJobInput{
 			RepoID:     repoID,
 			SessionID:  session.ID,
 			Number:     number,
@@ -598,11 +610,11 @@ func (h *HostRunner) pollRepo(ctx stdctx.Context, snap hostRunnerSnapshot, repo 
 			h.log.Warn("host: failed to enqueue PR review", "repo", repo.Slug, "pr", number, "error", config.RedactString(err.Error()))
 			continue
 		}
+		if queued && repo.Debounce > 0 && job.AvailableAt.After(now) {
+			h.updateQueuedSummaryStatus(ctx, getGitHubClient(), repo, pr, job.AvailableAt, repo.Debounce)
+		}
 		if repo.ThreadResolutionSync.Enabled() {
-			if threadSyncClient == nil {
-				threadSyncClient = mgithub.NewClient(token)
-			}
-			h.enqueueThreadResolutionSync(ctx, threadSyncClient, repo, pr, now)
+			h.enqueueThreadResolutionSync(ctx, getGitHubClient(), repo, pr, now)
 		}
 	}
 	superseded, supersededErr := h.store.ReconcileHostSupersededPRHeads(ctx, store.HostSupersededPRHeadsInput{RepoID: repoID, Heads: openHeads, Now: now})
@@ -621,6 +633,57 @@ func (h *HostRunner) pollRepo(ctx stdctx.Context, snap hostRunnerSnapshot, repo 
 	}
 	h.pruneThreadResolutionSync(repo.Slug, openNumbers)
 	return pollFloor, nil
+}
+
+func (h *HostRunner) updateQueuedSummaryStatus(ctx stdctx.Context, client mgithub.Client, repo HostRepoConfig, pr *github.PullRequest, availableAt time.Time, debounce time.Duration) {
+	info := hostPRInfo(repo, pr)
+	action, url, err := mgithub.UpsertSummaryStatus(ctx, client, info, mgithub.RenderQueuedSummaryStatus(info, availableAt, debounce), mgithub.RenderQueuedSummary(info, availableAt, debounce, ""))
+	if err != nil {
+		h.log.Warn("host: failed to update queued summary status",
+			"repo", repo.Slug, "pr", info.Number, "head_sha", ShortSHA(info.HeadSHA),
+			"available_at", availableAt.Format(time.RFC3339), "debounce", debounce.String(),
+			"error", config.RedactString(err.Error()))
+		return
+	}
+	h.log.Info("host: queued summary status updated",
+		"repo", repo.Slug, "pr", info.Number, "head_sha", ShortSHA(info.HeadSHA),
+		"available_at", availableAt.Format(time.RFC3339), "debounce", debounce.String(),
+		"summary_action", string(action), "summary_url", url)
+}
+
+func hostPRInfo(repo HostRepoConfig, pr *github.PullRequest) *mgithub.PRInfo {
+	owner, name := repo.Owner, repo.Repo
+	if (owner == "" || name == "") && strings.Contains(repo.Slug, "/") {
+		parts := strings.SplitN(repo.Slug, "/", 2)
+		if owner == "" {
+			owner = parts[0]
+		}
+		if name == "" {
+			name = parts[1]
+		}
+	}
+	head := pr.GetHead().GetRepo()
+	isFork := head == nil ||
+		!strings.EqualFold(head.GetOwner().GetLogin(), owner) ||
+		!strings.EqualFold(head.GetName(), name)
+	htmlBase := pr.GetBase().GetRepo().GetHTMLURL()
+	if htmlBase == "" && repo.Slug != "" {
+		htmlBase = "https://github.com/" + repo.Slug
+	}
+	return &mgithub.PRInfo{
+		Owner:             owner,
+		Repo:              name,
+		Number:            pr.GetNumber(),
+		HeadSHA:           pr.GetHead().GetSHA(),
+		BaseSHA:           pr.GetBase().GetSHA(),
+		BaseBranch:        pr.GetBase().GetRef(),
+		HTMLBase:          htmlBase,
+		ChangedFiles:      pr.GetChangedFiles(),
+		Additions:         int64(pr.GetAdditions()),
+		Deletions:         int64(pr.GetDeletions()),
+		AuthorAssociation: pr.GetAuthorAssociation(),
+		IsFork:            isFork,
+	}
 }
 
 func (h *HostRunner) reserveThreadResolutionSync(slug string, number int64, interval time.Duration, now time.Time) (bool, string) {
@@ -673,31 +736,14 @@ func (h *HostRunner) pruneThreadResolutionSync(slug string, openNumbers []int64)
 }
 
 func (h *HostRunner) enqueueThreadResolutionSync(ctx stdctx.Context, client mgithub.Client, repo HostRepoConfig, pr *github.PullRequest, now time.Time) {
-	head := pr.GetHead().GetRepo()
-	isFork := head == nil ||
-		!strings.EqualFold(head.GetOwner().GetLogin(), repo.Owner) ||
-		!strings.EqualFold(head.GetName(), repo.Repo)
-	snap := threadResolutionSyncPR{
-		Number:            pr.GetNumber(),
-		HeadSHA:           pr.GetHead().GetSHA(),
-		BaseSHA:           pr.GetBase().GetSHA(),
-		HTMLBase:          pr.GetBase().GetRepo().GetHTMLURL(),
-		ChangedFiles:      pr.GetChangedFiles(),
-		Additions:         int64(pr.GetAdditions()),
-		Deletions:         int64(pr.GetDeletions()),
-		AuthorAssociation: pr.GetAuthorAssociation(),
-		IsFork:            isFork,
-	}
-	if snap.HTMLBase == "" && repo.Slug != "" {
-		snap.HTMLBase = "https://github.com/" + repo.Slug
-	}
-	ok, reason := h.reserveThreadResolutionSync(repo.Slug, int64(snap.Number), repo.ThreadResolutionSync.Interval, now)
+	info := hostPRInfo(repo, pr)
+	ok, reason := h.reserveThreadResolutionSync(repo.Slug, int64(info.Number), repo.ThreadResolutionSync.Interval, now)
 	if !ok {
 		if reason == "stopping" {
-			h.log.Warn("host: conversation resolution sync dropped; host stopping", "repo", repo.Slug, "pr", snap.Number, "head_sha", snap.HeadSHA)
+			h.log.Warn("host: conversation resolution sync dropped; host stopping", "repo", repo.Slug, "pr", info.Number, "head_sha", info.HeadSHA)
 		}
 		if reason == "workers_busy" {
-			h.log.Warn("host: conversation resolution sync dropped; workers busy", "repo", repo.Slug, "pr", snap.Number, "head_sha", snap.HeadSHA)
+			h.log.Warn("host: conversation resolution sync dropped; workers busy", "repo", repo.Slug, "pr", info.Number, "head_sha", info.HeadSHA)
 		}
 		return
 	}
@@ -705,20 +751,8 @@ func (h *HostRunner) enqueueThreadResolutionSync(ctx stdctx.Context, client mgit
 		defer h.finishThreadResolutionSync()
 		syncCtx, cancel := stdctx.WithTimeout(stdctx.WithoutCancel(ctx), runHostDrainGrace)
 		defer cancel()
-		h.syncThreadResolution(syncCtx, client, repo, snap, now)
+		h.syncThreadResolution(syncCtx, client, repo, info, now)
 	}()
-}
-
-type threadResolutionSyncPR struct {
-	Number            int
-	HeadSHA           string
-	BaseSHA           string
-	HTMLBase          string
-	ChangedFiles      int
-	Additions         int64
-	Deletions         int64
-	AuthorAssociation string
-	IsFork            bool
 }
 
 func (h *HostRunner) finishThreadResolutionSync() {
@@ -734,22 +768,9 @@ func (h *HostRunner) finishThreadResolutionSync() {
 	}
 }
 
-func (h *HostRunner) syncThreadResolution(ctx stdctx.Context, client mgithub.Client, repo HostRepoConfig, pr threadResolutionSyncPR, now time.Time) {
-	info := &mgithub.PRInfo{
-		Owner:             repo.Owner,
-		Repo:              repo.Repo,
-		Number:            pr.Number,
-		HeadSHA:           pr.HeadSHA,
-		BaseSHA:           pr.BaseSHA,
-		HTMLBase:          pr.HTMLBase,
-		ChangedFiles:      pr.ChangedFiles,
-		Additions:         pr.Additions,
-		Deletions:         pr.Deletions,
-		AuthorAssociation: pr.AuthorAssociation,
-		IsFork:            pr.IsFork,
-	}
+func (h *HostRunner) syncThreadResolution(ctx stdctx.Context, client mgithub.Client, repo HostRepoConfig, info *mgithub.PRInfo, now time.Time) {
 	res, err := mgithub.SyncSummaryConversationResolved(ctx, client, info, repo.Review.Approval, now)
-	attrs := []any{"repo", repo.Slug, "pr", pr.Number, "head_sha", info.HeadSHA, "reason", res.Reason, "resolved", res.Resolved, "reopened", res.Reopened, "entries", res.Entries}
+	attrs := []any{"repo", repo.Slug, "pr", info.Number, "head_sha", info.HeadSHA, "reason", res.Reason, "resolved", res.Resolved, "reopened", res.Reopened, "entries", res.Entries}
 	if res.Approved {
 		attrs = append(attrs, "approved", true)
 	} else if res.ApproveReason != "" {
