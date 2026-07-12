@@ -163,6 +163,52 @@ func TestCreateSummaryCommentIfMissingKeepsExistingSummary(t *testing.T) {
 	}
 }
 
+func TestUpsertSummaryStatusEditsExistingSummary(t *testing.T) {
+	info := upsertInfo()
+	info.HeadSHA = "abcdef123456"
+	c := &recordClient{issueStore: []*gh.IssueComment{{
+		ID:      gh.Ptr(int64(8)),
+		HTMLURL: gh.Ptr("https://github.com/o/r/pull/1#issuecomment-8"),
+		Body:    gh.Ptr(ReviewMarker + "\n" + runsCountToken(1) + "\n## Code Review Summary\n\n**Result:** Review passed!"),
+	}}}
+	c.issueIDSeq = 8
+	act, url, err := UpsertSummaryStatus(stdctx.Background(), c, info, RenderReviewingSummaryStatus(info), RenderRunningSummary(info, ""))
+	if err != nil {
+		t.Fatalf("upsert status: %v", err)
+	}
+	if act != UpsertEdited {
+		t.Fatalf("want edited, got %q", act)
+	}
+	if url != "https://github.com/o/r/pull/1#issuecomment-8" {
+		t.Fatalf("summary URL = %q", url)
+	}
+	body := c.issueStore[0].GetBody()
+	if !strings.Contains(body, "Reviewing commit") || !strings.Contains(body, "Review passed") {
+		t.Fatalf("status overlay should keep prior result:\n%s", body)
+	}
+}
+
+func TestUpsertSummaryStatusNoopsWhenUnchanged(t *testing.T) {
+	info := upsertInfo()
+	info.HeadSHA = "abcdef123456"
+	body := withSummaryStatus(ReviewMarker+"\n## Code Review Summary\n\n**Result:** Review passed!", RenderReviewingSummaryStatus(info))
+	c := &recordClient{issueStore: []*gh.IssueComment{{
+		ID:   gh.Ptr(int64(8)),
+		Body: gh.Ptr(body),
+	}}}
+	c.issueIDSeq = 8
+	act, _, err := UpsertSummaryStatus(stdctx.Background(), c, info, RenderReviewingSummaryStatus(info), RenderRunningSummary(info, ""))
+	if err != nil {
+		t.Fatalf("upsert status: %v", err)
+	}
+	if act != UpsertNone {
+		t.Fatalf("want none, got %q", act)
+	}
+	if c.editN != 0 {
+		t.Fatalf("unchanged status should not edit, edits=%d", c.editN)
+	}
+}
+
 func TestUpsertSummaryCommentForkFallbackOnCreate(t *testing.T) {
 	t.Setenv("GITHUB_ACTIONS", "true")
 	c := &recordClient{issueStore: []*gh.IssueComment{}, createIssueErr: forbidden403()}

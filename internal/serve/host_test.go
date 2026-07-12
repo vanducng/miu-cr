@@ -502,6 +502,8 @@ func TestHostRunnerDebounceDelaysJobAvailability(t *testing.T) {
 	cfg.Now = func() time.Time { return base }
 	cfg.Repos[0].Debounce = 2 * time.Minute
 	st := cfg.Store.(*fakeHostStore)
+	client := &threadSyncContextClient{}
+	cfg.NewGitHubClient = func(string) mgithub.Client { return client }
 	r, err := NewHostRunner(cfg)
 	if err != nil {
 		t.Fatalf("NewHostRunner: %v", err)
@@ -514,6 +516,15 @@ func TestHostRunnerDebounceDelaysJobAvailability(t *testing.T) {
 	want := base.Add(2 * time.Minute)
 	if !st.lastEnqueue.AvailableAt.Equal(want) {
 		t.Fatalf("debounced enqueue available_at = %s, want %s (now+debounce)", st.lastEnqueue.AvailableAt, want)
+	}
+	client.mu.Lock()
+	defer client.mu.Unlock()
+	if len(client.issueComments) != 1 {
+		t.Fatalf("queued summary comments = %d, want 1", len(client.issueComments))
+	}
+	body := client.issueComments[0].GetBody()
+	if !strings.Contains(body, "Review queued") || !strings.Contains(body, "2026-07-03 12:02 UTC") {
+		t.Fatalf("queued summary status missing debounce detail:\n%s", body)
 	}
 }
 
@@ -1072,8 +1083,10 @@ func TestHostRunnerWaitsForThreadResolutionSync(t *testing.T) {
 }
 
 type threadSyncContextClient struct {
-	mu  sync.Mutex
-	err error
+	mu            sync.Mutex
+	err           error
+	issueComments []*github.IssueComment
+	nextIssueID   int64
 }
 
 func (c *threadSyncContextClient) issueContextErr() error {
@@ -1085,8 +1098,9 @@ func (c *threadSyncContextClient) issueContextErr() error {
 func (c *threadSyncContextClient) ListIssueComments(ctx stdctx.Context, _, _ string, _ int, _ *github.IssueListCommentsOptions) ([]*github.IssueComment, *github.Response, error) {
 	c.mu.Lock()
 	c.err = ctx.Err()
+	out := append([]*github.IssueComment(nil), c.issueComments...)
 	c.mu.Unlock()
-	return nil, nil, nil
+	return out, &github.Response{}, nil
 }
 
 func (c *threadSyncContextClient) GetPR(stdctx.Context, string, string, int) (*github.PullRequest, error) {
@@ -1113,12 +1127,28 @@ func (c *threadSyncContextClient) ListReviewComments(stdctx.Context, string, str
 	return nil, nil, nil
 }
 
-func (c *threadSyncContextClient) CreateIssueComment(stdctx.Context, string, string, int, *github.IssueComment) (*github.IssueComment, error) {
-	return nil, nil
+func (c *threadSyncContextClient) CreateIssueComment(_ stdctx.Context, _ string, _ string, _ int, comment *github.IssueComment) (*github.IssueComment, error) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	c.nextIssueID++
+	stored := &github.IssueComment{ID: github.Ptr(c.nextIssueID), Body: github.Ptr(comment.GetBody())}
+	if len(c.issueComments) == 0 {
+		stored.HTMLURL = github.Ptr("https://github.com/octo/hello/pull/1#issuecomment-1")
+	}
+	c.issueComments = append(c.issueComments, stored)
+	return stored, nil
 }
 
-func (c *threadSyncContextClient) EditIssueComment(stdctx.Context, string, string, int64, *github.IssueComment) (*github.IssueComment, error) {
-	return nil, nil
+func (c *threadSyncContextClient) EditIssueComment(_ stdctx.Context, _ string, _ string, id int64, comment *github.IssueComment) (*github.IssueComment, error) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	for _, existing := range c.issueComments {
+		if existing.GetID() == id {
+			existing.Body = github.Ptr(comment.GetBody())
+			return existing, nil
+		}
+	}
+	return comment, nil
 }
 
 func (c *threadSyncContextClient) CreateIssueReaction(stdctx.Context, string, string, int, string) (*github.Reaction, error) {

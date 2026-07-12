@@ -51,6 +51,7 @@ type HostRunnerConfig struct {
 	ReviewTO        time.Duration
 	WorkerID        string
 	NewNotifGetter  func(string) notifGetter
+	NewGitHubClient func(string) mgithub.Client
 	Prune           HostPruneConfig
 	JanitorInterval time.Duration
 	Now             func() time.Time
@@ -113,6 +114,7 @@ type HostRunner struct {
 	reviewTO         time.Duration
 	workerID         string
 	newGetter        func(string) notifGetter
+	newGitHubClient  func(string) mgithub.Client
 	prune            HostPruneConfig
 	janitorInterval  time.Duration
 	now              func() time.Time
@@ -159,6 +161,9 @@ func NewHostRunner(cfg HostRunnerConfig) (*HostRunner, error) {
 	if cfg.NewNotifGetter == nil {
 		cfg.NewNotifGetter = NewNotifGetter
 	}
+	if cfg.NewGitHubClient == nil {
+		cfg.NewGitHubClient = mgithub.NewClient
+	}
 	if cfg.Logger == nil {
 		cfg.Logger = slog.Default()
 	}
@@ -192,6 +197,7 @@ func NewHostRunner(cfg HostRunnerConfig) (*HostRunner, error) {
 		reviewTO:        cfg.ReviewTO,
 		workerID:        cfg.WorkerID,
 		newGetter:       cfg.NewNotifGetter,
+		newGitHubClient: cfg.NewGitHubClient,
 		prune:           cfg.Prune,
 		janitorInterval: cfg.JanitorInterval,
 		now:             cfg.Now,
@@ -539,6 +545,7 @@ func (h *HostRunner) pollRepo(ctx stdctx.Context, snap hostRunnerSnapshot, repo 
 		return pollFloor, err
 	}
 	var threadSyncClient mgithub.Client
+	var summaryStatusClient mgithub.Client
 	now := h.now().UTC()
 	if err := h.store.UpsertHostPollCursor(ctx, store.HostPollCursorInput{RepoID: repoID, Source: string(sourcePulls), Cursor: now.Format(time.RFC3339Nano), LastPolledAt: now}); err != nil {
 		return pollFloor, err
@@ -578,7 +585,7 @@ func (h *HostRunner) pollRepo(ctx stdctx.Context, snap hostRunnerSnapshot, repo 
 			h.log.Warn("host: failed to upsert PR session", "repo", repo.Slug, "pr", number, "error", config.RedactString(err.Error()))
 			continue
 		}
-		_, _, err = h.store.EnqueueHostJob(ctx, store.HostJobInput{
+		job, queued, err := h.store.EnqueueHostJob(ctx, store.HostJobInput{
 			RepoID:     repoID,
 			SessionID:  session.ID,
 			Number:     number,
@@ -598,9 +605,15 @@ func (h *HostRunner) pollRepo(ctx stdctx.Context, snap hostRunnerSnapshot, repo 
 			h.log.Warn("host: failed to enqueue PR review", "repo", repo.Slug, "pr", number, "error", config.RedactString(err.Error()))
 			continue
 		}
+		if queued && repo.Debounce > 0 && job.AvailableAt.After(now) {
+			if summaryStatusClient == nil {
+				summaryStatusClient = h.newGitHubClient(token)
+			}
+			h.updateQueuedSummaryStatus(ctx, summaryStatusClient, repo, pr, job.AvailableAt, repo.Debounce)
+		}
 		if repo.ThreadResolutionSync.Enabled() {
 			if threadSyncClient == nil {
-				threadSyncClient = mgithub.NewClient(token)
+				threadSyncClient = h.newGitHubClient(token)
 			}
 			h.enqueueThreadResolutionSync(ctx, threadSyncClient, repo, pr, now)
 		}
@@ -621,6 +634,38 @@ func (h *HostRunner) pollRepo(ctx stdctx.Context, snap hostRunnerSnapshot, repo 
 	}
 	h.pruneThreadResolutionSync(repo.Slug, openNumbers)
 	return pollFloor, nil
+}
+
+func (h *HostRunner) updateQueuedSummaryStatus(ctx stdctx.Context, client mgithub.Client, repo HostRepoConfig, pr *github.PullRequest, availableAt time.Time, debounce time.Duration) {
+	info := hostPRInfo(repo, pr)
+	action, url, err := mgithub.UpsertSummaryStatus(ctx, client, info, mgithub.RenderQueuedSummaryStatus(info, availableAt, debounce), mgithub.RenderQueuedSummary(info, availableAt, debounce, ""))
+	if err != nil {
+		h.log.Warn("host: failed to update queued summary status",
+			"repo", repo.Slug, "pr", info.Number, "head_sha", ShortSHA(info.HeadSHA),
+			"available_at", availableAt.Format(time.RFC3339), "debounce", debounce.String(),
+			"error", config.RedactString(err.Error()))
+		return
+	}
+	h.log.Info("host: queued summary status updated",
+		"repo", repo.Slug, "pr", info.Number, "head_sha", ShortSHA(info.HeadSHA),
+		"available_at", availableAt.Format(time.RFC3339), "debounce", debounce.String(),
+		"summary_action", string(action), "summary_url", url)
+}
+
+func hostPRInfo(repo HostRepoConfig, pr *github.PullRequest) *mgithub.PRInfo {
+	htmlBase := pr.GetBase().GetRepo().GetHTMLURL()
+	if htmlBase == "" {
+		htmlBase = "https://github.com/" + repo.Owner + "/" + repo.Repo
+	}
+	return &mgithub.PRInfo{
+		Owner:      repo.Owner,
+		Repo:       repo.Repo,
+		Number:     pr.GetNumber(),
+		HeadSHA:    pr.GetHead().GetSHA(),
+		BaseSHA:    pr.GetBase().GetSHA(),
+		BaseBranch: pr.GetBase().GetRef(),
+		HTMLBase:   htmlBase,
+	}
 }
 
 func (h *HostRunner) reserveThreadResolutionSync(slug string, number int64, interval time.Duration, now time.Time) (bool, string) {

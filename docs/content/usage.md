@@ -301,7 +301,7 @@ Every review gets a built-in baseline plus any project rules under `.miu/cr/rule
 `review` can review a GitHub pull request directly and (with `--post`) publish results back to it:
 
 - `--pr <url|owner/repo#N>`: review a GitHub PR (no PAT needed for public repos in dry-run).
-- `--post` / `--no-post`: publish inline comments + a summary, or dry-run (`--no-post` is the default for `--pr`). Review-mode posting reacts 👀 and creates a `Review running` summary only when no prior summary exists; later commits keep the prior result visible until the new result replaces it.
+- `--post` / `--no-post`: publish inline comments + a summary, or dry-run (`--no-post` is the default for `--pr`). Review-mode posting reacts 👀 and creates a `Review running` summary only when no prior summary exists; later commits keep the prior result visible with a temporary reviewing status until the new result replaces it.
 - `--token <pat>`: GitHub PAT, required only for `--post`.
 - `--mode review|checks`: inline review comments (default) or a GitHub CheckRun (survives force-push, works on fork PRs).
 - `--suggest`: emit one-click GitHub suggestions for proven fixes: single-line replacements and wrap/guard/insert fixes (a multi-line patch on a QuotedCode-proven single-line anchor).
