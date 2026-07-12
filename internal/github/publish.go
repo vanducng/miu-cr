@@ -905,21 +905,6 @@ func UpsertSummaryStatus(ctx stdctx.Context, client Client, info *PRInfo, status
 	return UpsertEdited, summaryCommentURL(info, targetID, targetURL), nil
 }
 
-// CreateSummaryCommentIfMissing creates the initial placeholder without hiding an existing result.
-func CreateSummaryCommentIfMissing(ctx stdctx.Context, client Client, info *PRInfo, body string) (UpsertAction, string, error) {
-	if strings.TrimSpace(body) == "" {
-		return UpsertNone, "", nil
-	}
-	targetID, targetURL, _, err := findSummaryCommentBody(ctx, client, info)
-	if err != nil {
-		return UpsertNone, "", err
-	}
-	if targetID != 0 {
-		return UpsertNone, summaryCommentURL(info, targetID, targetURL), nil
-	}
-	return createSummaryComment(ctx, client, info, body)
-}
-
 func findSummaryCommentBody(ctx stdctx.Context, client Client, info *PRInfo) (int64, string, string, error) {
 	targetID := int64(0)
 	targetURL := ""
