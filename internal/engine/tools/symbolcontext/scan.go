@@ -181,12 +181,17 @@ func (s *scanner) definitionsSequential(ctx context.Context, symbol string, path
 
 // indexDefinitions serves a repo-wide by-name lookup from the shared index;
 // ok=false (index missing or failed to build) means scan per-call instead.
+// Bounded by s.limit so both serving paths return the same shape.
 func (s *scanner) indexDefinitions(ctx context.Context, symbol string) ([]Definition, bool) {
 	ix := s.tc.Index
 	if ix == nil || !ix.ensure(ctx) {
 		return nil, false
 	}
-	return ix.Lookup(ctx, symbol), true
+	defs := ix.Lookup(ctx, symbol)
+	if len(defs) > s.limit {
+		defs = defs[:s.limit]
+	}
+	return defs, true
 }
 
 // indexFileDefinitions serves one file's definitions from the shared index;

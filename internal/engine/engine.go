@@ -1188,6 +1188,14 @@ var referencedDefsSkipWords = map[string]bool{
 	"union": true, "update": true, "values": true, "var": true, "view": true,
 	"void": true, "when": true, "where": true, "while": true, "with": true,
 	"yield": true,
+	// builtin/primitive type + function names: frequent on added lines, never
+	// project definitions worth a ranking slot.
+	"bool": true, "byte": true, "bytes": true, "complex64": true, "complex128": true,
+	"dict": true, "error": true, "float": true, "float32": true, "float64": true,
+	"int8": true, "int16": true, "int32": true, "int64": true, "isinstance": true,
+	"len": true, "list": true, "make": true, "object": true, "print": true,
+	"rune": true, "set": true, "str": true, "tuple": true, "uint": true,
+	"uint8": true, "uint16": true, "uint32": true, "uint64": true, "uintptr": true,
 }
 
 // buildReferencedDefsContext prefetches definitions for the symbols the change
@@ -1255,6 +1263,12 @@ func buildReferencedDefsContext(ctx stdctx.Context, selected []diff.Diff, index 
 		return ""
 	}
 	out := string(truncateUTF8Bytes([]byte(referencedDefsHeader+sb.String()), referencedDefsBytes))
+	// Drop a truncation-split partial line: a half signature is misleading context.
+	if !strings.HasSuffix(out, "\n") {
+		if i := strings.LastIndexByte(out, '\n'); i >= len(referencedDefsHeader) {
+			out = out[:i]
+		}
+	}
 	return strings.TrimRight(out, "\n")
 }
 
