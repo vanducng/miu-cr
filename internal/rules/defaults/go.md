@@ -4,6 +4,8 @@ globs:
   - "**/*.go"
 alwaysApply: false
 ---
+Prefer precision over recall: a false positive costs more reviewer trust than a missed nit. If a concern is plausible but not verifiable from the visible context, ask a short verification question instead of asserting a bug.
+
 # Go review context
 
 Apply only to the conventions actually visible in the diff; do not invent issues to satisfy a checklist.
@@ -16,12 +18,26 @@ Apply only to the conventions actually visible in the diff; do not invent issues
 - If a worker pool stores results in a shared slice/map, every read and write must use the same lock or happen after all producers have stopped. A write-only lock still races with an unlocked reader.
 - A `defer f.Close()` inside a loop accumulates open handles until the function returns; close per-iteration or refactor when the loop count is unbounded.
 
+Do not report when:
+- The mutated map/slice/counter is function-local and never escapes to another goroutine — no sharing, no race.
+- The goroutine's exit path (ctx cancellation, channel close) plausibly lives in a caller outside the diff — ask, don't assert a leak.
+- The `defer Close()` loop iterates a small bounded collection.
+
 ## Error handling
 
 - A swallowed error (`_ =` or an ignored second return) hides the exact failure the reviewer is looking for; flag it unless the ignore is clearly intentional.
 - Wrapping with `fmt.Errorf("...: %w", err)` preserves the chain for `errors.Is/As`; a bare `errors.New("failed")` at the top discards the cause and makes the incident unsearchable.
 
+Do not report when:
+- The ignored error cannot occur or carries no signal (`bytes.Buffer.Write`, `strings.Builder`, `Close` on a read-only file).
+- The unwrapped error sits at a program boundary (`main`, CLI exit) where nothing calls `errors.Is/As` on it.
+
 ## Correctness
 
 - `append` to a slice aliased elsewhere can overwrite the other view when capacity allows — a silent data-corruption bug, not a panic.
 - Capturing a loop variable in a closure before Go 1.22 semantics, or in any goroutine, reads the last value; confirm the loop variable is copied.
+
+Do not report when:
+- Loop-var capture where go.mod pins Go >= 1.22 and no goroutine is involved — per-iteration semantics already apply.
+- The file is `_test.go` — allocation and perf nits don't matter there.
+- The diff only moves or renames existing code; pre-existing patterns are not new findings.
