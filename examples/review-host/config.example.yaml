@@ -51,7 +51,9 @@ x:
       max_retries: 10
       initial_backoff: 5s
       max_backoff: 2m
-      max_elapsed: 10m
+      max_elapsed: 3m            # caps the retry tail on an overloaded provider; the job
+                                 # fails fast and the next poll requeues it, instead of one
+                                 # review hanging in backoff for the full window
     expand: 20
     token_budget: 0
     deep_context: true
@@ -63,7 +65,9 @@ x:
       max_turns: 24
       retry_backoff: 250ms
       symbol_context:
-        max_bytes: 16000
+        max_bytes: 32768         # budget for the changed-symbol prefetch injected into the
+                                 # first prompt; too small truncates it and the model spends
+                                 # extra tool turns re-fetching what was dropped
         max_files: 2000
         max_parallel: 8
 
@@ -88,7 +92,12 @@ review:
       - '(^|\s)(/miucr review\b|@vanducng\b)'
     rules:
       - action: exclude
-        title_regexes: ['^chore\(deps\):']
+        title_regexes:
+          - '^chore\(deps\):'          # generated dependency PRs (title, not author:
+                                       # Renovate-style branches may be pushed by a human)
+          - '^chore\(main\): release ' # release-please bump PRs
+          - '^release: promote '       # staging→main promotion merges: hundreds of files
+                                       # whose content was already reviewed on the source PRs
 
 agent:
   system_prompt_file: prompts/default-reviewer.md
@@ -123,6 +132,9 @@ host:
       mode: off
 
 repos:
+  # Use case: noisy, high-traffic service repo — inline only medium+, keep the
+  # summary comment lean, and mirror manual "Resolve conversation" clicks into
+  # the summary ledger between pushes.
   - <<: *repo_defaults
     name: service-api
     slug: example-org/service-api
@@ -135,21 +147,34 @@ repos:
     review:
       min_severity: medium
       context_hops: 1
+      format: minimal
+      thread_resolution_sync:
+        mode: poll
+        interval: 5m
 
+  # Use case: high-churn data/ELT repo — heads get pushed in bursts and the
+  # diffs are mostly SQL/DAG changes, so trade thinking depth for latency and
+  # let pushes settle before spending a review.
   - <<: *repo_defaults
     name: example-dbt-project
     slug: example-org/example-dbt-project
     git_url: https://github.com/example-org/example-dbt-project.git
     github_account: personal-pat
     review:
+      thinking: medium   # full extended thinking adds latency/tokens with little
+                         # finding delta on focused SQL diffs
+      debounce: 10m      # coalesce a push burst into one review on the settled head
       pr_filter:
-        default_action: exclude
+        default_action: exclude   # allowlist mode: review only what matches below
         rules:
           - action: include
             authors: ["vanducng"]
           - action: include
             requested_reviewers: ["vanducng"]
 
+  # Use case: auto-approve when the review is clean enough — threshold approval
+  # submits APPROVE when only P4 (or no) findings remain, with a note listing
+  # what was waived; anything P0-P3 blocks approval.
   - <<: *repo_defaults
     name: data-platform
     slug: example-org/data-platform
@@ -164,7 +189,14 @@ repos:
       timeout: 1800s
       stalled_timeout: 8m
       suggest: false
+      approval:
+        mode: threshold
+        max_priority: P4
+        note: on_findings
 
+  # Use case: observe-only onboarding — post: false runs the full review and
+  # stores the result without writing anything to the PR; flip to true once
+  # the rules/prompt are tuned.
   - <<: *repo_defaults
     name: infrastructure
     slug: example-platform/infrastructure
