@@ -21,6 +21,9 @@ type Context struct {
 	Runner   *gitcmd.Runner
 	Progress func(string)
 	Trace    TraceRecorder
+	// Index is the optional per-review symbol index shared by every
+	// symbol_context call; nil keeps per-call scanning.
+	Index *symbolcontext.Index
 }
 
 type Spec struct {
@@ -50,6 +53,7 @@ func Execute(ctx context.Context, cfg config.SymbolContext, tc Context, turn int
 			Runner:   tc.Runner,
 			Progress: tc.Progress,
 			Trace:    tc.Trace,
+			Index:    tc.Index,
 		}, turn, input)
 	default:
 		out := fmt.Sprintf("unknown tool %q", name)

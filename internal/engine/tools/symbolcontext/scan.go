@@ -24,7 +24,7 @@ const (
 	NoDependenciesFoundMarker = "(no dependencies found)"
 )
 
-type definition struct {
+type Definition struct {
 	Name      string
 	Kind      string
 	File      string
@@ -108,7 +108,12 @@ func scan(ctx context.Context, cfg config.SymbolContext, tc Context, args Args) 
 	}
 }
 
-func (s *scanner) definitions(ctx context.Context, symbol, file string) ([]definition, error) {
+func (s *scanner) definitions(ctx context.Context, symbol, file string) ([]Definition, error) {
+	if file == "" && s.tc.Index != nil {
+		if defs, ok := s.indexDefinitions(ctx, symbol); ok {
+			return defs, nil
+		}
+	}
 	paths, err := s.paths(ctx, file)
 	if err != nil {
 		return nil, err
@@ -122,7 +127,7 @@ func (s *scanner) definitions(ctx context.Context, symbol, file string) ([]defin
 			scanPaths = append(scanPaths, path)
 		}
 	}
-	var defs []definition
+	var defs []Definition
 	batchSize := s.scanBatchSize()
 	for start := 0; start < len(scanPaths) && len(defs) < s.limit; start += batchSize {
 		end := start + batchSize
@@ -147,17 +152,21 @@ func (s *scanner) definitions(ctx context.Context, symbol, file string) ([]defin
 	return defs, nil
 }
 
-func (s *scanner) definitionsSequential(ctx context.Context, symbol string, paths []string) ([]definition, error) {
-	var defs []definition
+func (s *scanner) definitionsSequential(ctx context.Context, symbol string, paths []string) ([]Definition, error) {
+	var defs []Definition
 	for _, path := range paths {
 		if !supportedSource(path) {
 			continue
 		}
-		text, err := s.readText(ctx, path)
-		if err != nil {
-			return nil, err
+		fileDefs, ok := s.indexFileDefinitions(ctx, path)
+		if !ok {
+			text, err := s.readText(ctx, path)
+			if err != nil {
+				return nil, err
+			}
+			fileDefs = extractDefinitions(path, text)
 		}
-		for _, d := range extractDefinitions(path, text) {
+		for _, d := range fileDefs {
 			if symbolMatches(d.Name, symbol, path) {
 				defs = append(defs, d)
 			}
@@ -168,6 +177,26 @@ func (s *scanner) definitionsSequential(ctx context.Context, symbol string, path
 	}
 	sortDefinitions(defs)
 	return defs, nil
+}
+
+// indexDefinitions serves a repo-wide by-name lookup from the shared index;
+// ok=false (index missing or failed to build) means scan per-call instead.
+func (s *scanner) indexDefinitions(ctx context.Context, symbol string) ([]Definition, bool) {
+	ix := s.tc.Index
+	if ix == nil || !ix.ensure(ctx) {
+		return nil, false
+	}
+	return ix.Lookup(ctx, symbol), true
+}
+
+// indexFileDefinitions serves one file's definitions from the shared index;
+// ok=false means the path was not indexed (or no index) — read it per-call.
+func (s *scanner) indexFileDefinitions(ctx context.Context, path string) ([]Definition, bool) {
+	ix := s.tc.Index
+	if ix == nil {
+		return nil, false
+	}
+	return ix.FileDefinitions(ctx, path)
 }
 
 func (s *scanner) grep(ctx context.Context, title, pattern, file string) (string, error) {
@@ -217,6 +246,15 @@ func (s *scanner) outgoingCalls(ctx context.Context, symbol, file string) (strin
 }
 
 func (s *scanner) documentSymbols(ctx context.Context, file string) (string, error) {
+	// Index-served path: a missing entry (directory, unindexed, or read-failed
+	// path) falls through to the per-call read below, which keeps the directory
+	// listing and error behavior identical.
+	if defs, ok := s.indexFileDefinitions(ctx, file); ok {
+		if len(defs) == 0 {
+			return "Document symbols for " + file + ":\n" + NoSymbolsDetectedMarker, nil
+		}
+		return formatDefinitions("Document symbols for "+file, defs, s.limit), nil
+	}
 	text, err := s.readText(ctx, file)
 	// A directory path used to waste the model's turn (raw git exit-128 when
 	// staged, a useless "tree" blob at a rev); answer with the listing the next
@@ -239,11 +277,19 @@ func (s *scanner) documentSymbols(ctx context.Context, file string) (string, err
 
 func (s *scanner) dependencies(ctx context.Context, symbol, file string) (string, error) {
 	if file != "" {
+		if ix := s.tc.Index; ix != nil {
+			if refs, ok := ix.sqlRefs(ctx, file); ok {
+				return formatDBTRefList(file, refs), nil
+			}
+		}
 		text, err := s.readText(ctx, file)
 		if err != nil {
 			return "", err
 		}
 		return formatDBTFileDependencies(file, text), nil
+	}
+	if out, ok := s.indexDependencies(ctx, symbol); ok {
+		return out, nil
 	}
 	paths, err := s.paths(ctx, "")
 	if err != nil {
@@ -281,14 +327,54 @@ func (s *scanner) dependencies(ctx context.Context, symbol, file string) (string
 			}
 		}
 	}
+	return formatDependencyMatches(symbol, matches), nil
+}
+
+// indexDependencies serves the repo-wide dbt-dependency scan from the shared
+// index; ok=false means scan per-call instead. Read-failed .sql paths have no
+// index entry, matching the per-call skip of failed reads.
+func (s *scanner) indexDependencies(ctx context.Context, symbol string) (string, bool) {
+	ix := s.tc.Index
+	if ix == nil {
+		return "", false
+	}
+	paths, ok := ix.filesList(ctx)
+	if !ok {
+		return "", false
+	}
+	var matches []string
+	for _, path := range paths {
+		if strings.ToLower(filepath.Ext(path)) != ".sql" {
+			continue
+		}
+		refs, ok := ix.sqlRefs(ctx, path)
+		if !ok {
+			continue
+		}
+		for _, ref := range refs {
+			if symbol == "" || dbtRefMatches(ref, symbol) {
+				matches = append(matches, fmt.Sprintf("- %s -> %s", path, formatDependencyRef(ref)))
+				if len(matches) >= s.limit {
+					break
+				}
+			}
+		}
+		if len(matches) >= s.limit {
+			break
+		}
+	}
+	return formatDependencyMatches(symbol, matches), true
+}
+
+func formatDependencyMatches(symbol string, matches []string) string {
 	title := "Dependencies"
 	if symbol != "" {
 		title += " for " + symbol
 	}
 	if len(matches) == 0 {
-		return title + ":\n" + NoDependenciesFoundMarker, nil
+		return title + ":\n" + NoDependenciesFoundMarker
 	}
-	return title + ":\n" + strings.Join(matches, "\n"), nil
+	return title + ":\n" + strings.Join(matches, "\n")
 }
 
 func (s *scanner) paths(ctx context.Context, file string) ([]string, error) {
@@ -446,7 +532,7 @@ func cleanFilePath(path string) (string, error) {
 	return path, nil
 }
 
-func formatDefinitions(title string, defs []definition, limit int) string {
+func formatDefinitions(title string, defs []Definition, limit int) string {
 	if len(defs) == 0 {
 		return title + ":\n" + NoSymbolsFoundMarker
 	}
@@ -462,7 +548,7 @@ func formatDefinitions(title string, defs []definition, limit int) string {
 	return strings.TrimRight(sb.String(), "\n")
 }
 
-func sortDefinitions(defs []definition) {
+func sortDefinitions(defs []Definition) {
 	sort.Slice(defs, func(i, j int) bool {
 		if defs[i].File == defs[j].File {
 			return defs[i].Line < defs[j].Line
@@ -482,7 +568,10 @@ func symbolMatches(name, symbol, file string) bool {
 }
 
 func formatDBTFileDependencies(file, text string) string {
-	refs := extractDBTRefs(text)
+	return formatDBTRefList(file, extractDBTRefs(text))
+}
+
+func formatDBTRefList(file string, refs []string) string {
 	if len(refs) == 0 {
 		return "Dependencies for " + file + ":\n" + NoDependenciesFoundMarker
 	}
@@ -555,7 +644,7 @@ func (s *scanner) symbolAtLine(ctx context.Context, file string, line int) strin
 	if err != nil {
 		return ""
 	}
-	var before, after *definition
+	var before, after *Definition
 	for _, d := range extractDefinitions(file, text) {
 		d := d
 		if d.Line <= line {

@@ -53,13 +53,13 @@ func supportedSource(path string) bool {
 	return sourceExts[strings.ToLower(filepath.Ext(path))]
 }
 
-func extractDefinitions(file, text string) []definition {
+func extractDefinitions(file, text string) []Definition {
 	ext := strings.ToLower(filepath.Ext(file))
 	lines := strings.Split(text, "\n")
-	var defs []definition
+	var defs []Definition
 	if isSingleFileComponent(ext) {
 		name := strings.TrimSuffix(filepath.Base(file), ext)
-		defs = append(defs, definition{Name: name, Kind: "component", File: file, Line: 1, Signature: "component " + name})
+		defs = append(defs, Definition{Name: name, Kind: "component", File: file, Line: 1, Signature: "component " + name})
 	}
 	patterns := patternsForExt(ext)
 	for i, line := range lines {
@@ -68,7 +68,7 @@ func extractDefinitions(file, text string) []definition {
 			if len(m) < 2 {
 				continue
 			}
-			defs = append(defs, definition{
+			defs = append(defs, Definition{
 				Name:      strings.TrimSpace(m[1]),
 				Kind:      p.kind,
 				File:      file,
@@ -81,7 +81,7 @@ func extractDefinitions(file, text string) []definition {
 	if ext == ".sql" {
 		model := strings.TrimSuffix(filepath.Base(file), ext)
 		if model != "" {
-			defs = append(defs, definition{Name: model, Kind: "dbt-model", File: file, Line: 1, Signature: "dbt model " + model})
+			defs = append(defs, Definition{Name: model, Kind: "dbt-model", File: file, Line: 1, Signature: "dbt model " + model})
 		}
 	}
 	sortDefinitions(defs)
