@@ -10,6 +10,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"path/filepath"
+	"regexp"
 	"sort"
 	"strings"
 	"time"
@@ -370,10 +371,15 @@ type AgentContext struct {
 	ProviderRetry  config.ProviderRetry
 	Tools          config.ReviewTools
 	SymbolContext  config.SymbolContext
-	RepoDir        string
-	Rev            string
-	Runner         *gitcmd.Runner
-	Progress       func(string) // nil = silent; milestone strings only, never secrets
+	// Index is the per-review symbol index shared by every symbol_context call
+	// in the pass (and across subagents). LOCKSTEP: mirror Rules — thread it
+	// here -> agent.Context -> toolContext in the agent package, and forward it
+	// in the wire adapter, or every tool call rebuilds the repo scan.
+	Index    *symbolcontext.Index
+	RepoDir  string
+	Rev      string
+	Runner   *gitcmd.Runner
+	Progress func(string) // nil = silent; milestone strings only, never secrets
 	// Trace, when non-nil, captures the raw prompt, per-turn tool calls/results, and raw
 	// final response for persistence. nil = no capture (mirrors Progress).
 	Trace *ReviewTrace
@@ -723,10 +729,15 @@ func (e *Engine) Review(ctx stdctx.Context, req Request) (ReviewResult, error) {
 		related = enginectx.BuildRelatedContext(ctx, req.RepoDir, rev, selected, e.Runner, enginectx.RelatedOptions{HopDepth: relatedHops})
 		relatedMS = time.Since(relatedStart).Milliseconds()
 	}
+	// One symbol index for the whole review: the prompt prefetches below and
+	// every symbol_context tool call (across all backends and subagents) share
+	// its single lazy repo scan instead of rebuilding ls-files + git-show xN.
+	symbolIndex := symbolcontext.NewIndex(req.SymbolContext, symbolcontext.Context{RepoDir: req.RepoDir, Rev: rev, Runner: e.Runner})
 	changedSymbolStart := time.Now()
-	changedSymbolContext, changedSymbolFiles, changedSymbolTruncated := buildChangedSymbolContext(ctx, req, selected, rev, e.Runner)
+	changedSymbolContext, changedSymbolFiles, changedSymbolTruncated := buildChangedSymbolContext(ctx, req, selected, rev, e.Runner, symbolIndex)
 	changedSymbolMS := time.Since(changedSymbolStart).Milliseconds()
-	relatedText := joinPromptContext(changedSymbolContext, related.Text)
+	referencedDefsContext := buildReferencedDefsContext(ctx, selected, symbolIndex)
+	relatedText := joinPromptContext(changedSymbolContext, referencedDefsContext, related.Text)
 
 	trace.SetModel(req.Provider, req.Model)
 
@@ -736,6 +747,7 @@ func (e *Engine) Review(ctx stdctx.Context, req Request) (ReviewResult, error) {
 		projectContext:  projectContext,
 		relatedContext:  relatedText,
 		rev:             rev,
+		index:           symbolIndex,
 		trace:           trace,
 	})
 	if err != nil {
@@ -976,10 +988,18 @@ const (
 	// Sized from production traces: the 16KB/12-file cap truncated 31% of
 	// reviews, and truncated reviews spend extra tool turns re-fetching what the
 	// prefetch dropped. Build cost is ~19ms, so the larger cap is near-free.
-	changedSymbolContextFiles   = 20
-	changedSymbolContextBytes   = 32 * 1024
-	changedSymbolContextLimit   = 8
-	changedSymbolContextHeader  = "Changed symbol context from the reviewed revision:\n"
+	changedSymbolContextFiles  = 20
+	changedSymbolContextBytes  = 32 * 1024
+	changedSymbolContextLimit  = 8
+	changedSymbolContextHeader = "Changed symbol context from the reviewed revision:\n"
+	// Production traces: half of the model's symbol_context definition calls look
+	// up symbols the diff uses but does not define, each on a ~27s sequential
+	// provider turn. Prefetching their definitions into the prompt removes those
+	// turns entirely.
+	referencedDefsMaxNames   = 10
+	referencedDefsMaxPerName = 3
+	referencedDefsBytes      = 8 * 1024
+	referencedDefsHeader     = "Definitions referenced by this change (already resolved; do not re-fetch these with symbol_context):\n"
 )
 
 var projectContextFiles = []string{"AGENTS.md", "CLAUDE.md"}
@@ -1027,7 +1047,7 @@ func (e *Engine) loadProjectContext(ctx stdctx.Context, repoDir, rev string) (st
 	return sb.String(), files, truncated
 }
 
-func buildChangedSymbolContext(ctx stdctx.Context, req Request, selected []diff.Diff, rev string, runner *gitcmd.Runner) (string, int, bool) {
+func buildChangedSymbolContext(ctx stdctx.Context, req Request, selected []diff.Diff, rev string, runner *gitcmd.Runner, index *symbolcontext.Index) (string, int, bool) {
 	if runner == nil {
 		runner = gitcmd.New()
 	}
@@ -1042,7 +1062,7 @@ func buildChangedSymbolContext(ctx stdctx.Context, req Request, selected []diff.
 	if maxBytes > changedSymbolContextBytes {
 		maxBytes = changedSymbolContextBytes
 	}
-	tc := symbolcontext.Context{RepoDir: req.RepoDir, Rev: rev, Runner: runner}
+	tc := symbolcontext.Context{RepoDir: req.RepoDir, Rev: rev, Runner: runner, Index: index}
 	var sb strings.Builder
 	seen := map[string]bool{}
 	files := 0
@@ -1133,6 +1153,164 @@ func usefulSymbolOutput(out string, failed bool) bool {
 		}
 	}
 	return true
+}
+
+// referencedDefsIdentRe tokenizes candidate identifiers from added lines:
+// word-shaped, at least 3 chars.
+var referencedDefsIdentRe = regexp.MustCompile(`[A-Za-z_][A-Za-z0-9_]{2,}`)
+
+// referencedDefsSkipWords holds language keywords and literals (go/py/ts/js/sql
+// common set) that ride added lines but never name a project definition.
+var referencedDefsSkipWords = map[string]bool{
+	"abstract": true, "alter": true, "and": true, "any": true, "as": true, "asc": true,
+	"assert": true, "async": true, "await": true, "begin": true, "between": true,
+	"boolean": true, "break": true, "case": true, "catch": true, "chan": true,
+	"class": true, "column": true, "commit": true, "const": true, "constructor": true,
+	"continue": true, "create": true, "cross": true, "debugger": true, "declare": true,
+	"def": true, "default": true, "defer": true, "del": true, "delete": true,
+	"desc": true, "distinct": true, "do": true, "drop": true, "elif": true,
+	"else": true, "end": true, "enum": true, "except": true, "exists": true,
+	"export": true, "extends": true, "fallthrough": true, "false": true, "finally": true,
+	"for": true, "foreign": true, "from": true, "full": true, "func": true,
+	"function": true, "global": true, "go": true, "goto": true, "group": true,
+	"having": true, "if": true, "implements": true, "import": true, "in": true,
+	"index": true, "inner": true, "insert": true, "instanceof": true, "interface": true,
+	"into": true, "is": true, "join": true, "lambda": true, "left": true,
+	"let": true, "like": true, "limit": true, "map": true, "new": true,
+	"nil": true, "none": true, "nonlocal": true, "not": true, "null": true,
+	"number": true, "of": true, "offset": true, "or": true, "order": true,
+	"outer": true, "package": true, "pass": true, "primary": true, "private": true,
+	"protected": true, "public": true, "raise": true, "range": true, "readonly": true,
+	"references": true, "replace": true, "return": true, "right": true, "rollback": true,
+	"select": true, "self": true, "static": true, "string": true, "struct": true,
+	"super": true, "switch": true, "table": true, "then": true, "this": true,
+	"throw": true, "try": true, "type": true, "typeof": true, "undefined": true,
+	"union": true, "update": true, "values": true, "var": true, "view": true,
+	"void": true, "when": true, "where": true, "while": true, "with": true,
+	"yield": true,
+	// builtin/primitive type + function names: frequent on added lines, never
+	// project definitions worth a ranking slot.
+	"bool": true, "byte": true, "bytes": true, "complex64": true, "complex128": true,
+	"dict": true, "error": true, "float": true, "float32": true, "float64": true,
+	"int8": true, "int16": true, "int32": true, "int64": true, "isinstance": true,
+	"len": true, "list": true, "make": true, "object": true, "print": true,
+	"rune": true, "set": true, "str": true, "tuple": true, "uint": true,
+	"uint8": true, "uint16": true, "uint32": true, "uint64": true, "uintptr": true,
+}
+
+// buildReferencedDefsContext prefetches definitions for the symbols the change
+// USES but does not define: identifiers on added lines, minus keywords/literals
+// and anything defined in the changed files (the changed-symbol block already
+// covers those), ranked deterministically and resolved via the shared index.
+// Empty result => byte-identical prompt.
+func buildReferencedDefsContext(ctx stdctx.Context, selected []diff.Diff, index *symbolcontext.Index) string {
+	if index == nil {
+		return ""
+	}
+	counts := map[string]int{}
+	for _, d := range selected {
+		for _, h := range diff.ParseHunks(d.Diff) {
+			for _, l := range h.Lines {
+				if l.Type != diff.HunkAdded {
+					continue
+				}
+				for _, tok := range referencedDefsIdentRe.FindAllString(l.Content, -1) {
+					if skipReferencedIdentifier(tok) {
+						continue
+					}
+					counts[tok]++
+				}
+			}
+		}
+	}
+	if len(counts) == 0 {
+		return ""
+	}
+	changedDefs := changedFileDefNames(ctx, selected, index)
+	names := make([]string, 0, len(counts))
+	for name := range counts {
+		if changedDefs[strings.ToLower(name)] {
+			continue
+		}
+		names = append(names, name)
+	}
+	sort.Slice(names, func(i, j int) bool {
+		if counts[names[i]] != counts[names[j]] {
+			return counts[names[i]] > counts[names[j]]
+		}
+		if len(names[i]) != len(names[j]) {
+			return len(names[i]) > len(names[j])
+		}
+		return names[i] < names[j]
+	})
+	if len(names) > referencedDefsMaxNames {
+		names = names[:referencedDefsMaxNames]
+	}
+	var sb strings.Builder
+	for _, name := range names {
+		defs := index.Lookup(ctx, name)
+		if len(defs) == 0 {
+			continue
+		}
+		if len(defs) > referencedDefsMaxPerName {
+			defs = defs[:referencedDefsMaxPerName]
+		}
+		for _, d := range defs {
+			fmt.Fprintf(&sb, "- %s (%s) %s:%d — %s\n", d.Name, d.Kind, d.File, d.Line, d.Signature)
+		}
+	}
+	if sb.Len() == 0 {
+		return ""
+	}
+	out := string(truncateUTF8Bytes([]byte(referencedDefsHeader+sb.String()), referencedDefsBytes))
+	// Drop a truncation-split partial line: a half signature is misleading context.
+	if !strings.HasSuffix(out, "\n") {
+		if i := strings.LastIndexByte(out, '\n'); i >= len(referencedDefsHeader) {
+			out = out[:i]
+		}
+	}
+	return strings.TrimRight(out, "\n")
+}
+
+// skipReferencedIdentifier drops keywords/literals and short all-lowercase
+// words (<4 chars) that are almost never project symbols worth prefetching.
+func skipReferencedIdentifier(tok string) bool {
+	if len(tok) < 4 && tok == strings.ToLower(tok) {
+		return true
+	}
+	return referencedDefsSkipWords[strings.ToLower(tok)]
+}
+
+// changedFileDefNames collects the lowercased names (plus dot-suffixes,
+// mirroring symbolMatches) defined in the changed files themselves.
+func changedFileDefNames(ctx stdctx.Context, selected []diff.Diff, index *symbolcontext.Index) map[string]bool {
+	out := map[string]bool{}
+	for _, d := range selected {
+		if d.IsDeleted {
+			continue
+		}
+		path := filepath.ToSlash(strings.TrimSpace(d.NewPath))
+		if path == "" {
+			continue
+		}
+		defs, ok := index.FileDefinitions(ctx, path)
+		if !ok {
+			continue
+		}
+		for _, def := range defs {
+			name := strings.ToLower(def.Name)
+			out[name] = true
+			for {
+				i := strings.IndexByte(name, '.')
+				if i < 0 {
+					break
+				}
+				name = name[i+1:]
+				out[name] = true
+			}
+		}
+	}
+	return out
 }
 
 func joinPromptContext(parts ...string) string {

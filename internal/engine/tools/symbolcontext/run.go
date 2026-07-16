@@ -29,6 +29,9 @@ type Context struct {
 	Runner   *gitcmd.Runner
 	Progress func(string)
 	Trace    TraceRecorder
+	// Index, when non-nil, serves definitions/document_symbols/dependencies from
+	// one shared per-review repo scan; nil keeps per-call scanning.
+	Index *Index
 }
 
 type Args struct {

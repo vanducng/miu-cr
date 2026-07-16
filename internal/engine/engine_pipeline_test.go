@@ -295,6 +295,35 @@ func TestReviewInjectsChangedSymbolContext(t *testing.T) {
 	}
 }
 
+// A changed file calling a symbol defined in an UNCHANGED file must get that
+// definition prefetched into the prompt context, after the changed-symbol block.
+func TestReviewInjectsReferencedDefsContext(t *testing.T) {
+	dir := initRepo(t)
+	writeFile(t, dir, "util.go", "package app\n\nfunc HelperThing() int { return 1 }\n")
+	writeFile(t, dir, "app.go", "package app\n\nfunc Existing() int { return 1 }\n")
+	git(t, dir, "add", ".")
+	git(t, dir, "commit", "-q", "-m", "base")
+	writeFile(t, dir, "app.go", "package app\n\nfunc Existing() int { return 1 }\n\nfunc Risky() int { return HelperThing() }\n")
+	git(t, dir, "add", "app.go")
+
+	fa := &fakeAgent{}
+	eng := engine.New(fa, gitcmd.New())
+	_, err := eng.Review(stdctx.Background(), engine.Request{Mode: 0, RepoDir: dir, Gate: "high", Extensions: []string{"go"}})
+	if err != nil {
+		t.Fatalf("Review: %v", err)
+	}
+	refHeader := "Definitions referenced by this change"
+	if !strings.Contains(fa.gotRelated, refHeader) {
+		t.Fatalf("referenced-defs block missing from RelatedContext: %q", fa.gotRelated)
+	}
+	if !strings.Contains(fa.gotRelated, "HelperThing (function) util.go:3") {
+		t.Fatalf("referenced-defs block did not resolve HelperThing: %q", fa.gotRelated)
+	}
+	if strings.Index(fa.gotRelated, "Changed symbol context from the reviewed revision") > strings.Index(fa.gotRelated, refHeader) {
+		t.Fatalf("referenced-defs block must follow the changed-symbol block: %q", fa.gotRelated)
+	}
+}
+
 type failStore struct{ called bool }
 
 func (s *failStore) SaveReview(stdctx.Context, engine.PersistRecord) (string, error) {

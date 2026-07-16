@@ -20,6 +20,7 @@ import (
 	"github.com/vanducng/miu-cr/internal/engine"
 	"github.com/vanducng/miu-cr/internal/engine/gitcmd"
 	enginetools "github.com/vanducng/miu-cr/internal/engine/tools"
+	"github.com/vanducng/miu-cr/internal/engine/tools/symbolcontext"
 )
 
 // classifyAnthropicErr types a proven Anthropic API status into the stable
@@ -72,10 +73,15 @@ type Context struct {
 	ProviderRetry  config.ProviderRetry
 	Tools          config.ReviewTools
 	SymbolContext  config.SymbolContext
-	RepoDir        string
-	Rev            string
-	Runner         *gitcmd.Runner
-	Progress       func(string) // nil = silent; milestone/tool strings only, never secrets
+	// Index is the optional per-review symbol index shared by all symbol_context
+	// calls. LOCKSTEP: thread it engine.AgentContext -> here -> toolContext (the
+	// shared runTool path all three backends use), or every tool call rebuilds
+	// the repo scan.
+	Index    *symbolcontext.Index
+	RepoDir  string
+	Rev      string
+	Runner   *gitcmd.Runner
+	Progress func(string) // nil = silent; milestone/tool strings only, never secrets
 	// Trace, when non-nil, accumulates the raw prompt, per-turn tool calls/results, and
 	// raw final response for persistence. nil = no capture (mirrors Progress).
 	Trace *engine.ReviewTrace
@@ -509,6 +515,7 @@ func toolContext(rc Context) enginetools.Context {
 		Runner:   rc.Runner,
 		Progress: rc.Progress,
 		Trace:    rc.Trace,
+		Index:    rc.Index,
 	}
 }
 

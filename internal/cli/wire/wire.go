@@ -1197,6 +1197,7 @@ func (a agentAdapter) Review(ctx stdctx.Context, rc engine.AgentContext) (engine
 		ProviderRetry:    rc.ProviderRetry,
 		Tools:            rc.Tools,
 		SymbolContext:    rc.SymbolContext,
+		Index:            rc.Index, // lockstep: forgetting this makes every tool call rebuild the repo scan
 		RepoDir:          rc.RepoDir,
 		Rev:              rc.Rev,
 		Runner:           rc.Runner,
