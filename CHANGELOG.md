@@ -55,6 +55,13 @@ comment with a new marker); subsequent re-runs dedupe normally. On a
 first M5 review **manually** (or off-hours) to absorb the one-time re-post before
 the next scheduled run.
 
+## [0.87.0](https://github.com/vanducng/miu-cr/compare/v0.86.0...v0.87.0) (2026-07-16)
+
+
+### Features
+
+* **host:** per-repo anchor_recovery override in host YAML ([#279](https://github.com/vanducng/miu-cr/issues/279)) ([54cd7f7](https://github.com/vanducng/miu-cr/commit/54cd7f75caca5cd2e9481bf47ecadcd811dd8bbc))
+
 ## [0.86.0](https://github.com/vanducng/miu-cr/compare/v0.85.3...v0.86.0) (2026-07-16)
 
 
