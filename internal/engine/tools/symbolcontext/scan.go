@@ -47,7 +47,7 @@ func scan(ctx context.Context, cfg config.SymbolContext, tc Context, args Args) 
 	s := &scanner{cfg: cfg, tc: tc, limit: normalizeLimit(args.Limit)}
 	args.Symbol = strings.TrimSpace(args.Symbol)
 	// Models routinely pass "path.go:42" in file; fold the suffix into line.
-	// ponytail: a real path literally ending in :digits loses its suffix here.
+	// Caveat: a real path literally ending in :digits loses its suffix here.
 	if rawFile, line := splitTrailingLine(args.File); line > 0 {
 		args.File = rawFile
 		if args.Line == 0 {
@@ -224,6 +224,9 @@ func (s *scanner) documentSymbols(ctx context.Context, file string) (string, err
 	if err != nil || strings.HasPrefix(text, "tree ") {
 		if listing := s.directoryListing(ctx, file); len(listing) > 0 {
 			return "Document symbols for " + file + ":\n(path is a directory; pass one of its files)\n" + strings.Join(listing, "\n"), nil
+		}
+		if err == nil {
+			return "", fmt.Errorf("%s is a directory with no scannable files; pass a file path", file)
 		}
 		return "", err
 	}

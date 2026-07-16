@@ -181,6 +181,13 @@ func TestReviewReuseKeyChangesForReviewShape(t *testing.T) {
 		t.Fatal("model env change must change the reuse key")
 	}
 	cfg = config.Defaults()
+	recoveryOn := reviewReuseKey(req, cfg)
+	off := false
+	cfg.Review.AnchorRecovery = &off
+	if got := reviewReuseKey(req, cfg); got == recoveryOn {
+		t.Fatal("anchor_recovery change must change the reuse key")
+	}
+	cfg = config.Defaults()
 	cfg.Providers["custom"] = config.Provider{Kind: config.KindAnthropic, Model: "m", AuthEnv: "MIUCR_REUSE_AUTH_ENV_TEST"}
 	req.Provider = "custom"
 	t.Setenv("MIUCR_REUSE_AUTH_ENV_TEST", "secret-one")

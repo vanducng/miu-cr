@@ -64,7 +64,11 @@ func (e *Engine) recoverAnchors(ctx stdctx.Context, anchored []Finding, selected
 		if strings.TrimSpace(f.QuotedCode) == "" { // no failed quote to relocate from
 			continue
 		}
-		if _, ok := byPath[f.File]; !ok { // no reviewed file to excerpt
+		d, ok := byPath[f.File]
+		if !ok { // no reviewed file to excerpt
+			continue
+		}
+		if strings.TrimSpace(relocateExcerpt(d)) == "" { // nothing to relocate against; keep the slot
 			continue
 		}
 		cands = append(cands, candidate{idx: i, rank: rank})
