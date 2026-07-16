@@ -40,6 +40,12 @@ type fakeAgent struct {
 	repair      func(engine.RepairRequest) (string, error)
 	repairUsage engine.Usage // returned per RepairPatch call (patch-repair metering tests)
 	repairCalls []engine.RepairRequest
+
+	// relocate drives RelocateQuote; nil => default "" (no usable quote). It
+	// records every call so tests can assert call count / order / skip.
+	relocate      func(engine.RelocateRequest) (string, error)
+	relocateUsage engine.Usage // returned per RelocateQuote call (anchor-recovery metering tests)
+	relocateCalls []engine.RelocateRequest
 }
 
 func (f *fakeAgent) Review(_ stdctx.Context, rc engine.AgentContext) (engine.ReviewOutput, error) {
@@ -77,6 +83,15 @@ func (f *fakeAgent) RepairPatch(_ stdctx.Context, rr engine.RepairRequest) (stri
 		return s, f.repairUsage, err
 	}
 	return "", f.repairUsage, nil
+}
+
+func (f *fakeAgent) RelocateQuote(_ stdctx.Context, rr engine.RelocateRequest) (string, engine.Usage, error) {
+	f.relocateCalls = append(f.relocateCalls, rr)
+	if f.relocate != nil {
+		s, err := f.relocate(rr)
+		return s, f.relocateUsage, err
+	}
+	return "", f.relocateUsage, nil
 }
 
 // fakeRetriever drives the engine's semantic seam without embed/DB/network.

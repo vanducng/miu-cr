@@ -189,6 +189,45 @@ func (a *codexAgent) RepairPatch(ctx stdctx.Context, rr RepairRequest) (string, 
 	return parseRepairReply(text.String()), engine.Usage{}, nil
 }
 
+// RelocateQuote issues one tools-less, code-only Responses completion over the
+// same SSE/stream path as Review and returns the fence-stripped, trimmed reply
+// (lockstep with the SDK backends).
+func (a *codexAgent) RelocateQuote(ctx stdctx.Context, rr RelocateRequest) (string, engine.Usage, error) {
+	if a.timeout > 0 {
+		var cancel stdctx.CancelFunc
+		ctx, cancel = stdctx.WithTimeout(ctx, a.timeout)
+		defer cancel()
+	}
+	resp, err := a.post(ctx, rr.ProviderRetry, nil, codexReq{
+		Model:        a.model,
+		Instructions: relocateSystemPrompt,
+		Input: []codexItem{{
+			Type:    "message",
+			Role:    "user",
+			Content: []codexContent{{Type: "input_text", Text: BuildRelocatePrompt(rr)}},
+		}},
+		Store:           false,
+		Stream:          true,
+		MaxOutputTokens: relocateMaxTokens,
+	})
+	if err != nil {
+		return "", engine.Usage{}, err
+	}
+	var text strings.Builder
+	for _, o := range resp.Output {
+		if o.Type != "message" {
+			continue
+		}
+		for _, c := range o.Content {
+			if c.Type == "output_text" || c.Type == "text" {
+				text.WriteString(c.Text)
+			}
+		}
+	}
+	// codex SSE usage is not parsed (its Review path is unmetered too); zero usage.
+	return parseRepairReply(text.String()), engine.Usage{}, nil
+}
+
 func (a *codexAgent) Review(ctx stdctx.Context, rc Context) (engine.ReviewOutput, error) {
 	if a.timeout > 0 {
 		var cancel stdctx.CancelFunc
@@ -264,6 +303,8 @@ func (a *codexAgent) Review(ctx stdctx.Context, rc Context) (engine.ReviewOutput
 			}
 			emptyRounds++
 			if emptyRounds >= maxEmptyRounds {
+				// Keep the unparseable reply: without it this failure is undiagnosable.
+				rc.Trace.SetFinalResponse(finalText)
 				return engine.ReviewOutput{}, fmt.Errorf("agent: model produced no tool calls and no parseable findings after %d rounds", emptyRounds)
 			}
 			input = append(input, codexItem{Type: "message", Role: "user",

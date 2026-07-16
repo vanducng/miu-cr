@@ -40,6 +40,10 @@ func (f *fakeAgent) RepairPatch(stdctx.Context, engine.RepairRequest) (string, e
 	return "", engine.Usage{}, nil
 }
 
+func (f *fakeAgent) RelocateQuote(stdctx.Context, engine.RelocateRequest) (string, engine.Usage, error) {
+	return "", engine.Usage{}, nil
+}
+
 func git(t *testing.T, dir string, args ...string) {
 	t.Helper()
 	cmd := exec.Command("git", args...)

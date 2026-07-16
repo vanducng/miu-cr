@@ -12,8 +12,9 @@ import (
 // adapter forwards every field, Rules in particular, whose copy is easy to
 // forget and would silently drop all project rules.
 type captureAgent struct {
-	got       agent.Context
-	gotRepair agent.RepairRequest
+	got         agent.Context
+	gotRepair   agent.RepairRequest
+	gotRelocate agent.RelocateRequest
 }
 
 func (c *captureAgent) Review(_ stdctx.Context, rc agent.Context) (engine.ReviewOutput, error) {
@@ -23,6 +24,11 @@ func (c *captureAgent) Review(_ stdctx.Context, rc agent.Context) (engine.Review
 
 func (c *captureAgent) RepairPatch(_ stdctx.Context, rr agent.RepairRequest) (string, engine.Usage, error) {
 	c.gotRepair = rr
+	return "", engine.Usage{}, nil
+}
+
+func (c *captureAgent) RelocateQuote(_ stdctx.Context, rr agent.RelocateRequest) (string, engine.Usage, error) {
+	c.gotRelocate = rr
 	return "", engine.Usage{}, nil
 }
 

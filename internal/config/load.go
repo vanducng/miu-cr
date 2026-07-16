@@ -173,6 +173,9 @@ func mergeReview(base, file Review) Review {
 	if file.PatchRepair != nil {
 		out.PatchRepair = file.PatchRepair
 	}
+	if file.AnchorRecovery != nil {
+		out.AnchorRecovery = file.AnchorRecovery
+	}
 	if file.CodeSummary.Walkthrough != nil {
 		out.CodeSummary.Walkthrough = file.CodeSummary.Walkthrough
 	}

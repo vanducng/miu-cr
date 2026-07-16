@@ -101,6 +101,12 @@ type Agent interface {
 	// re-validates the reply; "" means no usable replacement (the engine falls
 	// back to the original finding).
 	RepairPatch(ctx stdctx.Context, rr RepairRequest) (string, engine.Usage, error)
+	// RelocateQuote runs a single tools-less completion for ONE drift-rejected
+	// finding + ONE file excerpt and returns the exact verbatim line(s) the
+	// finding refers to (fence-stripped). The engine re-anchors the reply with
+	// its deterministic anchorer; "" means no usable quote (the finding stays
+	// dropped).
+	RelocateQuote(ctx stdctx.Context, rr RelocateRequest) (string, engine.Usage, error)
 }
 
 const (
@@ -111,6 +117,10 @@ const (
 	// repairMaxTokens bounds the second-pass replacement: a single span's minimal
 	// edit, never a full review.
 	repairMaxTokens = 1024
+
+	// relocateMaxTokens bounds the anchor-recovery reply: a minimal contiguous
+	// quote copied from the excerpt, never a full review.
+	relocateMaxTokens = 512
 
 	// Injected on the final tool turn (with tools withdrawn) so a budget-exhausted
 	// large diff is forced to finalize into a real review, not a hard failure.
@@ -260,6 +270,8 @@ func (a *anthropicAgent) Review(ctx stdctx.Context, rc Context) (engine.ReviewOu
 			}
 			emptyRounds++
 			if emptyRounds >= maxEmptyRounds {
+				// Keep the unparseable reply: without it this failure is undiagnosable.
+				rc.Trace.SetFinalResponse(finalText)
 				return engine.ReviewOutput{}, fmt.Errorf("agent: model produced no tool calls and no parseable findings after %d rounds", emptyRounds)
 			}
 			params.Messages = append(params.Messages, anthropic.NewUserMessage(anthropic.NewTextBlock(
@@ -290,6 +302,45 @@ func (a *anthropicAgent) RepairPatch(ctx stdctx.Context, rr RepairRequest) (stri
 			System:      []anthropic.TextBlockParam{{Text: repairSystemPrompt}},
 			Messages: []anthropic.MessageParam{
 				anthropic.NewUserMessage(anthropic.NewTextBlock(BuildRepairPrompt(rr))),
+			},
+		})
+	}, classifyAnthropicErr, anthropicProviderRetryable)
+	if err != nil {
+		return "", engine.Usage{}, err
+	}
+	var text strings.Builder
+	for _, block := range msg.Content {
+		if block.Type == "text" {
+			text.WriteString(block.Text)
+		}
+	}
+	u := engine.Usage{
+		InputTokens:         msg.Usage.InputTokens,
+		OutputTokens:        msg.Usage.OutputTokens,
+		CacheReadTokens:     msg.Usage.CacheReadInputTokens,
+		CacheCreationTokens: msg.Usage.CacheCreationInputTokens,
+	}
+	return parseRepairReply(text.String()), u, nil
+}
+
+// RelocateQuote issues one tools-less, code-only completion (system =
+// relocateSystemPrompt, user = BuildRelocatePrompt) and returns the
+// fence-stripped, trimmed reply. Mirrors RepairPatch: same creds/client, the
+// ctx deadline owns the wall clock.
+func (a *anthropicAgent) RelocateQuote(ctx stdctx.Context, rr RelocateRequest) (string, engine.Usage, error) {
+	if a.timeout > 0 {
+		var cancel stdctx.CancelFunc
+		ctx, cancel = stdctx.WithTimeout(ctx, a.timeout)
+		defer cancel()
+	}
+	msg, err := retryProviderCall(ctx, rr.ProviderRetry, nil, "anthropic.relocate", func() (*anthropic.Message, error) {
+		return a.client.newMessage(ctx, anthropic.MessageNewParams{
+			MaxTokens:   relocateMaxTokens,
+			Temperature: anthropic.Float(a.temperature),
+			Model:       anthropic.Model(a.model),
+			System:      []anthropic.TextBlockParam{{Text: relocateSystemPrompt}},
+			Messages: []anthropic.MessageParam{
+				anthropic.NewUserMessage(anthropic.NewTextBlock(BuildRelocatePrompt(rr))),
 			},
 		})
 	}, classifyAnthropicErr, anthropicProviderRetryable)
@@ -461,6 +512,24 @@ func toolContext(rc Context) enginetools.Context {
 	}
 }
 
+// extractFindings recovers the findings object from a reply that wrapped it in
+// prose ("Here are my findings: {...}"), a mid-text fence, or trailing chatter —
+// the dominant cause of a discarded review turn. The stdlib decoder owns
+// nesting/strings/trailing text, so this only picks the opening brace; a
+// non-findings object (no "findings" key) is skipped rather than accepted.
+// ponytail: linear brace scan over a max_tokens-bounded reply; index the key
+// first if replies ever grow unbounded.
+func extractFindings(body string) (rawFindings, bool) {
+	for i := strings.IndexByte(body, '{'); i >= 0; i = strings.IndexByte(body, '{') {
+		var raw rawFindings
+		if err := json.NewDecoder(strings.NewReader(body[i:])).Decode(&raw); err == nil && raw.Findings != nil {
+			return raw, true
+		}
+		body = body[i+1:]
+	}
+	return rawFindings{}, false
+}
+
 // parseFindings strips markdown fences and unmarshals the model's JSON into a
 // ReviewOutput: findings (carrying severity/category/quoted-code and NO line
 // numbers) plus the optional, length-capped walkthrough/file-digest. Untrusted
@@ -472,7 +541,11 @@ func parseFindings(text string) (engine.ReviewOutput, bool) {
 	}
 	var raw rawFindings
 	if err := json.Unmarshal([]byte(body), &raw); err != nil {
-		return engine.ReviewOutput{}, false
+		found, ok := extractFindings(body)
+		if !ok {
+			return engine.ReviewOutput{}, false
+		}
+		raw = found
 	}
 	if len(raw.Findings) > maxFindings {
 		raw.Findings = raw.Findings[:maxFindings]

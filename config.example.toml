@@ -121,6 +121,7 @@ default_provider = "anthropic"
 # stalled_timeout = "5m"         # no-progress watchdog; "0s" disables
 # suggest      = false           # emit GitHub one-click suggestions on --post (default off)
 # patch_repair = false           # 2nd-pass recovery of one-click suggestions; only effective with suggest=true (default off)
+# anchor_recovery = true         # 2nd-pass rescue of findings whose quoted code failed line-anchoring; max 3 LLM calls per review, severity >= medium, recovered quotes must still anchor exactly (default on)
 #
 # # Provider API retry behavior (all optional; values shown are defaults).
 # [review.provider_retry]
