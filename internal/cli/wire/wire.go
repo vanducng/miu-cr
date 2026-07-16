@@ -251,6 +251,7 @@ func (engineReviewer) Review(ctx stdctx.Context, req cli.ReviewRequest) (cli.Rev
 		Provider:        string(creds.Kind),
 		Model:           creds.Model,
 		Quota:           gate,
+		AnchorRecovery:  cfg.Review.AnchorRecoveryOn(),
 
 		Rules:            loadRules(req.RepoDir, true),
 		RulesFork:        false,
@@ -500,6 +501,7 @@ func (prReviewer) ReviewPR(ctx stdctx.Context, req cli.PRReviewRequest) (cli.Rev
 		Number:          info.Number,
 		Post:            req.Post,
 		PatchRepair:     req.PatchRepair,
+		AnchorRecovery:  cfg.Review.AnchorRecoveryOn(),
 
 		Rules:            loaded,
 		RulesFork:        info.IsFork,
@@ -655,6 +657,7 @@ type reviewReuseConfigShape struct {
 	ProviderAuthEnvValueFingerprint string
 	ReviewTemperature               *float64
 	ReviewThinking                  string
+	ReviewAnchorRecovery            *bool
 	CategoryURLs                    map[string]string
 	Env                             reviewReuseEnvShape
 	RequestSecretSet                reviewReuseRequestSecretShape
@@ -731,6 +734,7 @@ func newReviewReuseShape(req cli.PRReviewRequest, cfg config.Config, providerNam
 			ProviderAuthEnvValueFingerprint: secretReuseFingerprint(os.Getenv(provider.AuthEnv)),
 			ReviewTemperature:               cfg.Review.Temperature,
 			ReviewThinking:                  cfg.Review.Thinking,
+			ReviewAnchorRecovery:            cfg.Review.AnchorRecovery,
 			CategoryURLs:                    cfg.Review.CategoryURLs,
 			Env:                             reviewReuseEnvShapeFromProcess(),
 			RequestSecretSet: reviewReuseRequestSecretShape{
@@ -1206,6 +1210,20 @@ func (a agentAdapter) RepairPatch(ctx stdctx.Context, rr engine.RepairRequest) (
 	})
 }
 
+// RelocateQuote forwards the engine's anchor-recovery request to the concrete
+// agent — lockstep: a missed forward silently no-ops recovery for the real agent.
+func (a agentAdapter) RelocateQuote(ctx stdctx.Context, rr engine.RelocateRequest) (string, engine.Usage, error) {
+	return a.inner.RelocateQuote(ctx, agent.RelocateRequest{
+		File:          rr.File,
+		Rationale:     rr.Rationale,
+		QuotedCode:    rr.QuotedCode,
+		Excerpt:       rr.Excerpt,
+		Category:      rr.Category,
+		Severity:      rr.Severity,
+		ProviderRetry: rr.ProviderRetry,
+	})
+}
+
 // mcpServerImpl builds the engine + SQLite store and serves them over MCP. The
 // agent resolves credentials lazily (on the first review_run), so the MCP
 // handshake and tools/list need no Anthropic key.
@@ -1299,6 +1317,16 @@ func (l *lazyAgent) RepairPatch(ctx stdctx.Context, rr engine.RepairRequest) (st
 		return "", engine.Usage{}, err
 	}
 	return a.RepairPatch(ctx, rr)
+}
+
+// RelocateQuote reuses the memoized agent (mirroring Review) — lockstep with the
+// engine.Agent interface.
+func (l *lazyAgent) RelocateQuote(ctx stdctx.Context, rr engine.RelocateRequest) (string, engine.Usage, error) {
+	a, err := l.resolve(ctx)
+	if err != nil {
+		return "", engine.Usage{}, err
+	}
+	return a.RelocateQuote(ctx, rr)
 }
 
 func modeFor(req cli.ReviewRequest) diff.Mode {

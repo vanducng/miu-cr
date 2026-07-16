@@ -28,6 +28,10 @@ type fakeAgent struct {
 	repairReply string
 	repairErr   error
 	gotRepair   RepairRequest
+	// relocateReply/relocateErr mirror repairReply/repairErr for RelocateQuote.
+	relocateReply string
+	relocateErr   error
+	gotRelocate   RelocateRequest
 }
 
 func (f *fakeAgent) Review(ctx stdctx.Context, rc Context) (engine.ReviewOutput, error) {
@@ -50,6 +54,16 @@ func (f *fakeAgent) RepairPatch(_ stdctx.Context, rr RepairRequest) (string, eng
 		return "", engine.Usage{}, f.repairErr
 	}
 	return parseRepairReply(f.repairReply), engine.Usage{}, nil
+}
+
+// RelocateQuote records the request and returns the canned reply, fence-stripped
+// the same way the production backends parse it.
+func (f *fakeAgent) RelocateQuote(_ stdctx.Context, rr RelocateRequest) (string, engine.Usage, error) {
+	f.gotRelocate = rr
+	if f.relocateErr != nil {
+		return "", engine.Usage{}, f.relocateErr
+	}
+	return parseRepairReply(f.relocateReply), engine.Usage{}, nil
 }
 
 var _ Agent = (*fakeAgent)(nil)
@@ -379,5 +393,55 @@ func TestTokenNeverInFindings(t *testing.T) {
 			strings.Contains(f.Severity, secretToken) {
 			t.Fatal("API token leaked into a returned Finding")
 		}
+	}
+}
+
+// Models routinely wrap the required JSON in prose, a mid-text fence, or
+// trailing chatter. Each of those used to burn an empty round and, at three in a
+// row, discard an otherwise complete review.
+func TestParseFindingsRecoversWrappedJSON(t *testing.T) {
+	finding := `{"findings":[{"file":"a.go","existing_code":"x","severity":"low","category":"bug","rationale":"r"}]}`
+	cases := map[string]string{
+		"prose prefix":     "I reviewed the changes. Here are my findings:\n\n" + finding,
+		"mid-text fence":   "Analysis complete.\n\n```json\n" + finding + "\n```",
+		"trailing chatter": finding + "\n\nLet me know if you want more detail.",
+		"prose both sides": "Here you go:\n\n" + finding + "\n\nHope that helps!",
+	}
+	for name, model := range cases {
+		out, ok := parseFindings(model)
+		if !ok {
+			t.Errorf("%s: parse failed", name)
+			continue
+		}
+		if len(out.Findings) != 1 || out.Findings[0].File != "a.go" {
+			t.Errorf("%s: wrong findings: %+v", name, out.Findings)
+		}
+	}
+}
+
+// A clean review ("no issues") must survive the same wrapping: an empty findings
+// array is a real result, not a parse miss.
+func TestParseFindingsRecoversWrappedEmptyResult(t *testing.T) {
+	out, ok := parseFindings("No problems found in this diff.\n\n```json\n{\"findings\":[]}\n```")
+	if !ok {
+		t.Fatal("wrapped empty findings must parse as a clean review")
+	}
+	if len(out.Findings) != 0 {
+		t.Fatalf("want 0 findings, got %d", len(out.Findings))
+	}
+}
+
+// Prose braces must not be mistaken for the findings object, and a reply with no
+// findings object at all must still fail.
+func TestParseFindingsIgnoresNonFindingsObjects(t *testing.T) {
+	if _, ok := parseFindings(`I considered {"foo":"bar"} but found nothing worth reporting.`); ok {
+		t.Fatal("a non-findings object must not parse as a review")
+	}
+	out, ok := parseFindings(`Config {"retries":3} looked fine. Findings: {"findings":[]}`)
+	if !ok {
+		t.Fatal("must skip the decoy object and find the real one")
+	}
+	if len(out.Findings) != 0 {
+		t.Fatalf("want 0 findings, got %d", len(out.Findings))
 	}
 }

@@ -111,9 +111,22 @@ type ReviewTrace struct {
 	// Reasoning holds the model's captured internal reasoning. Populated only when
 	// CaptureReasoning is on AND [review].thinking is enabled (off = nothing to capture).
 	// Quotes diff content: always redacted at persist; opt-in, off by default.
-	Reasoning    *TraceReasoning                `json:"reasoning,omitempty"`
-	Sink         func(step string, payload any) `json:"-"`
-	modelEmitted bool                           // the live "model" step fires once, when model first becomes non-empty
+	Reasoning *TraceReasoning `json:"reasoning,omitempty"`
+	// AnchorRecoveries holds one record per anchor-recovery attempt (which finding,
+	// whether its relocated quote re-anchored). Identity only, no code quotes.
+	AnchorRecoveries []AnchorRecoveryRecord         `json:"anchor_recoveries,omitempty"`
+	Sink             func(step string, payload any) `json:"-"`
+	modelEmitted     bool                           // the live "model" step fires once, when model first becomes non-empty
+}
+
+// AnchorRecoveryRecord is one anchor-recovery attempt: the finding's identity
+// (file + severity) and the outcome (Recovered + the re-anchored line, 0 when
+// the relocated quote still failed to anchor).
+type AnchorRecoveryRecord struct {
+	File      string `json:"file"`
+	Severity  string `json:"severity"`
+	Recovered bool   `json:"recovered"`
+	Line      int    `json:"line,omitempty"`
 }
 
 // TraceReasoning holds one captured reasoning output. Text is the raw thinking for
@@ -275,6 +288,15 @@ func (t *ReviewTrace) RecordTurnReason(turn int, text string) {
 	t.emit("turn_reason", tr)
 }
 
+// RecordAnchorRecovery appends one anchor-recovery attempt/outcome; nil-safe.
+func (t *ReviewTrace) RecordAnchorRecovery(rec AnchorRecoveryRecord) {
+	if t == nil {
+		return
+	}
+	t.AnchorRecoveries = append(t.AnchorRecoveries, rec)
+	t.emit("anchor_recovery", rec)
+}
+
 // SetReasoning captures the model's reasoning once (first non-empty wins); nil-safe.
 // Only call when text is non-empty: reasoning quotes diff content and is redacted at persist.
 func (t *ReviewTrace) SetReasoning(provider, text string, tokens int64) {
@@ -398,6 +420,13 @@ type Agent interface {
 	// token Usage. "" => no usable replacement; the engine falls back to the
 	// original finding. The wire layer adapts this to agent.RepairPatch.
 	RepairPatch(ctx stdctx.Context, rr RepairRequest) (string, Usage, error)
+	// RelocateQuote runs the anchor-recovery second pass: ONE drift-rejected
+	// finding + its file excerpt in, the exact verbatim line(s) it refers to out
+	// (already fence-stripped/trimmed) plus that call's token Usage. The engine
+	// re-anchors the reply with the SAME deterministic anchorer; "" => no usable
+	// quote (the finding stays dropped). The wire layer adapts this to
+	// agent.RelocateQuote.
+	RelocateQuote(ctx stdctx.Context, rr RelocateRequest) (string, Usage, error)
 }
 
 // RepairRequest is the engine-side shadow of agent.RepairRequest (defined here so
@@ -405,6 +434,20 @@ type Agent interface {
 type RepairRequest struct {
 	Span          string
 	Rationale     string
+	Category      string
+	Severity      string
+	ProviderRetry config.ProviderRetry
+}
+
+// RelocateRequest is the engine-side shadow of agent.RelocateRequest (mirrors
+// RepairRequest; the wire layer adapts it). QuotedCode is the anchor quote that
+// FAILED to match; Excerpt is that file's diff (or new-file content) the model
+// must copy the true line(s) from.
+type RelocateRequest struct {
+	File          string
+	Rationale     string
+	QuotedCode    string
+	Excerpt       string
 	Category      string
 	Severity      string
 	ProviderRetry config.ProviderRetry
@@ -494,6 +537,15 @@ type Request struct {
 	// (0 => defaultMaxRepair); candidates are tried highest-severity-first.
 	PatchRepair bool
 	MaxRepair   int
+
+	// AnchorRecovery opts into the bounded second LLM pass that rescues findings
+	// whose QuotedCode failed line-anchoring (drift-reject would drop them): one
+	// focused RelocateQuote call per finding (severity >= medium, highest first,
+	// hard cap maxAnchorRecovery), and the recovered quote is kept ONLY if the
+	// SAME deterministic anchorer now places it. Runs on both the local and PR
+	// paths. Resolved from [review].anchor_recovery (default on) by the wire
+	// layer. OFF is byte-identical: no calls, no stats.
+	AnchorRecovery bool
 
 	// Persist context copied onto the saved PersistRecord (no secrets): the resolved
 	// provider/model and, on the --pr path, the PR owner/repo/number. Local reviews
@@ -694,6 +746,9 @@ func (e *Engine) Review(ctx stdctx.Context, req Request) (ReviewResult, error) {
 		return ReviewResult{}, &clierr.CLIError{Code: "engine.no_anchorer", Message: "anchoring not wired", Exit: 1}
 	}
 	anchored := anchorLineNumbers(out.Findings, selected)
+	recoveryStart := time.Now()
+	anchored, recovery := e.recoverAnchors(ctx, anchored, selected, req, trace)
+	recoveryMS := time.Since(recoveryStart).Milliseconds()
 	kept := dropDrift(anchored)
 	kept = dedupe(kept)
 
@@ -735,6 +790,24 @@ func (e *Engine) Review(ctx stdctx.Context, req Request) (ReviewResult, error) {
 	for k, v := range passStats {
 		stats[k] = v
 	}
+	// findings_dropped above already counts only the FINALLY-dropped findings:
+	// recovery re-anchored its successes in place before dropDrift ran.
+	if recovery.attempted > 0 {
+		stats["anchor_recovery"] = map[string]any{
+			"attempted":             float64(recovery.attempted),
+			"recovered":             float64(recovery.recovered),
+			"skipped_cap":           float64(recovery.skippedCap),
+			"input_tokens":          float64(recovery.usage.InputTokens),
+			"output_tokens":         float64(recovery.usage.OutputTokens),
+			"cache_read_tokens":     float64(recovery.usage.CacheReadTokens),
+			"cache_creation_tokens": float64(recovery.usage.CacheCreationTokens),
+			"ms":                    float64(recoveryMS),
+		}
+	}
+	if recovery.recovered > 0 {
+		stats["findings_recovered"] = float64(recovery.recovered)
+	}
+	out.Usage.Add(recovery.usage) // fold the anchor-recovery second-pass tokens into metering + stats
 	repairStart := time.Now()
 	kept, repairUsage := e.repairPatches(ctx, kept, selected, req, stats)
 	out.Usage.Add(repairUsage) // fold the --patch-repair second-pass tokens into metering + stats
@@ -900,8 +973,11 @@ func retrieveSemantic(ctx stdctx.Context, r Retriever, selected []diff.Diff) (ad
 const (
 	projectContextMaxFileBytes  = 8 * 1024
 	projectContextMaxTotalBytes = 32 * 1024
-	changedSymbolContextFiles   = 12
-	changedSymbolContextBytes   = 16 * 1024
+	// Sized from production traces: the 16KB/12-file cap truncated 31% of
+	// reviews, and truncated reviews spend extra tool turns re-fetching what the
+	// prefetch dropped. Build cost is ~19ms, so the larger cap is near-free.
+	changedSymbolContextFiles   = 20
+	changedSymbolContextBytes   = 32 * 1024
 	changedSymbolContextLimit   = 8
 	changedSymbolContextHeader  = "Changed symbol context from the reviewed revision:\n"
 )
@@ -1004,6 +1080,11 @@ func buildChangedSymbolContext(ctx stdctx.Context, req Request, selected []diff.
 		}
 		sb.WriteString(block)
 		files++
+	}
+	// Traces show ~27% of the model's document_symbols calls re-request files
+	// already injected above; say so explicitly to stop the duplicate turns.
+	if sb.Len() > 0 {
+		sb.WriteString("\n(document_symbols for the files above are already included here; call symbol_context on them only for a relation not shown.)\n")
 	}
 	return strings.TrimRight(sb.String(), "\n"), files, truncated
 }
@@ -1208,6 +1289,13 @@ func redactTrace(t ReviewTrace) ReviewTrace {
 		r := *t.Reasoning
 		r.Text = config.RedactString(r.Text)
 		t.Reasoning = &r
+	}
+	if len(t.AnchorRecoveries) > 0 {
+		recs := make([]AnchorRecoveryRecord, len(t.AnchorRecoveries))
+		for i, r := range t.AnchorRecoveries {
+			recs[i] = AnchorRecoveryRecord{File: config.RedactString(r.File), Severity: r.Severity, Recovered: r.Recovered, Line: r.Line}
+		}
+		t.AnchorRecoveries = recs
 	}
 	return t
 }

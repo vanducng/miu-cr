@@ -251,3 +251,59 @@ func TestRunCapsOutput(t *testing.T) {
 		t.Fatalf("capped output length = %d, want <= %d", len(out), cfg.MaxBytes)
 	}
 }
+
+// A directory passed to document_symbols must answer with a file listing the
+// model can act on, not a raw git error that wastes the turn.
+func TestDocumentSymbolsOnDirectoryListsFiles(t *testing.T) {
+	repo := initRepo(t)
+	writeRepoFile(t, repo, "pkg/a.go", "package pkg\n\nfunc Alpha() {}\n")
+	writeRepoFile(t, repo, "pkg/b.go", "package pkg\n\nfunc Beta() {}\n")
+	rev := commitRepo(t, repo, "init")
+
+	out, err := scan(context.Background(), symbolConfig(), Context{RepoDir: repo, Rev: rev, Runner: gitcmd.New()},
+		Args{Relation: "document_symbols", File: "pkg"})
+	if err != nil {
+		t.Fatalf("directory path must not error: %v", err)
+	}
+	if !strings.Contains(out, "directory") || !strings.Contains(out, "pkg/a.go") || !strings.Contains(out, "pkg/b.go") {
+		t.Fatalf("want directory listing, got: %q", out)
+	}
+}
+
+// references with file+line but no symbol must resolve the enclosing
+// definition instead of erroring.
+func TestReferencesResolvesSymbolFromFileLine(t *testing.T) {
+	repo := initRepo(t)
+	writeRepoFile(t, repo, "a.go", "package a\n\nfunc Target() {\n\thelper()\n}\n")
+	writeRepoFile(t, repo, "b.go", "package a\n\nfunc caller() {\n\tTarget()\n}\n")
+	rev := commitRepo(t, repo, "init")
+
+	out, err := scan(context.Background(), symbolConfig(), Context{RepoDir: repo, Rev: rev, Runner: gitcmd.New()},
+		Args{Relation: "references", File: "a.go", Line: 4})
+	if err != nil {
+		t.Fatalf("references with file+line must resolve a symbol: %v", err)
+	}
+	if !strings.Contains(out, "References for Target") {
+		t.Fatalf("want references for Target, got: %q", out)
+	}
+}
+
+// "path.go:42" in the file argument must fold the trailing line into Line.
+func TestFileArgWithTrailingLineSuffix(t *testing.T) {
+	repo := initRepo(t)
+	writeRepoFile(t, repo, "a.go", "package a\n\nfunc Target() {\n\thelper()\n}\n")
+	rev := commitRepo(t, repo, "init")
+
+	out, err := scan(context.Background(), symbolConfig(), Context{RepoDir: repo, Rev: rev, Runner: gitcmd.New()},
+		Args{Relation: "references", File: "a.go:3"})
+	if err != nil {
+		t.Fatalf("file:line suffix must parse: %v", err)
+	}
+	if !strings.Contains(out, "References for Target") {
+		t.Fatalf("want references for Target, got: %q", out)
+	}
+
+	if got, n := splitTrailingLine("plain.go"); got != "plain.go" || n != 0 {
+		t.Fatalf("plain path must pass through, got %q %d", got, n)
+	}
+}

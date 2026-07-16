@@ -46,6 +46,14 @@ func scan(ctx context.Context, cfg config.SymbolContext, tc Context, args Args) 
 	}
 	s := &scanner{cfg: cfg, tc: tc, limit: normalizeLimit(args.Limit)}
 	args.Symbol = strings.TrimSpace(args.Symbol)
+	// Models routinely pass "path.go:42" in file; fold the suffix into line.
+	// Caveat: a real path literally ending in :digits loses its suffix here.
+	if rawFile, line := splitTrailingLine(args.File); line > 0 {
+		args.File = rawFile
+		if args.Line == 0 {
+			args.Line = line
+		}
+	}
 	file, err := cleanFilePath(args.File)
 	if err != nil {
 		return "", err
@@ -71,8 +79,11 @@ func scan(ctx context.Context, cfg config.SymbolContext, tc Context, args Args) 
 		}
 		return formatDefinitions("Implementation candidates for "+args.Symbol, defs, s.limit), nil
 	case "references":
+		if args.Symbol == "" && args.File != "" && args.Line > 0 {
+			args.Symbol = s.symbolAtLine(ctx, args.File, args.Line)
+		}
 		if args.Symbol == "" {
-			return "", fmt.Errorf("references requires symbol")
+			return "", fmt.Errorf("references requires symbol (or file + line to resolve the enclosing one)")
 		}
 		return s.grep(ctx, "References for "+args.Symbol, args.Symbol, args.File)
 	case "incoming_calls":
@@ -207,7 +218,16 @@ func (s *scanner) outgoingCalls(ctx context.Context, symbol, file string) (strin
 
 func (s *scanner) documentSymbols(ctx context.Context, file string) (string, error) {
 	text, err := s.readText(ctx, file)
-	if err != nil {
+	// A directory path used to waste the model's turn (raw git exit-128 when
+	// staged, a useless "tree" blob at a rev); answer with the listing the next
+	// call needs. git show renders a directory as "tree <rev>:<path>\n...".
+	if err != nil || strings.HasPrefix(text, "tree ") {
+		if listing := s.directoryListing(ctx, file); len(listing) > 0 {
+			return "Document symbols for " + file + ":\n(path is a directory; pass one of its files)\n" + strings.Join(listing, "\n"), nil
+		}
+		if err == nil {
+			return "", fmt.Errorf("%s is a directory with no scannable files; pass a file path", file)
+		}
 		return "", err
 	}
 	defs := extractDefinitions(file, text)
@@ -511,4 +531,73 @@ func extractDBTRefs(text string) []string {
 		}
 	}
 	return out
+}
+
+var trailingLineRe = regexp.MustCompile(`^(.+):(\d{1,7})$`)
+
+// splitTrailingLine separates a "path:42"-style file argument into path + line.
+func splitTrailingLine(file string) (string, int) {
+	m := trailingLineRe.FindStringSubmatch(strings.TrimSpace(file))
+	if m == nil {
+		return file, 0
+	}
+	n := 0
+	for _, r := range m[2] {
+		n = n*10 + int(r-'0')
+	}
+	return m[1], n
+}
+
+// symbolAtLine names the definition enclosing (or nearest before, else first
+// after) the given line, so "references file:line" works without a symbol.
+func (s *scanner) symbolAtLine(ctx context.Context, file string, line int) string {
+	text, err := s.readText(ctx, file)
+	if err != nil {
+		return ""
+	}
+	var before, after *definition
+	for _, d := range extractDefinitions(file, text) {
+		d := d
+		if d.Line <= line {
+			if before == nil || d.Line > before.Line {
+				before = &d
+			}
+		} else if after == nil || d.Line < after.Line {
+			after = &d
+		}
+	}
+	if before != nil {
+		return before.Name
+	}
+	if after != nil {
+		return after.Name
+	}
+	return ""
+}
+
+// directoryListing returns the tracked files under dir at the reviewed
+// revision (empty when dir is not a directory), capped for prompt budget.
+func (s *scanner) directoryListing(ctx context.Context, dir string) []string {
+	dir = strings.TrimRight(dir, "/")
+	if dir == "" {
+		return nil
+	}
+	args := []string{"ls-files", "-z", "--", dir + "/"}
+	if s.tc.Rev != "" {
+		args = []string{"ls-tree", "-rz", "--name-only", "--full-tree", s.tc.Rev, "--", dir + "/"}
+	}
+	out, err := s.tc.Runner.Output(ctx, s.tc.RepoDir, args...)
+	if err != nil {
+		return nil
+	}
+	var files []string
+	for _, part := range strings.Split(string(out), "\x00") {
+		if path := strings.TrimSpace(part); path != "" {
+			files = append(files, path)
+			if len(files) >= 20 {
+				break
+			}
+		}
+	}
+	return files
 }

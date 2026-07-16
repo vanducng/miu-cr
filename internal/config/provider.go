@@ -152,6 +152,7 @@ type Review struct {
 	Conversation   *bool             `toml:"conversation,omitempty"`
 	Suggest        *bool             `toml:"suggest,omitempty"`
 	PatchRepair    *bool             `toml:"patch_repair,omitempty"`
+	AnchorRecovery *bool             `toml:"anchor_recovery,omitempty"` // nil → on; bounded LLM rescue of findings whose quoted code failed anchoring
 	Tools          ReviewTools       `toml:"tools,omitempty"`
 	Approval       ApprovalPolicy    `toml:"approval"`
 	Subagents      ReviewSubagents   `toml:"subagents,omitempty"`
@@ -176,6 +177,11 @@ func (c CodeSummary) WantWalkthrough() bool { return c.Walkthrough == nil || *c.
 func (c CodeSummary) WantFileChangeSummary() bool {
 	return c.FileChangeSummary != nil && *c.FileChangeSummary
 }
+
+// AnchorRecoveryOn resolves the anchor-recovery toggle (nil → true). Default on:
+// the pass only spends when a finding was about to be dropped, is hard-capped,
+// and its recovered quote must still pass the deterministic anchorer.
+func (r Review) AnchorRecoveryOn() bool { return r.AnchorRecovery == nil || *r.AnchorRecovery }
 
 const (
 	DefaultProviderRetryMaxRetries     = 10

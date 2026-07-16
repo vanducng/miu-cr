@@ -138,6 +138,9 @@ func reviewEqual(a, b Review) bool {
 	if (a.PatchRepair == nil) != (b.PatchRepair == nil) || (a.PatchRepair != nil && *a.PatchRepair != *b.PatchRepair) {
 		return false
 	}
+	if (a.AnchorRecovery == nil) != (b.AnchorRecovery == nil) || (a.AnchorRecovery != nil && *a.AnchorRecovery != *b.AnchorRecovery) {
+		return false
+	}
 	if !reflect.DeepEqual(a.Tools, b.Tools) {
 		return false
 	}

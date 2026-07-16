@@ -139,6 +139,45 @@ func (a *openaiAgent) RepairPatch(ctx stdctx.Context, rr RepairRequest) (string,
 	return parseRepairReply(resp.Choices[0].Message.Content), u, nil
 }
 
+// RelocateQuote issues one tools-less, code-only chat completion and returns
+// the fence-stripped, trimmed reply (lockstep with anthropicAgent.RelocateQuote).
+func (a *openaiAgent) RelocateQuote(ctx stdctx.Context, rr RelocateRequest) (string, engine.Usage, error) {
+	if a.timeout > 0 {
+		var cancel stdctx.CancelFunc
+		ctx, cancel = stdctx.WithTimeout(ctx, a.timeout)
+		defer cancel()
+	}
+	relocateParams := openai.ChatCompletionNewParams{
+		Model: shared.ChatModel(a.model),
+		Messages: []openai.ChatCompletionMessageParamUnion{
+			openai.SystemMessage(relocateSystemPrompt),
+			openai.UserMessage(BuildRelocatePrompt(rr)),
+		},
+	}
+	if isOpenAIReasoningModel(a.model) {
+		relocateParams.MaxCompletionTokens = openai.Int(int64(relocateMaxTokens))
+	} else {
+		relocateParams.Temperature = openai.Float(a.temperature)
+		relocateParams.MaxTokens = openai.Int(int64(relocateMaxTokens))
+	}
+	resp, err := retryProviderCall(ctx, rr.ProviderRetry, nil, "openai.relocate", func() (*openai.ChatCompletion, error) {
+		return a.client.create(ctx, relocateParams)
+	}, classifyOpenAIErr, openAIProviderRetryable)
+	if err != nil {
+		return "", engine.Usage{}, err
+	}
+	if len(resp.Choices) == 0 {
+		return "", engine.Usage{}, fmt.Errorf("agent: empty completion (no choices)")
+	}
+	cached := resp.Usage.PromptTokensDetails.CachedTokens
+	u := engine.Usage{
+		InputTokens:     resp.Usage.PromptTokens - cached,
+		OutputTokens:    resp.Usage.CompletionTokens,
+		CacheReadTokens: cached,
+	}
+	return parseRepairReply(resp.Choices[0].Message.Content), u, nil
+}
+
 func (a *openaiAgent) Review(ctx stdctx.Context, rc Context) (engine.ReviewOutput, error) {
 	// The ctx deadline (below) owns the wall clock; each turn checks ctx.Err()
 	// rather than tracking a parallel manual deadline.
@@ -231,6 +270,8 @@ func (a *openaiAgent) Review(ctx stdctx.Context, rc Context) (engine.ReviewOutpu
 			}
 			emptyRounds++
 			if emptyRounds >= maxEmptyRounds {
+				// Keep the unparseable reply: without it this failure is undiagnosable.
+				rc.Trace.SetFinalResponse(msg.Content)
 				return engine.ReviewOutput{}, fmt.Errorf("agent: model produced no tool calls and no parseable findings after %d rounds", emptyRounds)
 			}
 			params.Messages = append(params.Messages, openai.UserMessage(

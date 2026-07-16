@@ -49,6 +49,10 @@ func (f *subagentFake) RepairPatch(stdctx.Context, engine.RepairRequest) (string
 	return "", engine.Usage{}, nil
 }
 
+func (f *subagentFake) RelocateQuote(stdctx.Context, engine.RelocateRequest) (string, engine.Usage, error) {
+	return "", engine.Usage{}, nil
+}
+
 func TestReviewSubagentsFanOutAndMerge(t *testing.T) {
 	dir := initRepo(t)
 	writeFile(t, dir, "backend.go", "package app\n\nfunc Existing() {}\n")
