@@ -114,18 +114,20 @@ type HostReview struct {
 	// Debounce delays a review until the PR head has been stable for this long, so a
 	// burst of pushes coalesces into one review on the settled head instead of each
 	// push superseding the prior in-flight review. Empty/0 = off (review immediately).
-	Debounce             string                     `yaml:"debounce" json:"debounce,omitempty"`
-	ProviderRetry        ProviderRetry              `yaml:"provider_retry" json:"provider_retry,omitempty"`
-	Expand               *int                       `yaml:"expand" json:"expand,omitempty"`
-	TokenBudget          *int                       `yaml:"token_budget" json:"token_budget,omitempty"`
-	ContextHops          *int                       `yaml:"context_hops" json:"context_hops,omitempty"`
-	Mode                 string                     `yaml:"mode" json:"mode,omitempty"`
-	DeepContext          *bool                      `yaml:"deep_context" json:"deep_context,omitempty"`
-	Conversation         *bool                      `yaml:"conversation" json:"conversation,omitempty"`
-	Post                 *bool                      `yaml:"post" json:"post,omitempty"`
-	Force                *bool                      `yaml:"force" json:"force,omitempty"`
-	Suggest              *bool                      `yaml:"suggest" json:"suggest,omitempty"`
-	PatchRepair          *bool                      `yaml:"patch_repair" json:"patch_repair,omitempty"`
+	Debounce      string        `yaml:"debounce" json:"debounce,omitempty"`
+	ProviderRetry ProviderRetry `yaml:"provider_retry" json:"provider_retry,omitempty"`
+	Expand        *int          `yaml:"expand" json:"expand,omitempty"`
+	TokenBudget   *int          `yaml:"token_budget" json:"token_budget,omitempty"`
+	ContextHops   *int          `yaml:"context_hops" json:"context_hops,omitempty"`
+	Mode          string        `yaml:"mode" json:"mode,omitempty"`
+	DeepContext   *bool         `yaml:"deep_context" json:"deep_context,omitempty"`
+	Conversation  *bool         `yaml:"conversation" json:"conversation,omitempty"`
+	Post          *bool         `yaml:"post" json:"post,omitempty"`
+	Force         *bool         `yaml:"force" json:"force,omitempty"`
+	Suggest       *bool         `yaml:"suggest" json:"suggest,omitempty"`
+	PatchRepair   *bool         `yaml:"patch_repair" json:"patch_repair,omitempty"`
+	// AnchorRecovery is tri-state: nil inherits the machine config (default on).
+	AnchorRecovery       *bool                      `yaml:"anchor_recovery" json:"anchor_recovery,omitempty"`
 	Tools                ReviewTools                `yaml:"tools" json:"tools,omitempty"`
 	ThreadResolutionSync ThreadResolutionSyncConfig `yaml:"thread_resolution_sync" json:"thread_resolution_sync,omitempty"`
 	Approval             ApprovalPolicy             `yaml:"approval" json:"approval"`

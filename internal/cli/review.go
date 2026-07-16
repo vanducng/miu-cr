@@ -311,6 +311,7 @@ type PRReviewRequest struct {
 	MinSeverity     string // inline-posting floor: none|info|low|medium|high|critical (default keeps current behavior)
 	Format          string // review-comment presentation preset: full (default) | minimal
 	Thinking        string // extended-thinking level: auto|off|low|medium|high ("" → cfg.Review.Thinking; host path sets it per-repo)
+	AnchorRecovery  *bool  // tri-state anchor-recovery toggle (nil → cfg.Review.AnchorRecoveryOn(); host path sets it per-repo)
 	// SuppressWalkthrough drops the "What changed" walkthrough bullets. Zero-value
 	// safe: false = rendered (the default); a minimal req keeps the walkthrough.
 	SuppressWalkthrough bool
