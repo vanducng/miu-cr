@@ -55,6 +55,14 @@ comment with a new marker); subsequent re-runs dedupe normally. On a
 first M5 review **manually** (or off-hours) to absorb the one-time re-post before
 the next scheduled run.
 
+## [0.86.0](https://github.com/vanducng/miu-cr/compare/v0.85.3...v0.86.0) (2026-07-16)
+
+
+### Features
+
+* **review:** recover lost findings and cut wasted review turns ([#276](https://github.com/vanducng/miu-cr/issues/276)) ([a271090](https://github.com/vanducng/miu-cr/commit/a271090605e13f14c79804f0907579fe7431a4b2))
+* **rules:** add precision suppressions to default rule docs ([#275](https://github.com/vanducng/miu-cr/issues/275)) ([4c6f516](https://github.com/vanducng/miu-cr/commit/4c6f516af4e181adedb05128ca845942780dfc27))
+
 ## [0.85.3](https://github.com/vanducng/miu-cr/compare/v0.85.2...v0.85.3) (2026-07-12)
 
 
