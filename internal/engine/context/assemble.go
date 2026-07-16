@@ -83,6 +83,8 @@ func overBudget(s string, budget int) bool {
 // render emits per-file sections. When withWindows is true a small file gets
 // its entire line-numbered content; otherwise (and for expand>=0) a
 // line-numbered new-content window around the changed lines is appended.
+// The whole-file allowance is consumed in diffs slice order, so once it is
+// exhausted, later files fall back to windows even when individually small.
 func render(diffs []diff.Diff, expand int, withWindows bool) string {
 	var sb strings.Builder
 	wholeFileBudget := wholeFileTotalBudget
@@ -133,6 +135,7 @@ func xmlEscAttr(s string) string {
 
 // renderXML emits per-file sections using XML-tagged structure instead of the
 // markdown === File: === delimiters; file paths and content bodies are escaped.
+// Whole-file allowance semantics match render (slice-order positional fallback).
 func renderXML(diffs []diff.Diff, expand int, withWindows bool) string {
 	var sb strings.Builder
 	wholeFileBudget := wholeFileTotalBudget
@@ -193,7 +196,7 @@ func wholeFileEligible(d diff.Diff) bool {
 func wholeFileContent(d diff.Diff) string {
 	var sb strings.Builder
 	for i, l := range contentLines(d.NewFileContent) {
-		sb.WriteString(fmt.Sprintf("%d|%s\n", i+1, l))
+		fmt.Fprintf(&sb, "%d|%s\n", i+1, l)
 	}
 	return sb.String()
 }

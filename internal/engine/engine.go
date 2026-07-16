@@ -15,6 +15,7 @@ import (
 	"sort"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 	"unicode/utf8"
 
@@ -1008,6 +1009,7 @@ const (
 	// call sites removes the sequential grep turns.
 	callerContextMaxSymbols = 8
 	callerContextMaxSites   = 4
+	callerContextMaxGreps   = 4 // concurrent git-grep subprocesses during assembly
 	callerContextBytes      = 8 * 1024
 	callerContextHeader     = "Call sites of symbols changed here (impact context, already fetched; grep only for symbols not listed):\n"
 )
@@ -1338,19 +1340,38 @@ func buildCallerContext(ctx stdctx.Context, repoDir string, selected []diff.Diff
 			changed[p] = true
 		}
 	}
+	// Each grep is a git subprocess; run them concurrently (bounded) and render
+	// in def order so the output stays deterministic.
+	greps := make([]string, len(defs))
+	var wg sync.WaitGroup
+	sem := make(chan struct{}, callerContextMaxGreps)
+	for i, def := range defs {
+		wg.Add(1)
+		go func(i int, name string) {
+			defer wg.Done()
+			sem <- struct{}{}
+			defer func() { <-sem }()
+			if out, err := enginectx.Grep(ctx, repoDir, rev, name, runner); err == nil {
+				greps[i] = out
+			}
+		}(i, def.Name)
+	}
+	wg.Wait()
+
 	var sb strings.Builder
-	for _, def := range defs {
-		out, err := enginectx.Grep(ctx, repoDir, rev, def.Name, runner)
-		if err != nil || out == "" {
+	for i, def := range defs {
+		if greps[i] == "" {
 			continue
 		}
+		// Per-symbol exclusion on purpose: a def line of one changed symbol may
+		// legitimately CALL another changed symbol.
 		defLines := map[string]bool{}
 		for _, d := range index.Lookup(ctx, def.Name) {
 			defLines[fmt.Sprintf("%s:%d", d.File, d.Line)] = true
 		}
 		re := callSiteRe(def.Name)
 		sites := 0
-		for _, m := range parseGrepMatches(out) {
+		for _, m := range parseGrepMatches(greps[i]) {
 			if sites >= callerContextMaxSites {
 				break
 			}
