@@ -55,6 +55,13 @@ comment with a new marker); subsequent re-runs dedupe normally. On a
 first M5 review **manually** (or off-hours) to absorb the one-time re-post before
 the next scheduled run.
 
+## [0.88.0](https://github.com/vanducng/miu-cr/compare/v0.87.0...v0.88.0) (2026-07-16)
+
+
+### Features
+
+* **engine:** prefetch referenced definitions via a per-review symbol index ([#278](https://github.com/vanducng/miu-cr/issues/278)) ([d62d603](https://github.com/vanducng/miu-cr/commit/d62d60338fb32efc09ca6785acdd106caf8fe405))
+
 ## [0.87.0](https://github.com/vanducng/miu-cr/compare/v0.86.0...v0.87.0) (2026-07-16)
 
 
