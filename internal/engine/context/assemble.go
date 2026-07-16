@@ -22,6 +22,15 @@ const (
 	LevelFilenamesOnly = "filenames_only" // file list only
 )
 
+// Whole-file view: production traces show 59% of the model's file_read calls
+// re-read CHANGED files the prompt only windowed, even though NewFileContent is
+// already in memory. Small changed files get the entire numbered content instead.
+const (
+	wholeFileMaxLines    = 400
+	wholeFileMaxBytes    = 24 * 1024
+	wholeFileTotalBudget = 96 * 1024 // per-review allowance, consumed in diffs slice order
+)
+
 // AssembledContext is the deterministic review context plus assembly stats.
 type AssembledContext struct {
 	Text  string         `json:"text"`
@@ -29,7 +38,8 @@ type AssembledContext struct {
 }
 
 // AssembleContext builds the exact text the agent will see from the reviewable
-// diffs: per-file diff hunks plus line-numbered new-content windows. It is
+// diffs: per-file diff hunks plus line-numbered new content (the entire file
+// when small, a window around the changed lines otherwise). It is
 // deterministic for a fixed diff set. When the result exceeds TokenBudget it
 // degrades through the truncation ladder (drop expansion windows, then
 // hunks-only, then filenames-only) and records the applied level in Stats.
@@ -70,18 +80,23 @@ func overBudget(s string, budget int) bool {
 	return budget > 0 && estTokens(s) > budget
 }
 
-// render emits per-file sections. When withWindows is true and expand>=0 a
+// render emits per-file sections. When withWindows is true a small file gets
+// its entire line-numbered content; otherwise (and for expand>=0) a
 // line-numbered new-content window around the changed lines is appended.
 func render(diffs []diff.Diff, expand int, withWindows bool) string {
 	var sb strings.Builder
+	wholeFileBudget := wholeFileTotalBudget
 	for _, d := range diffs {
 		sb.WriteString(fmt.Sprintf("=== File: %s ===\n", d.NewPath))
 		sb.WriteString("--- Diff ---\n")
 		sb.WriteString(strings.TrimRight(d.Diff, "\n"))
 		sb.WriteString("\n")
 		if withWindows && d.NewFileContent != "" {
-			win := newContentWindow(d, expand)
-			if win != "" {
+			if wholeFileEligible(d) && len(d.NewFileContent) <= wholeFileBudget {
+				wholeFileBudget -= len(d.NewFileContent)
+				sb.WriteString("--- New content (entire file) ---\n")
+				sb.WriteString(wholeFileContent(d))
+			} else if win := newContentWindow(d, expand); win != "" {
 				sb.WriteString("--- New content ---\n")
 				sb.WriteString(win)
 			}
@@ -120,14 +135,19 @@ func xmlEscAttr(s string) string {
 // markdown === File: === delimiters; file paths and content bodies are escaped.
 func renderXML(diffs []diff.Diff, expand int, withWindows bool) string {
 	var sb strings.Builder
+	wholeFileBudget := wholeFileTotalBudget
 	for _, d := range diffs {
 		sb.WriteString(fmt.Sprintf("<file path=\"%s\">\n", xmlEscAttr(d.NewPath)))
 		sb.WriteString("<diff>")
 		sb.WriteString(xmlEscBody(strings.TrimRight(d.Diff, "\n")))
 		sb.WriteString("</diff>\n")
 		if withWindows && d.NewFileContent != "" {
-			win := newContentWindow(d, expand)
-			if win != "" {
+			if wholeFileEligible(d) && len(d.NewFileContent) <= wholeFileBudget {
+				wholeFileBudget -= len(d.NewFileContent)
+				sb.WriteString("<new_content full=\"true\">")
+				sb.WriteString(xmlEscBody(wholeFileContent(d)))
+				sb.WriteString("</new_content>\n")
+			} else if win := newContentWindow(d, expand); win != "" {
 				sb.WriteString("<new_content>")
 				sb.WriteString(xmlEscBody(win))
 				sb.WriteString("</new_content>\n")
@@ -149,16 +169,42 @@ func renderFilenamesXML(diffs []diff.Diff) string {
 	return sb.String()
 }
 
+// contentLines splits file content into lines, dropping the empty trailing
+// element a final newline produces.
+func contentLines(content string) []string {
+	lines := strings.Split(content, "\n")
+	if len(lines) > 0 && lines[len(lines)-1] == "" {
+		lines = lines[:len(lines)-1]
+	}
+	return lines
+}
+
+// wholeFileEligible reports whether the file is small enough for the whole-file
+// view; the caller still checks the running per-review allowance.
+func wholeFileEligible(d diff.Diff) bool {
+	if d.NewFileContent == "" || len(d.NewFileContent) > wholeFileMaxBytes {
+		return false
+	}
+	return len(contentLines(d.NewFileContent)) <= wholeFileMaxLines
+}
+
+// wholeFileContent emits every line of the new file in the same N|line format
+// the window path uses.
+func wholeFileContent(d diff.Diff) string {
+	var sb strings.Builder
+	for i, l := range contentLines(d.NewFileContent) {
+		sb.WriteString(fmt.Sprintf("%d|%s\n", i+1, l))
+	}
+	return sb.String()
+}
+
 // newContentWindow emits the line-numbered new-file lines covering the union of
 // changed-line ranges (from the hunks) expanded by `expand` on each side.
 func newContentWindow(d diff.Diff, expand int) string {
 	if expand < 0 {
 		expand = 0
 	}
-	lines := strings.Split(d.NewFileContent, "\n")
-	if len(lines) > 0 && lines[len(lines)-1] == "" {
-		lines = lines[:len(lines)-1]
-	}
+	lines := contentLines(d.NewFileContent)
 	if len(lines) == 0 {
 		return ""
 	}

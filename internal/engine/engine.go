@@ -9,9 +9,11 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"fmt"
+	"math"
 	"path/filepath"
 	"regexp"
 	"sort"
+	"strconv"
 	"strings"
 	"time"
 	"unicode/utf8"
@@ -737,7 +739,8 @@ func (e *Engine) Review(ctx stdctx.Context, req Request) (ReviewResult, error) {
 	changedSymbolContext, changedSymbolFiles, changedSymbolTruncated := buildChangedSymbolContext(ctx, req, selected, rev, e.Runner, symbolIndex)
 	changedSymbolMS := time.Since(changedSymbolStart).Milliseconds()
 	referencedDefsContext := buildReferencedDefsContext(ctx, selected, symbolIndex)
-	relatedText := joinPromptContext(changedSymbolContext, referencedDefsContext, related.Text)
+	callerContext := buildCallerContext(ctx, req.RepoDir, selected, rev, e.Runner, symbolIndex)
+	relatedText := joinPromptContext(changedSymbolContext, referencedDefsContext, callerContext, related.Text)
 
 	trace.SetModel(req.Provider, req.Model)
 
@@ -1000,6 +1003,13 @@ const (
 	referencedDefsMaxPerName = 3
 	referencedDefsBytes      = 8 * 1024
 	referencedDefsHeader     = "Definitions referenced by this change (already resolved; do not re-fetch these with symbol_context):\n"
+	// Production traces: grep (357 calls across 40 traces) is dominated by
+	// impact-analysis lookups of who calls the changed code. Prefetching those
+	// call sites removes the sequential grep turns.
+	callerContextMaxSymbols = 8
+	callerContextMaxSites   = 4
+	callerContextBytes      = 8 * 1024
+	callerContextHeader     = "Call sites of symbols changed here (impact context, already fetched; grep only for symbols not listed):\n"
 )
 
 var projectContextFiles = []string{"AGENTS.md", "CLAUDE.md"}
@@ -1311,6 +1321,180 @@ func changedFileDefNames(ctx stdctx.Context, selected []diff.Diff, index *symbol
 		}
 	}
 	return out
+}
+
+// buildCallerContext prefetches call sites of the symbols this change touches:
+// for each changed symbol (definition in a changed file whose span overlaps a
+// new-side hunk range) it greps the reviewed revision for call-shaped matches
+// outside the changed files. Empty result => byte-identical prompt.
+func buildCallerContext(ctx stdctx.Context, repoDir string, selected []diff.Diff, rev string, runner *gitcmd.Runner, index *symbolcontext.Index) string {
+	defs := changedSymbolDefs(ctx, selected, index)
+	if len(defs) == 0 {
+		return ""
+	}
+	changed := map[string]bool{}
+	for _, d := range selected {
+		if p := filepath.ToSlash(strings.TrimSpace(d.NewPath)); p != "" {
+			changed[p] = true
+		}
+	}
+	var sb strings.Builder
+	for _, def := range defs {
+		out, err := enginectx.Grep(ctx, repoDir, rev, def.Name, runner)
+		if err != nil || out == "" {
+			continue
+		}
+		defLines := map[string]bool{}
+		for _, d := range index.Lookup(ctx, def.Name) {
+			defLines[fmt.Sprintf("%s:%d", d.File, d.Line)] = true
+		}
+		re := callSiteRe(def.Name)
+		sites := 0
+		for _, m := range parseGrepMatches(out) {
+			if sites >= callerContextMaxSites {
+				break
+			}
+			if changed[m.file] || defLines[fmt.Sprintf("%s:%d", m.file, m.line)] || !re.MatchString(m.content) {
+				continue
+			}
+			fmt.Fprintf(&sb, "- %s ← %s:%d: %s\n", def.Name, m.file, m.line, strings.TrimSpace(m.content))
+			sites++
+		}
+	}
+	if sb.Len() == 0 {
+		return ""
+	}
+	out := string(truncateUTF8Bytes([]byte(callerContextHeader+sb.String()), callerContextBytes))
+	// Drop a truncation-split partial line: a half call site is misleading context.
+	if !strings.HasSuffix(out, "\n") {
+		if i := strings.LastIndexByte(out, '\n'); i >= len(callerContextHeader) {
+			out = out[:i]
+		}
+	}
+	return strings.TrimRight(out, "\n")
+}
+
+// changedSymbolDefs lists the definitions in changed files whose enclosing span
+// (its Line up to the next definition's Line; the last runs to EOF) overlaps a
+// new-side hunk range. Deterministic: file path asc, then def line asc, one
+// entry per name, capped at callerContextMaxSymbols.
+func changedSymbolDefs(ctx stdctx.Context, selected []diff.Diff, index *symbolcontext.Index) []symbolcontext.Definition {
+	if index == nil {
+		return nil
+	}
+	byPath := map[string]string{}
+	var paths []string
+	for _, d := range selected {
+		if d.IsDeleted {
+			continue
+		}
+		path := filepath.ToSlash(strings.TrimSpace(d.NewPath))
+		if path == "" {
+			continue
+		}
+		if _, ok := byPath[path]; !ok {
+			paths = append(paths, path)
+		}
+		byPath[path] = d.Diff
+	}
+	sort.Strings(paths)
+	seen := map[string]bool{}
+	var out []symbolcontext.Definition
+	for _, path := range paths {
+		ranges := newSideHunkRanges(byPath[path])
+		if len(ranges) == 0 {
+			continue
+		}
+		defs, ok := index.FileDefinitions(ctx, path)
+		if !ok || len(defs) == 0 {
+			continue
+		}
+		sorted := make([]symbolcontext.Definition, len(defs))
+		copy(sorted, defs)
+		sort.Slice(sorted, func(i, j int) bool { return sorted[i].Line < sorted[j].Line })
+		for i, def := range sorted {
+			end := math.MaxInt
+			if i+1 < len(sorted) {
+				end = sorted[i+1].Line - 1
+				if end < def.Line {
+					end = def.Line
+				}
+			}
+			if seen[strings.ToLower(def.Name)] || !overlapsAny(ranges, def.Line, end) {
+				continue
+			}
+			seen[strings.ToLower(def.Name)] = true
+			out = append(out, def)
+			if len(out) >= callerContextMaxSymbols {
+				return out
+			}
+		}
+	}
+	return out
+}
+
+// newSideHunkRanges lists the new-side line spans the diff touches; a
+// pure-deletion hunk collapses to its single anchor line.
+func newSideHunkRanges(diffText string) [][2]int {
+	var out [][2]int
+	for _, h := range diff.ParseHunks(diffText) {
+		lo := h.NewStart
+		if lo < 1 {
+			lo = 1
+		}
+		hi := lo + h.NewCount - 1
+		if hi < lo {
+			hi = lo
+		}
+		out = append(out, [2]int{lo, hi})
+	}
+	return out
+}
+
+func overlapsAny(ranges [][2]int, lo, hi int) bool {
+	for _, r := range ranges {
+		if lo <= r[1] && hi >= r[0] {
+			return true
+		}
+	}
+	return false
+}
+
+// callSiteRe keeps only call-shaped matches: the name immediately followed by
+// "(" and not embedded in a longer identifier.
+func callSiteRe(name string) *regexp.Regexp {
+	return regexp.MustCompile(`(?:^|[^A-Za-z0-9_])` + regexp.QuoteMeta(name) + `\(`)
+}
+
+type grepMatch struct {
+	file    string
+	line    int
+	content string
+}
+
+// parseGrepMatches flattens enginectx.Grep's per-file "File: x / N|line" blocks.
+func parseGrepMatches(out string) []grepMatch {
+	var matches []grepMatch
+	file := ""
+	for _, ln := range strings.Split(out, "\n") {
+		if strings.HasPrefix(ln, "File: ") {
+			file = strings.TrimPrefix(ln, "File: ")
+			continue
+		}
+		if file == "" || ln == "" || strings.HasPrefix(ln, "Match lines: ") {
+			continue
+		}
+		i := strings.IndexByte(ln, '|')
+		if i <= 0 {
+			continue
+		}
+		num, err := strconv.Atoi(ln[:i])
+		if err != nil {
+			continue
+		}
+		matches = append(matches, grepMatch{file: file, line: num, content: ln[i+1:]})
+	}
+	return matches
 }
 
 func joinPromptContext(parts ...string) string {

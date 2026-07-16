@@ -630,3 +630,33 @@ func TestReviewEmptyStaged(t *testing.T) {
 		t.Error("empty staged must not fail the gate")
 	}
 }
+
+// An UNCHANGED file calling a symbol defined in a changed file must get that
+// call site prefetched into the prompt context, after the referenced-defs block.
+func TestReviewInjectsCallerContext(t *testing.T) {
+	dir := initRepo(t)
+	writeFile(t, dir, "app.go", "package app\n\nfunc Target() int { return 1 }\n")
+	writeFile(t, dir, "consumer.go", "package app\n\nfunc Uses() int { return Target() }\n")
+	git(t, dir, "add", ".")
+	git(t, dir, "commit", "-q", "-m", "base")
+	writeFile(t, dir, "app.go", "package app\n\nfunc Target() int { return 2 }\n")
+	git(t, dir, "add", "app.go")
+
+	fa := &fakeAgent{}
+	eng := engine.New(fa, gitcmd.New())
+	_, err := eng.Review(stdctx.Background(), engine.Request{Mode: 0, RepoDir: dir, Gate: "high", Extensions: []string{"go"}})
+	if err != nil {
+		t.Fatalf("Review: %v", err)
+	}
+	callHeader := "Call sites of symbols changed here"
+	if !strings.Contains(fa.gotRelated, callHeader) {
+		t.Fatalf("caller block missing from RelatedContext: %q", fa.gotRelated)
+	}
+	if !strings.Contains(fa.gotRelated, "Target ← consumer.go:3") {
+		t.Fatalf("caller block did not list the unchanged-file call site: %q", fa.gotRelated)
+	}
+	refHeader := "Definitions referenced by this change"
+	if ri, ci := strings.Index(fa.gotRelated, refHeader), strings.Index(fa.gotRelated, callHeader); ri >= 0 && ri > ci {
+		t.Fatalf("caller block must follow the referenced-defs block: %q", fa.gotRelated)
+	}
+}
