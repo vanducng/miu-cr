@@ -78,6 +78,7 @@ type JobReviewOptions struct {
 	MinSeverity         string
 	Format              string
 	Thinking            string
+	AnchorRecovery      *bool // nil = inherit the machine config
 	SuppressWalkthrough bool
 	FileChangeSummary   bool
 	PromptFormat        string

@@ -148,6 +148,7 @@ repos:
       min_severity: medium
       context_hops: 1
       format: minimal
+      anchor_recovery: false   # quote drift is rare on this repo; skip the rescue pass's extra spend
       thread_resolution_sync:
         mode: poll
         interval: 5m

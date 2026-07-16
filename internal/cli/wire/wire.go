@@ -317,6 +317,20 @@ func (prReviewer) GateFailed(findings []cli.ReviewFinding, gate string) bool {
 	return engine.GateFailed(toEngineFindings(findings), gate)
 }
 
+// applyRequestConfigOverrides folds request-level review overrides (the host
+// sets them per-repo from HostReview; the standalone CLI path leaves them
+// zero) into the loaded machine config, so the single source (cfg.Review)
+// stays consistent for BOTH the cache-reuse fingerprint and everything
+// downstream (resolved creds, engine request).
+func applyRequestConfigOverrides(cfg *config.Config, req cli.PRReviewRequest) {
+	if strings.TrimSpace(req.Thinking) != "" {
+		cfg.Review.Thinking = req.Thinking
+	}
+	if req.AnchorRecovery != nil {
+		cfg.Review.AnchorRecovery = req.AnchorRecovery
+	}
+}
+
 // wantConversation gates the opt-in PR-conversation fetch: requested AND not a
 // fork. Untrusted participant text gains no injection channel on fork PRs,
 // mirroring fork-dropped repo rules.
@@ -358,13 +372,7 @@ func (prReviewer) ReviewPR(ctx stdctx.Context, req cli.PRReviewRequest) (cli.Rev
 	if lerr != nil {
 		slog.Warn("config load failed, using built-in defaults: " + config.RedactString(lerr.Error()))
 	}
-	// A request-level thinking override (the host sets it per-repo from HostReview;
-	// cfg.Review.Thinking is only populated on the standalone CLI path) must flow to
-	// BOTH the resolved creds and the cache-reuse fingerprint — set it on cfg so the
-	// single source (cfg.Review.Thinking) stays consistent everywhere downstream.
-	if strings.TrimSpace(req.Thinking) != "" {
-		cfg.Review.Thinking = req.Thinking
-	}
+	applyRequestConfigOverrides(&cfg, req)
 	hist, closeHist := openHistoryStore(ctx, cfg, req.NoSave)
 	if closeHist != nil {
 		defer closeHist()

@@ -694,6 +694,7 @@ type hostReviewAnalysisFields struct {
 	Conversation   *bool
 	Force          *bool
 	PatchRepair    *bool
+	AnchorRecovery *bool
 	Tools          config.ReviewTools
 	Subagents      config.ReviewSubagents
 }
@@ -715,6 +716,7 @@ func hostReviewAnalysisShape(review config.HostReview) any {
 		Conversation:   review.Conversation,
 		Force:          review.Force,
 		PatchRepair:    review.PatchRepair,
+		AnchorRecovery: review.AnchorRecovery,
 		Tools:          review.Tools,
 		Subagents:      review.Subagents,
 		PromptFormat:   review.PromptFormat,
@@ -734,6 +736,7 @@ func hostReviewOptions(providerName string, provider config.HostProvider, secret
 		MinSeverity:         review.MinSeverity,
 		Format:              review.Format,
 		Thinking:            review.Thinking,
+		AnchorRecovery:      review.AnchorRecovery,
 		SuppressWalkthrough: !review.CodeSummary.WantWalkthrough(),
 		FileChangeSummary:   review.CodeSummary.WantFileChangeSummary(),
 		PromptFormat:        review.PromptFormat,
@@ -1188,6 +1191,9 @@ func mergeHostReview(base, over config.HostReview) config.HostReview {
 	if over.PatchRepair != nil {
 		out.PatchRepair = over.PatchRepair
 	}
+	if over.AnchorRecovery != nil {
+		out.AnchorRecovery = over.AnchorRecovery
+	}
 	out.Tools = config.MergeReviewTools(base.Tools, over.Tools)
 	out.ThreadResolutionSync = config.MergeThreadResolutionSyncConfig(base.ThreadResolutionSync, over.ThreadResolutionSync)
 	out.Approval = config.MergeApprovalPolicy(base.Approval, over.Approval)
@@ -1379,6 +1385,7 @@ func buildServeReviewFn(log *slog.Logger, gate string, st serve.ReviewStore, tra
 			MinSeverity:         review.MinSeverity,
 			Format:              review.Format,
 			Thinking:            review.Thinking,
+			AnchorRecovery:      review.AnchorRecovery,
 			SuppressWalkthrough: review.SuppressWalkthrough,
 			FileChangeSummary:   review.FileChangeSummary,
 			PromptFormat:        review.PromptFormat,
