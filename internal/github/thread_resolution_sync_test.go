@@ -296,12 +296,13 @@ func TestSyncSummaryConversationResolvedApprovesClearedLedger(t *testing.T) {
 // approving a commit we never reviewed would be unsafe; a fresh review handles it.
 func TestSyncSummaryConversationResolvedSkipsApproveOnMovedHead(t *testing.T) {
 	now := time.Date(2026, 6, 28, 10, 0, 0, 0, time.UTC)
-	reviewed := &PRInfo{Owner: "o", Repo: "r", Number: 1, HeadSHA: "bbbbbb2", HTMLBase: "https://github.com/o/r", ReviewCount: 1}
-	info := &PRInfo{Owner: "o", Repo: "r", Number: 1, HeadSHA: "cccccc3", HTMLBase: "https://github.com/o/r", ReviewCount: 1, AuthorAssociation: "MEMBER"}
+	reviewed := &PRInfo{Owner: "o", Repo: "r", Number: 1, HeadSHA: "bbbbbb2222222222222222222222222222222222", HTMLBase: "https://github.com/o/r", ReviewCount: 1}
+	info := &PRInfo{Owner: "o", Repo: "r", Number: 1, HeadSHA: "cccccc3333333333333333333333333333333333", HTMLBase: "https://github.com/o/r", ReviewCount: 1, AuthorAssociation: "MEMBER"}
 	f := engine.Finding{File: "a.go", Line: 5, Severity: "low", Category: "bug", Title: "thing", QuotedCode: "x"}
 	fp := Fingerprint(f)
 	body := RenderSummaryFull(reviewed, []engine.Finding{f}, nil, 0, nil, nil, SummaryOptions{
-		Ledger: MergeLedger(nil, []engine.Finding{f}, "aaaaaa1", map[string]bool{"a.go": true}, now),
+		Ledger:    MergeLedger(nil, []engine.Finding{f}, "aaaaaa1", map[string]bool{"a.go": true}, now),
+		Published: true,
 	})
 	client := &syncRecordClient{
 		recordClient: recordClient{issueStore: []*gh.IssueComment{{ID: gh.Ptr(int64(7)), Body: gh.Ptr(body)}}},
