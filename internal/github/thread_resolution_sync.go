@@ -79,10 +79,10 @@ func SyncSummaryConversationResolved(ctx stdctx.Context, client Client, info *PR
 	result.Action = UpsertEdited
 	result.Reason = updateReason
 	// Approve-on-resolution: the ledger is now clean by resolution. Approve only when
-	// the current head IS the reviewed head (parseReviewedCommit non-empty and equal),
+	// the current head IS the published head (non-empty and equal),
 	// so we never approve a commit we did not review; ApproveResolvedLedger applies the
 	// policy + trusted-author + already-approved guards and degrades silently on reject.
-	if reviewedHead := parseReviewedCommit(body); LedgerFullyResolved(next) && reviewedHead != "" && reviewedHead == info.HeadSHA {
+	if reviewedHead := parsePublishedCommit(body); LedgerFullyResolved(next) && reviewedHead != "" && reviewedHead == info.HeadSHA {
 		result.Approved, result.ApproveReason = ApproveResolvedLedger(ctx, client, info, policy, summaryCommentURL(info, targetID, ""))
 	}
 	return result, nil

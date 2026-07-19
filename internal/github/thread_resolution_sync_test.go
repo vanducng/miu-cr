@@ -264,11 +264,13 @@ func TestSyncSummaryConversationResolvedWrapsThreadFetchError(t *testing.T) {
 // reviewed head, a trusted-author PR under a clean policy gets an APPROVE.
 func TestSyncSummaryConversationResolvedApprovesClearedLedger(t *testing.T) {
 	now := time.Date(2026, 6, 28, 10, 0, 0, 0, time.UTC)
-	info := &PRInfo{Owner: "o", Repo: "r", Number: 1, HeadSHA: "bbbbbb2", HTMLBase: "https://github.com/o/r", ReviewCount: 1, AuthorAssociation: "MEMBER"}
+	headSHA := "bbbbbb2222222222222222222222222222222222"
+	info := &PRInfo{Owner: "o", Repo: "r", Number: 1, HeadSHA: headSHA, HTMLBase: "https://github.com/o/r", ReviewCount: 1, AuthorAssociation: "MEMBER"}
 	f := engine.Finding{File: "a.go", Line: 5, Severity: "low", Category: "bug", Title: "thing", QuotedCode: "x"}
 	fp := Fingerprint(f)
 	body := RenderSummaryFull(info, []engine.Finding{f}, nil, 0, nil, nil, SummaryOptions{
-		Ledger: MergeLedger(nil, []engine.Finding{f}, "aaaaaa1", map[string]bool{"a.go": true}, now),
+		Ledger:    MergeLedger(nil, []engine.Finding{f}, "aaaaaa1", map[string]bool{"a.go": true}, now),
+		Published: true,
 	})
 	client := &syncRecordClient{
 		recordClient: recordClient{issueStore: []*gh.IssueComment{{ID: gh.Ptr(int64(7)), Body: gh.Ptr(body)}}},
@@ -285,7 +287,7 @@ func TestSyncSummaryConversationResolvedApprovesClearedLedger(t *testing.T) {
 	if client.createReviewN != 1 || client.gotReview.GetEvent() != "APPROVE" {
 		t.Fatalf("want one APPROVE CreateReview, got n=%d event=%q", client.createReviewN, client.gotReview.GetEvent())
 	}
-	if client.gotReview.GetCommitID() != "bbbbbb2" {
+	if client.gotReview.GetCommitID() != headSHA {
 		t.Fatalf("APPROVE must target the reviewed head, got %q", client.gotReview.GetCommitID())
 	}
 }
