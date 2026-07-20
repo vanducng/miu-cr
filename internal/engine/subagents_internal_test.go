@@ -3,7 +3,23 @@ package engine
 import (
 	"strings"
 	"testing"
+
+	"github.com/vanducng/miu-cr/internal/engine/diff"
 )
+
+func TestPlanSubagentsTracksDeletedFilesByOriginalPath(t *testing.T) {
+	selected := []diff.Diff{
+		{OldPath: "backend/removed.go", NewPath: "/dev/null", IsDeleted: true},
+		{OldPath: "frontend/removed.ts", NewPath: "/dev/null", IsDeleted: true},
+	}
+	plans := planSubagents(SubagentConfig{Agents: []SubagentSpec{{Name: "backend", IncludeGlobs: []string{"backend/**"}}}}, selected)
+	if len(plans) != 2 || len(plans[0].files) != 1 || len(plans[1].files) != 1 {
+		t.Fatalf("deleted files must remain in separate plans: %+v", plans)
+	}
+	if plans[0].files[0].ReviewPath() != "backend/removed.go" || plans[1].files[0].ReviewPath() != "frontend/removed.ts" {
+		t.Fatalf("unexpected deleted-file assignments: %+v", plans)
+	}
+}
 
 func TestSubagentDiffBudgetSubtractsSharedContext(t *testing.T) {
 	req := Request{TokenBudget: 100, RulesTokenBudget: 20}

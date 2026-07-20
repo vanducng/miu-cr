@@ -89,7 +89,7 @@ func render(diffs []diff.Diff, expand int, withWindows bool) string {
 	var sb strings.Builder
 	wholeFileBudget := wholeFileTotalBudget
 	for _, d := range diffs {
-		sb.WriteString(fmt.Sprintf("=== File: %s ===\n", d.NewPath))
+		sb.WriteString(fmt.Sprintf("=== File: %s ===\n", d.ReviewPath()))
 		sb.WriteString("--- Diff ---\n")
 		sb.WriteString(strings.TrimRight(d.Diff, "\n"))
 		sb.WriteString("\n")
@@ -112,7 +112,7 @@ func renderFilenames(diffs []diff.Diff) string {
 	var sb strings.Builder
 	sb.WriteString("=== Files changed ===\n")
 	for _, d := range diffs {
-		sb.WriteString(d.NewPath)
+		sb.WriteString(d.ReviewPath())
 		sb.WriteString("\n")
 	}
 	return sb.String()
@@ -140,7 +140,7 @@ func renderXML(diffs []diff.Diff, expand int, withWindows bool) string {
 	var sb strings.Builder
 	wholeFileBudget := wholeFileTotalBudget
 	for _, d := range diffs {
-		sb.WriteString(fmt.Sprintf("<file path=\"%s\">\n", xmlEscAttr(d.NewPath)))
+		sb.WriteString(fmt.Sprintf("<file path=\"%s\">\n", xmlEscAttr(d.ReviewPath())))
 		sb.WriteString("<diff>")
 		sb.WriteString(xmlEscBody(strings.TrimRight(d.Diff, "\n")))
 		sb.WriteString("</diff>\n")
@@ -166,7 +166,7 @@ func renderFilenamesXML(diffs []diff.Diff) string {
 	var sb strings.Builder
 	sb.WriteString("<files_changed>\n")
 	for _, d := range diffs {
-		sb.WriteString(fmt.Sprintf("<file path=\"%s\"/>\n", xmlEscAttr(d.NewPath)))
+		sb.WriteString(fmt.Sprintf("<file path=\"%s\"/>\n", xmlEscAttr(d.ReviewPath())))
 	}
 	sb.WriteString("</files_changed>\n")
 	return sb.String()

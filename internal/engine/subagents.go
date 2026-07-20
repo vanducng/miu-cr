@@ -135,13 +135,13 @@ func planSubagents(cfg SubagentConfig, selected []diff.Diff) []subagentPlan {
 			continue
 		}
 		for _, f := range files {
-			assigned[f.NewPath] = true
+			assigned[f.ReviewPath()] = true
 		}
 		plans = append(plans, subagentPlan{name: spec.Name, operatorPrompt: spec.OperatorPrompt, files: files})
 	}
 	var rest []diff.Diff
 	for _, f := range selected {
-		if !assigned[f.NewPath] {
+		if !assigned[f.ReviewPath()] {
 			rest = append(rest, f)
 		}
 	}

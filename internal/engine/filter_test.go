@@ -9,18 +9,18 @@ import (
 func paths(ds []diff.Diff) []string {
 	out := make([]string, len(ds))
 	for i, d := range ds {
-		out[i] = d.NewPath
+		out[i] = d.ReviewPath()
 	}
 	return out
 }
 
-func TestSelectFiles_AllowlistExcludeBinaryDeleted(t *testing.T) {
+func TestSelectFiles_AllowlistExcludeBinary(t *testing.T) {
 	in := []diff.Diff{
 		{NewPath: "internal/app/main.go"},
 		{NewPath: "internal/app/main_test.go"},
 		{NewPath: "web/index.html"},
 		{NewPath: "assets/logo.png", IsBinary: true},
-		{NewPath: "old/removed.go", IsDeleted: true},
+		{OldPath: "old/removed.go", NewPath: "/dev/null", IsDeleted: true},
 		{NewPath: "vendor/lib/dep.go"},
 		{NewPath: "README.md"},
 	}
@@ -29,7 +29,7 @@ func TestSelectFiles_AllowlistExcludeBinaryDeleted(t *testing.T) {
 		Exclude:    []string{"**/*_test.go", "vendor/**"},
 	}
 	got := paths(SelectFiles(in, opts))
-	want := []string{"internal/app/main.go", "web/index.html"}
+	want := []string{"internal/app/main.go", "web/index.html", "old/removed.go"}
 	if len(got) != len(want) {
 		t.Fatalf("got %v, want %v", got, want)
 	}

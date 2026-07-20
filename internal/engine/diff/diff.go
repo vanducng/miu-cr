@@ -26,3 +26,10 @@ type Diff struct {
 	Insertions int64 `json:"insertions"`
 	Deletions  int64 `json:"deletions"`
 }
+
+func (d Diff) ReviewPath() string {
+	if d.IsDeleted || d.NewPath == "/dev/null" {
+		return d.OldPath
+	}
+	return d.NewPath
+}
