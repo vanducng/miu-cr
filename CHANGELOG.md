@@ -55,6 +55,13 @@ comment with a new marker); subsequent re-runs dedupe normally. On a
 first M5 review **manually** (or off-hours) to absorb the one-time re-post before
 the next scheduled run.
 
+## [0.89.2](https://github.com/vanducng/miu-cr/compare/v0.89.1...v0.89.2) (2026-07-20)
+
+
+### Bug Fixes
+
+* review deleted files before approval ([c257b0a](https://github.com/vanducng/miu-cr/commit/c257b0ac42ae78f00a8fa399415d22f9ca369506))
+
 ## [0.89.1](https://github.com/vanducng/miu-cr/compare/v0.89.0...v0.89.1) (2026-07-19)
 
 
