@@ -26,6 +26,7 @@ func init() {
 type fakeAgent struct {
 	findings       []engine.Finding
 	gotRev         string
+	gotText        string
 	gotRules       string
 	gotSemantic    string
 	gotProject     string
@@ -51,6 +52,7 @@ type fakeAgent struct {
 func (f *fakeAgent) Review(_ stdctx.Context, rc engine.AgentContext) (engine.ReviewOutput, error) {
 	f.reviewCalls++
 	f.gotRev = rc.Rev
+	f.gotText = rc.Text
 	f.gotRules = rc.Rules
 	f.gotSemantic = rc.SemanticContext
 	f.gotProject = rc.ProjectContext
@@ -177,6 +179,30 @@ func TestReviewPipelineEndToEnd(t *testing.T) {
 	}
 	if engine.GateFailed(res.Findings, "high") != true {
 		t.Error("high finding must trip high gate")
+	}
+}
+
+func TestReviewPipelineReviewsDeletedFiles(t *testing.T) {
+	dir := initRepo(t)
+	writeFile(t, dir, "removed.go", "package removed\n\nfunc Used() bool { return false }\n")
+	git(t, dir, "add", ".")
+	git(t, dir, "commit", "-q", "-m", "base")
+	git(t, dir, "rm", "-q", "removed.go")
+
+	fa := &fakeAgent{}
+	eng := engine.New(fa, gitcmd.New())
+	res, err := eng.Review(stdctx.Background(), engine.Request{Mode: 0, RepoDir: dir, Gate: "high", Extensions: []string{"go"}})
+	if err != nil {
+		t.Fatalf("Review: %v", err)
+	}
+	if fa.reviewCalls != 1 {
+		t.Fatalf("deleted file must reach the reviewer, got %d review calls", fa.reviewCalls)
+	}
+	if !strings.Contains(fa.gotText, `path="removed.go"`) || !strings.Contains(fa.gotText, "-func Used() bool { return false }") {
+		t.Fatalf("deleted file must use its original path and include removed code:\n%s", fa.gotText)
+	}
+	if got := res.Stats["files_reviewed"]; got != float64(1) {
+		t.Fatalf("files_reviewed: want 1, got %v", got)
 	}
 }
 

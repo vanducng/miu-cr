@@ -1567,8 +1567,7 @@ func changedHunksOf(selected []diff.Diff) [][]string {
 	return out
 }
 
-// changedPathsOf derives forward-slash relative paths from the selected diffs
-// (NewPath, plus OldPath for renames) for glob matching.
+// changedPathsOf returns forward-slash review paths plus old rename paths for glob matching.
 func changedPathsOf(selected []diff.Diff) []string {
 	out := make([]string, 0, len(selected)*2) // worst case: a rename adds OldPath + NewPath
 	seen := map[string]bool{}
@@ -1581,7 +1580,7 @@ func changedPathsOf(selected []diff.Diff) []string {
 		out = append(out, p)
 	}
 	for _, d := range selected {
-		add(d.NewPath)
+		add(d.ReviewPath())
 		if d.IsRenamed {
 			add(d.OldPath)
 		}

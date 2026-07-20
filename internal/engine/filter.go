@@ -16,16 +16,16 @@ type FilterOptions struct {
 	Exclude    []string // doublestar globs; matching paths are dropped
 }
 
-// SelectFiles returns the reviewable diffs: drops binary and deleted files,
-// applies the extension allowlist, then doublestar include/exclude globs.
+// SelectFiles returns the reviewable diffs: drops binary files, applies the
+// extension allowlist, then doublestar include/exclude globs.
 func SelectFiles(diffs []diff.Diff, opts FilterOptions) []diff.Diff {
 	exts := normalizeExtensions(opts.Extensions)
 	out := make([]diff.Diff, 0, len(diffs))
 	for _, d := range diffs {
-		if d.IsBinary || d.IsDeleted {
+		if d.IsBinary {
 			continue
 		}
-		p := d.NewPath
+		p := d.ReviewPath()
 		if p == "" || p == "/dev/null" {
 			continue
 		}

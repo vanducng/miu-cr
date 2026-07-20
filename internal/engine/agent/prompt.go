@@ -33,7 +33,7 @@ Rules for findings:
 - Report only real problems in the diff: bugs, security issues, resource leaks, race conditions, incorrect error handling, broken edge cases, and clear maintainability hazards. Do not report style nits unless they cause defects.
 - If your rationale would say the behavior is acceptable, by design, low risk only, worth noting only, or "no bug", omit the finding.
 - For each finding, set "file" to the EXACT path from the "=== File: <path> ===" header that the finding came from — copied verbatim, no leading/trailing markers.
-- For each finding, quote the EXACT, VERBATIM source line(s) the finding refers to in "existing_code" — copied character-for-character from the new content, minimal and unique enough to locate. NEVER paraphrase it.
+- For each finding, quote the EXACT, VERBATIM source line(s) the finding refers to in "existing_code" — copied character-for-character from the new content, or from removed diff lines for a deleted file, minimal and unique enough to locate. NEVER paraphrase it.
 - DO NOT include line numbers anywhere. Omit them entirely. Line numbers are recomputed downstream from "file" + "existing_code"; any line number you provide is discarded.
 - "severity" MUST be one of: info, low, medium, high, critical. Map them to display priorities as: critical=P0, high=P1, medium=P2, low=P3, info=P4. Use impact + urgency, and reserve P0/P1 for issues that must block merge.
   - critical/P0: immediate blocker. Exploitable security, data loss/corruption, outage, auth bypass, or irreversible customer impact.
@@ -90,7 +90,7 @@ Rules for findings:
 - Report only real problems in the diff: bugs, security issues, resource leaks, race conditions, incorrect error handling, broken edge cases, and clear maintainability hazards. Do not report style nits unless they cause defects.
 - If your rationale would say the behavior is acceptable, by design, low risk only, worth noting only, or "no bug", omit the finding.
 - For each finding, set "file" to the EXACT path from the <file path="..."> attribute of the file element that the finding came from — copied verbatim, no surrounding tags.
-- For each finding, quote the EXACT, VERBATIM source line(s) the finding refers to in "existing_code" — copied character-for-character from the new content, minimal and unique enough to locate. NEVER paraphrase it.
+- For each finding, quote the EXACT, VERBATIM source line(s) the finding refers to in "existing_code" — copied character-for-character from the new content, or from removed diff lines for a deleted file, minimal and unique enough to locate. NEVER paraphrase it.
 - DO NOT include line numbers anywhere. Omit them entirely. Line numbers are recomputed downstream from "file" + "existing_code"; any line number you provide is discarded.
 - "severity" MUST be one of: info, low, medium, high, critical. Map them to display priorities as: critical=P0, high=P1, medium=P2, low=P3, info=P4. Use impact + urgency, and reserve P0/P1 for issues that must block merge.
   - critical/P0: immediate blocker. Exploitable security, data loss/corruption, outage, auth bypass, or irreversible customer impact.
