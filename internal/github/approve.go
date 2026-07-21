@@ -3,7 +3,9 @@ package github
 import (
 	stdctx "context"
 	"fmt"
+	"log/slog"
 	"strings"
+	"time"
 
 	gh "github.com/google/go-github/v84/github"
 
@@ -34,6 +36,10 @@ const (
 )
 
 const defaultApprovalMaxPriority = "P4"
+
+const approvalReadinessAttempts = 3
+
+var approvalReadinessRetryDelay = 500 * time.Millisecond
 
 // trustedAssociations are the only AuthorAssociation values we auto-approve. This
 // is a fail-CLOSED allowlist, not a denylist: an empty string (API didn't populate
@@ -105,9 +111,27 @@ func approvalChecksGreen(ctx stdctx.Context, client Client, info *PRInfo) (bool,
 }
 
 func approvalReadiness(ctx stdctx.Context, client Client, info *PRInfo) string {
-	fresh, err := client.GetPR(ctx, info.Owner, info.Repo, info.Number)
-	if err != nil || fresh == nil || fresh.GetHead() == nil || fresh.GetHead().GetSHA() != info.HeadSHA {
-		return approveReasonHeadMoved
+	var fresh *gh.PullRequest
+	for attempt := 0; attempt < approvalReadinessAttempts; attempt++ {
+		var err error
+		fresh, err = client.GetPR(ctx, info.Owner, info.Repo, info.Number)
+		if err != nil {
+			slog.Warn("approval readiness fetch failed", "error", config.RedactString(err.Error()))
+			return approveReasonReadinessUnverified
+		}
+		if fresh == nil || fresh.GetHead() == nil || fresh.GetHead().GetSHA() != info.HeadSHA {
+			return approveReasonHeadMoved
+		}
+		if fresh.Mergeable != nil {
+			break
+		}
+		if attempt+1 < approvalReadinessAttempts {
+			select {
+			case <-ctx.Done():
+				return approveReasonReadinessUnverified
+			case <-time.After(approvalReadinessRetryDelay):
+			}
+		}
 	}
 	if fresh.Mergeable == nil {
 		return approveReasonReadinessUnverified
@@ -117,6 +141,7 @@ func approvalReadiness(ctx stdctx.Context, client Client, info *PRInfo) string {
 	}
 	green, err := approvalChecksGreen(ctx, client, info)
 	if err != nil {
+		slog.Warn("approval readiness checks failed", "error", config.RedactString(err.Error()))
 		return approveReasonReadinessUnverified
 	}
 	if !green {

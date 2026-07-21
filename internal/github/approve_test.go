@@ -171,6 +171,36 @@ func TestPostReviewDoesNotApproveFailedCommitStatus(t *testing.T) {
 	}
 }
 
+func TestPostReviewRetriesUnknownMergeability(t *testing.T) {
+	oldDelay := approvalReadinessRetryDelay
+	approvalReadinessRetryDelay = 0
+	t.Cleanup(func() { approvalReadinessRetryDelay = oldDelay })
+
+	c := &recordClient{mergeabilityUnknownCalls: 1}
+	res, err := PostReview(stdctx.Background(), c, approveInfo(), nil, nil, staticSummary("review"), nil, approveOpts())
+	if err != nil {
+		t.Fatalf("PostReview: %v", err)
+	}
+	if res.Event != "APPROVE" || c.getPRN != 2 {
+		t.Fatalf("transient unknown mergeability should retry and approve, got event=%q getPR calls=%d", res.Event, c.getPRN)
+	}
+}
+
+func TestPostReviewDoesNotApproveUnknownMergeability(t *testing.T) {
+	oldDelay := approvalReadinessRetryDelay
+	approvalReadinessRetryDelay = 0
+	t.Cleanup(func() { approvalReadinessRetryDelay = oldDelay })
+
+	c := &recordClient{mergeabilityUnknownCalls: approvalReadinessAttempts}
+	res, err := PostReview(stdctx.Background(), c, approveInfo(), nil, nil, staticSummary("review"), nil, approveOpts())
+	if err != nil {
+		t.Fatalf("PostReview: %v", err)
+	}
+	if res.Event != "COMMENT" || res.Reason != approveReasonReadinessUnverified {
+		t.Fatalf("unknown mergeability must fail closed, got (%q,%q)", res.Event, res.Reason)
+	}
+}
+
 func TestApproveResolvedLedgerDoesNotBypassReadiness(t *testing.T) {
 	c := &recordClient{conflicted: true}
 	approved, reason := ApproveResolvedLedger(stdctx.Background(), c, approveInfo(), config.ApprovalPolicy{Mode: "clean"}, "")

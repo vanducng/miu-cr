@@ -370,6 +370,7 @@ func TestRenderSummaryApprovalBlockers(t *testing.T) {
 	}{
 		{approveReasonMergeConflict, "Resolve the merge conflicts"},
 		{approveReasonChecksNotGreen, "Waiting for CI checks to finish successfully"},
+		{approveReasonReadinessUnverified, "GitHub readiness could not be verified"},
 	} {
 		out := RenderSummaryFull(info, nil, nil, 0, nil, nil, SummaryOptions{ApprovalReason: tc.reason})
 		if !strings.Contains(out, tc.want) {
