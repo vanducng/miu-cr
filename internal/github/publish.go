@@ -646,14 +646,13 @@ func resolveApproveEvent(ctx stdctx.Context, client Client, info *PRInfo, opts P
 		return "COMMENT", approveReasonAlreadyDone, false
 	}
 
-	// Re-fetch the head SHA right before deciding: the LLM pass can take long
-	// enough for a new push to land; an APPROVE on a stale head is unsafe.
-	headUnchanged := false
-	if fresh, err := client.GetPR(ctx, info.Owner, info.Repo, info.Number); err == nil && fresh != nil && fresh.GetHead() != nil {
-		headUnchanged = fresh.GetHead().GetSHA() == info.HeadSHA
+	event, reason = resolveEvent(opts, *info, opts.GateClean, findings, opts.ReviewedFiles, true)
+	if event != "APPROVE" {
+		return event, reason, approvalState.prior
 	}
-
-	event, reason = resolveEvent(opts, *info, opts.GateClean, findings, opts.ReviewedFiles, headUnchanged)
+	if reason = approvalReadiness(ctx, client, info); reason != approveReasonApproved {
+		return "COMMENT", reason, approvalState.prior
+	}
 	return event, reason, approvalState.prior
 }
 

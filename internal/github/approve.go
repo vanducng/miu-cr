@@ -23,6 +23,9 @@ const (
 	approveReasonNothingDone           = "nothing_reviewed"
 	approveReasonHeadUnknown           = "head_unknown"
 	approveReasonHeadMoved             = "head_moved"
+	approveReasonMergeConflict         = "merge_conflict"
+	approveReasonChecksNotGreen        = "checks_not_green"
+	approveReasonReadinessUnverified   = "readiness_unverified"
 	approveReasonAlreadyDone           = "already_approved"
 	approveReasonSelfForbidden         = "self_approve_forbidden"
 	approveReasonForbidden             = "approve_forbidden"
@@ -47,6 +50,79 @@ var trustedAssociations = map[string]bool{
 // allowlist (fail-closed: unknown/empty → untrusted).
 func trustedAuthor(info PRInfo) bool {
 	return trustedAssociations[info.AuthorAssociation]
+}
+
+func approvalChecksGreen(ctx stdctx.Context, client Client, info *PRInfo) (bool, error) {
+	opts := &gh.ListCheckRunsOptions{Filter: gh.Ptr("latest"), ListOptions: gh.ListOptions{PerPage: 100}}
+	for {
+		runs, resp, err := client.ListCheckRunsForRef(ctx, info.Owner, info.Repo, info.HeadSHA, opts)
+		if err != nil {
+			return false, err
+		}
+		if runs != nil {
+			for _, run := range runs.CheckRuns {
+				if run.GetName() == checkRunName {
+					continue
+				}
+				if run.GetStatus() != "completed" {
+					return false, nil
+				}
+				switch run.GetConclusion() {
+				case "success", "neutral", "skipped":
+				default:
+					return false, nil
+				}
+			}
+		}
+		if resp == nil || resp.NextPage == 0 {
+			break
+		}
+		opts.Page = resp.NextPage
+	}
+
+	statusOpts := &gh.ListOptions{PerPage: 100}
+	for {
+		statuses, resp, err := client.GetCombinedStatus(ctx, info.Owner, info.Repo, info.HeadSHA, statusOpts)
+		if err != nil {
+			return false, err
+		}
+		if statuses != nil {
+			for _, status := range statuses.Statuses {
+				if status.GetContext() == checkRunName {
+					continue
+				}
+				if status.GetState() != "success" {
+					return false, nil
+				}
+			}
+		}
+		if resp == nil || resp.NextPage == 0 {
+			break
+		}
+		statusOpts.Page = resp.NextPage
+	}
+	return true, nil
+}
+
+func approvalReadiness(ctx stdctx.Context, client Client, info *PRInfo) string {
+	fresh, err := client.GetPR(ctx, info.Owner, info.Repo, info.Number)
+	if err != nil || fresh == nil || fresh.GetHead() == nil || fresh.GetHead().GetSHA() != info.HeadSHA {
+		return approveReasonHeadMoved
+	}
+	if fresh.Mergeable == nil {
+		return approveReasonReadinessUnverified
+	}
+	if !fresh.GetMergeable() {
+		return approveReasonMergeConflict
+	}
+	green, err := approvalChecksGreen(ctx, client, info)
+	if err != nil {
+		return approveReasonReadinessUnverified
+	}
+	if !green {
+		return approveReasonChecksNotGreen
+	}
+	return approveReasonApproved
 }
 
 // resolveEvent decides the CreateReview Event. It returns APPROVE only when the
@@ -231,6 +307,9 @@ func ApproveResolvedLedger(ctx stdctx.Context, client Client, info *PRInfo, poli
 	}
 	if state.current {
 		return false, approveReasonApproved
+	}
+	if reason := approvalReadiness(ctx, client, info); reason != approveReasonApproved {
+		return false, reason
 	}
 	req := &gh.PullRequestReviewRequest{
 		CommitID: gh.Ptr(info.HeadSHA),

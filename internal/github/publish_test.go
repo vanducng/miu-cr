@@ -24,7 +24,8 @@ type recordClient struct {
 	listIssueErr   error
 	listReviewsErr error
 
-	headSHA string // GetPR returns this head SHA; empty means "headsha"
+	headSHA    string // GetPR returns this head SHA; empty means "headsha"
+	conflicted bool
 
 	createReviewErr      error
 	createReviewErrFirst error // returned on the FIRST CreateReview call only (the APPROVE attempt)
@@ -56,6 +57,8 @@ type recordClient struct {
 	existingCheckRuns []*gh.CheckRun // returned by ListCheckRunsForRef (nil → create path)
 	listCheckErr      error
 	listCheckRunN     int
+	combinedStatuses  []*gh.RepoStatus
+	combinedStatusErr error
 }
 
 func (c *recordClient) GetPR(stdctx.Context, string, string, int) (*gh.PullRequest, error) {
@@ -63,7 +66,7 @@ func (c *recordClient) GetPR(stdctx.Context, string, string, int) (*gh.PullReque
 	if sha == "" {
 		sha = "headsha"
 	}
-	return &gh.PullRequest{Head: &gh.PullRequestBranch{SHA: gh.Ptr(sha)}}, nil
+	return &gh.PullRequest{Head: &gh.PullRequestBranch{SHA: gh.Ptr(sha)}, Mergeable: gh.Ptr(!c.conflicted)}, nil
 }
 func (c *recordClient) ListFiles(stdctx.Context, string, string, int, *gh.ListOptions) ([]*gh.CommitFile, *gh.Response, error) {
 	return nil, &gh.Response{}, nil
@@ -173,6 +176,13 @@ func (c *recordClient) ListCheckRunsForRef(_ stdctx.Context, _, _, _ string, _ *
 		return nil, nil, c.listCheckErr
 	}
 	return &gh.ListCheckRunsResults{CheckRuns: c.existingCheckRuns, Total: gh.Ptr(len(c.existingCheckRuns))}, &gh.Response{}, nil
+}
+
+func (c *recordClient) GetCombinedStatus(_ stdctx.Context, _, _, _ string, _ *gh.ListOptions) (*gh.CombinedStatus, *gh.Response, error) {
+	if c.combinedStatusErr != nil {
+		return nil, nil, c.combinedStatusErr
+	}
+	return &gh.CombinedStatus{Statuses: c.combinedStatuses}, &gh.Response{}, nil
 }
 
 func optPage(opts *gh.PullRequestListCommentsOptions) int {

@@ -273,7 +273,7 @@ func TestSyncSummaryConversationResolvedApprovesClearedLedger(t *testing.T) {
 		Published: true,
 	})
 	client := &syncRecordClient{
-		recordClient: recordClient{issueStore: []*gh.IssueComment{{ID: gh.Ptr(int64(7)), Body: gh.Ptr(body)}}},
+		recordClient: recordClient{headSHA: headSHA, issueStore: []*gh.IssueComment{{ID: gh.Ptr(int64(7)), Body: gh.Ptr(body)}}},
 		threads:      []ReviewThread{{Resolved: true, Comments: []ReviewThreadComment{{Body: fpMarker(fp)}}}},
 	}
 

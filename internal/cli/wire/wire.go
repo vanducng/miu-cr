@@ -968,6 +968,7 @@ func publishReviewWithDiffs(ctx stdctx.Context, client mgithub.Client, info *mgi
 	// renders in lifecycle mode on the PR path.
 	now := time.Now()
 	ledger := mgithub.MergeLedger(info.PriorLedger, publishFindings, info.HeadSHA, diffPathSet(diffs), now)
+	approvalReason := ""
 
 	// renderSummary builds the summary body for a given omitted set. info.ReviewCount
 	// is already this run's number (FetchPR did the +1); the body's runs token seeds
@@ -989,6 +990,7 @@ func publishReviewWithDiffs(ctx stdctx.Context, client mgithub.Client, info *mgi
 			Format:              req.Format,
 			SuppressWalkthrough: req.SuppressWalkthrough,
 			FileChangeSummary:   req.FileChangeSummary,
+			ApprovalReason:      approvalReason,
 		})
 	}
 
@@ -1012,6 +1014,7 @@ func publishReviewWithDiffs(ctx stdctx.Context, client mgithub.Client, info *mgi
 	if err != nil {
 		return err
 	}
+	approvalReason = pr.Reason
 	prResult.Mode = "review"
 	prResult.FallbackAnnotations = pr.Fallback
 	// Fork-PR 403 fallback fired on inline: findings went to ::error:: annotations. The

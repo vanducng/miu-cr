@@ -318,6 +318,18 @@ type SummaryOptions struct {
 	// file table defaults off (= [review].code_summary defaults).
 	SuppressWalkthrough bool
 	FileChangeSummary   bool
+	ApprovalReason      string
+}
+
+func renderApprovalBlocker(b *strings.Builder, reason string) {
+	switch reason {
+	case approveReasonMergeConflict:
+		b.WriteString("> **Approval:** Resolve the merge conflicts, then update the pull request.\n\n")
+	case approveReasonChecksNotGreen:
+		b.WriteString("> **Approval:** Waiting for CI checks to finish successfully. Fix any failures, then update the pull request.\n\n")
+	case approveReasonReadinessUnverified:
+		b.WriteString("> **Approval:** GitHub readiness could not be verified. Check mergeability and CI, then rerun the review.\n\n")
+	}
 }
 
 // RenderSummaryFull is RenderSummaryWithOverflow plus the LLM-free reviewer-trust
@@ -355,6 +367,7 @@ func RenderSummaryFull(info *PRInfo, findings []engine.Finding, stats map[string
 			result = ledgerResultPlain(opts.Ledger)
 		}
 		fmt.Fprintf(&b, "**Result:** %s\n\n", result)
+		renderApprovalBlocker(&b, opts.ApprovalReason)
 		if p.Walkthrough && !opts.SuppressWalkthrough {
 			renderWalkthrough(&b, opts.Walkthrough)
 		}
@@ -374,6 +387,7 @@ func RenderSummaryFull(info *PRInfo, findings []engine.Finding, stats map[string
 			lead = fmt.Sprintf("%d finding%s", len(findings), plural(len(findings)))
 		}
 		fmt.Fprintf(&b, "**Result:** %s\n\n", lead)
+		renderApprovalBlocker(&b, opts.ApprovalReason)
 		if posted := len(findings) - omittedInline; posted > 0 {
 			b.WriteString(fmt.Sprintf("→ Review the %d inline comment%s below.", posted, plural(posted)))
 			b.WriteString("\n\n")
