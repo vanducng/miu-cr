@@ -23,7 +23,7 @@ type statefulClient struct {
 }
 
 func (c *statefulClient) GetPR(stdctx.Context, string, string, int) (*gh.PullRequest, error) {
-	return &gh.PullRequest{Head: &gh.PullRequestBranch{SHA: gh.Ptr("headsha")}}, nil
+	return &gh.PullRequest{Head: &gh.PullRequestBranch{SHA: gh.Ptr("headsha")}, Mergeable: gh.Ptr(true)}, nil
 }
 func (c *statefulClient) GetCommit(stdctx.Context, string, string, string) (*gh.Commit, error) {
 	return nil, nil
@@ -80,6 +80,9 @@ func (c *statefulClient) UpdateCheckRun(stdctx.Context, string, string, int64, g
 }
 func (c *statefulClient) ListCheckRunsForRef(stdctx.Context, string, string, string, *gh.ListCheckRunsOptions) (*gh.ListCheckRunsResults, *gh.Response, error) {
 	return &gh.ListCheckRunsResults{}, &gh.Response{}, nil
+}
+func (c *statefulClient) GetCombinedStatus(stdctx.Context, string, string, string, *gh.ListOptions) (*gh.CombinedStatus, *gh.Response, error) {
+	return &gh.CombinedStatus{}, &gh.Response{}, nil
 }
 
 // runPublishWithDiffs mirrors wire.publishReview's Codex flow (existing fps →

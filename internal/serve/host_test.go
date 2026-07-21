@@ -1167,6 +1167,10 @@ func (c *threadSyncContextClient) ListCheckRunsForRef(stdctx.Context, string, st
 	return nil, nil, nil
 }
 
+func (c *threadSyncContextClient) GetCombinedStatus(stdctx.Context, string, string, string, *github.ListOptions) (*github.CombinedStatus, *github.Response, error) {
+	return &github.CombinedStatus{}, &github.Response{}, nil
+}
+
 var _ mgithub.Client = (*threadSyncContextClient)(nil)
 
 func hostRunnerConfig(t *testing.T) HostRunnerConfig {

@@ -122,6 +122,96 @@ func TestPostReviewApprovesCleanPR(t *testing.T) {
 	}
 }
 
+func TestPostReviewDoesNotApproveMergeConflict(t *testing.T) {
+	c := &recordClient{conflicted: true}
+	res, err := PostReview(stdctx.Background(), c, approveInfo(), nil, nil, staticSummary("review"), nil, approveOpts())
+	if err != nil {
+		t.Fatalf("PostReview: %v", err)
+	}
+	if res.Event != "COMMENT" || res.Reason != approveReasonMergeConflict {
+		t.Fatalf("merge conflict must block approval, got (%q,%q)", res.Event, res.Reason)
+	}
+	if c.gotReview.GetEvent() == "APPROVE" {
+		t.Fatal("must not APPROVE a conflicted PR")
+	}
+}
+
+func TestPostReviewDoesNotApproveUntilChecksPass(t *testing.T) {
+	for _, tc := range []struct {
+		name string
+		run  *gh.CheckRun
+	}{
+		{name: "pending", run: &gh.CheckRun{Name: gh.Ptr("build"), Status: gh.Ptr("in_progress")}},
+		{name: "failed", run: &gh.CheckRun{Name: gh.Ptr("build"), Status: gh.Ptr("completed"), Conclusion: gh.Ptr("failure")}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			c := &recordClient{existingCheckRuns: []*gh.CheckRun{tc.run}}
+			res, err := PostReview(stdctx.Background(), c, approveInfo(), nil, nil, staticSummary("review"), nil, approveOpts())
+			if err != nil {
+				t.Fatalf("PostReview: %v", err)
+			}
+			if res.Event != "COMMENT" || res.Reason != approveReasonChecksNotGreen {
+				t.Fatalf("non-green checks must block approval, got (%q,%q)", res.Event, res.Reason)
+			}
+			if c.gotReview.GetEvent() == "APPROVE" {
+				t.Fatal("must not APPROVE before CI is green")
+			}
+		})
+	}
+}
+
+func TestPostReviewDoesNotApproveFailedCommitStatus(t *testing.T) {
+	c := &recordClient{combinedStatuses: []*gh.RepoStatus{{Context: gh.Ptr("continuous-integration"), State: gh.Ptr("failure")}}}
+	res, err := PostReview(stdctx.Background(), c, approveInfo(), nil, nil, staticSummary("review"), nil, approveOpts())
+	if err != nil {
+		t.Fatalf("PostReview: %v", err)
+	}
+	if res.Event != "COMMENT" || res.Reason != approveReasonChecksNotGreen {
+		t.Fatalf("failed commit status must block approval, got (%q,%q)", res.Event, res.Reason)
+	}
+}
+
+func TestPostReviewRetriesUnknownMergeability(t *testing.T) {
+	oldDelay := approvalReadinessRetryDelay
+	approvalReadinessRetryDelay = 0
+	t.Cleanup(func() { approvalReadinessRetryDelay = oldDelay })
+
+	c := &recordClient{mergeabilityUnknownCalls: 1}
+	res, err := PostReview(stdctx.Background(), c, approveInfo(), nil, nil, staticSummary("review"), nil, approveOpts())
+	if err != nil {
+		t.Fatalf("PostReview: %v", err)
+	}
+	if res.Event != "APPROVE" || c.getPRN != 2 {
+		t.Fatalf("transient unknown mergeability should retry and approve, got event=%q getPR calls=%d", res.Event, c.getPRN)
+	}
+}
+
+func TestPostReviewDoesNotApproveUnknownMergeability(t *testing.T) {
+	oldDelay := approvalReadinessRetryDelay
+	approvalReadinessRetryDelay = 0
+	t.Cleanup(func() { approvalReadinessRetryDelay = oldDelay })
+
+	c := &recordClient{mergeabilityUnknownCalls: approvalReadinessAttempts}
+	res, err := PostReview(stdctx.Background(), c, approveInfo(), nil, nil, staticSummary("review"), nil, approveOpts())
+	if err != nil {
+		t.Fatalf("PostReview: %v", err)
+	}
+	if res.Event != "COMMENT" || res.Reason != approveReasonReadinessUnverified {
+		t.Fatalf("unknown mergeability must fail closed, got (%q,%q)", res.Event, res.Reason)
+	}
+}
+
+func TestApproveResolvedLedgerDoesNotBypassReadiness(t *testing.T) {
+	c := &recordClient{conflicted: true}
+	approved, reason := ApproveResolvedLedger(stdctx.Background(), c, approveInfo(), config.ApprovalPolicy{Mode: "clean"}, "")
+	if approved || reason != approveReasonMergeConflict {
+		t.Fatalf("resolved-ledger approval must honor mergeability, got approved=%v reason=%q", approved, reason)
+	}
+	if c.createReviewN != 0 {
+		t.Fatalf("conflicted PR must not create an approval review, got %d calls", c.createReviewN)
+	}
+}
+
 func TestPostReviewApproveDegradesForkToComment(t *testing.T) {
 	c := &recordClient{}
 	info := approveInfo()

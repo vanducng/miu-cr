@@ -123,6 +123,9 @@ func (f *fakeClient) UpdateCheckRun(stdctx.Context, string, string, int64, gh.Up
 func (f *fakeClient) ListCheckRunsForRef(stdctx.Context, string, string, string, *gh.ListCheckRunsOptions) (*gh.ListCheckRunsResults, *gh.Response, error) {
 	return &gh.ListCheckRunsResults{}, &gh.Response{}, nil
 }
+func (f *fakeClient) GetCombinedStatus(stdctx.Context, string, string, string, *gh.ListOptions) (*gh.CombinedStatus, *gh.Response, error) {
+	return &gh.CombinedStatus{}, &gh.Response{}, nil
+}
 
 func TestFetchPR(t *testing.T) {
 	ref := PRRef{Owner: "vanducng", Repo: "miu-cr", Number: 1}

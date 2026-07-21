@@ -49,6 +49,7 @@ type Client interface {
 	// (app, name, head_sha) for GitHub App tokens, so a PAT re-run on the same SHA
 	// would otherwise spawn a second "miu-cr" check run.
 	ListCheckRunsForRef(ctx stdctx.Context, owner, repo, ref string, opts *gh.ListCheckRunsOptions) (*gh.ListCheckRunsResults, *gh.Response, error)
+	GetCombinedStatus(ctx stdctx.Context, owner, repo, ref string, opts *gh.ListOptions) (*gh.CombinedStatus, *gh.Response, error)
 }
 
 // ghClient wraps *github.Client. An empty token yields an anonymous client (fine
@@ -130,6 +131,10 @@ func (g ghClient) UpdateCheckRun(ctx stdctx.Context, owner, repo string, checkRu
 
 func (g ghClient) ListCheckRunsForRef(ctx stdctx.Context, owner, repo, ref string, opts *gh.ListCheckRunsOptions) (*gh.ListCheckRunsResults, *gh.Response, error) {
 	return g.c.Checks.ListCheckRunsForRef(ctx, owner, repo, ref, opts)
+}
+
+func (g ghClient) GetCombinedStatus(ctx stdctx.Context, owner, repo, ref string, opts *gh.ListOptions) (*gh.CombinedStatus, *gh.Response, error) {
+	return g.c.Repositories.GetCombinedStatus(ctx, owner, repo, ref, opts)
 }
 
 // PRRef identifies a pull request: owner/repo and its number.

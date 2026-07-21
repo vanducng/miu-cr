@@ -362,6 +362,23 @@ func TestRenderSummaryFullOrder(t *testing.T) {
 	})
 }
 
+func TestRenderSummaryApprovalBlockers(t *testing.T) {
+	info := &PRInfo{HeadSHA: "deadbeef"}
+	for _, tc := range []struct {
+		reason string
+		want   string
+	}{
+		{approveReasonMergeConflict, "Resolve the merge conflicts"},
+		{approveReasonChecksNotGreen, "Waiting for CI checks to finish successfully"},
+		{approveReasonReadinessUnverified, "GitHub readiness could not be verified"},
+	} {
+		out := RenderSummaryFull(info, nil, nil, 0, nil, nil, SummaryOptions{ApprovalReason: tc.reason})
+		if !strings.Contains(out, tc.want) {
+			t.Fatalf("summary for %q missing %q:\n%s", tc.reason, tc.want, out)
+		}
+	}
+}
+
 func TestRenderSummaryReviewCountIdentity(t *testing.T) {
 	// Zero ReviewCount: old identity line gone, no "Reviews (" prefix, no "Last reviewed commit:",
 	// footer omits the Review-attempts clause, token seeded to 1.

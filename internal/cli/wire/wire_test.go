@@ -32,7 +32,8 @@ type fakeGitHub struct {
 	createIssueN  int
 	editN         int
 
-	headSHA          string                  // re-fetched head SHA returned by GetPR (defaults to "headsha")
+	headSHA          string // re-fetched head SHA returned by GetPR (defaults to "headsha")
+	conflicted       bool
 	reviews          []*gh.PullRequestReview // existing reviews returned by ListReviews
 	reviewThreads    []mgithub.ReviewThread
 	lastReviewed     *gh.PullRequestReviewRequest // last CreateReview request, for Event assertions
@@ -52,6 +53,7 @@ func (f *fakeGitHub) GetPR(stdctx.Context, string, string, int) (*gh.PullRequest
 		Head:              &gh.PullRequestBranch{SHA: gh.Ptr(sha), Repo: repo},
 		Base:              &gh.PullRequestBranch{SHA: gh.Ptr("basesha"), Ref: gh.Ptr("main"), Repo: repo},
 		AuthorAssociation: gh.Ptr("MEMBER"),
+		Mergeable:         gh.Ptr(!f.conflicted),
 	}, nil
 }
 func (f *fakeGitHub) ListFiles(stdctx.Context, string, string, int, *gh.ListOptions) ([]*gh.CommitFile, *gh.Response, error) {
@@ -136,6 +138,10 @@ func (f *fakeGitHub) UpdateCheckRun(stdctx.Context, string, string, int64, gh.Up
 func (f *fakeGitHub) ListCheckRunsForRef(stdctx.Context, string, string, string, *gh.ListCheckRunsOptions) (*gh.ListCheckRunsResults, *gh.Response, error) {
 	f.order = append(f.order, "list_check")
 	return &gh.ListCheckRunsResults{}, &gh.Response{}, nil
+}
+func (f *fakeGitHub) GetCombinedStatus(stdctx.Context, string, string, string, *gh.ListOptions) (*gh.CombinedStatus, *gh.Response, error) {
+	f.order = append(f.order, "combined_status")
+	return &gh.CombinedStatus{}, &gh.Response{}, nil
 }
 
 func TestAckPRReviewStartedReactsAndPostsRunningSummary(t *testing.T) {
@@ -855,6 +861,28 @@ func TestPublishReviewApprovalClean(t *testing.T) {
 	}
 	if pr.SummaryAction != "edited" || fake.createIssueN != 1 || fake.editN != 1 {
 		t.Fatalf("clean approve must still upsert the summary: action=%q create=%d edit=%d", pr.SummaryAction, fake.createIssueN, fake.editN)
+	}
+}
+
+func TestPublishReviewConflictBlocksApprovalAndUpdatesSummary(t *testing.T) {
+	runner := gitcmd.New()
+	dir, base, head := setupRepo(t, runner)
+	fake := &fakeGitHub{headSHA: head, conflicted: true}
+	info := &mgithub.PRInfo{Owner: "o", Repo: "r", Number: 7, HeadSHA: head, BaseSHA: base, BaseBranch: "main", AuthorAssociation: "MEMBER"}
+	pr := &cli.PRResult{SummaryAction: "none"}
+	req := cli.PRReviewRequest{Gate: "high", Approval: config.ApprovalPolicy{Mode: "clean"}}
+
+	if err := publishReview(stdctx.Background(), fake, runner, dir, info, cleanReviewResult(), pr, req, nil, embedWriter{}, nil, nil, ""); err != nil {
+		t.Fatalf("publishReview: %v", err)
+	}
+	if pr.ApproveAction != "commented" || pr.ApproveReason != "merge_conflict" {
+		t.Fatalf("conflict must block approval, got action=%q reason=%q", pr.ApproveAction, pr.ApproveReason)
+	}
+	if fake.lastReviewed != nil && fake.lastReviewed.GetEvent() == "APPROVE" {
+		t.Fatal("conflicted PR must not receive an approval")
+	}
+	if len(fake.issueComments) != 1 || !strings.Contains(fake.issueComments[0].GetBody(), "Resolve the merge conflicts") {
+		t.Fatalf("final summary must tell the developer how to unblock approval: %+v", fake.issueComments)
 	}
 }
 
