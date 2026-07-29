@@ -55,6 +55,13 @@ comment with a new marker); subsequent re-runs dedupe normally. On a
 first M5 review **manually** (or off-hours) to absorb the one-time re-post before
 the next scheduled run.
 
+## [0.89.5](https://github.com/vanducng/miu-cr/compare/v0.89.4...v0.89.5) (2026-07-29)
+
+
+### Bug Fixes
+
+* **docs:** center navigation shell ([#292](https://github.com/vanducng/miu-cr/issues/292)) ([6a439e6](https://github.com/vanducng/miu-cr/commit/6a439e68271931a60c6a2ec98f0625833126a32a))
+
 ## [0.89.4](https://github.com/vanducng/miu-cr/compare/v0.89.3...v0.89.4) (2026-07-29)
 
 
