@@ -55,6 +55,13 @@ comment with a new marker); subsequent re-runs dedupe normally. On a
 first M5 review **manually** (or off-hours) to absorb the one-time re-post before
 the next scheduled run.
 
+## [0.89.6](https://github.com/vanducng/miu-cr/compare/v0.89.5...v0.89.6) (2026-07-29)
+
+
+### Bug Fixes
+
+* **docs:** restore shell spacing ([#294](https://github.com/vanducng/miu-cr/issues/294)) ([01b8108](https://github.com/vanducng/miu-cr/commit/01b810898a3f74599fa19dc2234e9aca80d61259))
+
 ## [0.89.5](https://github.com/vanducng/miu-cr/compare/v0.89.4...v0.89.5) (2026-07-29)
 
 
