@@ -55,6 +55,13 @@ comment with a new marker); subsequent re-runs dedupe normally. On a
 first M5 review **manually** (or off-hours) to absorb the one-time re-post before
 the next scheduled run.
 
+## [0.89.4](https://github.com/vanducng/miu-cr/compare/v0.89.3...v0.89.4) (2026-07-29)
+
+
+### Bug Fixes
+
+* **docs:** restore Starlight layout ([#290](https://github.com/vanducng/miu-cr/issues/290)) ([63c10c9](https://github.com/vanducng/miu-cr/commit/63c10c96549f248edec6bce200f7ae213eb37050))
+
 ## [0.89.3](https://github.com/vanducng/miu-cr/compare/v0.89.2...v0.89.3) (2026-07-21)
 
 
