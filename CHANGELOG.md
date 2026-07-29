@@ -55,6 +55,13 @@ comment with a new marker); subsequent re-runs dedupe normally. On a
 first M5 review **manually** (or off-hours) to absorb the one-time re-post before
 the next scheduled run.
 
+## [0.89.7](https://github.com/vanducng/miu-cr/compare/v0.89.6...v0.89.7) (2026-07-29)
+
+
+### Bug Fixes
+
+* **docs:** scope search trigger sizing ([#296](https://github.com/vanducng/miu-cr/issues/296)) ([3d50366](https://github.com/vanducng/miu-cr/commit/3d50366e18e2e06052386b7a5157ee1a3da82ad9))
+
 ## [0.89.6](https://github.com/vanducng/miu-cr/compare/v0.89.5...v0.89.6) (2026-07-29)
 
 
