@@ -4,11 +4,13 @@ import (
 	stdctx "context"
 	"errors"
 	"fmt"
+	"io"
 	"net/http"
 	"net/http/httptest"
 	"net/url"
 	"strings"
 	"testing"
+	"time"
 
 	gh "github.com/google/go-github/v84/github"
 
@@ -359,6 +361,51 @@ func TestFetchPRNetErrorIsUnavailable(t *testing.T) {
 	}
 	if ce.Code != "github.unavailable" || !ce.Retry {
 		t.Fatalf("net error → code=%q retry=%v, want github.unavailable retry=true", ce.Code, ce.Retry)
+	}
+}
+
+func TestGhAPIErrorRateLimitIncludesRetryAfter(t *testing.T) {
+	reset := time.Now().Add(45 * time.Second)
+	err := ghAPIError("github.list_review_comments_failed", "listing review comments", &gh.RateLimitError{
+		Message: "rate limited",
+		Rate:    gh.Rate{Reset: gh.Timestamp{Time: reset}},
+	})
+	var ce *clierr.CLIError
+	if !asCLIErr(err, &ce) || ce.Code != "github.rate_limited" || !ce.Retry {
+		t.Fatalf("want github.rate_limited retryable, got %v", err)
+	}
+	got, _ := ce.Details["retry_after_seconds"].(int)
+	if got <= 0 || got > 45 {
+		t.Fatalf("retry_after_seconds=%d, want (0,45]", got)
+	}
+}
+
+func TestGhAPIErrorClassifiesUnexpectedEOF(t *testing.T) {
+	tests := []struct {
+		name string
+		err  error
+	}{
+		{
+			name: "url wrapped",
+			err:  &url.Error{Op: "Get", URL: "https://api.github.com/repos/o/r/pulls/1/comments?per_page=100", Err: io.ErrUnexpectedEOF},
+		},
+		{name: "bare unexpected EOF", err: io.ErrUnexpectedEOF},
+		{name: "bare EOF", err: io.EOF},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			err := ghAPIError("github.list_review_comments_failed", "listing review comments", tt.err)
+			var ce *clierr.CLIError
+			if !asCLIErr(err, &ce) {
+				t.Fatalf("want *clierr.CLIError, got %T (%v)", err, err)
+			}
+			if ce.Code != "github.unavailable" || !ce.Retry || !ce.SafeRetry {
+				t.Fatalf("code=%q retry=%v safe=%v, want github.unavailable retryable", ce.Code, ce.Retry, ce.SafeRetry)
+			}
+			if !strings.Contains(ce.Message, "listing review comments") {
+				t.Fatalf("message %q must keep the stage prefix", ce.Message)
+			}
+		})
 	}
 }
 

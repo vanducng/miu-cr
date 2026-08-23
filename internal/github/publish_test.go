@@ -2,7 +2,10 @@ package github
 
 import (
 	stdctx "context"
+	"errors"
 	"fmt"
+	"io"
+	"net/url"
 	"sort"
 	"strings"
 	"testing"
@@ -881,6 +884,40 @@ func TestExistingFingerprintsRateLimitMapped(t *testing.T) {
 	}
 	if !ce.Retry {
 		t.Error("list rate-limit error must be retryable")
+	}
+}
+
+func TestExistingFingerprintsUnexpectedEOFMapped(t *testing.T) {
+	c := &recordClient{listRevErr: &url.Error{
+		Op:  "Get",
+		URL: "https://api.github.com/repos/o/r/pulls/1/comments?per_page=100",
+		Err: io.ErrUnexpectedEOF,
+	}}
+	_, err := ExistingFingerprints(stdctx.Background(), c, &PRInfo{Owner: "o", Repo: "r", Number: 1})
+	if err == nil {
+		t.Fatal("want unexpected-EOF error")
+	}
+	var ce *clierr.CLIError
+	if !asCLIErr(err, &ce) || ce.Code != "github.unavailable" {
+		t.Fatalf("want github.unavailable, got %v", err)
+	}
+	if !ce.Retry || !ce.SafeRetry {
+		t.Fatalf("list unexpected EOF must be retryable, retry=%v safe=%v", ce.Retry, ce.SafeRetry)
+	}
+}
+
+func TestExistingFingerprintsUnrecognizedKeepsFallback(t *testing.T) {
+	c := &recordClient{listRevErr: errors.New("boom")}
+	_, err := ExistingFingerprints(stdctx.Background(), c, &PRInfo{Owner: "o", Repo: "r", Number: 1})
+	if err == nil {
+		t.Fatal("want fallback error")
+	}
+	var ce *clierr.CLIError
+	if !asCLIErr(err, &ce) || ce.Code != "github.list_review_comments_failed" {
+		t.Fatalf("want github.list_review_comments_failed, got %v", err)
+	}
+	if ce.Retry {
+		t.Fatal("unrecognized list error must not be retryable")
 	}
 }
 

@@ -3,7 +3,9 @@ package wire
 import (
 	stdctx "context"
 	"errors"
+	"io"
 	"net/http"
+	"net/url"
 	"os"
 	"path/filepath"
 	"strings"
@@ -41,6 +43,7 @@ type fakeGitHub struct {
 	checkRunN        int
 	createReviewErr  error // injected CreateReview failure (e.g. fork 403)
 	issueListCtxErrs []error
+	listReviewErrs   []error // FIFO injected ListReviewComments failures
 }
 
 func (f *fakeGitHub) GetPR(stdctx.Context, string, string, int) (*gh.PullRequest, error) {
@@ -86,6 +89,11 @@ func (f *fakeGitHub) CreateReview(_ stdctx.Context, _, _ string, _ int, r *gh.Pu
 
 func (f *fakeGitHub) ListReviewComments(stdctx.Context, string, string, int, *gh.PullRequestListCommentsOptions) ([]*gh.PullRequestComment, *gh.Response, error) {
 	f.order = append(f.order, "list_review")
+	if len(f.listReviewErrs) > 0 {
+		err := f.listReviewErrs[0]
+		f.listReviewErrs = f.listReviewErrs[1:]
+		return nil, nil, err
+	}
 	return f.reviewComments, &gh.Response{}, nil
 }
 func (f *fakeGitHub) ReviewThreads(stdctx.Context, string, string, int) ([]mgithub.ReviewThread, error) {
@@ -356,6 +364,46 @@ func TestPublishReviewWireFlow(t *testing.T) {
 	}
 	if got := fake.issueComments[0].GetBody(); !strings.Contains(got, "Review attempts: 2") {
 		t.Fatalf("re-run summary must advance to Review attempts: 2:\n%s", got)
+	}
+}
+
+func TestPublishReviewRetriesTransientListComments(t *testing.T) {
+	defer func(b time.Duration) { retryBackoffBase = b }(retryBackoffBase)
+	retryBackoffBase = time.Millisecond
+
+	runner := gitcmd.New()
+	dir, base, head := setupRepo(t, runner)
+	fake := &fakeGitHub{
+		listReviewErrs: []error{
+			&url.Error{
+				Op:  "Get",
+				URL: "https://api.github.com/repos/o/r/pulls/7/comments?per_page=100",
+				Err: io.ErrUnexpectedEOF,
+			},
+		},
+	}
+	info := &mgithub.PRInfo{Owner: "o", Repo: "r", Number: 7, HeadSHA: head, BaseSHA: base, BaseBranch: "main", ReviewCount: 1}
+	res := engine.ReviewResult{
+		Findings: []engine.Finding{
+			{File: "foo.go", Line: 4, Severity: "high", Category: "bug", Rationale: "boom", QuotedCode: "func B() {}"},
+		},
+		Stats: map[string]any{"truncation_level": "full", "files_reviewed": float64(1)},
+	}
+	pr := &cli.PRResult{SummaryAction: "none"}
+	if err := publishReview(stdctx.Background(), fake, runner, dir, info, res, pr, cli.PRReviewRequest{Gate: "high"}, nil, embedWriter{}, nil, nil, testReuseKey); err != nil {
+		t.Fatalf("publishReview: %v", err)
+	}
+	if pr.PostedInline != 1 {
+		t.Fatalf("want 1 inline posted after retry, got %d", pr.PostedInline)
+	}
+	nList := 0
+	for _, step := range fake.order {
+		if step == "list_review" {
+			nList++
+		}
+	}
+	if nList < 2 {
+		t.Fatalf("transient list-comments EOF must retry, list_review count=%d order=%v", nList, fake.order)
 	}
 }
 

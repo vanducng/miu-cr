@@ -5,6 +5,8 @@ import (
 	"errors"
 	"fmt"
 	"testing"
+
+	"github.com/vanducng/miu-cr/internal/cli"
 )
 
 func TestShouldPostReviewErrorSummary(t *testing.T) {
@@ -29,6 +31,20 @@ func TestShouldPostReviewErrorSummary(t *testing.T) {
 				t.Fatalf("shouldPostReviewErrorSummary(%v,%v,%v)=%v want %v", tt.post, tt.isFork, tt.err, got, tt.want)
 			}
 		})
+	}
+}
+
+func TestReviewErrorNoticeGitHubUnavailable(t *testing.T) {
+	notice := reviewErrorNotice(&cli.CLIError{
+		Code:    "github.unavailable",
+		Message: `listing review comments: Get "https://api.github.com/repos/o/r/pulls/1/comments?per_page=100": unexpected EOF`,
+		Retry:   true,
+	})
+	if notice.Level != "warning" || notice.Title != "GitHub unavailable" {
+		t.Fatalf("classified GitHub blip must render as warning, got %+v", notice)
+	}
+	if notice.Code != "github.unavailable" {
+		t.Fatalf("code=%q", notice.Code)
 	}
 }
 
@@ -96,6 +112,7 @@ func TestReviewErrorTextLooksOperational(t *testing.T) {
 		{"overload", "service overloaded", true},
 		{"529", "upstream returned 529", true},
 		{"network", "network connection reset", true},
+		{"unexpected eof", `listing review comments: Get "https://api.github.com/repos/o/r/pulls/1/comments?per_page=100": unexpected EOF`, true},
 		{"internal panic", "panic in renderer", false},
 	}
 	for _, tt := range tests {

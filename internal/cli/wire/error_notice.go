@@ -124,6 +124,7 @@ func reviewErrorTextLooksOperational(msg string) bool {
 		"connection refused",
 		"network",
 		"tls handshake timeout",
+		"unexpected eof",
 	} {
 		if strings.Contains(s, needle) {
 			return true

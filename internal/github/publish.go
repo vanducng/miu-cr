@@ -13,11 +13,9 @@ import (
 	"sort"
 	"strconv"
 	"strings"
-	"time"
 
 	gh "github.com/google/go-github/v84/github"
 
-	"github.com/vanducng/miu-cr/internal/cli/clierr"
 	"github.com/vanducng/miu-cr/internal/config"
 	"github.com/vanducng/miu-cr/internal/engine"
 	"github.com/vanducng/miu-cr/internal/engine/diff"
@@ -953,46 +951,8 @@ func summaryCommentURL(info *PRInfo, id int64, got string) string {
 	return fmt.Sprintf("%s/pull/%d#issuecomment-%d", strings.TrimRight(info.HTMLBase, "/"), info.Number, id)
 }
 
-// mapWriteError maps go-github rate-limit errors to a retryable github.rate_limited
-// CLIError (carrying Retry-After when known) and falls back to a generic typed error.
+// mapWriteError classifies a GitHub write-path failure with the same ghAPIError
+// rules as FetchPR (rate-limit / 5xx / net / unexpected EOF).
 func mapWriteError(code, stage string, err error) error {
-	var rle *gh.RateLimitError
-	var arle *gh.AbuseRateLimitError
-	if errors.As(err, &rle) {
-		ce := &clierr.CLIError{
-			Code:      "github.rate_limited",
-			Message:   "GitHub rate limit exceeded",
-			Hint:      "wait for the rate limit to reset, then re-run",
-			Exit:      1,
-			Retry:     true,
-			SafeRetry: true,
-		}
-		if !rle.Rate.Reset.IsZero() {
-			ce.Details = map[string]any{"retry_after_seconds": int(time.Until(rle.Rate.Reset.Time).Seconds())}
-		}
-		return ce
-	}
-	if errors.As(err, &arle) {
-		ce := &clierr.CLIError{
-			Code:      "github.rate_limited",
-			Message:   "GitHub secondary (abuse) rate limit exceeded",
-			Hint:      "wait before retrying",
-			Exit:      1,
-			Retry:     true,
-			SafeRetry: true,
-		}
-		if arle.RetryAfter != nil {
-			ce.Details = map[string]any{"retry_after_seconds": int(arle.RetryAfter.Seconds())}
-		}
-		return ce
-	}
-	return ghWriteError(code, stage, err)
-}
-
-func ghWriteError(code, stage string, err error) error {
-	return &clierr.CLIError{
-		Code:    code,
-		Message: config.RedactString(fmt.Sprintf("%s: %v", stage, err)),
-		Exit:    1,
-	}
+	return ghAPIError(code, stage, err)
 }

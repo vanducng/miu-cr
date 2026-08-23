@@ -4,11 +4,13 @@ import (
 	stdctx "context"
 	"errors"
 	"fmt"
+	"io"
 	"net"
 	"net/url"
 	"os"
 	"regexp"
 	"strings"
+	"time"
 	"unicode/utf8"
 
 	gh "github.com/google/go-github/v84/github"
@@ -465,19 +467,20 @@ func fetchError(stage string, err error) error {
 }
 
 // ghAPIError classifies a GitHub API failure into a typed CLIError by a PROVEN
-// signal: the go-github *ErrorResponse status (401/403/404/5xx) or a net error
-// (DNS/refused/timeout). Anything unrecognized keeps the caller's fallback code
-// (github.pr_fetch_failed) so a real bug is never mislabeled retryable. The
-// message is redacted so a 401 body can't leak a token fragment.
+// signal: the go-github *ErrorResponse status (401/403/404/5xx), a net error
+// (DNS/refused/timeout), or a truncated HTTP body (io.EOF / unexpected EOF).
+// Anything unrecognized keeps the caller's fallback code so a real bug is never
+// mislabeled retryable. The message is redacted so a 401 body can't leak a
+// token fragment.
 func ghAPIError(fallback, stage string, err error) error {
 	msg := config.RedactString(fmt.Sprintf("%s: %v", stage, err))
 
 	// Rate-limit errors arrive as dedicated types that do NOT embed *gh.ErrorResponse,
-	// so errors.As below would miss them; match them first. Reads are idempotent →
-	// SafeRetry (mirrors mapWriteError in publish.go).
+	// so errors.As below would miss them; match them first. GET-like calls are
+	// idempotent → SafeRetry.
 	var rle *gh.RateLimitError
 	if errors.As(err, &rle) {
-		return &clierr.CLIError{
+		ce := &clierr.CLIError{
 			Code:      "github.rate_limited",
 			Message:   "GitHub rate limit exceeded",
 			Hint:      "wait for the rate limit to reset, then re-run",
@@ -485,10 +488,14 @@ func ghAPIError(fallback, stage string, err error) error {
 			Retry:     true,
 			SafeRetry: true,
 		}
+		if !rle.Rate.Reset.IsZero() {
+			ce.Details = map[string]any{"retry_after_seconds": int(time.Until(rle.Rate.Reset.Time).Seconds())}
+		}
+		return ce
 	}
 	var arle *gh.AbuseRateLimitError
 	if errors.As(err, &arle) {
-		return &clierr.CLIError{
+		ce := &clierr.CLIError{
 			Code:      "github.rate_limited",
 			Message:   "GitHub secondary (abuse) rate limit exceeded",
 			Hint:      "wait before retrying",
@@ -496,6 +503,10 @@ func ghAPIError(fallback, stage string, err error) error {
 			Retry:     true,
 			SafeRetry: true,
 		}
+		if arle.RetryAfter != nil {
+			ce.Details = map[string]any{"retry_after_seconds": int(arle.RetryAfter.Seconds())}
+		}
+		return ce
 	}
 
 	var er *gh.ErrorResponse
@@ -538,19 +549,28 @@ func ghAPIError(fallback, stage string, err error) error {
 
 	var netErr net.Error
 	if errors.As(err, &netErr) {
-		return &clierr.CLIError{
-			Code:      "github.unavailable",
-			Message:   msg,
-			Hint:      "cannot reach GitHub — check your network and retry",
-			Exit:      1,
-			Retry:     true,
-			SafeRetry: true,
-		}
+		return githubUnavailable(msg)
+	}
+	// GitHub often drops idle HTTP/2 connections as a bare unexpected EOF, which
+	// is not itself a net.Error when the url.Error wrapper is stripped.
+	if errors.Is(err, io.EOF) || errors.Is(err, io.ErrUnexpectedEOF) {
+		return githubUnavailable(msg)
 	}
 
 	return &clierr.CLIError{
 		Code:    fallback,
 		Message: msg,
 		Exit:    1,
+	}
+}
+
+func githubUnavailable(msg string) error {
+	return &clierr.CLIError{
+		Code:      "github.unavailable",
+		Message:   msg,
+		Hint:      "cannot reach GitHub — check your network and retry",
+		Exit:      1,
+		Retry:     true,
+		SafeRetry: true,
 	}
 }
