@@ -488,8 +488,8 @@ func ghAPIError(fallback, stage string, err error) error {
 			Retry:     true,
 			SafeRetry: true,
 		}
-		if !rle.Rate.Reset.IsZero() {
-			ce.Details = map[string]any{"retry_after_seconds": int(time.Until(rle.Rate.Reset.Time).Seconds())}
+		if secs := int(time.Until(rle.Rate.Reset.Time).Seconds()); secs > 0 {
+			ce.Details = map[string]any{"retry_after_seconds": secs}
 		}
 		return ce
 	}
@@ -504,7 +504,9 @@ func ghAPIError(fallback, stage string, err error) error {
 			SafeRetry: true,
 		}
 		if arle.RetryAfter != nil {
-			ce.Details = map[string]any{"retry_after_seconds": int(arle.RetryAfter.Seconds())}
+			if secs := int(arle.RetryAfter.Seconds()); secs > 0 {
+				ce.Details = map[string]any{"retry_after_seconds": secs}
+			}
 		}
 		return ce
 	}

@@ -378,6 +378,14 @@ func TestGhAPIErrorRateLimitIncludesRetryAfter(t *testing.T) {
 	if got <= 0 || got > 45 {
 		t.Fatalf("retry_after_seconds=%d, want (0,45]", got)
 	}
+
+	past := ghAPIError("github.list_review_comments_failed", "listing review comments", &gh.RateLimitError{
+		Message: "rate limited",
+		Rate:    gh.Rate{Reset: gh.Timestamp{Time: time.Now().Add(-30 * time.Second)}},
+	})
+	if !asCLIErr(past, &ce) || ce.Details["retry_after_seconds"] != nil {
+		t.Fatalf("past reset must omit retry_after_seconds, details=%v", ce.Details)
+	}
 }
 
 func TestGhAPIErrorClassifiesUnexpectedEOF(t *testing.T) {

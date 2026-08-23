@@ -1425,5 +1425,10 @@ func retryTransient(ctx stdctx.Context, maxAttempts int, fn func() error) error 
 
 func isRetryableErr(err error) bool {
 	var ce *cli.CLIError
-	return errors.As(err, &ce) && ce.Retry
+	if !errors.As(err, &ce) || !ce.Retry {
+		return false
+	}
+	// Rate-limit Retry is for the host/user to wait out the window, not the
+	// 0.5-8s in-process blip loop.
+	return ce.Code != "github.rate_limited"
 }

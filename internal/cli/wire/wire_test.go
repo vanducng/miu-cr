@@ -1150,4 +1150,13 @@ func TestRetryTransient(t *testing.T) {
 	if err == nil || calls != 1 {
 		t.Fatalf("non-retryable error must not retry: err=%v calls=%d", err, calls)
 	}
+	// github.rate_limited is Retry=true for host/user wait-out, not the blip loop.
+	calls = 0
+	err = retryTransient(stdctx.Background(), 3, func() error {
+		calls++
+		return &cli.CLIError{Code: "github.rate_limited", Retry: true}
+	})
+	if err == nil || calls != 1 {
+		t.Fatalf("rate-limited error must not short-retry: err=%v calls=%d", err, calls)
+	}
 }
