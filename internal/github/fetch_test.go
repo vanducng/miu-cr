@@ -378,7 +378,7 @@ func TestGhAPIErrorWritePath404KeepsFallback(t *testing.T) {
 		t.Fatal("write-path 404 must not be retryable")
 	}
 
-	err = ghAPIError("github.pr_fetch_failed", "fetching PR o/r#1", er)
+	err = ghFetchError("fetching PR o/r#1", er)
 	if !asCLIErr(err, &ce) || ce.Code != "github.pr_not_found" {
 		t.Fatalf("fetch 404 must be github.pr_not_found, got %v", err)
 	}

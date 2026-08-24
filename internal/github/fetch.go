@@ -86,7 +86,7 @@ func blobURL(info *PRInfo, path string, line, endLine int) string {
 func FetchPR(ctx stdctx.Context, client Client, ref PRRef) (*PRInfo, error) {
 	pr, err := client.GetPR(ctx, ref.Owner, ref.Repo, ref.Number)
 	if err != nil {
-		return nil, ghAPIError("github.pr_fetch_failed", fmt.Sprintf("fetching PR %s/%s#%d", ref.Owner, ref.Repo, ref.Number), err)
+		return nil, ghFetchError(fmt.Sprintf("fetching PR %s/%s#%d", ref.Owner, ref.Repo, ref.Number), err)
 	}
 	if pr.Head == nil || pr.Base == nil {
 		return nil, &clierr.CLIError{
@@ -112,7 +112,7 @@ func FetchPR(ctx stdctx.Context, client Client, ref PRRef) (*PRInfo, error) {
 	for {
 		files, resp, lerr := client.ListFiles(ctx, ref.Owner, ref.Repo, ref.Number, opts)
 		if lerr != nil {
-			return nil, ghAPIError("github.pr_fetch_failed", "listing PR files", lerr)
+			return nil, ghFetchError("listing PR files", lerr)
 		}
 		for _, f := range files {
 			if name := f.GetFilename(); name != "" {
@@ -466,13 +466,21 @@ func fetchError(stage string, err error) error {
 	}
 }
 
+func ghFetchError(stage string, err error) error {
+	return mapGitHubAPIError("github.pr_fetch_failed", stage, err, true)
+}
+
 // ghAPIError classifies a GitHub API failure into a typed CLIError by a PROVEN
 // signal: the go-github *ErrorResponse status (401/403/404/5xx), a net error
 // (DNS/refused/timeout), or a truncated HTTP body (io.EOF / unexpected EOF).
 // Anything unrecognized keeps the caller's fallback code so a real bug is never
 // mislabeled retryable. The message is redacted so a 401 body can't leak a
-// token fragment.
+// token fragment. Write-path 404s keep fallback; PR-fetch 404s use ghFetchError.
 func ghAPIError(fallback, stage string, err error) error {
+	return mapGitHubAPIError(fallback, stage, err, false)
+}
+
+func mapGitHubAPIError(fallback, stage string, err error, prNotFoundOn404 bool) error {
 	msg := config.RedactString(fmt.Sprintf("%s: %v", stage, err))
 
 	// Rate-limit errors arrive as dedicated types that do NOT embed *gh.ErrorResponse,
@@ -522,9 +530,7 @@ func ghAPIError(fallback, stage string, err error) error {
 				Exit:    1,
 			}
 		case status == 404:
-			// Fetch-path 404 means the PR is missing or invisible. Write-path 404 is
-			// usually a deleted comment/reaction target; keep the caller's stage code.
-			if fallback == "github.pr_fetch_failed" {
+			if prNotFoundOn404 {
 				return &clierr.CLIError{
 					Code:    "github.pr_not_found",
 					Message: msg,
