@@ -522,12 +522,17 @@ func ghAPIError(fallback, stage string, err error) error {
 				Exit:    1,
 			}
 		case status == 404:
-			return &clierr.CLIError{
-				Code:    "github.pr_not_found",
-				Message: msg,
-				Hint:    "check the PR exists and the token has access",
-				Exit:    1,
+			// Fetch-path 404 means the PR is missing or invisible. Write-path 404 is
+			// usually a deleted comment/reaction target; keep the caller's stage code.
+			if fallback == "github.pr_fetch_failed" {
+				return &clierr.CLIError{
+					Code:    "github.pr_not_found",
+					Message: msg,
+					Hint:    "check the PR exists and the token has access",
+					Exit:    1,
+				}
 			}
+			return &clierr.CLIError{Code: fallback, Message: msg, Exit: 1}
 		case status == 429:
 			return &clierr.CLIError{
 				Code:      "github.rate_limited",

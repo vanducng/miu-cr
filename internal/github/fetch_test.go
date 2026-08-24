@@ -364,6 +364,26 @@ func TestFetchPRNetErrorIsUnavailable(t *testing.T) {
 	}
 }
 
+func TestGhAPIErrorWritePath404KeepsFallback(t *testing.T) {
+	er := &gh.ErrorResponse{
+		Response: &http.Response{StatusCode: http.StatusNotFound},
+		Message:  "Not Found",
+	}
+	err := ghAPIError("github.upsert_summary_failed", "editing summary comment", er)
+	var ce *clierr.CLIError
+	if !asCLIErr(err, &ce) || ce.Code != "github.upsert_summary_failed" {
+		t.Fatalf("write-path 404 must keep fallback, got %v", err)
+	}
+	if ce.Retry {
+		t.Fatal("write-path 404 must not be retryable")
+	}
+
+	err = ghAPIError("github.pr_fetch_failed", "fetching PR o/r#1", er)
+	if !asCLIErr(err, &ce) || ce.Code != "github.pr_not_found" {
+		t.Fatalf("fetch 404 must be github.pr_not_found, got %v", err)
+	}
+}
+
 func TestGhAPIErrorRateLimitIncludesRetryAfter(t *testing.T) {
 	reset := time.Now().Add(45 * time.Second)
 	err := ghAPIError("github.list_review_comments_failed", "listing review comments", &gh.RateLimitError{
