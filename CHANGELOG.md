@@ -55,6 +55,13 @@ comment with a new marker); subsequent re-runs dedupe normally. On a
 first M5 review **manually** (or off-hours) to absorb the one-time re-post before
 the next scheduled run.
 
+## [0.89.9](https://github.com/vanducng/miu-cr/compare/v0.89.8...v0.89.9) (2026-08-24)
+
+
+### Bug Fixes
+
+* **github:** retry unexpected EOF when listing PR comments ([024ab35](https://github.com/vanducng/miu-cr/commit/024ab3597841435756f9afb01ec4a073ed1bf355)), closes [#303](https://github.com/vanducng/miu-cr/issues/303)
+
 ## [0.89.8](https://github.com/vanducng/miu-cr/compare/v0.89.7...v0.89.8) (2026-07-29)
 
 
