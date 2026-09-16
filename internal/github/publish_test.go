@@ -622,6 +622,61 @@ func TestCommentBodyRationaleInlineCodeSafeWithPatch(t *testing.T) {
 	}
 }
 
+func TestCommentBodySuggestionPreservesRebasedPythonIndentation(t *testing.T) {
+	f := engine.Finding{
+		Line:           5,
+		EndLine:        7,
+		Severity:       "high",
+		Category:       "bug",
+		Rationale:      "keep the nested expression aligned",
+		QuotedCode:     "result = (\n\"this unchanged synthetic value stays on one line\"\n)",
+		SuggestedPatch: "result = holder(\n    \"this unchanged synthetic value stays on one line\"\n)",
+	}
+	content := "def build(items):\n    if items:\n        for item in items:\n            with holder():\n                result = (\n                    \"this unchanged synthetic value stays on one line\"\n                )"
+	body, native := commentBody(nil, f, content, PostReviewOptions{Suggest: true}, true)
+	if !native {
+		t.Fatalf("clean nested replacement must emit a native suggestion:\n%s", body)
+	}
+	want := "```suggestion\n                result = holder(\n                    \"this unchanged synthetic value stays on one line\"\n                )\n```"
+	if !strings.Contains(body, want) {
+		t.Fatalf("suggestion fence lost rebased indentation:\n%s", body)
+	}
+}
+
+func TestCommentBodyHintPreservesLeadingIndentation(t *testing.T) {
+	f := engine.Finding{
+		Severity:       "low",
+		Category:       "bug",
+		Rationale:      "show the replacement",
+		SuggestedPatch: "    replacement()  ",
+	}
+	body, native := commentBody(nil, f, "", PostReviewOptions{}, false)
+	if native {
+		t.Fatal("plain patch hint must not be native")
+	}
+	if !strings.Contains(body, "```\n    replacement()\n```") {
+		t.Fatalf("plain patch fence lost leading indentation or kept trailing whitespace:\n%s", body)
+	}
+}
+
+func TestCommentBodyIndentMismatchDegradesToHint(t *testing.T) {
+	f := engine.Finding{
+		Line:           2,
+		Severity:       "high",
+		Category:       "bug",
+		Rationale:      "replace the calls",
+		QuotedCode:     "original()",
+		SuggestedPatch: "        fixed()\n  finish()",
+	}
+	body, native := commentBody(nil, f, "def run():\n    original()", PostReviewOptions{Suggest: true}, false)
+	if native || strings.Contains(body, "```suggestion") {
+		t.Fatalf("unsafe indentation rebase must degrade to a plain hint:\n%s", body)
+	}
+	if !strings.Contains(body, "```\n        fixed()\n  finish()\n```") {
+		t.Fatalf("plain hint must retain the model patch:\n%s", body)
+	}
+}
+
 // commentBody leads with the bold title when present; absent, the body is
 // byte-for-byte today's body; an untrusted title is mdInline-escaped (no breakout).
 func TestCommentBodyTitle(t *testing.T) {

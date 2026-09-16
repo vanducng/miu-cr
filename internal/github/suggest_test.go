@@ -20,7 +20,121 @@ func TestClassifyReplacement(t *testing.T) {
 			name:       "clean single-line OK",
 			f:          engine.Finding{Line: 2, QuotedCode: "anchor here", SuggestedPatch: "  fixed line"},
 			content:    content,
-			wantPatch:  "fixed line",
+			wantPatch:  "  fixed line",
+			wantReason: reasonOK,
+		},
+		{
+			name: "nested Python parenthesized patch inherits 16-space anchor",
+			f: engine.Finding{
+				Line:           5,
+				EndLine:        7,
+				QuotedCode:     "result = (\n\"this unchanged synthetic value stays on one line\"\n)",
+				SuggestedPatch: "result = holder(\n    \"this unchanged synthetic value stays on one line\"\n)",
+			},
+			content:    "def build(items):\n    if items:\n        for item in items:\n            with holder():\n                result = (\n                    \"this unchanged synthetic value stays on one line\"\n                )",
+			wantPatch:  "                result = holder(\n                    \"this unchanged synthetic value stays on one line\"\n                )",
+			wantReason: reasonOK,
+		},
+		{
+			name: "tab-indented patch preserves anchor and relative tabs",
+			f: engine.Finding{
+				Line:           2,
+				EndLine:        3,
+				QuotedCode:     "if ready {\nprocess()",
+				SuggestedPatch: "if ready {\n\tprocess_safely()\n\t\tlog()",
+			},
+			content:    "func run() {\n\tif ready {\n\t\tprocess()\n\t}",
+			wantPatch:  "\tif ready {\n\t\tprocess_safely()\n\t\t\tlog()",
+			wantReason: reasonOK,
+		},
+		{
+			name:       "mixed anchor suffix is inserted after shared tab",
+			f:          engine.Finding{Line: 2, QuotedCode: "original()", SuggestedPatch: "\tfixed()\n\t\tchild()"},
+			content:    "def run():\n\t    original()",
+			wantPatch:  "\t    fixed()\n\t    \tchild()",
+			wantReason: reasonOK,
+		},
+		{
+			name:       "mixed patch suffix is removed after shared tab",
+			f:          engine.Finding{Line: 2, QuotedCode: "original()", SuggestedPatch: "\t    fixed()\n\t    \tchild()"},
+			content:    "def run():\n\toriginal()",
+			wantPatch:  "\tfixed()\n\t\tchild()",
+			wantReason: reasonOK,
+		},
+		{
+			name: "overindented patch rebases onto anchor",
+			f: engine.Finding{
+				Line:           2,
+				QuotedCode:     "old()",
+				SuggestedPatch: "        replacement()\n            child()",
+			},
+			content:    "def run():\n    old()",
+			wantPatch:  "    replacement()\n        child()",
+			wantReason: reasonOK,
+		},
+		{
+			name: "dedented patch line receives negative indentation delta",
+			f: engine.Finding{
+				Line:           2,
+				QuotedCode:     "original()",
+				SuggestedPatch: "        fixed()\n    finish()",
+			},
+			content:    "def run():\n    original()",
+			wantPatch:  "    fixed()\nfinish()",
+			wantReason: reasonOK,
+		},
+		{
+			name: "dedented patch line receives positive indentation delta",
+			f: engine.Finding{
+				Line:           3,
+				QuotedCode:     "original()",
+				SuggestedPatch: "    fixed()\nfinish()",
+			},
+			content:    "if enabled:\n    if ready:\n        original()",
+			wantPatch:  "        fixed()\n    finish()",
+			wantReason: reasonOK,
+		},
+		{
+			name: "impossible negative rebase is rejected",
+			f: engine.Finding{
+				Line:           2,
+				QuotedCode:     "original()",
+				SuggestedPatch: "        fixed()\n  finish()",
+			},
+			content:    "def run():\n    original()",
+			wantReason: reasonIndentMismatch,
+		},
+		{
+			name: "CRLF patch trims trailing whitespace per line and keeps blank line",
+			f: engine.Finding{
+				Line:           2,
+				QuotedCode:     "old()",
+				SuggestedPatch: "replacement()  \r\n   \r\n    child()\t",
+			},
+			content:    "def run():\r\n    old()\r\n",
+			wantPatch:  "    replacement()\n\n        child()",
+			wantReason: reasonOK,
+		},
+		{
+			name: "leading blank line uses first nonempty patch indentation",
+			f: engine.Finding{
+				Line:           2,
+				QuotedCode:     "old()",
+				SuggestedPatch: "\nreplacement()\n    child()",
+			},
+			content:    "def run():\n    old()",
+			wantPatch:  "\n    replacement()\n        child()",
+			wantReason: reasonOK,
+		},
+		{
+			name: "trailing newline is stripped from emitted patch",
+			f: engine.Finding{
+				Line:           2,
+				QuotedCode:     "old()",
+				SuggestedPatch: "replacement()\n    child()\n\n",
+			},
+			content:    "def run():\n    old()",
+			wantPatch:  "    replacement()\n        child()",
 			wantReason: reasonOK,
 		},
 		{
@@ -66,7 +180,7 @@ func TestClassifyReplacement(t *testing.T) {
 			name:       "clean multi-line OK",
 			f:          engine.Finding{Line: 2, EndLine: 3, QuotedCode: "anchor here\nline three", SuggestedPatch: "new a\nnew b"},
 			content:    content,
-			wantPatch:  "new a\nnew b",
+			wantPatch:  "  new a\n  new b",
 			wantReason: reasonOK,
 		},
 		{
@@ -91,6 +205,13 @@ func TestClassifyReplacement(t *testing.T) {
 		{
 			name:       "multi-line no-op",
 			f:          engine.Finding{Line: 2, EndLine: 3, QuotedCode: "anchor here\nline three", SuggestedPatch: "anchor here\nline three"},
+			content:    content,
+			wantReason: reasonNoOp,
+			wantRepair: true,
+		},
+		{
+			name:       "multi-line no-op with boundary whitespace",
+			f:          engine.Finding{Line: 2, EndLine: 3, QuotedCode: "anchor here\nline three", SuggestedPatch: " \nanchor here\nline three\n\t"},
 			content:    content,
 			wantReason: reasonNoOp,
 			wantRepair: true,
@@ -138,6 +259,23 @@ func TestClassifyReplacement(t *testing.T) {
 	}
 }
 
+func TestClassifyReplacementRebaseIsIdempotent(t *testing.T) {
+	content := "def run():\n\t    original()"
+	f := engine.Finding{Line: 2, QuotedCode: "original()", SuggestedPatch: "\tfixed()\n\t\tchild()"}
+	first, reason := classifyReplacement(f, content)
+	if reason != reasonOK {
+		t.Fatalf("first reason = %v, want ok", reason)
+	}
+	f.SuggestedPatch = first
+	second, reason := classifyReplacement(f, content)
+	if reason != reasonOK {
+		t.Fatalf("second reason = %v, want ok", reason)
+	}
+	if second != first {
+		t.Fatalf("second patch = %q, want idempotent %q", second, first)
+	}
+}
+
 func TestRepairReasonString(t *testing.T) {
 	for r, want := range map[repairReason]string{
 		reasonOK:             "ok",
@@ -148,6 +286,7 @@ func TestRepairReasonString(t *testing.T) {
 		reasonAnchorMismatch: "anchor_mismatch",
 		reasonGarbledSpan:    "garbled_span",
 		reasonLengthMismatch: "length_mismatch",
+		reasonIndentMismatch: "indent_mismatch",
 	} {
 		if got := r.String(); got != want {
 			t.Errorf("repairReason(%d).String() = %q, want %q", r, got, want)

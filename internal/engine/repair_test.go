@@ -7,6 +7,7 @@ import (
 
 	"github.com/vanducng/miu-cr/internal/engine"
 	"github.com/vanducng/miu-cr/internal/engine/gitcmd"
+	mgithub "github.com/vanducng/miu-cr/internal/github"
 )
 
 // repairRepo stages a one-line change whose new-file line is exactly `line` so a
@@ -97,6 +98,36 @@ func TestRepairEmptyPatchRepaired(t *testing.T) {
 	st := res.Stats["patch_repair"].(map[string]any)
 	if st["attempted"].(float64) != 1 || st["repaired"].(float64) != 1 {
 		t.Errorf("stats: %+v", st)
+	}
+}
+
+func TestRepairIndentationSurvivesClassification(t *testing.T) {
+	dir := initRepo(t)
+	writeFile(t, dir, "sample.py", "def old():\n    return None\n")
+	git(t, dir, "add", ".")
+	git(t, dir, "commit", "-q", "-m", "base")
+	content := "def run():\n    original()\n"
+	writeFile(t, dir, "sample.py", content)
+	git(t, dir, "add", "sample.py")
+
+	fa := &fakeAgent{
+		findings: []engine.Finding{{File: "sample.py", Severity: "high", Category: "bug", Rationale: "replace the call", QuotedCode: "original()"}},
+		repair:   func(engine.RepairRequest) (string, error) { return "    check()\n    save()", nil },
+	}
+	eng := engine.New(fa, gitcmd.New())
+	res, err := eng.Review(stdctx.Background(), engine.Request{Mode: 0, RepoDir: dir, Gate: "high", Extensions: []string{"py"}, PatchRepair: true, Post: true})
+	if err != nil {
+		t.Fatalf("Review: %v", err)
+	}
+	if len(res.Findings) != 1 {
+		t.Fatalf("want 1 repaired finding, got %+v", res.Findings)
+	}
+	got, reason, _ := mgithub.ClassifyReplacement(res.Findings[0], content)
+	if reason != "ok" {
+		t.Fatalf("classification reason = %q, want ok", reason)
+	}
+	if want := "    check()\n    save()"; got != want {
+		t.Fatalf("emitted patch = %q, want %q", got, want)
 	}
 }
 

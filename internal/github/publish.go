@@ -787,8 +787,8 @@ func commentBody(info *PRInfo, f engine.Finding, newFileContent string, opts Pos
 	}
 	b.WriteString(mdProse(f.Rationale))
 
-	patch := strings.TrimSpace(f.SuggestedPatch)
-	if patch == "" {
+	patch := cleanSuggestedPatch(f.SuggestedPatch)
+	if strings.TrimSpace(patch) == "" {
 		return b.String(), false
 	}
 

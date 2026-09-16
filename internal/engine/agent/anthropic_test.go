@@ -13,6 +13,7 @@ import (
 	"github.com/vanducng/miu-cr/internal/cli/clierr"
 	"github.com/vanducng/miu-cr/internal/config"
 	"github.com/vanducng/miu-cr/internal/engine"
+	mgithub "github.com/vanducng/miu-cr/internal/github"
 )
 
 // fakeAnthropic serves scripted Messages and records params, so the tool/parse
@@ -395,6 +396,23 @@ func TestAnthropicAgentRepairPatch(t *testing.T) {
 	}
 	if got := fc.seen[0].System[0].Text; got != repairSystemPrompt {
 		t.Fatalf("repair must use repairSystemPrompt, got %q", got)
+	}
+}
+
+func TestAnthropicRepairIndentationReachesClassifier(t *testing.T) {
+	fc := &fakeAnthropic{responses: []string{textMessage(" \n```python\n    check()\n    save()\n```\n\t")}}
+	a := &anthropicAgent{client: fc, model: "claude-test"}
+	patch, _, err := a.RepairPatch(stdctx.Background(), RepairRequest{Span: "    original()", Rationale: "replace the call", Category: "bug", Severity: "high"})
+	if err != nil {
+		t.Fatalf("RepairPatch: %v", err)
+	}
+	f := engine.Finding{Line: 2, QuotedCode: "original()", SuggestedPatch: patch}
+	got, reason, _ := mgithub.ClassifyReplacement(f, "def run():\n    original()")
+	if reason != "ok" {
+		t.Fatalf("classification reason = %q, want ok", reason)
+	}
+	if want := "    check()\n    save()"; got != want {
+		t.Fatalf("emitted patch = %q, want %q", got, want)
 	}
 }
 

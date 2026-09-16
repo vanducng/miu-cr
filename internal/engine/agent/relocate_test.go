@@ -90,6 +90,18 @@ func TestAnthropicAgentRelocateQuote(t *testing.T) {
 	}
 }
 
+func TestRelocateQuoteStripsBoundaryWhitespacePreservingIndentation(t *testing.T) {
+	fc := &fakeAnthropic{responses: []string{textMessage(" \n```python\n    value = source()\n```\n\t")}}
+	a := &anthropicAgent{client: fc, model: "claude-test"}
+	out, _, err := a.RelocateQuote(stdctx.Background(), RelocateRequest{Excerpt: "    value = source()"})
+	if err != nil {
+		t.Fatalf("RelocateQuote: %v", err)
+	}
+	if want := "    value = source()"; out != want {
+		t.Fatalf("reply = %q, want %q", out, want)
+	}
+}
+
 // A surfaced API error from RelocateQuote must be wrapped through the same
 // classifier as Review (consistent error taxonomy).
 func TestAnthropicAgentRelocateQuoteErrorWrapped(t *testing.T) {

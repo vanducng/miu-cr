@@ -67,7 +67,7 @@ func renderFinding(ew *errWriter, color bool, f ReviewFinding) {
 		ew.printf("  %s\n", paint(color, ansiDim, "code:"))
 		printIndentedBlock(ew, color, code)
 	}
-	if patch := strings.TrimSpace(f.SuggestedPatch); patch != "" {
+	if patch := f.SuggestedPatch; strings.TrimSpace(patch) != "" {
 		ew.printf("  %s\n", paint(color, ansiDim, "suggested patch:"))
 		printIndentedBlock(ew, color, patch)
 	}
