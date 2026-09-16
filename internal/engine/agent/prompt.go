@@ -552,7 +552,10 @@ func stripCodeFences(s string) string {
 	fenced = strings.TrimPrefix(fenced, "```")
 	i := strings.IndexByte(fenced, '\n')
 	if i < 0 {
-		return t
+		if j := strings.LastIndex(fenced, "```"); j >= 0 {
+			return trimBlankBoundaryLines(fenced[:j])
+		}
+		return ""
 	}
 	fenced = fenced[i+1:]
 	if i = strings.LastIndex(fenced, "```"); i >= 0 {
