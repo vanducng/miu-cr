@@ -555,7 +555,7 @@ func stripCodeFences(s string) string {
 		return t
 	}
 	fenced = fenced[i+1:]
-	if i = strings.LastIndex(fenced, "```"); i >= 0 && strings.TrimSpace(fenced[i+3:]) == "" {
+	if i = strings.LastIndex(fenced, "```"); i >= 0 {
 		fenced = fenced[:i]
 	}
 	return trimBlankBoundaryLines(fenced)

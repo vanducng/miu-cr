@@ -126,6 +126,23 @@ func TestEmitSARIFNoRegionNoArtifactChanges(t *testing.T) {
 	}
 }
 
+func TestEmitSARIFPreservesPatchIndentation(t *testing.T) {
+	want := "    check()\n    save()"
+	m := decode(t, []Finding{{
+		File: "a.py", Line: 4, Severity: "high", Category: "bug",
+		Rationale: "indent", SuggestedPatch: want,
+	}})
+	res := m["runs"].([]any)[0].(map[string]any)["results"].([]any)[0].(map[string]any)
+	fix0 := res["fixes"].([]any)[0].(map[string]any)
+	repl := fix0["artifactChanges"].([]any)[0].(map[string]any)["replacements"].([]any)[0].(map[string]any)
+	if got := repl["insertedContent"].(map[string]any)["text"]; got != want {
+		t.Fatalf("insertedContent stripped indentation: %q", got)
+	}
+	if got := fix0["description"].(map[string]any)["text"]; got != want {
+		t.Fatalf("description stripped indentation: %q", got)
+	}
+}
+
 func TestEmitSARIFEmptyCategoryDefaultsRule(t *testing.T) {
 	for _, cat := range []string{"", "   "} {
 		m := decode(t, []Finding{{File: "a.go", Line: 1, Severity: "low", Category: cat}})

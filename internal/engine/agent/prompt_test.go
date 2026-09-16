@@ -540,6 +540,7 @@ func TestParseRepairReplyStripsFencesAndPreservesIndentation(t *testing.T) {
 		{"crlf", "val, ok := m[key]\r", "val, ok := m[key]"},
 		{"empty", "", ""},
 		{"fences-only", "```\n```", ""},
+		{"trailing prose after fence", "```go\n    fixed()\n```\nDone!", "    fixed()"},
 	} {
 		if got := parseRepairReply(tc.in); got != tc.want {
 			t.Errorf("%s: parseRepairReply(%q) = %q, want %q", tc.name, tc.in, got, tc.want)

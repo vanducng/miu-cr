@@ -66,6 +66,20 @@ func TestRenderReviewTableMultiSeverity(t *testing.T) {
 	}
 }
 
+func TestRenderReviewTablePreservesPatchIndentation(t *testing.T) {
+	out := ReviewOutcome{Findings: []ReviewFinding{
+		{File: "a.py", Line: 4, Severity: "high", Category: "bug", SuggestedPatch: "    check()\n    save()"},
+	}}
+	var buf bytes.Buffer
+	if err := renderReviewTable(&buf, out); err != nil {
+		t.Fatalf("renderReviewTable: %v", err)
+	}
+	s := buf.String()
+	if !strings.Contains(s, "|     check()") || !strings.Contains(s, "|     save()") {
+		t.Fatalf("pretty output stripped patch indentation: %q", s)
+	}
+}
+
 func TestRenderReviewTableTruncationASCII(t *testing.T) {
 	var sb strings.Builder
 	for i := 0; i < 12; i++ {

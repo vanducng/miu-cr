@@ -183,7 +183,7 @@ func toResult(f Finding, cat string) result {
 			Region:           reg,
 		}}},
 	}
-	if patch := strings.TrimSpace(f.SuggestedPatch); patch != "" {
+	if patch := f.SuggestedPatch; strings.TrimSpace(patch) != "" {
 		fx := fix{Description: message{Text: patch}}
 		// Only emit a machine-applicable replacement when there's a concrete region
 		// to delete; a region-less (drift, Line<=0) fix stays description-only.
