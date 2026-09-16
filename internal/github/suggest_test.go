@@ -127,6 +127,17 @@ func TestClassifyReplacement(t *testing.T) {
 			wantReason: reasonOK,
 		},
 		{
+			name: "trailing newline is stripped from emitted patch",
+			f: engine.Finding{
+				Line:           2,
+				QuotedCode:     "old()",
+				SuggestedPatch: "replacement()\n    child()\n\n",
+			},
+			content:    "def run():\n    old()",
+			wantPatch:  "    replacement()\n        child()",
+			wantReason: reasonOK,
+		},
+		{
 			name:       "no anchor (line<=0)",
 			f:          engine.Finding{Line: 0, SuggestedPatch: "x"},
 			content:    content,

@@ -209,7 +209,7 @@ func cleanSuggestedPatch(patch string) string {
 	for i := range lines {
 		lines[i] = strings.TrimRight(lines[i], " \t\r")
 	}
-	return strings.Join(lines, "\n")
+	return strings.TrimRight(strings.Join(lines, "\n"), "\n")
 }
 
 func rebasePatchIndentation(patch, rawAnchor string) (string, bool) {
