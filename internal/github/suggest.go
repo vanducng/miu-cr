@@ -23,8 +23,6 @@ func meetsSuggestionFloor(sev string) bool {
 }
 
 // repairReason classifies why classifyReplacement accepted or rejected a patch.
-// Only the "repairable" subset is worth a second LLM pass; the rest are anchoring
-// bugs a patch-only re-prompt cannot fix.
 type repairReason int
 
 const (
@@ -36,6 +34,7 @@ const (
 	reasonAnchorMismatch
 	reasonGarbledSpan
 	reasonLengthMismatch
+	reasonIndentMismatch
 )
 
 func (r repairReason) String() string {
@@ -56,15 +55,14 @@ func (r repairReason) String() string {
 		return "garbled_span"
 	case reasonLengthMismatch:
 		return "length_mismatch"
+	case reasonIndentMismatch:
+		return "indent_mismatch"
 	default:
 		return "unknown"
 	}
 }
 
-// repairable reports whether a rejection is worth a second LLM pass: only an
-// empty/no-op/garbled-span/length-mismatch patch can be fixed by re-prompting for
-// the replacement code. A true anchor mismatch (or no/out-of-range anchor) is an
-// anchoring bug, not a patch problem, so it is NOT repairable.
+// repairable reports whether a rejection is worth a second LLM pass.
 func (r repairReason) repairable() bool {
 	switch r {
 	// A garbled span (EndLine set but != Line) is structural: it lives in the
@@ -114,6 +112,7 @@ func normalizeLine(s string) string {
 //     suggestion could replace an unrelated new-file line.
 //   - the patch is not a no-op (differs from the whitespace-trimmed raw line;
 //     +/- are NOT stripped from the patch, which may be operator-prefixed code)
+//   - its indentation can be rebased exactly onto the raw anchor
 func isCleanReplacement(f engine.Finding, newFileContent string) (string, bool) {
 	s, r := classifyReplacement(f, newFileContent)
 	return s, r == reasonOK
@@ -121,8 +120,6 @@ func isCleanReplacement(f engine.Finding, newFileContent string) (string, bool) 
 
 // classifyReplacement implements the single- and multi-line accept/reject logic of
 // isCleanReplacement, returning the precise rejection reason for the repair loop.
-// The accept/reject decision is byte-for-byte identical to the original
-// isCleanReplacement/cleanMultiLineReplacement; only the reason is new.
 func classifyReplacement(f engine.Finding, newFileContent string) (string, repairReason) {
 	if f.Line <= 0 {
 		return "", reasonNoAnchor
@@ -134,8 +131,8 @@ func classifyReplacement(f engine.Finding, newFileContent string) (string, repai
 		return "", reasonGarbledSpan
 	}
 
-	patch := strings.TrimRight(strings.TrimSpace(f.SuggestedPatch), "\r")
-	if patch == "" {
+	patch := cleanSuggestedPatch(f.SuggestedPatch)
+	if strings.TrimSpace(patch) == "" {
 		return "", reasonEmpty
 	}
 
@@ -155,22 +152,25 @@ func classifyReplacement(f engine.Finding, newFileContent string) (string, repai
 	if strings.TrimSpace(rawLine) == strings.TrimSpace(patch) {
 		return "", reasonNoOp
 	}
-	return patch, reasonOK
+	rebased, ok := rebasePatchIndentation(patch, rawLine)
+	if !ok {
+		return "", reasonIndentMismatch
+	}
+	return rebased, reasonOK
 }
 
 // cleanMultiLineReplacement proves a multi-line one-click suggestion is safe: the
 // span Line..EndLine must exist in the new file AND its QuotedCode must match those
 // raw lines verbatim (per-line normalized), so the patch replaces EXACTLY the
-// anchored on-diff block. Any mismatch (length, content, no-op) rejects → the
-// caller falls back to a plain fenced hint, never a one-click multi-line apply.
+// anchored on-diff block. Any unsafe replacement falls back to a plain fenced hint.
 func cleanMultiLineReplacement(f engine.Finding, newFileContent string) (string, bool) {
 	s, r := classifyMultiLineReplacement(f, newFileContent)
 	return s, r == reasonOK
 }
 
 func classifyMultiLineReplacement(f engine.Finding, newFileContent string) (string, repairReason) {
-	patch := strings.TrimRight(strings.TrimSpace(f.SuggestedPatch), "\r")
-	if patch == "" {
+	patch := cleanSuggestedPatch(f.SuggestedPatch)
+	if strings.TrimSpace(patch) == "" {
 		return "", reasonEmpty
 	}
 
@@ -193,10 +193,63 @@ func classifyMultiLineReplacement(f engine.Finding, newFileContent string) (stri
 		}
 	}
 	// No-op: the patch reproduces the span verbatim (whitespace-trimmed per line).
-	if strings.Join(trimAll(span), "\n") == strings.Join(trimAll(strings.Split(patch, "\n")), "\n") {
+	comparisonPatch := strings.TrimSpace(patch)
+	if strings.Join(trimAll(span), "\n") == strings.Join(trimAll(strings.Split(comparisonPatch, "\n")), "\n") {
 		return "", reasonNoOp
 	}
-	return patch, reasonOK
+	rebased, ok := rebasePatchIndentation(patch, span[0])
+	if !ok {
+		return "", reasonIndentMismatch
+	}
+	return rebased, reasonOK
+}
+
+func cleanSuggestedPatch(patch string) string {
+	lines := strings.Split(strings.ReplaceAll(patch, "\r\n", "\n"), "\n")
+	for i := range lines {
+		lines[i] = strings.TrimRight(lines[i], " \t\r")
+	}
+	return strings.Join(lines, "\n")
+}
+
+func rebasePatchIndentation(patch, rawAnchor string) (string, bool) {
+	lines := strings.Split(patch, "\n")
+	patchIndent := ""
+	for _, line := range lines {
+		if strings.TrimSpace(line) != "" {
+			patchIndent = leadingWhitespace(line)
+			break
+		}
+	}
+	anchorIndent := leadingWhitespace(rawAnchor)
+	if patchIndent == anchorIndent {
+		return patch, true
+	}
+	for i, line := range lines {
+		if line == "" {
+			continue
+		}
+		indent := leadingWhitespace(line)
+		var rebased string
+		switch {
+		case strings.HasPrefix(indent, patchIndent):
+			rebased = anchorIndent + strings.TrimPrefix(indent, patchIndent)
+		case strings.HasPrefix(patchIndent, indent):
+			removed := strings.TrimPrefix(patchIndent, indent)
+			if !strings.HasSuffix(anchorIndent, removed) {
+				return "", false
+			}
+			rebased = strings.TrimSuffix(anchorIndent, removed)
+		default:
+			return "", false
+		}
+		lines[i] = rebased + strings.TrimPrefix(line, indent)
+	}
+	return strings.Join(lines, "\n"), true
+}
+
+func leadingWhitespace(line string) string {
+	return strings.TrimSuffix(line, strings.TrimLeft(line, " \t"))
 }
 
 func trimAll(lines []string) []string {

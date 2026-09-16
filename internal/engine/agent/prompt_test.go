@@ -346,25 +346,31 @@ func TestSystemPromptPatchGuidanceIsModelControlled(t *testing.T) {
 	// (cache-stable; not injectable USER prose). suggested_patch is model-controlled:
 	// emitted only for a CERTAIN, grounded fix, omitted for judgment calls even on
 	// high/critical findings (a wrong one-click suggestion is worse than none).
-	for _, want := range []string{
-		"OPTIONAL one-click fix",
-		"CERTAIN",
-		"grounded in a cited rule OR an obvious best practice",
-		"EVEN for high/critical findings",
-		"worse than none",
-		"NEVER put a value you cannot VERIFY",
-		"brief verification QUESTION",
-		"FULL replacement for the quoted line(s)",
-		"Worked example",
-		"val, ok := m[key]",
-	} {
-		if !contains(systemPrompt, want) {
-			t.Fatalf("systemPrompt missing patch guidance %q", want)
+	for name, prompt := range map[string]string{"markdown": systemPrompt, "xml": systemPromptXML} {
+		for _, want := range []string{
+			"OPTIONAL one-click fix",
+			"CERTAIN",
+			"grounded in a cited rule OR an obvious best practice",
+			"EVEN for high/critical findings",
+			"worse than none",
+			"NEVER put a value you cannot VERIFY",
+			"brief verification QUESTION",
+			"FULL replacement for the quoted line(s)",
+			"Copy the leading whitespace from `existing_code` verbatim",
+			"Do not reflow unchanged lines",
+			"Python uses 4 spaces, Go uses tabs, and YAML indentation is exact",
+			"OMIT `suggested_patch` if indentation or wrapping is uncertain",
+			"Worked example",
+			"val, ok := m[key]",
+		} {
+			if !contains(prompt, want) {
+				t.Fatalf("%s system prompt missing patch guidance %q", name, want)
+			}
 		}
-	}
-	// The old blanket mandate must be gone.
-	if contains(systemPrompt, "REQUIRED for every high/critical finding") {
-		t.Fatal("systemPrompt must no longer force a patch on every high/critical finding")
+		// The old blanket mandate must be gone.
+		if contains(prompt, "REQUIRED for every high/critical finding") {
+			t.Fatalf("%s system prompt must no longer force a patch on every high/critical finding", name)
+		}
 	}
 }
 
@@ -520,12 +526,17 @@ func TestReviewSystemPromptXMLVariant(t *testing.T) {
 	}
 }
 
-func TestParseRepairReplyStripsFencesAndTrims(t *testing.T) {
+func TestParseRepairReplyStripsFencesAndPreservesIndentation(t *testing.T) {
 	for _, tc := range []struct {
 		name, in, want string
 	}{
 		{"plain", "val, ok := m[key]", "val, ok := m[key]"},
 		{"fenced", "```go\nval, ok := m[key]\n```", "val, ok := m[key]"},
+		{"indented fenced", "```python\n    check()\n    save()\n```", "    check()\n    save()"},
+		{"space boundary lines", " \n```python\n    check()\n```\n  \n", "    check()"},
+		{"tab CRLF boundary lines", "\t\r\n```python\r\n\tfixed()\r\n```\r\n \t\r\n", "\tfixed()"},
+		{"indented plain", "    check()\n    save()", "    check()\n    save()"},
+		{"indented plain with boundaries", " \n    check()\n    save()\n\t", "    check()\n    save()"},
 		{"crlf", "val, ok := m[key]\r", "val, ok := m[key]"},
 		{"empty", "", ""},
 		{"fences-only", "```\n```", ""},

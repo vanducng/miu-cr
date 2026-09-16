@@ -368,11 +368,10 @@ func (a *anthropicAgent) RelocateQuote(ctx stdctx.Context, rr RelocateRequest) (
 	return parseRepairReply(text.String()), u, nil
 }
 
-// parseRepairReply fence-strips the model reply and trims it consistently with
-// isCleanReplacement's own trimming so the re-validation gate sees identical
-// bytes. Empty after strip => no usable replacement.
+// parseRepairReply fence-strips the model reply without removing code indentation.
+// Empty after strip => no usable replacement.
 func parseRepairReply(reply string) string {
-	return strings.TrimRight(stripMarkdownFences(reply), "\r")
+	return stripCodeFences(reply)
 }
 
 // dispatch executes every tool_use block in msg, returning the tool_result
