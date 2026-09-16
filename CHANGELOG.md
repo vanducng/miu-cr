@@ -55,6 +55,13 @@ comment with a new marker); subsequent re-runs dedupe normally. On a
 first M5 review **manually** (or off-hours) to absorb the one-time re-post before
 the next scheduled run.
 
+## [0.89.10](https://github.com/vanducng/miu-cr/compare/v0.89.9...v0.89.10) (2026-09-16)
+
+
+### Bug Fixes
+
+* **github:** preserve file indent on one-click suggestions ([9d8516d](https://github.com/vanducng/miu-cr/commit/9d8516d094f780ffd4070a87e3c80b86d20135b1))
+
 ## [0.89.9](https://github.com/vanducng/miu-cr/compare/v0.89.8...v0.89.9) (2026-08-24)
 
 
