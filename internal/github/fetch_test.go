@@ -107,6 +107,7 @@ func (f *fakeClient) ListReviewComments(stdctx.Context, string, string, int, *gh
 func (f *fakeClient) ListIssueComments(stdctx.Context, string, string, int, *gh.IssueListCommentsOptions) ([]*gh.IssueComment, *gh.Response, error) {
 	return nil, &gh.Response{}, nil
 }
+func (f *fakeClient) CurrentLogin(stdctx.Context) (string, error) { return "reviewer", nil }
 func (f *fakeClient) CreateIssueComment(stdctx.Context, string, string, int, *gh.IssueComment) (*gh.IssueComment, error) {
 	return nil, nil
 }
@@ -548,7 +549,7 @@ func TestParsePublishedKey(t *testing.T) {
 
 func TestPriorRunsCount(t *testing.T) {
 	marked := func(id int64, body string) *gh.IssueComment {
-		return &gh.IssueComment{ID: gh.Ptr(id), Body: gh.Ptr(body)}
+		return &gh.IssueComment{ID: gh.Ptr(id), User: &gh.User{Login: gh.Ptr("reviewer")}, Body: gh.Ptr(body)}
 	}
 	tests := []struct {
 		name     string
@@ -598,8 +599,9 @@ func TestFetchPRSeedsPriorLedger(t *testing.T) {
 	c := &convClient{
 		fakeClient: fakeClient{pr: prFixture("vanducng", "miu-cr", "headsha", "basesha", "main")},
 		issueComments: []*gh.IssueComment{
-			{ID: gh.Ptr(int64(9)), Body: gh.Ptr(higher)},
-			{ID: gh.Ptr(int64(3)), Body: gh.Ptr(lowest)},
+			{ID: gh.Ptr(int64(1)), User: &gh.User{Login: gh.Ptr("someone")}, Body: gh.Ptr(higher)},
+			{ID: gh.Ptr(int64(9)), User: &gh.User{Login: gh.Ptr("reviewer")}, Body: gh.Ptr(higher)},
+			{ID: gh.Ptr(int64(3)), User: &gh.User{Login: gh.Ptr("reviewer")}, Body: gh.Ptr(lowest)},
 		},
 	}
 	info, err := FetchPR(stdctx.Background(), c, PRRef{Owner: "vanducng", Repo: "miu-cr", Number: 1})
@@ -629,7 +631,7 @@ func TestFetchPRSeedsPriorLedger(t *testing.T) {
 func TestFetchPriorSummariesStripsLedgerMarker(t *testing.T) {
 	marker := renderLedgerMarker([]LedgerEntry{{FP: "aaaaaaaaaaaaaaaa", Path: "a.go", Status: statusOpen, Sev: "high", FirstSev: "high", OpenSHA: "aaaaaa1"}})
 	body := ReviewMarker + "\n## Code Review Summary\n\nwalkthrough prose\n" + marker
-	c := &convClient{issueComments: []*gh.IssueComment{{ID: gh.Ptr(int64(1)), Body: gh.Ptr(body)}}}
+	c := &convClient{issueComments: []*gh.IssueComment{{ID: gh.Ptr(int64(1)), User: &gh.User{Login: gh.Ptr("reviewer")}, Body: gh.Ptr(body)}}}
 
 	out := fetchPriorSummaries(stdctx.Background(), c, convInfo())
 	if strings.Contains(out, ledgerPrefix) {
@@ -652,7 +654,7 @@ func TestReviewCountIncrementChain(t *testing.T) {
 		var comments []*gh.IssueComment
 		if prior >= 0 {
 			comments = []*gh.IssueComment{
-				{ID: gh.Ptr(int64(5)), Body: gh.Ptr(ReviewMarker + "\n" + runsCountToken(prior))},
+				{ID: gh.Ptr(int64(5)), User: &gh.User{Login: gh.Ptr("reviewer")}, Body: gh.Ptr(ReviewMarker + "\n" + runsCountToken(prior))},
 			}
 		}
 		c := &convClient{

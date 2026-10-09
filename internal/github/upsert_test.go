@@ -38,7 +38,7 @@ func TestUpsertSummaryCommentCreatesOnFirstRun(t *testing.T) {
 
 func TestUpsertSummaryCommentEditsNotStacks(t *testing.T) {
 	c := &recordClient{issueStore: []*gh.IssueComment{
-		{ID: gh.Ptr(int64(7)), Body: gh.Ptr(ReviewMarker + "\nold summary")},
+		{ID: gh.Ptr(int64(7)), User: &gh.User{Login: gh.Ptr("reviewer")}, Body: gh.Ptr(ReviewMarker + "\nold summary")},
 	}}
 	c.issueIDSeq = 7
 	act, url, err := UpsertSummaryComment(stdctx.Background(), c, upsertInfo(), ReviewMarker+"\nnew summary")
@@ -64,8 +64,8 @@ func TestUpsertSummaryCommentEditsNotStacks(t *testing.T) {
 
 func TestUpsertSummaryCommentEditsLowestID(t *testing.T) {
 	c := &recordClient{issueStore: []*gh.IssueComment{
-		{ID: gh.Ptr(int64(9)), Body: gh.Ptr(ReviewMarker + "\ndup nine")},
-		{ID: gh.Ptr(int64(5)), Body: gh.Ptr(ReviewMarker + "\ndup five")},
+		{ID: gh.Ptr(int64(9)), User: &gh.User{Login: gh.Ptr("reviewer")}, Body: gh.Ptr(ReviewMarker + "\ndup nine")},
+		{ID: gh.Ptr(int64(5)), User: &gh.User{Login: gh.Ptr("reviewer")}, Body: gh.Ptr(ReviewMarker + "\ndup five")},
 	}}
 	c.issueIDSeq = 9
 	act, _, err := UpsertSummaryComment(stdctx.Background(), c, upsertInfo(), ReviewMarker+"\nedited")
@@ -125,6 +125,7 @@ func TestUpsertSummaryStatusEditsExistingSummary(t *testing.T) {
 	info.HeadSHA = "abcdef123456"
 	c := &recordClient{issueStore: []*gh.IssueComment{{
 		ID:      gh.Ptr(int64(8)),
+		User:    &gh.User{Login: gh.Ptr("reviewer")},
 		HTMLURL: gh.Ptr("https://github.com/o/r/pull/1#issuecomment-8"),
 		Body:    gh.Ptr(ReviewMarker + "\n" + runsCountToken(1) + "\n## Code Review Summary\n\n**Result:** Review passed!"),
 	}}}
@@ -175,6 +176,7 @@ func TestUpsertSummaryStatusNoopsWhenUnchanged(t *testing.T) {
 	body := withSummaryStatus(ReviewMarker+"\n## Code Review Summary\n\n**Result:** Review passed!", RenderReviewingSummaryStatus(info))
 	c := &recordClient{issueStore: []*gh.IssueComment{{
 		ID:   gh.Ptr(int64(8)),
+		User: &gh.User{Login: gh.Ptr("reviewer")},
 		Body: gh.Ptr(body),
 	}}}
 	c.issueIDSeq = 8
@@ -205,7 +207,7 @@ func TestUpsertSummaryCommentForkFallbackOnCreate(t *testing.T) {
 func TestUpsertSummaryCommentForkFallbackOnEdit(t *testing.T) {
 	t.Setenv("GITHUB_ACTIONS", "true")
 	c := &recordClient{
-		issueStore: []*gh.IssueComment{{ID: gh.Ptr(int64(2)), Body: gh.Ptr(ReviewMarker + "\nold")}},
+		issueStore: []*gh.IssueComment{{ID: gh.Ptr(int64(2)), User: &gh.User{Login: gh.Ptr("reviewer")}, Body: gh.Ptr(ReviewMarker + "\nold")}},
 		editErr:    forbidden403(),
 	}
 	c.issueIDSeq = 2

@@ -1179,6 +1179,10 @@ func (c *threadSyncContextClient) issueContextErr() error {
 	return c.err
 }
 
+func (c *threadSyncContextClient) CurrentLogin(stdctx.Context) (string, error) {
+	return "reviewer", nil
+}
+
 func (c *threadSyncContextClient) ListIssueComments(ctx stdctx.Context, _, _ string, _ int, _ *github.IssueListCommentsOptions) ([]*github.IssueComment, *github.Response, error) {
 	if c.hold != nil {
 		select {

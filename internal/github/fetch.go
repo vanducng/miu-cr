@@ -138,34 +138,18 @@ func FetchPR(ctx stdctx.Context, client Client, ref PRRef) (*PRInfo, error) {
 	return info, nil
 }
 
-// lowestMarkedCommentBody returns the body of the lowest-id miucr summary issue
-// comment (the upsert's edit target — the authoritative copy when accidental
-// duplicates exist), or "" when none / on any list error. Best-effort: a fetch
-// failure never blocks the review. Storeless: both the runs counter and the
-// finding ledger live in this body.
+// lowestMarkedCommentBody returns the body of the lowest-id summary comment
+// written by the authenticated user, or "" when none exists, the author cannot
+// be resolved, or the list fails. Best-effort: a fetch failure never blocks the
+// review, and a copied marker cannot seed the runs counter, ledger, or publish key.
 func lowestMarkedCommentBody(ctx stdctx.Context, client Client, info *PRInfo) string {
-	opts := &gh.IssueListCommentsOptions{ListOptions: gh.ListOptions{PerPage: 100}}
-	lowestID := int64(0)
-	body := ""
-	for page := 0; page < maxConvPages; page++ {
-		comments, resp, err := client.ListIssueComments(ctx, info.Owner, info.Repo, info.Number, opts)
-		if err != nil {
-			return ""
-		}
-		for _, c := range comments {
-			b := c.GetBody()
-			if !strings.Contains(b, ReviewMarker) {
-				continue
-			}
-			if id := c.GetID(); lowestID == 0 || id < lowestID {
-				lowestID = id
-				body = b
-			}
-		}
-		if resp == nil || resp.NextPage == 0 {
-			break
-		}
-		opts.Page = resp.NextPage
+	login, err := currentLogin(ctx, client)
+	if err != nil {
+		return ""
+	}
+	_, _, body, err := lowestMarkedComment(ctx, client, info, login)
+	if err != nil {
+		return ""
 	}
 	return body
 }
@@ -262,6 +246,10 @@ func capConversation(s string) string {
 // any list error. The summary moved out of the review body to a single upserted
 // issue comment, so --conversation scans issue comments here to surface it.
 func fetchPriorSummaries(ctx stdctx.Context, client Client, info *PRInfo) string {
+	login, err := currentLogin(ctx, client)
+	if err != nil {
+		return ""
+	}
 	var b strings.Builder
 	opts := &gh.IssueListCommentsOptions{ListOptions: gh.ListOptions{PerPage: 100}}
 	for page := 0; page < maxConvPages; page++ {
@@ -272,15 +260,16 @@ func fetchPriorSummaries(ctx stdctx.Context, client Client, info *PRInfo) string
 		}
 		for _, c := range comments {
 			body := strings.TrimSpace(c.GetBody())
-			if body != "" && strings.Contains(body, ReviewMarker) {
-				// Strip the hidden ledger marker: its base64 payload is meaningless to
-				// the model and (near the entry cap) is multi-KB, which would displace
-				// real conversation prose within the shared maxConversationBytes budget.
-				body = strings.TrimSpace(ledgerMarkerRe.ReplaceAllString(body, ""))
-				b.WriteString("- ")
-				b.WriteString(body)
-				b.WriteString("\n")
+			if body == "" || !strings.Contains(body, ReviewMarker) || !strings.EqualFold(c.GetUser().GetLogin(), login) {
+				continue
 			}
+			// Strip the hidden ledger marker: its base64 payload is meaningless to
+			// the model and (near the entry cap) is multi-KB, which would displace
+			// real conversation prose within the shared maxConversationBytes budget.
+			body = strings.TrimSpace(ledgerMarkerRe.ReplaceAllString(body, ""))
+			b.WriteString("- ")
+			b.WriteString(body)
+			b.WriteString("\n")
 		}
 		if resp == nil || resp.NextPage == 0 {
 			break

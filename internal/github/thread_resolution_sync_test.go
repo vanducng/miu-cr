@@ -188,7 +188,7 @@ func TestSyncSummaryConversationResolvedEditsExistingComment(t *testing.T) {
 	})
 	client := &syncRecordClient{
 		recordClient: recordClient{
-			issueStore:     []*gh.IssueComment{{ID: gh.Ptr(int64(7)), Body: gh.Ptr(body)}},
+			issueStore:     []*gh.IssueComment{{ID: gh.Ptr(int64(7)), User: &gh.User{Login: gh.Ptr("reviewer")}, Body: gh.Ptr(body)}},
 			reviewComments: [][]*gh.PullRequestComment{{{Body: gh.Ptr(fpMarker(fp)), HTMLURL: gh.Ptr("https://github.com/o/r/pull/1#discussion_r1")}}},
 		},
 		threads: []ReviewThread{{Resolved: true, Comments: []ReviewThreadComment{{Body: fpMarker(fp)}}}},
@@ -219,7 +219,7 @@ func TestSyncSummaryConversationResolvedContinuesWithoutInlineURLs(t *testing.T)
 		Ledger: MergeLedger(nil, []engine.Finding{f}, "aaaaaa1", map[string]bool{"a.go": true}, now),
 	})
 	client := &syncRecordClientWithExistingError{syncRecordClient: syncRecordClient{
-		recordClient: recordClient{issueStore: []*gh.IssueComment{{ID: gh.Ptr(int64(7)), Body: gh.Ptr(body)}}},
+		recordClient: recordClient{issueStore: []*gh.IssueComment{{ID: gh.Ptr(int64(7)), User: &gh.User{Login: gh.Ptr("reviewer")}, Body: gh.Ptr(body)}}},
 		threads:      []ReviewThread{{Resolved: true, Comments: []ReviewThreadComment{{Body: fpMarker(fp)}}}},
 	}}
 
@@ -246,7 +246,7 @@ func TestSyncSummaryConversationResolvedWrapsThreadFetchError(t *testing.T) {
 		Ledger: MergeLedger(nil, []engine.Finding{f}, "aaaaaa1", map[string]bool{"a.go": true}, now),
 	})
 	client := &syncRecordClient{
-		recordClient: recordClient{issueStore: []*gh.IssueComment{{ID: gh.Ptr(int64(7)), Body: gh.Ptr(body)}}},
+		recordClient: recordClient{issueStore: []*gh.IssueComment{{ID: gh.Ptr(int64(7)), User: &gh.User{Login: gh.Ptr("reviewer")}, Body: gh.Ptr(body)}}},
 		threadErr:    errors.New("boom"),
 	}
 
@@ -273,7 +273,7 @@ func TestSyncSummaryConversationResolvedApprovesClearedLedger(t *testing.T) {
 		Published: true,
 	})
 	client := &syncRecordClient{
-		recordClient: recordClient{headSHA: headSHA, issueStore: []*gh.IssueComment{{ID: gh.Ptr(int64(7)), Body: gh.Ptr(body)}}},
+		recordClient: recordClient{headSHA: headSHA, issueStore: []*gh.IssueComment{{ID: gh.Ptr(int64(7)), User: &gh.User{Login: gh.Ptr("reviewer")}, Body: gh.Ptr(body)}}},
 		threads:      []ReviewThread{{Resolved: true, Comments: []ReviewThreadComment{{Body: fpMarker(fp)}}}},
 	}
 
@@ -305,7 +305,7 @@ func TestSyncSummaryConversationResolvedSkipsApproveOnMovedHead(t *testing.T) {
 		Published: true,
 	})
 	client := &syncRecordClient{
-		recordClient: recordClient{issueStore: []*gh.IssueComment{{ID: gh.Ptr(int64(7)), Body: gh.Ptr(body)}}},
+		recordClient: recordClient{issueStore: []*gh.IssueComment{{ID: gh.Ptr(int64(7)), User: &gh.User{Login: gh.Ptr("reviewer")}, Body: gh.Ptr(body)}}},
 		threads:      []ReviewThread{{Resolved: true, Comments: []ReviewThreadComment{{Body: fpMarker(fp)}}}},
 	}
 

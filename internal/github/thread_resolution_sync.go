@@ -126,10 +126,13 @@ func SyncLedgerConversationResolved(prior []LedgerEntry, resolved map[string]boo
 	return capLedger(out), delta
 }
 
-// lowestMarkedComment returns the lowest-id summary comment. A non-empty login
-// keeps the match on that author so upsert, thread sync, and approval retry
-// edit the same comment.
+// lowestMarkedComment returns the lowest-id summary comment written by login.
+// Upsert, fetch, thread sync, and approval retry all use it, so a copied marker
+// cannot seed prior state or become the comment a later review edits.
 func lowestMarkedComment(ctx stdctx.Context, client Client, info *PRInfo, login string) (int64, string, string, error) {
+	if strings.TrimSpace(login) == "" {
+		return 0, "", "", fmt.Errorf("github: empty authenticated login")
+	}
 	opts := &gh.IssueListCommentsOptions{ListOptions: gh.ListOptions{PerPage: 100}}
 	lowestID := int64(0)
 	url := ""
@@ -140,7 +143,7 @@ func lowestMarkedComment(ctx stdctx.Context, client Client, info *PRInfo, login 
 			return 0, "", "", err
 		}
 		for _, c := range comments {
-			if login != "" && !strings.EqualFold(c.GetUser().GetLogin(), login) {
+			if !strings.EqualFold(c.GetUser().GetLogin(), login) {
 				continue
 			}
 			if !strings.Contains(c.GetBody(), ReviewMarker) {

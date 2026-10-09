@@ -73,7 +73,10 @@ func (c *recordClient) CurrentLogin(stdctx.Context) (string, error) {
 	if c.loginErr != nil {
 		return "", c.loginErr
 	}
-	return c.login, nil
+	if c.login != "" {
+		return c.login, nil
+	}
+	return "reviewer", nil
 }
 
 func (c *recordClient) GetPR(stdctx.Context, string, string, int) (*gh.PullRequest, error) {
@@ -149,10 +152,11 @@ func (c *recordClient) CreateIssueComment(_ stdctx.Context, _, _ string, _ int, 
 		return nil, c.createIssueErr
 	}
 	c.issueIDSeq++
-	stored := &gh.IssueComment{ID: gh.Ptr(c.issueIDSeq), Body: gh.Ptr(com.GetBody())}
-	if c.login != "" {
-		stored.User = &gh.User{Login: gh.Ptr(c.login)}
+	login := c.login
+	if login == "" {
+		login = "reviewer"
 	}
+	stored := &gh.IssueComment{ID: gh.Ptr(c.issueIDSeq), Body: gh.Ptr(com.GetBody()), User: &gh.User{Login: gh.Ptr(login)}}
 	c.issueStore = append(c.issueStore, stored)
 	return stored, nil
 }

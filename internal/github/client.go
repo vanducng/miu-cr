@@ -36,6 +36,9 @@ type Client interface {
 	ListReviews(ctx stdctx.Context, owner, repo string, number int, opts *gh.ListOptions) ([]*gh.PullRequestReview, *gh.Response, error)
 	ListReviewComments(ctx stdctx.Context, owner, repo string, number int, opts *gh.PullRequestListCommentsOptions) ([]*gh.PullRequestComment, *gh.Response, error)
 	ListIssueComments(ctx stdctx.Context, owner, repo string, number int, opts *gh.IssueListCommentsOptions) ([]*gh.IssueComment, *gh.Response, error)
+	// CurrentLogin is the account that posts and owns the summary comment.
+	// An empty login is unverified. Callers must not match another author's marker.
+	CurrentLogin(ctx stdctx.Context) (string, error)
 	CreateIssueComment(ctx stdctx.Context, owner, repo string, number int, comment *gh.IssueComment) (*gh.IssueComment, error)
 	EditIssueComment(ctx stdctx.Context, owner, repo string, commentID int64, comment *gh.IssueComment) (*gh.IssueComment, error)
 	CreateIssueReaction(ctx stdctx.Context, owner, repo string, number int, content string) (*gh.Reaction, error)

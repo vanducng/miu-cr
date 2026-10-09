@@ -2,6 +2,7 @@ package github
 
 import (
 	stdctx "context"
+	"errors"
 	"regexp"
 	"strings"
 
@@ -89,16 +90,18 @@ func DeferredApprovalNeedsAttention(reason string) bool {
 	}
 }
 
-type loginClient interface {
-	CurrentLogin(ctx stdctx.Context) (string, error)
-}
-
 func currentLogin(ctx stdctx.Context, client Client) (string, error) {
-	src, ok := client.(loginClient)
-	if !ok {
-		return "", nil
+	if client == nil {
+		return "", errors.New("github: missing client")
 	}
-	return src.CurrentLogin(ctx)
+	login, err := client.CurrentLogin(ctx)
+	if err != nil {
+		return "", err
+	}
+	if strings.TrimSpace(login) == "" {
+		return "", errors.New("github: empty authenticated login")
+	}
+	return login, nil
 }
 
 // markedCommentByAuthor returns the lowest-id summary comment written by login.
