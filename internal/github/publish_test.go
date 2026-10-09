@@ -64,6 +64,16 @@ type recordClient struct {
 	listCheckRunN     int
 	combinedStatuses  []*gh.RepoStatus
 	combinedStatusErr error
+
+	login    string
+	loginErr error
+}
+
+func (c *recordClient) CurrentLogin(stdctx.Context) (string, error) {
+	if c.loginErr != nil {
+		return "", c.loginErr
+	}
+	return c.login, nil
 }
 
 func (c *recordClient) GetPR(stdctx.Context, string, string, int) (*gh.PullRequest, error) {

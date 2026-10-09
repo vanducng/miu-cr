@@ -28,6 +28,7 @@ const hostJobHeartbeatInterval = 30 * time.Second
 const hostFailedRetryBase = 5 * time.Minute
 const hostFailedRetryCap = time.Hour
 const defaultThreadResolutionSyncInterval = 5 * time.Minute
+const threadResolutionSyncTimeout = 30 * time.Second
 const maxThreadResolutionSyncWorkers = 2
 
 var runHostDrainGrace = 10 * time.Second
@@ -613,7 +614,7 @@ func (h *HostRunner) pollRepo(ctx stdctx.Context, snap hostRunnerSnapshot, repo 
 		if queued && repo.Debounce > 0 && job.AvailableAt.After(now) {
 			h.updateQueuedSummaryStatus(ctx, getGitHubClient(), repo, pr, job.AvailableAt, repo.Debounce)
 		}
-		if repo.ThreadResolutionSync.Enabled() {
+		if repo.ThreadResolutionSync.Enabled() || deferredApprovalEnabled(repo.Review.Approval) {
 			h.enqueueThreadResolutionSync(ctx, getGitHubClient(), repo, pr, now)
 		}
 	}
@@ -749,7 +750,7 @@ func (h *HostRunner) enqueueThreadResolutionSync(ctx stdctx.Context, client mgit
 	}
 	go func() {
 		defer h.finishThreadResolutionSync()
-		syncCtx, cancel := stdctx.WithTimeout(stdctx.WithoutCancel(ctx), runHostDrainGrace)
+		syncCtx, cancel := stdctx.WithTimeout(stdctx.WithoutCancel(ctx), threadResolutionSyncTimeout)
 		defer cancel()
 		h.syncThreadResolution(syncCtx, client, repo, info, now)
 	}()
@@ -768,7 +769,40 @@ func (h *HostRunner) finishThreadResolutionSync() {
 	}
 }
 
+func deferredApprovalEnabled(policy config.ApprovalPolicy) bool {
+	return policy.Mode == "clean" || policy.Mode == "threshold"
+}
+
 func (h *HostRunner) syncThreadResolution(ctx stdctx.Context, client mgithub.Client, repo HostRepoConfig, info *mgithub.PRInfo, now time.Time) {
+	if repo.ThreadResolutionSync.Enabled() {
+		h.syncConversationResolution(ctx, client, repo, info, now)
+	}
+	if !deferredApprovalEnabled(repo.Review.Approval) {
+		return
+	}
+	res, err := mgithub.RetryDeferredApproval(ctx, client, info, repo.Review.Approval)
+	attrs := []any{"repo", repo.Slug, "pr", info.Number, "head_sha", ShortSHA(info.HeadSHA), "reason", res.Reason}
+	if res.Approved {
+		attrs = append(attrs, "approved", true)
+	}
+	if res.Cleared {
+		attrs = append(attrs, "cleared", true)
+	}
+	if err != nil || mgithub.DeferredApprovalNeedsAttention(res.Reason) {
+		if err != nil {
+			attrs = append(attrs, "error", config.RedactString(err.Error()))
+		}
+		h.log.Warn("host: deferred approval retry failed", attrs...)
+		return
+	}
+	if res.Approved || res.Cleared {
+		h.log.Info("host: deferred approval retry finished", attrs...)
+		return
+	}
+	h.log.Debug("host: deferred approval retry skipped", attrs...)
+}
+
+func (h *HostRunner) syncConversationResolution(ctx stdctx.Context, client mgithub.Client, repo HostRepoConfig, info *mgithub.PRInfo, now time.Time) {
 	res, err := mgithub.SyncSummaryConversationResolved(ctx, client, info, repo.Review.Approval, now)
 	attrs := []any{"repo", repo.Slug, "pr", info.Number, "head_sha", info.HeadSHA, "reason", res.Reason, "resolved", res.Resolved, "reopened", res.Reopened, "entries", res.Entries}
 	if res.Approved {

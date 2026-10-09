@@ -402,7 +402,11 @@ summary table. If a miucr inline conversation is manually resolved, the existing
 summary row moves to Resolved with `conversation resolved`; if that same
 conversation is later unresolved, only that conversation-resolved row reopens.
 `interval` controls the per-PR polling cadence and defaults to `5m`. This never
-starts an LLM review and never feeds approval decisions.
+starts an LLM review. When the ledger becomes fully resolved, the same poll can
+approve the current head under the repo approval policy. A review that already
+passed policy but waited on CI or unverified mergeability is retried on that
+poll too, even when thread sync is off, as long as approval is `clean` or
+`threshold`.
 
 GitHub also exposes
 [`pull_request_review_thread`](https://docs.github.com/en/webhooks/webhook-events-and-payloads#pull_request_review_thread)

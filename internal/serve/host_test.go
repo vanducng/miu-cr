@@ -254,6 +254,7 @@ func TestHostRunnerThreadResolutionSyncDetachesFromPollContext(t *testing.T) {
 		Owner: "octo",
 		Repo:  "hello",
 		ThreadResolutionSync: HostThreadResolutionSync{
+			Mode:     "poll",
 			Interval: time.Minute,
 		},
 	}, prWithHead(1, "sha-A"), now)
