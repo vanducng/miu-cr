@@ -326,9 +326,11 @@ func renderApprovalBlocker(b *strings.Builder, reason string) {
 	case approveReasonMergeConflict:
 		b.WriteString("> **Approval:** Resolve the merge conflicts, then update the pull request.\n\n")
 	case approveReasonChecksNotGreen:
-		b.WriteString("> **Approval:** Waiting for CI checks to finish successfully. Fix any failures, then update the pull request.\n\n")
+		b.WriteString(approvalReasonToken(reason) + "\n")
+		b.WriteString(approvalChecksPrefix + " Approval follows once they do.\n\n")
 	case approveReasonReadinessUnverified:
-		b.WriteString("> **Approval:** GitHub readiness could not be verified. Check mergeability and CI, then rerun the review.\n\n")
+		b.WriteString(approvalReasonToken(reason) + "\n")
+		b.WriteString(approvalReadinessPrefix + " Approval retries once mergeability and CI are available.\n\n")
 	}
 }
 

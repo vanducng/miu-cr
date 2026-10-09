@@ -433,8 +433,16 @@ All approval modes still require: no finding reaches the gate, the PR is **not a
 fork**, the author is **trusted** (`AuthorAssociation` not `NONE` /
 `FIRST_TIME_CONTRIBUTOR` / `FIRST_TIMER`), **at least one file was actually
 reviewed**, the **head SHA is unchanged** (re-fetched right before submitting),
-and no `APPROVED` review already exists at that SHA. Re-runs at the same head SHA
-post **no second APPROVE**.
+the head is **mergeable**, **CI checks succeeded** (pending, failing, and
+non-success commit statuses wait), and no `APPROVED` review already exists at
+that SHA. Re-runs at the same head SHA post **no second APPROVE**.
+
+When the review itself passed policy but CI was still running, or GitHub had
+not reported mergeability yet, the summary says approval is waiting. The host
+retries that decision on a later poll of the **same head**, without another
+model review, and approves once the head is mergeable and its checks succeeded.
+A failed check stays unapproved until it succeeds, including a rerun that does
+not push a new commit. A new push still starts a new review.
 
 Any missed precondition silently **degrades to `COMMENT`** with a reason; it
 **never fails the run**. The outcome is reported as `approve_action`

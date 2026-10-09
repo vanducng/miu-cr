@@ -376,6 +376,16 @@ func TestRenderSummaryApprovalBlockers(t *testing.T) {
 		if !strings.Contains(out, tc.want) {
 			t.Fatalf("summary for %q missing %q:\n%s", tc.reason, tc.want, out)
 		}
+		marker := approvalReasonToken(tc.reason)
+		if tc.reason == approveReasonMergeConflict {
+			if strings.Contains(out, "miu-cr-approval:") {
+				t.Fatalf("merge conflict is not a deferred approval:\n%s", out)
+			}
+			continue
+		}
+		if !strings.Contains(out, marker) {
+			t.Fatalf("summary for %q missing %q:\n%s", tc.reason, marker, out)
+		}
 	}
 }
 
