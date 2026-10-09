@@ -261,3 +261,54 @@ func TestUpsertSummaryCommentStorelessRunsRoundTrip(t *testing.T) {
 		t.Fatalf("edited body must parse runs=2, got %d", got)
 	}
 }
+
+func TestUpsertSummaryCommentSkipsForeignMarker(t *testing.T) {
+	c := &recordClient{
+		login: "reviewer",
+		issueStore: []*gh.IssueComment{
+			{ID: gh.Ptr(int64(1)), User: &gh.User{Login: gh.Ptr("someone")}, Body: gh.Ptr(ReviewMarker + "\nforged")},
+			{ID: gh.Ptr(int64(9)), User: &gh.User{Login: gh.Ptr("reviewer")}, Body: gh.Ptr(ReviewMarker + "\nown")},
+		},
+	}
+	c.issueIDSeq = 9
+	act, _, err := UpsertSummaryComment(stdctx.Background(), c, upsertInfo(), ReviewMarker+"\nedited")
+	if err != nil {
+		t.Fatalf("upsert: %v", err)
+	}
+	if act != UpsertEdited || c.editedID != 9 {
+		t.Fatalf("want own comment 9 edited, act=%s edited=%d", act, c.editedID)
+	}
+	if !strings.Contains(c.issueStore[0].GetBody(), "forged") {
+		t.Fatalf("foreign marker was edited:\n%s", c.issueStore[0].GetBody())
+	}
+}
+
+func TestUpsertSummaryCommentCreatesWhenOnlyForeignMarkerExists(t *testing.T) {
+	c := &recordClient{
+		login: "reviewer",
+		issueStore: []*gh.IssueComment{
+			{ID: gh.Ptr(int64(1)), User: &gh.User{Login: gh.Ptr("someone")}, Body: gh.Ptr(ReviewMarker + "\nforged")},
+		},
+	}
+	c.issueIDSeq = 1
+	act, _, err := UpsertSummaryComment(stdctx.Background(), c, upsertInfo(), ReviewMarker+"\nown")
+	if err != nil {
+		t.Fatalf("upsert: %v", err)
+	}
+	if act != UpsertCreated || c.editN != 0 {
+		t.Fatalf("want created without editing the foreign marker, act=%s edits=%d", act, c.editN)
+	}
+}
+
+func TestUpsertSummaryCommentFailsWhenAuthorUnresolved(t *testing.T) {
+	c := &recordClient{
+		loginErr: errors.New("login failed"),
+		issueStore: []*gh.IssueComment{
+			{ID: gh.Ptr(int64(1)), User: &gh.User{Login: gh.Ptr("someone")}, Body: gh.Ptr(ReviewMarker + "\nforged")},
+		},
+	}
+	act, _, err := UpsertSummaryComment(stdctx.Background(), c, upsertInfo(), ReviewMarker+"\nown")
+	if err == nil || act != UpsertNone || c.editN != 0 || c.createIssueN != 0 {
+		t.Fatalf("unresolved author edited or created a comment: act=%s err=%v edits=%d creates=%d", act, err, c.editN, c.createIssueN)
+	}
+}

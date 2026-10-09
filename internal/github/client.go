@@ -7,6 +7,7 @@ package github
 
 import (
 	stdctx "context"
+	"errors"
 	"fmt"
 	"net/http"
 	"regexp"
@@ -137,14 +138,59 @@ func (g ghClient) GetCombinedStatus(ctx stdctx.Context, owner, repo, ref string,
 	return g.c.Repositories.GetCombinedStatus(ctx, owner, repo, ref, opts)
 }
 
-// CurrentLogin is the authenticated token user. An empty user fetches the
-// caller, which is who posts the summary comment.
+// CurrentLogin is the account that posts the summary. A user token resolves
+// through GET /user. An installation token cannot call that endpoint, so a 403
+// falls back to the GraphQL viewer, which is the app bot. An empty login is an error.
 func (g ghClient) CurrentLogin(ctx stdctx.Context) (string, error) {
 	u, _, err := g.c.Users.Get(ctx, "")
+	if err == nil {
+		if u.GetLogin() == "" {
+			return "", errors.New("github: empty authenticated login")
+		}
+		return u.GetLogin(), nil
+	}
+	if !githubForbidden(err) {
+		return "", err
+	}
+	login, verr := g.viewerLogin(ctx)
+	if verr != nil {
+		return "", verr
+	}
+	if login == "" {
+		return "", errors.New("github: empty authenticated login")
+	}
+	return login, nil
+}
+
+func githubForbidden(err error) bool {
+	var ghErr *gh.ErrorResponse
+	return errors.As(err, &ghErr) && ghErr.Response != nil && ghErr.Response.StatusCode == http.StatusForbidden
+}
+
+func (g ghClient) viewerLogin(ctx stdctx.Context) (string, error) {
+	req, err := g.c.NewRequest(http.MethodPost, "graphql", map[string]string{
+		"query": "query { viewer { login } }",
+	})
 	if err != nil {
 		return "", err
 	}
-	return u.GetLogin(), nil
+	var payload struct {
+		Data struct {
+			Viewer struct {
+				Login string `json:"login"`
+			} `json:"viewer"`
+		} `json:"data"`
+		Errors []struct {
+			Message string `json:"message"`
+		} `json:"errors"`
+	}
+	if _, err := g.c.Do(ctx, req, &payload); err != nil {
+		return "", err
+	}
+	if len(payload.Errors) > 0 {
+		return "", fmt.Errorf("github: viewer login: %s", payload.Errors[0].Message)
+	}
+	return payload.Data.Viewer.Login, nil
 }
 
 // PRRef identifies a pull request: owner/repo and its number.

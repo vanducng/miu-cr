@@ -1067,6 +1067,88 @@ func TestRunHostReturnsWhenRunnerDoesNotStop(t *testing.T) {
 	}
 }
 
+func TestRunHostDrainWaitsForSyncBudget(t *testing.T) {
+	oldGrace := runHostDrainGrace
+	oldSync := threadResolutionSyncTimeout
+	runHostDrainGrace = 20 * time.Millisecond
+	threadResolutionSyncTimeout = 200 * time.Millisecond
+	t.Cleanup(func() {
+		runHostDrainGrace = oldGrace
+		threadResolutionSyncTimeout = oldSync
+	})
+
+	cfg := hostRunnerConfig(t)
+	block := make(chan struct{})
+	cfg.Prune = HostPruneConfig{CompletedJobTTL: time.Hour}
+	cfg.Store.(*fakeHostStore).pruneBlock = block
+	r, err := NewHostRunner(cfg)
+	if err != nil {
+		t.Fatalf("NewHostRunner: %v", err)
+	}
+	hold := make(chan struct{})
+	t.Cleanup(func() { close(hold) })
+	r.enqueueThreadResolutionSync(stdctx.Background(), &threadSyncContextClient{hold: hold}, HostRepoConfig{
+		Slug:  "octo/hello",
+		Owner: "octo",
+		Repo:  "hello",
+		ThreadResolutionSync: HostThreadResolutionSync{
+			Mode:     "poll",
+			Interval: time.Minute,
+		},
+	}, prWithHead(1, "sha-A"), time.Now())
+
+	ctx, cancel := stdctx.WithCancel(stdctx.Background())
+	cancel()
+	start := time.Now()
+	err = RunHost(ctx, nil, r)
+	elapsed := time.Since(start)
+	close(block)
+	if elapsed < 150*time.Millisecond {
+		t.Fatalf("drain returned in %s, want the sync budget", elapsed)
+	}
+	if !errors.Is(err, ErrHostRunnerStopTimeout) {
+		t.Fatalf("RunHost error = %v, want stop deadline", err)
+	}
+}
+
+func TestHostRunnerCancelsSyncWhenDrainTimesOut(t *testing.T) {
+	now := time.Date(2026, 6, 28, 10, 0, 0, 0, time.UTC)
+	hold := make(chan struct{})
+	client := &threadSyncContextClient{hold: hold}
+	r := &HostRunner{
+		threadSyncLast: map[string]time.Time{},
+		log:            slog.New(slog.NewTextHandler(io.Discard, nil)),
+	}
+	r.enqueueThreadResolutionSync(stdctx.Background(), client, HostRepoConfig{
+		Slug:  "octo/hello",
+		Owner: "octo",
+		Repo:  "hello",
+		ThreadResolutionSync: HostThreadResolutionSync{
+			Mode:     "poll",
+			Interval: time.Minute,
+		},
+	}, prWithHead(1, "sha-A"), now)
+	if r.waitThreadResolutionSync(30 * time.Millisecond) {
+		t.Fatal("wait returned while sync was still blocked")
+	}
+	deadline := time.Now().Add(time.Second)
+	for {
+		r.mu.Lock()
+		active := r.threadSyncActive
+		r.mu.Unlock()
+		if active == 0 {
+			break
+		}
+		if time.Now().After(deadline) {
+			t.Fatal("sync worker still active after drain timeout")
+		}
+		time.Sleep(5 * time.Millisecond)
+	}
+	if !errors.Is(client.issueContextErr(), stdctx.Canceled) {
+		t.Fatalf("worker context err = %v, want canceled", client.issueContextErr())
+	}
+}
+
 func TestHostRunnerWaitsForThreadResolutionSync(t *testing.T) {
 	r := &HostRunner{threadSyncActive: 1, threadSyncDone: make(chan struct{})}
 	done := make(chan struct{})
@@ -1088,6 +1170,7 @@ type threadSyncContextClient struct {
 	err           error
 	issueComments []*github.IssueComment
 	nextIssueID   int64
+	hold          <-chan struct{}
 }
 
 func (c *threadSyncContextClient) issueContextErr() error {
@@ -1097,6 +1180,12 @@ func (c *threadSyncContextClient) issueContextErr() error {
 }
 
 func (c *threadSyncContextClient) ListIssueComments(ctx stdctx.Context, _, _ string, _ int, _ *github.IssueListCommentsOptions) ([]*github.IssueComment, *github.Response, error) {
+	if c.hold != nil {
+		select {
+		case <-ctx.Done():
+		case <-c.hold:
+		}
+	}
 	c.mu.Lock()
 	c.err = ctx.Err()
 	out := append([]*github.IssueComment(nil), c.issueComments...)

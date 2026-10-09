@@ -841,9 +841,11 @@ func ReactEyes(ctx stdctx.Context, client Client, info *PRInfo) error {
 
 // UpsertSummaryComment posts the rendered summary as ONE issue comment, upserted
 // across re-runs: list issue comments, find the lowest-id body carrying
-// ReviewMarker, EditIssueComment it in place; else CreateIssueComment. Editing the
-// lowest-id marked comment is deterministic and dedupes accidental race-created
-// duplicates (later duplicates are ignored, so the system reconverges to one). On a
+// ReviewMarker written by the authenticated user, EditIssueComment it in place;
+// else CreateIssueComment. A copied marker from anyone else is ignored, matching
+// the deferred-approval retry. Editing the lowest-id owned comment is deterministic
+// and dedupes accidental race-created duplicates (later duplicates are ignored, so
+// the system reconverges to one). On a
 // fork-PR 403 under Actions (token lacks comment-write scope) it degrades to
 // fork_fallback (no hard fail), mirroring PostReview's inline 403 path. An empty
 // body is a no-op (UpsertNone). The marker lives on the ISSUE COMMENT here, distinct
@@ -903,31 +905,15 @@ func UpsertSummaryStatus(ctx stdctx.Context, client Client, info *PRInfo, status
 }
 
 func findSummaryCommentBody(ctx stdctx.Context, client Client, info *PRInfo) (int64, string, string, error) {
-	targetID := int64(0)
-	targetURL := ""
-	targetBody := ""
-	opts := &gh.IssueListCommentsOptions{ListOptions: gh.ListOptions{PerPage: 100}}
-	for page := 0; page < maxConvPages; page++ {
-		comments, resp, err := client.ListIssueComments(ctx, info.Owner, info.Repo, info.Number, opts)
-		if err != nil {
-			return 0, "", "", mapWriteError("github.upsert_summary_failed", "listing issue comments", err)
-		}
-		for _, c := range comments {
-			if !strings.Contains(c.GetBody(), ReviewMarker) {
-				continue
-			}
-			if id := c.GetID(); id > 0 && (targetID == 0 || id < targetID) {
-				targetID = id
-				targetURL = c.GetHTMLURL()
-				targetBody = c.GetBody()
-			}
-		}
-		if resp == nil || resp.NextPage == 0 {
-			break
-		}
-		opts.Page = resp.NextPage
+	login, err := currentLogin(ctx, client)
+	if err != nil {
+		return 0, "", "", mapWriteError("github.upsert_summary_failed", "resolving comment author", err)
 	}
-	return targetID, targetURL, targetBody, nil
+	id, url, body, err := lowestMarkedComment(ctx, client, info, login)
+	if err != nil {
+		return 0, "", "", mapWriteError("github.upsert_summary_failed", "listing issue comments", err)
+	}
+	return id, url, body, nil
 }
 
 func createSummaryComment(ctx stdctx.Context, client Client, info *PRInfo, body string) (UpsertAction, string, error) {

@@ -150,6 +150,9 @@ func (c *recordClient) CreateIssueComment(_ stdctx.Context, _, _ string, _ int, 
 	}
 	c.issueIDSeq++
 	stored := &gh.IssueComment{ID: gh.Ptr(c.issueIDSeq), Body: gh.Ptr(com.GetBody())}
+	if c.login != "" {
+		stored.User = &gh.User{Login: gh.Ptr(c.login)}
+	}
 	c.issueStore = append(c.issueStore, stored)
 	return stored, nil
 }

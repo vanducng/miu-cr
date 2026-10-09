@@ -441,8 +441,12 @@ When the review itself passed policy but CI was still running, or GitHub had
 not reported mergeability yet, the summary says approval is waiting. The host
 retries that decision on a later poll of the **same head**, without another
 model review, and approves once the head is mergeable and its checks succeeded.
-The retry reads only a summary comment written by the authenticated user, so a
-comment that copies the marker cannot approve a head that was never reviewed.
+The retry reads only a summary comment written by the authenticated user, and
+the summary upsert edits that same comment, so a comment that copies the marker
+cannot approve a head that was never reviewed and cannot capture later reviews.
+A user token resolves that login with `GET /user`. A GitHub App installation
+token cannot call that endpoint, so the login falls back to the GraphQL viewer,
+which is the app bot. If the login cannot be resolved, the retry does not approve.
 A failed check stays unapproved until it succeeds, including a rerun that does
 not push a new commit. A new push still starts a new review.
 
