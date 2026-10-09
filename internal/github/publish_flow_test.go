@@ -59,6 +59,7 @@ func (c *statefulClient) ListReviewComments(_ stdctx.Context, _, _ string, _ int
 func (c *statefulClient) ListIssueComments(_ stdctx.Context, _, _ string, _ int, _ *gh.IssueListCommentsOptions) ([]*gh.IssueComment, *gh.Response, error) {
 	return nil, &gh.Response{}, nil
 }
+func (c *statefulClient) CurrentLogin(stdctx.Context) (string, error) { return "reviewer", nil }
 
 func (c *statefulClient) CreateIssueComment(stdctx.Context, string, string, int, *gh.IssueComment) (*gh.IssueComment, error) {
 	return nil, nil

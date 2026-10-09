@@ -2,6 +2,7 @@ package github
 
 import (
 	stdctx "context"
+	"errors"
 	"regexp"
 	"strings"
 
@@ -89,44 +90,29 @@ func DeferredApprovalNeedsAttention(reason string) bool {
 	}
 }
 
-type loginClient interface {
-	CurrentLogin(ctx stdctx.Context) (string, error)
-}
-
 func currentLogin(ctx stdctx.Context, client Client) (string, error) {
-	src, ok := client.(loginClient)
-	if !ok {
-		return "", nil
+	if client == nil {
+		return "", errors.New("github: missing client")
 	}
-	return src.CurrentLogin(ctx)
+	login, err := client.CurrentLogin(ctx)
+	if err != nil {
+		return "", err
+	}
+	if strings.TrimSpace(login) == "" {
+		return "", errors.New("github: empty authenticated login")
+	}
+	return login, nil
 }
 
 // markedCommentByAuthor returns the lowest-id summary comment written by login.
-// A marker comment from anyone else is ignored, so a forged summary cannot approve.
+// It uses the same selection as summary upsert, so a forged marker cannot approve
+// and cannot become the comment a later review edits.
 func markedCommentByAuthor(ctx stdctx.Context, client Client, info *PRInfo, login string) (int64, string, error) {
-	opts := &gh.IssueListCommentsOptions{ListOptions: gh.ListOptions{PerPage: 100}}
-	lowestID := int64(0)
-	body := ""
-	for page := 0; page < maxConvPages; page++ {
-		comments, resp, err := client.ListIssueComments(ctx, info.Owner, info.Repo, info.Number, opts)
-		if err != nil {
-			return 0, "", mapWriteError("github.deferred_approval_failed", "listing issue comments", err)
-		}
-		for _, c := range comments {
-			if !strings.EqualFold(c.GetUser().GetLogin(), login) || !strings.Contains(c.GetBody(), ReviewMarker) {
-				continue
-			}
-			if id := c.GetID(); id > 0 && (lowestID == 0 || id < lowestID) {
-				lowestID = id
-				body = c.GetBody()
-			}
-		}
-		if resp == nil || resp.NextPage == 0 {
-			break
-		}
-		opts.Page = resp.NextPage
+	id, _, body, err := lowestMarkedComment(ctx, client, info, login)
+	if err != nil {
+		return 0, "", mapWriteError("github.deferred_approval_failed", "listing issue comments", err)
 	}
-	return lowestID, body, nil
+	return id, body, nil
 }
 
 func approvalReasonToken(reason string) string {

@@ -406,7 +406,9 @@ starts an LLM review. When the ledger becomes fully resolved, the same poll can
 approve the current head under the repo approval policy. A review that already
 passed policy but waited on CI or unverified mergeability is retried on that
 poll too, even when thread sync is off, as long as approval is `clean` or
-`threshold`.
+`threshold`. The retry and the summary upsert both use the comment written by
+the authenticated user, including a GitHub App bot. Shutdown waits for that
+in-flight retry to finish.
 
 GitHub also exposes
 [`pull_request_review_thread`](https://docs.github.com/en/webhooks/webhook-events-and-payloads#pull_request_review_thread)

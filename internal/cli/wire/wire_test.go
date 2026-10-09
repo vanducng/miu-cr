@@ -101,6 +101,8 @@ func (f *fakeGitHub) ReviewThreads(stdctx.Context, string, string, int) ([]mgith
 	return f.reviewThreads, nil
 }
 
+func (f *fakeGitHub) CurrentLogin(stdctx.Context) (string, error) { return "reviewer", nil }
+
 func (f *fakeGitHub) ListIssueComments(ctx stdctx.Context, _ string, _ string, _ int, _ *gh.IssueListCommentsOptions) ([]*gh.IssueComment, *gh.Response, error) {
 	f.order = append(f.order, "list_issue")
 	f.issueListCtxErrs = append(f.issueListCtxErrs, ctx.Err())
@@ -111,7 +113,7 @@ func (f *fakeGitHub) CreateIssueComment(_ stdctx.Context, _, _ string, _ int, co
 	f.order = append(f.order, "create_issue")
 	f.createIssueN++
 	f.nextID++
-	saved := &gh.IssueComment{ID: gh.Ptr(f.nextID), Body: gh.Ptr(com.GetBody())}
+	saved := &gh.IssueComment{ID: gh.Ptr(f.nextID), Body: gh.Ptr(com.GetBody()), User: &gh.User{Login: gh.Ptr("reviewer")}}
 	f.issueComments = append(f.issueComments, saved)
 	return saved, nil
 }
@@ -194,6 +196,7 @@ func TestAckPRReviewStartedReactsAndPostsRunningSummary(t *testing.T) {
 func TestAckPRReviewStartedKeepsExistingSummaryOnRerun(t *testing.T) {
 	fake := &fakeGitHub{issueComments: []*gh.IssueComment{{
 		ID:      gh.Ptr(int64(9)),
+		User:    &gh.User{Login: gh.Ptr("reviewer")},
 		HTMLURL: gh.Ptr("https://github.com/o/r/pull/7#issuecomment-9"),
 		Body:    gh.Ptr(mgithub.ReviewMarker + "\n## Code Review Summary\n**Result:** Review passed!"),
 	}}}

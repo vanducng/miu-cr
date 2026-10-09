@@ -36,9 +36,13 @@ func LedgerFullyResolved(entries []LedgerEntry) bool {
 }
 
 func SyncSummaryConversationResolved(ctx stdctx.Context, client Client, info *PRInfo, policy config.ApprovalPolicy, now time.Time) (ThreadResolutionSyncResult, error) {
-	targetID, body, err := lowestMarkedComment(ctx, client, info)
+	login, err := currentLogin(ctx, client)
 	if err != nil {
-		return ThreadResolutionSyncResult{Reason: "summary_fetch_failed"}, err
+		return ThreadResolutionSyncResult{Reason: "summary_fetch_failed"}, mapWriteError("github.thread_resolution_sync_failed", "resolving comment author", err)
+	}
+	targetID, _, body, err := lowestMarkedComment(ctx, client, info, login)
+	if err != nil {
+		return ThreadResolutionSyncResult{Reason: "summary_fetch_failed"}, mapWriteError("github.thread_resolution_sync_failed", "listing issue comments", err)
 	}
 	if targetID == 0 || strings.TrimSpace(body) == "" {
 		return ThreadResolutionSyncResult{Reason: "no_summary"}, nil
@@ -122,21 +126,38 @@ func SyncLedgerConversationResolved(prior []LedgerEntry, resolved map[string]boo
 	return capLedger(out), delta
 }
 
-func lowestMarkedComment(ctx stdctx.Context, client Client, info *PRInfo) (int64, string, error) {
+// lowestMarkedComment returns the lowest-id summary comment written by login.
+// Upsert, authenticated fetch, thread sync, and approval retry all use it, so a
+// copied marker cannot seed prior state or become the comment a later review edits.
+func lowestMarkedComment(ctx stdctx.Context, client Client, info *PRInfo, login string) (int64, string, string, error) {
+	if strings.TrimSpace(login) == "" {
+		return 0, "", "", fmt.Errorf("github: empty authenticated login")
+	}
+	return scanMarkedComments(ctx, client, info, login)
+}
+
+// scanMarkedComments returns the lowest-id marker. An empty login matches any author
+// and is only for a token-less dry-run, which cannot post.
+func scanMarkedComments(ctx stdctx.Context, client Client, info *PRInfo, login string) (int64, string, string, error) {
 	opts := &gh.IssueListCommentsOptions{ListOptions: gh.ListOptions{PerPage: 100}}
 	lowestID := int64(0)
+	url := ""
 	body := ""
 	for page := 0; page < maxConvPages; page++ {
 		comments, resp, err := client.ListIssueComments(ctx, info.Owner, info.Repo, info.Number, opts)
 		if err != nil {
-			return 0, "", mapWriteError("github.thread_resolution_sync_failed", "listing issue comments", err)
+			return 0, "", "", err
 		}
 		for _, c := range comments {
+			if login != "" && !strings.EqualFold(c.GetUser().GetLogin(), login) {
+				continue
+			}
 			if !strings.Contains(c.GetBody(), ReviewMarker) {
 				continue
 			}
 			if id := c.GetID(); id > 0 && (lowestID == 0 || id < lowestID) {
 				lowestID = id
+				url = c.GetHTMLURL()
 				body = c.GetBody()
 			}
 		}
@@ -145,7 +166,7 @@ func lowestMarkedComment(ctx stdctx.Context, client Client, info *PRInfo) (int64
 		}
 		opts.Page = resp.NextPage
 	}
-	return lowestID, body, nil
+	return lowestID, url, body, nil
 }
 
 func replaceSummaryLedgerBody(body string, info *PRInfo, ledger []LedgerEntry, inlineURLs map[string]string) (string, bool) {

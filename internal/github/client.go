@@ -7,11 +7,13 @@ package github
 
 import (
 	stdctx "context"
+	"errors"
 	"fmt"
 	"net/http"
 	"regexp"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 
 	gh "github.com/google/go-github/v84/github"
@@ -35,6 +37,9 @@ type Client interface {
 	ListReviews(ctx stdctx.Context, owner, repo string, number int, opts *gh.ListOptions) ([]*gh.PullRequestReview, *gh.Response, error)
 	ListReviewComments(ctx stdctx.Context, owner, repo string, number int, opts *gh.PullRequestListCommentsOptions) ([]*gh.PullRequestComment, *gh.Response, error)
 	ListIssueComments(ctx stdctx.Context, owner, repo string, number int, opts *gh.IssueListCommentsOptions) ([]*gh.IssueComment, *gh.Response, error)
+	// CurrentLogin is the account that posts and owns the summary comment.
+	// An empty login is unverified. Callers must not match another author's marker.
+	CurrentLogin(ctx stdctx.Context) (string, error)
 	CreateIssueComment(ctx stdctx.Context, owner, repo string, number int, comment *gh.IssueComment) (*gh.IssueComment, error)
 	EditIssueComment(ctx stdctx.Context, owner, repo string, commentID int64, comment *gh.IssueComment) (*gh.IssueComment, error)
 	CreateIssueReaction(ctx stdctx.Context, owner, repo string, number int, content string) (*gh.Reaction, error)
@@ -59,6 +64,12 @@ type ghClient struct {
 	c     *gh.Client
 	hc    *http.Client
 	token string
+	login *cachedLogin // shared across value copies; successes only
+}
+
+type cachedLogin struct {
+	mu    sync.Mutex
+	value string
 }
 
 // NewClient returns a Client. token=="" → anonymous; else WithAuthToken (PAT). The
@@ -70,7 +81,7 @@ func NewClient(token string) Client {
 	if token != "" {
 		c = c.WithAuthToken(token)
 	}
-	return ghClient{c: c, hc: hc, token: token}
+	return ghClient{c: c, hc: hc, token: token, login: &cachedLogin{}}
 }
 
 func (g ghClient) GetPR(ctx stdctx.Context, owner, repo string, number int) (*gh.PullRequest, error) {
@@ -137,14 +148,100 @@ func (g ghClient) GetCombinedStatus(ctx stdctx.Context, owner, repo, ref string,
 	return g.c.Repositories.GetCombinedStatus(ctx, owner, repo, ref, opts)
 }
 
-// CurrentLogin is the authenticated token user. An empty user fetches the
-// caller, which is who posts the summary comment.
+// CurrentLogin is the account that posts the summary. A user token resolves
+// through GET /user. An installation token cannot call that endpoint, so a 403
+// falls back to the GraphQL viewer, which is the app bot. An empty login is an error.
+// A successful login is reused for the life of the client. Failures are not cached.
 func (g ghClient) CurrentLogin(ctx stdctx.Context) (string, error) {
-	u, _, err := g.c.Users.Get(ctx, "")
+	if login, ok := g.cachedLogin(); ok {
+		return login, nil
+	}
+	login, err := g.resolveLogin(ctx)
 	if err != nil {
 		return "", err
 	}
-	return u.GetLogin(), nil
+	g.storeLogin(login)
+	return login, nil
+}
+
+func (g ghClient) cachedLogin() (string, bool) {
+	if g.login == nil {
+		return "", false
+	}
+	g.login.mu.Lock()
+	defer g.login.mu.Unlock()
+	if g.login.value == "" {
+		return "", false
+	}
+	return g.login.value, true
+}
+
+func (g ghClient) storeLogin(login string) {
+	if g.login == nil || login == "" {
+		return
+	}
+	g.login.mu.Lock()
+	if g.login.value == "" {
+		g.login.value = login
+	}
+	g.login.mu.Unlock()
+}
+
+func (g ghClient) resolveLogin(ctx stdctx.Context) (string, error) {
+	u, _, err := g.c.Users.Get(ctx, "")
+	if err == nil {
+		if u.GetLogin() == "" {
+			return "", errors.New("github: empty authenticated login")
+		}
+		return u.GetLogin(), nil
+	}
+	if !githubForbidden(err) {
+		return "", err
+	}
+	login, verr := g.viewerLogin(ctx)
+	if verr != nil {
+		return "", verr
+	}
+	if login == "" {
+		return "", errors.New("github: empty authenticated login")
+	}
+	return login, nil
+}
+
+func githubForbidden(err error) bool {
+	var ghErr *gh.ErrorResponse
+	return errors.As(err, &ghErr) && ghErr.Response != nil && ghErr.Response.StatusCode == http.StatusForbidden
+}
+
+func githubUnauthorized(err error) bool {
+	var ghErr *gh.ErrorResponse
+	return errors.As(err, &ghErr) && ghErr.Response != nil && ghErr.Response.StatusCode == http.StatusUnauthorized
+}
+
+func (g ghClient) viewerLogin(ctx stdctx.Context) (string, error) {
+	req, err := g.c.NewRequest(http.MethodPost, "graphql", map[string]string{
+		"query": "query { viewer { login } }",
+	})
+	if err != nil {
+		return "", err
+	}
+	var payload struct {
+		Data struct {
+			Viewer struct {
+				Login string `json:"login"`
+			} `json:"viewer"`
+		} `json:"data"`
+		Errors []struct {
+			Message string `json:"message"`
+		} `json:"errors"`
+	}
+	if _, err := g.c.Do(ctx, req, &payload); err != nil {
+		return "", err
+	}
+	if len(payload.Errors) > 0 {
+		return "", fmt.Errorf("github: viewer login: %s", payload.Errors[0].Message)
+	}
+	return payload.Data.Viewer.Login, nil
 }
 
 // PRRef identifies a pull request: owner/repo and its number.

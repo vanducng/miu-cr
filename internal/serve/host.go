@@ -28,7 +28,10 @@ const hostJobHeartbeatInterval = 30 * time.Second
 const hostFailedRetryBase = 5 * time.Minute
 const hostFailedRetryCap = time.Hour
 const defaultThreadResolutionSyncInterval = 5 * time.Minute
-const threadResolutionSyncTimeout = 30 * time.Second
+
+// Shared by the sync worker and RunHost drain so shutdown waits out an in-flight approval retry.
+var threadResolutionSyncTimeout = 30 * time.Second
+
 const maxThreadResolutionSyncWorkers = 2
 
 var runHostDrainGrace = 10 * time.Second
@@ -103,27 +106,28 @@ type HostRepoConfig struct {
 }
 
 type HostRunner struct {
-	mu               sync.Mutex
-	store            store.HostStore
-	repos            []HostRepoConfig
-	tokens           map[string]HostTokenSource
-	reload           HostReloadFunc
-	src              pollSource
-	interval         time.Duration
-	disp             Dispatcher
-	log              *slog.Logger
-	reviewTO         time.Duration
-	workerID         string
-	newGetter        func(string) notifGetter
-	newGitHubClient  func(string) mgithub.Client
-	prune            HostPruneConfig
-	janitorInterval  time.Duration
-	now              func() time.Time
-	threadSyncLast   map[string]time.Time
-	threadSyncActive int
-	threadSyncDone   chan struct{}
-	threadSyncStop   bool
-	activeJobs       map[prKey]activeHostJob
+	mu                sync.Mutex
+	store             store.HostStore
+	repos             []HostRepoConfig
+	tokens            map[string]HostTokenSource
+	reload            HostReloadFunc
+	src               pollSource
+	interval          time.Duration
+	disp              Dispatcher
+	log               *slog.Logger
+	reviewTO          time.Duration
+	workerID          string
+	newGetter         func(string) notifGetter
+	newGitHubClient   func(string) mgithub.Client
+	prune             HostPruneConfig
+	janitorInterval   time.Duration
+	now               func() time.Time
+	threadSyncLast    map[string]time.Time
+	threadSyncActive  int
+	threadSyncDone    chan struct{}
+	threadSyncStop    bool
+	threadSyncCancels []*threadSyncCancel
+	activeJobs        map[prKey]activeHostJob
 }
 
 type hostRunnerSnapshot struct {
@@ -748,12 +752,47 @@ func (h *HostRunner) enqueueThreadResolutionSync(ctx stdctx.Context, client mgit
 		}
 		return
 	}
+	syncCtx, cancel := stdctx.WithTimeout(stdctx.WithoutCancel(ctx), threadResolutionSyncTimeout)
+	tracked := h.trackSyncCancel(cancel)
 	go func() {
 		defer h.finishThreadResolutionSync()
-		syncCtx, cancel := stdctx.WithTimeout(stdctx.WithoutCancel(ctx), threadResolutionSyncTimeout)
+		defer h.untrackSyncCancel(tracked)
 		defer cancel()
 		h.syncThreadResolution(syncCtx, client, repo, info, now)
 	}()
+}
+
+type threadSyncCancel struct {
+	fn stdctx.CancelFunc
+}
+
+func (h *HostRunner) trackSyncCancel(fn stdctx.CancelFunc) *threadSyncCancel {
+	item := &threadSyncCancel{fn: fn}
+	h.mu.Lock()
+	h.threadSyncCancels = append(h.threadSyncCancels, item)
+	h.mu.Unlock()
+	return item
+}
+
+func (h *HostRunner) untrackSyncCancel(item *threadSyncCancel) {
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	kept := h.threadSyncCancels[:0]
+	for _, c := range h.threadSyncCancels {
+		if c != item {
+			kept = append(kept, c)
+		}
+	}
+	h.threadSyncCancels = kept
+}
+
+func (h *HostRunner) cancelThreadSyncs() {
+	h.mu.Lock()
+	items := append([]*threadSyncCancel(nil), h.threadSyncCancels...)
+	h.mu.Unlock()
+	for _, item := range items {
+		item.fn()
+	}
 }
 
 func (h *HostRunner) finishThreadResolutionSync() {
@@ -1216,7 +1255,7 @@ func hostFailedRetryDelay(attempts int) time.Duration {
 
 func RunHost(ctx stdctx.Context, pool *Pool, runner *HostRunner) error {
 	drain := func() error {
-		syncDone := runner.waitThreadResolutionSync(runHostDrainGrace)
+		syncDone := runner.waitThreadResolutionSync(threadResolutionSyncTimeout)
 		if pool != nil {
 			pool.Drain()
 		}
@@ -1265,6 +1304,7 @@ func (h *HostRunner) waitThreadResolutionSync(timeout time.Duration) bool {
 	case <-done:
 		return true
 	case <-deadline.C:
+		h.cancelThreadSyncs()
 		return false
 	}
 }
