@@ -213,6 +213,11 @@ func githubForbidden(err error) bool {
 	return errors.As(err, &ghErr) && ghErr.Response != nil && ghErr.Response.StatusCode == http.StatusForbidden
 }
 
+func githubUnauthorized(err error) bool {
+	var ghErr *gh.ErrorResponse
+	return errors.As(err, &ghErr) && ghErr.Response != nil && ghErr.Response.StatusCode == http.StatusUnauthorized
+}
+
 func (g ghClient) viewerLogin(ctx stdctx.Context) (string, error) {
 	req, err := g.c.NewRequest(http.MethodPost, "graphql", map[string]string{
 		"query": "query { viewer { login } }",

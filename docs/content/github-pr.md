@@ -442,9 +442,11 @@ not reported mergeability yet, the summary says approval is waiting. The host
 retries that decision on a later poll of the **same head**, without another
 model review, and approves once the head is mergeable and its checks succeeded.
 The retry reads only a summary comment written by the authenticated user.
-Summary upsert, thread sync, and the next fetch read that same comment, so a
-comment that copies the marker cannot approve a head that was never reviewed,
+Summary upsert, thread sync, and an authenticated fetch read that same comment,
+so a comment that copies the marker cannot approve a head that was never reviewed,
 cannot capture later reviews, and cannot seed the prior ledger or publish key.
+A token-less public dry-run has no login, so fetch still reads the existing marker.
+That path does not post or approve.
 A user token resolves that login with `GET /user`. A GitHub App installation
 token cannot call that endpoint, so the login falls back to the GraphQL viewer,
 which is the app bot. If the login cannot be resolved, the retry does not approve.

@@ -66,6 +66,7 @@ type fakeClient struct {
 	pages     [][]*gh.CommitFile // one slice per page; NextPage chains them
 	listErr   error
 	listCalls int
+	loginErr  error
 }
 
 func (f *fakeClient) GetPR(_ stdctx.Context, _, _ string, _ int) (*gh.PullRequest, error) {
@@ -107,7 +108,12 @@ func (f *fakeClient) ListReviewComments(stdctx.Context, string, string, int, *gh
 func (f *fakeClient) ListIssueComments(stdctx.Context, string, string, int, *gh.IssueListCommentsOptions) ([]*gh.IssueComment, *gh.Response, error) {
 	return nil, &gh.Response{}, nil
 }
-func (f *fakeClient) CurrentLogin(stdctx.Context) (string, error) { return "reviewer", nil }
+func (f *fakeClient) CurrentLogin(stdctx.Context) (string, error) {
+	if f.loginErr != nil {
+		return "", f.loginErr
+	}
+	return "reviewer", nil
+}
 func (f *fakeClient) CreateIssueComment(stdctx.Context, string, string, int, *gh.IssueComment) (*gh.IssueComment, error) {
 	return nil, nil
 }
@@ -622,6 +628,61 @@ func TestFetchPRSeedsPriorLedger(t *testing.T) {
 	}
 	if info.PriorPublishedKey != "0123456789abcdef" {
 		t.Fatalf("PriorPublishedKey = %q, want 0123456789abcdef", info.PriorPublishedKey)
+	}
+}
+
+func TestFetchPRSeedsPriorLedgerWhenAnonymous(t *testing.T) {
+	body := ReviewMarker + "\n" + runsCountToken(2)
+	c := &convClient{
+		fakeClient: fakeClient{
+			pr:       prFixture("vanducng", "miu-cr", "headsha", "basesha", "main"),
+			loginErr: &gh.ErrorResponse{Response: &http.Response{StatusCode: http.StatusUnauthorized}},
+		},
+		issueComments: []*gh.IssueComment{
+			{ID: gh.Ptr(int64(3)), User: &gh.User{Login: gh.Ptr("someone")}, Body: gh.Ptr(body)},
+		},
+	}
+	info, err := FetchPR(stdctx.Background(), c, PRRef{Owner: "vanducng", Repo: "miu-cr", Number: 1})
+	if err != nil {
+		t.Fatalf("FetchPR: %v", err)
+	}
+	if info.ReviewCount != 3 {
+		t.Fatalf("anonymous dry-run ReviewCount = %d, want 3", info.ReviewCount)
+	}
+}
+
+func TestFetchPRDropsPriorLedgerWhenLoginFails(t *testing.T) {
+	body := ReviewMarker + "\n" + runsCountToken(4)
+	c := &convClient{
+		fakeClient: fakeClient{
+			pr:       prFixture("vanducng", "miu-cr", "headsha", "basesha", "main"),
+			loginErr: errors.New("login failed"),
+		},
+		issueComments: []*gh.IssueComment{
+			{ID: gh.Ptr(int64(3)), User: &gh.User{Login: gh.Ptr("someone")}, Body: gh.Ptr(body)},
+		},
+	}
+	info, err := FetchPR(stdctx.Background(), c, PRRef{Owner: "vanducng", Repo: "miu-cr", Number: 1})
+	if err != nil {
+		t.Fatalf("FetchPR: %v", err)
+	}
+	if info.ReviewCount != 1 {
+		t.Fatalf("unverified login ReviewCount = %d, want 1", info.ReviewCount)
+	}
+}
+
+func TestFetchPriorSummariesKeepsMarkersWhenAnonymous(t *testing.T) {
+	c := &convClient{
+		fakeClient: fakeClient{
+			loginErr: &gh.ErrorResponse{Response: &http.Response{StatusCode: http.StatusUnauthorized}},
+		},
+		issueComments: []*gh.IssueComment{
+			{ID: gh.Ptr(int64(1)), User: &gh.User{Login: gh.Ptr("someone")}, Body: gh.Ptr(ReviewMarker + "\nprior summary")},
+		},
+	}
+	out := fetchPriorSummaries(stdctx.Background(), c, convInfo())
+	if !strings.Contains(out, "prior summary") {
+		t.Fatalf("anonymous conversation dropped the marker:\n%s", out)
 	}
 }
 

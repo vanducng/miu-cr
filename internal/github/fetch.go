@@ -139,14 +139,21 @@ func FetchPR(ctx stdctx.Context, client Client, ref PRRef) (*PRInfo, error) {
 }
 
 // lowestMarkedCommentBody returns the body of the lowest-id summary comment
-// written by the authenticated user, or "" when none exists, the author cannot
-// be resolved, or the list fails. Best-effort: a fetch failure never blocks the
-// review, and a copied marker cannot seed the runs counter, ledger, or publish key.
+// written by the authenticated user. A token-less client (401) reads the lowest
+// marker of any author, because that dry-run cannot post. Any other login failure
+// returns "" so a copied marker cannot seed the runs counter, ledger, or publish key.
 func lowestMarkedCommentBody(ctx stdctx.Context, client Client, info *PRInfo) string {
 	login, err := currentLogin(ctx, client)
 	if err != nil {
-		os.Stderr.WriteString(config.RedactString("miucr: summary author unresolved: "+err.Error()) + "\n")
-		return ""
+		if !githubUnauthorized(err) {
+			os.Stderr.WriteString(config.RedactString("miucr: summary author unresolved: "+err.Error()) + "\n")
+			return ""
+		}
+		_, _, body, err := scanMarkedComments(ctx, client, info, "")
+		if err != nil {
+			return ""
+		}
+		return body
 	}
 	_, _, body, err := lowestMarkedComment(ctx, client, info, login)
 	if err != nil {
@@ -249,8 +256,11 @@ func capConversation(s string) string {
 func fetchPriorSummaries(ctx stdctx.Context, client Client, info *PRInfo) string {
 	login, err := currentLogin(ctx, client)
 	if err != nil {
-		os.Stderr.WriteString(config.RedactString("miucr: conversation fetch (summary author) skipped: "+err.Error()) + "\n")
-		return ""
+		if !githubUnauthorized(err) {
+			os.Stderr.WriteString(config.RedactString("miucr: conversation fetch (summary author) skipped: "+err.Error()) + "\n")
+			return ""
+		}
+		login = ""
 	}
 	var b strings.Builder
 	opts := &gh.IssueListCommentsOptions{ListOptions: gh.ListOptions{PerPage: 100}}
@@ -262,7 +272,10 @@ func fetchPriorSummaries(ctx stdctx.Context, client Client, info *PRInfo) string
 		}
 		for _, c := range comments {
 			body := strings.TrimSpace(c.GetBody())
-			if body == "" || !strings.Contains(body, ReviewMarker) || !strings.EqualFold(c.GetUser().GetLogin(), login) {
+			if body == "" || !strings.Contains(body, ReviewMarker) {
+				continue
+			}
+			if login != "" && !strings.EqualFold(c.GetUser().GetLogin(), login) {
 				continue
 			}
 			// Strip the hidden ledger marker: its base64 payload is meaningless to
