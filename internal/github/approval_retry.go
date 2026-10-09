@@ -37,7 +37,14 @@ func RetryDeferredApproval(ctx stdctx.Context, client Client, info *PRInfo, poli
 	if info == nil || info.HeadSHA == "" {
 		return DeferredApprovalResult{Reason: approveReasonHeadUnknown}, nil
 	}
-	commentID, body, err := lowestMarkedComment(ctx, client, info)
+	login, err := currentLogin(ctx, client)
+	if err != nil {
+		return DeferredApprovalResult{Reason: "comment_author_unverified"}, err
+	}
+	if login == "" {
+		return DeferredApprovalResult{Reason: "comment_author_unverified"}, nil
+	}
+	commentID, body, err := markedCommentByAuthor(ctx, client, info, login)
 	if err != nil {
 		return DeferredApprovalResult{Reason: "summary_fetch_failed"}, err
 	}
@@ -69,6 +76,57 @@ func RetryDeferredApproval(ctx stdctx.Context, client Client, info *PRInfo, poli
 		return DeferredApprovalResult{Approved: true, Cleared: true, Reason: approveReasonApproved}, nil
 	}
 	return DeferredApprovalResult{Cleared: true, Reason: approveReasonAlreadyDone}, nil
+}
+
+// DeferredApprovalNeedsAttention reports retry reasons that are operational
+// failures rather than an expected skip. The host logs these at warn.
+func DeferredApprovalNeedsAttention(reason string) bool {
+	switch reason {
+	case "create_review_failed", "list_reviews_failed", "summary_fetch_failed", "summary_edit_failed", "comment_author_unverified":
+		return true
+	default:
+		return false
+	}
+}
+
+type loginClient interface {
+	CurrentLogin(ctx stdctx.Context) (string, error)
+}
+
+func currentLogin(ctx stdctx.Context, client Client) (string, error) {
+	src, ok := client.(loginClient)
+	if !ok {
+		return "", nil
+	}
+	return src.CurrentLogin(ctx)
+}
+
+// markedCommentByAuthor returns the lowest-id summary comment written by login.
+// A marker comment from anyone else is ignored, so a forged summary cannot approve.
+func markedCommentByAuthor(ctx stdctx.Context, client Client, info *PRInfo, login string) (int64, string, error) {
+	opts := &gh.IssueListCommentsOptions{ListOptions: gh.ListOptions{PerPage: 100}}
+	lowestID := int64(0)
+	body := ""
+	for page := 0; page < maxConvPages; page++ {
+		comments, resp, err := client.ListIssueComments(ctx, info.Owner, info.Repo, info.Number, opts)
+		if err != nil {
+			return 0, "", mapWriteError("github.deferred_approval_failed", "listing issue comments", err)
+		}
+		for _, c := range comments {
+			if !strings.EqualFold(c.GetUser().GetLogin(), login) || !strings.Contains(c.GetBody(), ReviewMarker) {
+				continue
+			}
+			if id := c.GetID(); id > 0 && (lowestID == 0 || id < lowestID) {
+				lowestID = id
+				body = c.GetBody()
+			}
+		}
+		if resp == nil || resp.NextPage == 0 {
+			break
+		}
+		opts.Page = resp.NextPage
+	}
+	return lowestID, body, nil
 }
 
 func approvalReasonToken(reason string) string {

@@ -137,6 +137,16 @@ func (g ghClient) GetCombinedStatus(ctx stdctx.Context, owner, repo, ref string,
 	return g.c.Repositories.GetCombinedStatus(ctx, owner, repo, ref, opts)
 }
 
+// CurrentLogin is the authenticated token user. An empty user fetches the
+// caller, which is who posts the summary comment.
+func (g ghClient) CurrentLogin(ctx stdctx.Context) (string, error) {
+	u, _, err := g.c.Users.Get(ctx, "")
+	if err != nil {
+		return "", err
+	}
+	return u.GetLogin(), nil
+}
+
 // PRRef identifies a pull request: owner/repo and its number.
 type PRRef struct {
 	Owner  string

@@ -441,6 +441,8 @@ When the review itself passed policy but CI was still running, or GitHub had
 not reported mergeability yet, the summary says approval is waiting. The host
 retries that decision on a later poll of the **same head**, without another
 model review, and approves once the head is mergeable and its checks succeeded.
+The retry reads only a summary comment written by the authenticated user, so a
+comment that copies the marker cannot approve a head that was never reviewed.
 A failed check stays unapproved until it succeeds, including a rerun that does
 not push a new commit. A new push still starts a new review.
 

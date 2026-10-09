@@ -30,9 +30,10 @@ func greenCheck() *gh.CheckRun {
 
 func deferredClient(body string, runs []*gh.CheckRun) *recordClient {
 	return &recordClient{
+		login:   "reviewer",
 		headSHA: deferredSHA,
 		issueComments: [][]*gh.IssueComment{{
-			{ID: gh.Ptr(int64(9)), Body: gh.Ptr(body)},
+			{ID: gh.Ptr(int64(9)), User: &gh.User{Login: gh.Ptr("reviewer")}, Body: gh.Ptr(body)},
 		}},
 		existingCheckRuns: runs,
 	}
@@ -190,6 +191,36 @@ func TestRetryDeferredApprovalClearsNoticeWhenAlreadyApproved(t *testing.T) {
 	}
 	if strings.Contains(c.editedBody, approvalChecksPrefix) {
 		t.Fatalf("waiting notice kept after an existing approval:\n%s", c.editedBody)
+	}
+}
+
+func TestRetryDeferredApprovalIgnoresForgedSummary(t *testing.T) {
+	forged := legacyWaitingSummary()
+	real := strings.Replace(legacyWaitingSummary(), approvalChecksPrefix+" Fix any failures, then update the pull request.\n\n", "", 1)
+	c := &recordClient{
+		login:   "reviewer",
+		headSHA: deferredSHA,
+		issueComments: [][]*gh.IssueComment{{
+			{ID: gh.Ptr(int64(1)), User: &gh.User{Login: gh.Ptr("someone")}, Body: gh.Ptr(forged)},
+			{ID: gh.Ptr(int64(9)), User: &gh.User{Login: gh.Ptr("reviewer")}, Body: gh.Ptr(real)},
+		}},
+		existingCheckRuns: []*gh.CheckRun{greenCheck()},
+	}
+	res, err := RetryDeferredApproval(stdctx.Background(), c, deferredInfo(), config.ApprovalPolicy{Mode: "clean"})
+	if err != nil {
+		t.Fatalf("RetryDeferredApproval: %v", err)
+	}
+	if res.Approved || c.createReviewN != 0 || c.editedID != 0 {
+		t.Fatalf("forged summary approved or edited a comment: %+v reviews=%d edited=%d", res, c.createReviewN, c.editedID)
+	}
+
+	c.issueComments[0][1].Body = gh.Ptr(forged)
+	res, err = RetryDeferredApproval(stdctx.Background(), c, deferredInfo(), config.ApprovalPolicy{Mode: "clean"})
+	if err != nil {
+		t.Fatalf("RetryDeferredApproval: %v", err)
+	}
+	if !res.Approved || c.editedID != 9 {
+		t.Fatalf("own summary was not the one approved: %+v edited=%d", res, c.editedID)
 	}
 }
 

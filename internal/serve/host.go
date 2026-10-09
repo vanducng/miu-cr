@@ -28,6 +28,7 @@ const hostJobHeartbeatInterval = 30 * time.Second
 const hostFailedRetryBase = 5 * time.Minute
 const hostFailedRetryCap = time.Hour
 const defaultThreadResolutionSyncInterval = 5 * time.Minute
+const threadResolutionSyncTimeout = 30 * time.Second
 const maxThreadResolutionSyncWorkers = 2
 
 var runHostDrainGrace = 10 * time.Second
@@ -749,7 +750,7 @@ func (h *HostRunner) enqueueThreadResolutionSync(ctx stdctx.Context, client mgit
 	}
 	go func() {
 		defer h.finishThreadResolutionSync()
-		syncCtx, cancel := stdctx.WithTimeout(stdctx.WithoutCancel(ctx), runHostDrainGrace)
+		syncCtx, cancel := stdctx.WithTimeout(stdctx.WithoutCancel(ctx), threadResolutionSyncTimeout)
 		defer cancel()
 		h.syncThreadResolution(syncCtx, client, repo, info, now)
 	}()
@@ -787,8 +788,10 @@ func (h *HostRunner) syncThreadResolution(ctx stdctx.Context, client mgithub.Cli
 	if res.Cleared {
 		attrs = append(attrs, "cleared", true)
 	}
-	if err != nil {
-		attrs = append(attrs, "error", config.RedactString(err.Error()))
+	if err != nil || mgithub.DeferredApprovalNeedsAttention(res.Reason) {
+		if err != nil {
+			attrs = append(attrs, "error", config.RedactString(err.Error()))
+		}
 		h.log.Warn("host: deferred approval retry failed", attrs...)
 		return
 	}
