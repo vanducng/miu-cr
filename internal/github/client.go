@@ -13,6 +13,7 @@ import (
 	"regexp"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 
 	gh "github.com/google/go-github/v84/github"
@@ -63,6 +64,12 @@ type ghClient struct {
 	c     *gh.Client
 	hc    *http.Client
 	token string
+	login *cachedLogin // shared across value copies; successes only
+}
+
+type cachedLogin struct {
+	mu    sync.Mutex
+	value string
 }
 
 // NewClient returns a Client. token=="" → anonymous; else WithAuthToken (PAT). The
@@ -74,7 +81,7 @@ func NewClient(token string) Client {
 	if token != "" {
 		c = c.WithAuthToken(token)
 	}
-	return ghClient{c: c, hc: hc, token: token}
+	return ghClient{c: c, hc: hc, token: token, login: &cachedLogin{}}
 }
 
 func (g ghClient) GetPR(ctx stdctx.Context, owner, repo string, number int) (*gh.PullRequest, error) {
@@ -144,7 +151,43 @@ func (g ghClient) GetCombinedStatus(ctx stdctx.Context, owner, repo, ref string,
 // CurrentLogin is the account that posts the summary. A user token resolves
 // through GET /user. An installation token cannot call that endpoint, so a 403
 // falls back to the GraphQL viewer, which is the app bot. An empty login is an error.
+// A successful login is reused for the life of the client. Failures are not cached.
 func (g ghClient) CurrentLogin(ctx stdctx.Context) (string, error) {
+	if login, ok := g.cachedLogin(); ok {
+		return login, nil
+	}
+	login, err := g.resolveLogin(ctx)
+	if err != nil {
+		return "", err
+	}
+	g.storeLogin(login)
+	return login, nil
+}
+
+func (g ghClient) cachedLogin() (string, bool) {
+	if g.login == nil {
+		return "", false
+	}
+	g.login.mu.Lock()
+	defer g.login.mu.Unlock()
+	if g.login.value == "" {
+		return "", false
+	}
+	return g.login.value, true
+}
+
+func (g ghClient) storeLogin(login string) {
+	if g.login == nil || login == "" {
+		return
+	}
+	g.login.mu.Lock()
+	if g.login.value == "" {
+		g.login.value = login
+	}
+	g.login.mu.Unlock()
+}
+
+func (g ghClient) resolveLogin(ctx stdctx.Context) (string, error) {
 	u, _, err := g.c.Users.Get(ctx, "")
 	if err == nil {
 		if u.GetLogin() == "" {

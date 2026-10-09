@@ -77,6 +77,44 @@ func TestCurrentLoginDoesNotHideUserAuthFailure(t *testing.T) {
 	}
 }
 
+func TestCurrentLoginCachesSuccessfulLookup(t *testing.T) {
+	var hits atomic.Int32
+	c := testGHClient(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		hits.Add(1)
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"login":"octocat"}`))
+	}))
+	c.login = &cachedLogin{}
+	for i := 0; i < 2; i++ {
+		login, err := c.CurrentLogin(stdctx.Background())
+		if err != nil || login != "octocat" {
+			t.Fatalf("login=%q err=%v", login, err)
+		}
+	}
+	if hits.Load() != 1 {
+		t.Fatalf("user lookups=%d, want 1", hits.Load())
+	}
+}
+
+func TestCurrentLoginDoesNotCacheFailure(t *testing.T) {
+	var hits atomic.Int32
+	c := testGHClient(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		hits.Add(1)
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusUnauthorized)
+		_, _ = w.Write([]byte(`{"message":"Bad credentials"}`))
+	}))
+	c.login = &cachedLogin{}
+	for i := 0; i < 2; i++ {
+		if _, err := c.CurrentLogin(stdctx.Background()); err == nil {
+			t.Fatal("expected auth error")
+		}
+	}
+	if hits.Load() != 2 {
+		t.Fatalf("user lookups=%d, want 2", hits.Load())
+	}
+}
+
 func TestCurrentLoginViewerErrorFailsClosed(t *testing.T) {
 	c := testGHClient(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")

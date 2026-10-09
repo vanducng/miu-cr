@@ -145,6 +145,7 @@ func FetchPR(ctx stdctx.Context, client Client, ref PRRef) (*PRInfo, error) {
 func lowestMarkedCommentBody(ctx stdctx.Context, client Client, info *PRInfo) string {
 	login, err := currentLogin(ctx, client)
 	if err != nil {
+		os.Stderr.WriteString(config.RedactString("miucr: summary author unresolved: "+err.Error()) + "\n")
 		return ""
 	}
 	_, _, body, err := lowestMarkedComment(ctx, client, info, login)
@@ -248,6 +249,7 @@ func capConversation(s string) string {
 func fetchPriorSummaries(ctx stdctx.Context, client Client, info *PRInfo) string {
 	login, err := currentLogin(ctx, client)
 	if err != nil {
+		os.Stderr.WriteString(config.RedactString("miucr: conversation fetch (summary author) skipped: "+err.Error()) + "\n")
 		return ""
 	}
 	var b strings.Builder
