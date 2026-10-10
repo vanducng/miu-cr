@@ -1,7 +1,10 @@
 package scratchbug
 
 func last(items []int) int {
-	return items[len(items)]
+	if len(items) == 0 {
+		return 0
+	}
+	return items[len(items)-1]
 }
 
 func scale(n int) int {
