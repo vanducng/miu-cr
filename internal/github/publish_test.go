@@ -346,14 +346,14 @@ func TestMinSeverityFloor(t *testing.T) {
 		{File: "p.go", Line: 5, Severity: ""}, // ungraded
 	}
 	// Empty/"none" is a no-op.
-	if got := minSeverityFloor(findings, ""); len(got) != 5 {
+	if got := MinSeverityFloor(findings, ""); len(got) != 5 {
 		t.Fatalf("empty floor must keep all, got %d", len(got))
 	}
-	if got := minSeverityFloor(findings, "none"); len(got) != 5 {
+	if got := MinSeverityFloor(findings, "none"); len(got) != 5 {
 		t.Fatalf("none floor must keep all, got %d", len(got))
 	}
 	// high floor keeps high+critical only (info/low/ungraded dropped).
-	got := minSeverityFloor(findings, "high")
+	got := MinSeverityFloor(findings, "high")
 	if len(got) != 2 {
 		t.Fatalf("high floor: want 2 kept, got %d: %+v", len(got), got)
 	}

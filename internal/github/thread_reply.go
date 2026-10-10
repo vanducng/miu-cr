@@ -18,6 +18,9 @@ const (
 	offDiffMarker   = "<!-- miu-cr-offdiff -->"
 	noticeMarker    = "<!-- miu-cr-notice -->"
 	threadReplyHint = "Reply on this thread with `Fixed in <sha>: ...`, `Deferred: ...`, or `Not applicable: ...`."
+
+	replyNotReadyWait = 15 * time.Minute
+	replyFailureWait  = time.Hour
 )
 
 // IsBotBody reports whether body is a comment miu-cr itself posted. Developer
@@ -130,6 +133,9 @@ type ThreadReplyResult struct {
 	Rejected      int
 	Approved      bool
 	ApproveReason string
+	// CoolDown asks the host poll to wait before trying this comment again.
+	// It is set when the verdict was not saved and a marker would drop it.
+	CoolDown time.Duration
 }
 
 type commitInspector interface {
@@ -185,18 +191,18 @@ func ApplyThreadReply(ctx stdctx.Context, client Client, info *PRInfo, req Threa
 	}
 
 	if login == "" {
-		return ThreadReplyResult{Reason: "comment_author_unverified"}, nil
+		return ThreadReplyResult{Reason: "comment_author_unverified", CoolDown: replyNotReadyWait}, nil
 	}
 	summaryID, _, summaryBody, err := lowestMarkedComment(ctx, client, info, login)
 	if err != nil {
 		return ThreadReplyResult{Reason: "summary_fetch_failed"}, mapWriteError("github.thread_reply_failed", "listing summary", err)
 	}
 	if summaryID == 0 {
-		return ThreadReplyResult{Action: "ignored", Reason: "no_summary"}, nil
+		return ThreadReplyResult{Action: "ignored", Reason: "no_summary", CoolDown: replyNotReadyWait}, nil
 	}
 	ledger := ParseLedger(summaryBody)
 	if ledger == nil {
-		return ThreadReplyResult{Action: "ignored", Reason: "no_ledger"}, nil
+		return ThreadReplyResult{Action: "ignored", Reason: "no_ledger", CoolDown: replyNotReadyWait}, nil
 	}
 
 	threads, _ := loadReviewThreads(ctx, client, info)
@@ -267,7 +273,7 @@ func ApplyThreadReply(ctx stdctx.Context, client Client, info *PRInfo, req Threa
 	inlineURLs, _ := ExistingFingerprints(ctx, client, info)
 	nextBody, ok := replaceSummaryLedgerBody(summaryBody, &renderInfo, next, inlineURLs)
 	if !ok {
-		return ThreadReplyResult{Reason: "summary_shape_unsupported"}, nil
+		return ThreadReplyResult{Reason: "summary_shape_unsupported", CoolDown: replyFailureWait}, nil
 	}
 	if _, err := client.EditIssueComment(ctx, info.Owner, info.Repo, summaryID, &gh.IssueComment{Body: gh.Ptr(nextBody)}); err != nil {
 		return ThreadReplyResult{Reason: "summary_edit_failed"}, mapWriteError("github.thread_reply_failed", "editing summary", err)

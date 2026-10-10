@@ -1351,9 +1351,9 @@ func buildServeReviewFn(log *slog.Logger, gate string, st serve.ReviewStore, tra
 			defer cancel()
 			err := serveThreadReply(jobCtx, j)
 			if err != nil {
+				serve.DeferReplyRetry(serve.ReplyRetryKey(j.Ref, commentIDOf(j)), time.Now().Add(time.Hour))
 				var ce *CLIError
 				if errors.As(err, &ce) && ce.Code == "quota.exceeded" {
-					serve.DeferReplyRetry(serve.ReplyRetryKey(j.Ref, commentIDOf(j)), time.Now().Add(time.Hour))
 					log.Warn("thread reply skipped: provider quota exhausted", serveJobLogAttrs(j, "comment_id", commentIDOf(j), "err", config.RedactString(err.Error()))...)
 					return nil
 				}

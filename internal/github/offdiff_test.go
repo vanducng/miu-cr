@@ -1,9 +1,12 @@
 package github
 
 import (
+	stdctx "context"
 	"strings"
 	"testing"
 	"time"
+
+	gh "github.com/google/go-github/v84/github"
 
 	"github.com/vanducng/miu-cr/internal/engine"
 	"github.com/vanducng/miu-cr/internal/engine/diff"
@@ -63,6 +66,42 @@ func TestApplyOffDiffDispositionAndAnchor(t *testing.T) {
 	body := RenderOffDiffComment([]engine.Finding{real})
 	if !strings.Contains(body, offDiffMarker) || !strings.Contains(body, fpMarker(Fingerprint(real))) {
 		t.Fatalf("off-diff body missing markers:\n%s", body)
+	}
+}
+
+func TestOffDiffThreadHonorsSeverityFloor(t *testing.T) {
+	low := engine.Finding{File: "other.go", Line: 2, Severity: "low", Title: "nit", QuotedCode: "a"}
+	high := engine.Finding{File: "other.go", Line: 3, Severity: "high", Title: "bug", QuotedCode: "b"}
+	diffs := changedDiff()
+	findings := []engine.Finding{low, high}
+	ledger := MergeLedger(nil, findings, "abc", map[string]bool{"a.go": true}, time.Date(2026, 6, 28, 10, 0, 0, 0, time.UTC))
+	got := MinSeverityFloor(ActionableOffDiffFindings(findings, diffs, ledger), "high")
+	if len(got) != 1 || got[0].Title != "bug" {
+		t.Fatalf("off-diff thread = %+v", got)
+	}
+}
+
+func TestUpsertOffDiffIssueCommentEditsInPlace(t *testing.T) {
+	info := &PRInfo{Owner: "acme", Repo: "app", Number: 1, HeadSHA: "abc"}
+	f := engine.Finding{File: "other.go", Line: 3, Severity: "high", Title: "bug", Rationale: "breaks the bound"}
+	client := &recordClient{login: "reviewer", issueStore: []*gh.IssueComment{}}
+	if _, err := UpsertOffDiffComment(stdctx.Background(), client, info, []engine.Finding{f}, nil); err != nil {
+		t.Fatal(err)
+	}
+	if client.createIssueN != 1 {
+		t.Fatalf("creates = %d", client.createIssueN)
+	}
+	if _, err := UpsertOffDiffComment(stdctx.Background(), client, info, []engine.Finding{f}, nil); err != nil {
+		t.Fatal(err)
+	}
+	if client.createIssueN != 1 {
+		t.Fatalf("second pass created another comment: %d", client.createIssueN)
+	}
+	if _, err := UpsertOffDiffComment(stdctx.Background(), client, info, nil, nil); err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(client.issueStore[0].GetBody(), "No off-diff findings remain.") {
+		t.Fatalf("body = %s", client.issueStore[0].GetBody())
 	}
 }
 

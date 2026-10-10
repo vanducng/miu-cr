@@ -268,6 +268,24 @@ func TestPRGateUsesPRReviewerNotLocalReviewer(t *testing.T) {
 	}
 }
 
+func TestPRGateUsesBlockingSetWhenKnown(t *testing.T) {
+	pr := &fakePRReviewer{outcome: ReviewOutcome{
+		Findings: []ReviewFinding{{File: "a.go", Line: 1, Severity: "critical"}},
+		Stats:    map[string]any{},
+		PR:       &PRResult{Owner: "o", Repo: "r", Number: 1, HeadSHA: "h", BlockingGateKnown: true},
+	}}
+	if _, err := runPR(t, pr, &fakeReviewer{}, "--pr", "o/r#1", "--no-post", "--gate", "high"); err != nil {
+		t.Fatal(err)
+	}
+
+	pr.outcome.PR.BlockingGateFailed = true
+	_, err := runPR(t, pr, &fakeReviewer{}, "--pr", "o/r#1", "--no-post", "--gate", "high")
+	var ce *CLIError
+	if !asCLIError(err, &ce) || ce.Code != "review.gate_failed" || ce.Exit != 2 {
+		t.Fatalf("blocking gate should still fail the process, got %+v", err)
+	}
+}
+
 func TestPRPatchRepairRequiresSuggest(t *testing.T) {
 	_, err := runPR(t, &fakePRReviewer{}, &fakeReviewer{}, "--pr", "o/r#1", "--no-post", "--patch-repair")
 	var ce *CLIError

@@ -642,7 +642,14 @@ func (h *HostRunner) pollRepo(ctx stdctx.Context, snap hostRunnerSnapshot, repo 
 
 func (h *HostRunner) updateQueuedSummaryStatus(ctx stdctx.Context, client mgithub.Client, repo HostRepoConfig, pr *github.PullRequest, availableAt time.Time, debounce time.Duration) {
 	info := hostPRInfo(repo, pr)
-	action, url, err := mgithub.UpsertSummaryStatus(ctx, client, info, mgithub.RenderQueuedSummaryStatus(info, availableAt, debounce), mgithub.RenderQueuedSummary(info, availableAt, debounce, ""))
+	key := fmt.Sprintf("%s/%s#%d", info.Owner, info.Repo, info.Number)
+	var action mgithub.UpsertAction
+	var url string
+	var err error
+	_ = WithPRFlight(key, func() error {
+		action, url, err = mgithub.UpsertSummaryStatus(ctx, client, info, mgithub.RenderQueuedSummaryStatus(info, availableAt, debounce), mgithub.RenderQueuedSummary(info, availableAt, debounce, ""))
+		return nil
+	})
 	if err != nil {
 		h.log.Warn("host: failed to update queued summary status",
 			"repo", repo.Slug, "pr", info.Number, "head_sha", ShortSHA(info.HeadSHA),

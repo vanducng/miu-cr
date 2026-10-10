@@ -411,3 +411,21 @@ func TestLedgerClearForApprovalAllowsDeferrals(t *testing.T) {
 		t.Fatal("open finding must block")
 	}
 }
+
+func TestNoSummaryWaitsInsteadOfLooping(t *testing.T) {
+	info := &PRInfo{Owner: "acme", Repo: "app", Number: 1, HeadSHA: strings.Repeat("a", 40), AuthorLogin: "dev"}
+	client := &replyClient{recordClient: recordClient{login: "reviewer", issueStore: []*gh.IssueComment{}}}
+	res, err := ApplyThreadReply(stdctx.Background(), client, info, ThreadReplyRequest{
+		CommentID: 3, Body: "Deferred: tracked in #9 because this is safe to merge later",
+		UserLogin: "dev", AuthorAssociation: "NONE",
+	}, nil, config.ApprovalPolicy{}, time.Now())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if res.Reason != "no_summary" || res.CoolDown != replyNotReadyWait {
+		t.Fatalf("result = %+v", res)
+	}
+	if len(client.replies) != 0 {
+		t.Fatal("a missing summary must not post a marker")
+	}
+}

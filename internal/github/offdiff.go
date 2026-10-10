@@ -3,6 +3,7 @@ package github
 import (
 	stdctx "context"
 	"fmt"
+	"sort"
 	"strings"
 
 	gh "github.com/google/go-github/v84/github"
@@ -223,25 +224,38 @@ func UpsertOffDiffComment(ctx stdctx.Context, client Client, info *PRInfo, findi
 	if err != nil {
 		return "", err
 	}
+	issueComments, err := listAllIssueComments(ctx, client, info)
+	if err != nil {
+		return "", err
+	}
 	existing := findOffDiffComment(comments, login)
+	issues := findOffDiffIssueComments(issueComments, login)
 	if len(findings) == 0 {
-		if existing == nil {
+		if existing == nil && len(issues) == 0 {
 			return "", nil
 		}
 		body := offDiffMarker + "\n" + botMarker + "\n\nNo off-diff findings remain.\n"
-		if err := editOffDiffComment(ctx, client, info, existing, body); err != nil {
+		if existing != nil {
+			if err := editOffDiffComment(ctx, client, info, existing, body); err != nil {
+				return "", err
+			}
+		}
+		if err := editOffDiffIssueComments(ctx, client, info, issues, body); err != nil {
 			return "", err
 		}
-		return existing.GetHTMLURL(), nil
+		return offDiffExistingURL(existing, issues), nil
 	}
 	body := RenderOffDiffComment(findings)
-	if existing != nil {
-		if err := editOffDiffComment(ctx, client, info, existing, body); err != nil {
+	if existing != nil || len(issues) > 0 {
+		if existing != nil {
+			if err := editOffDiffComment(ctx, client, info, existing, body); err != nil {
+				return "", err
+			}
+		}
+		if err := editOffDiffIssueComments(ctx, client, info, issues, body); err != nil {
 			return "", err
 		}
-		if u := existing.GetHTMLURL(); u != "" {
-			return u, nil
-		}
+		return offDiffExistingURL(existing, issues), nil
 	} else if path, line, ok := NearestAnchor(findings[0], diffs); ok {
 		review := &gh.PullRequestReviewRequest{
 			CommitID: gh.Ptr(info.HeadSHA),
@@ -257,14 +271,45 @@ func UpsertOffDiffComment(ctx stdctx.Context, client Client, info *PRInfo, findi
 			return offDiffCommentURL(ctx, client, info)
 		}
 	}
-	if existing != nil {
-		return existing.GetHTMLURL(), nil
-	}
 	created, err := client.CreateIssueComment(ctx, info.Owner, info.Repo, info.Number, &gh.IssueComment{Body: gh.Ptr(body)})
 	if err != nil {
 		return "", err
 	}
 	return created.GetHTMLURL(), nil
+}
+
+func findOffDiffIssueComments(comments []*gh.IssueComment, login string) []*gh.IssueComment {
+	var found []*gh.IssueComment
+	for _, c := range comments {
+		if !strings.Contains(c.GetBody(), offDiffMarker) {
+			continue
+		}
+		if login != "" && !strings.EqualFold(c.GetUser().GetLogin(), login) {
+			continue
+		}
+		found = append(found, c)
+	}
+	sort.SliceStable(found, func(i, j int) bool { return found[i].GetID() < found[j].GetID() })
+	return found
+}
+
+func editOffDiffIssueComments(ctx stdctx.Context, client Client, info *PRInfo, comments []*gh.IssueComment, body string) error {
+	for _, c := range comments {
+		if _, err := client.EditIssueComment(ctx, info.Owner, info.Repo, c.GetID(), &gh.IssueComment{Body: gh.Ptr(body)}); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func offDiffExistingURL(review *gh.PullRequestComment, issues []*gh.IssueComment) string {
+	if review != nil && review.GetHTMLURL() != "" {
+		return review.GetHTMLURL()
+	}
+	if len(issues) > 0 && issues[0].GetHTMLURL() != "" {
+		return issues[0].GetHTMLURL()
+	}
+	return ""
 }
 
 func findOffDiffComment(comments []*gh.PullRequestComment, login string) *gh.PullRequestComment {

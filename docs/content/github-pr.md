@@ -338,9 +338,9 @@ They still appear in the summary, SARIF, and local output.
 ## Inline severity floor (`--min-severity`)
 
 `--min-severity none|info|low|medium|high|critical` raises the floor on which
-findings post **inline**. Findings below the threshold are excluded from inline
-comments only; they still appear in the summary header counts and SARIF, so
-nothing is dropped. Omitting the flag (the default) keeps the current behavior (no
+findings post **inline**, including the shared off-diff thread. Findings below
+the threshold are excluded from those comments; they still appear in the summary
+header counts and SARIF, so nothing is dropped. Omitting the flag (the default) keeps the current behavior (no
 floor).
 
 ```sh

@@ -122,11 +122,11 @@ func ValidMinSeverity(s string) bool {
 	return false
 }
 
-// minSeverityFloor keeps only findings whose severity reaches min (a high→low
+// MinSeverityFloor keeps only findings whose severity reaches min (a high→low
 // rank). An empty/"none" min is a no-op (current behavior). An unknown-severity
 // finding (rank past the table) is dropped only when a real floor is set, so a
 // floor never silently posts an ungraded finding inline.
-func minSeverityFloor(findings []engine.Finding, min string) []engine.Finding {
+func MinSeverityFloor(findings []engine.Finding, min string) []engine.Finding {
 	if min == "" || min == "none" {
 		return findings
 	}
@@ -478,7 +478,7 @@ func PostReview(ctx stdctx.Context, client Client, info *PRInfo, findings []engi
 		}
 	}
 
-	inHunk := minSeverityFloor(inlineEligible(findings, diffs, opts.FilterMode), opts.MinSeverity)
+	inHunk := MinSeverityFloor(inlineEligible(findings, diffs, opts.FilterMode), opts.MinSeverity)
 
 	toPost := make([]engine.Finding, 0, len(inHunk))
 	for _, f := range inHunk {

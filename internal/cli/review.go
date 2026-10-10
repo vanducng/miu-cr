@@ -231,6 +231,10 @@ type PRResult struct {
 	// run (0/absent when --patch-repair is OFF). Source of truth is the engine stat.
 	PatchesRepaired int `json:"patches_repaired,omitempty"`
 
+	// BlockingGateKnown and BlockingGateFailed are the ledger-aware gate for the process exit.
+	BlockingGateKnown  bool `json:"-"`
+	BlockingGateFailed bool `json:"-"`
+
 	// Mode is the GitHub reporter used: review (inline+summary) | checks (CheckRun).
 	// Checks-only fields are populated under --mode checks; FallbackAnnotations counts
 	// ::error:: workflow annotations emitted on the fork-PR 403 fallback (0 normally).
@@ -881,7 +885,7 @@ func runPRReview(cmd *cobra.Command, a prRunArgs) error {
 	if err := emitReview(cmd.OutOrStdout(), out, data, summary); err != nil {
 		return err
 	}
-	if prReviewer.GateFailed(out.Findings, a.gate) {
+	if prGateFailed(out, a.gate) {
 		return &CLIError{
 			Code:           "review.gate_failed",
 			Message:        fmt.Sprintf("findings reached gate %q", a.gate),
@@ -890,6 +894,13 @@ func runPRReview(cmd *cobra.Command, a prRunArgs) error {
 		}
 	}
 	return nil
+}
+
+func prGateFailed(out ReviewOutcome, gate string) bool {
+	if out.PR != nil && out.PR.BlockingGateKnown {
+		return out.PR.BlockingGateFailed
+	}
+	return prReviewer.GateFailed(out.Findings, gate)
 }
 
 // loadReviewDefaults loads [review] from config, validates it (config.invalid on

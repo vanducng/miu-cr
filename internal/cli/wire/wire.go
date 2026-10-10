@@ -963,6 +963,10 @@ func publishReviewLocked(ctx stdctx.Context, client mgithub.Client, info *mgithu
 	ledger := mgithub.MergeLedger(info.PriorLedger, publishFindings, info.HeadSHA, diffPathSet(diffs), now)
 	ledger = mgithub.ApplyOffDiffDisposition(ledger, publishFindings, diffs)
 	blocking := mgithub.BlockingFindings(publishFindings, ledger)
+	if prResult != nil {
+		prResult.BlockingGateKnown = true
+		prResult.BlockingGateFailed = engine.GateFailed(blocking, req.Gate)
+	}
 
 	opts := mgithub.PostReviewOptions{
 		Suggest:       req.Suggest,
@@ -1042,7 +1046,7 @@ func publishReviewLocked(ctx stdctx.Context, client mgithub.Client, info *mgithu
 		return nil
 	}
 
-	offDiff := mgithub.ActionableOffDiffFindings(publishFindings, diffs, ledger)
+	offDiff := mgithub.MinSeverityFloor(mgithub.ActionableOffDiffFindings(publishFindings, diffs, ledger), opts.MinSeverity)
 	if url, oerr := mgithub.UpsertOffDiffComment(ctx, client, info, offDiff, diffs); oerr != nil {
 		slog.Warn("off-diff comment failed", "repo", info.Owner+"/"+info.Repo, "pr", info.Number, "head_sha", shortSHA(info.HeadSHA), "error", config.RedactString(oerr.Error()))
 	} else if url != "" {
