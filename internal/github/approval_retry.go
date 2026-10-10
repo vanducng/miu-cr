@@ -136,7 +136,7 @@ func deferredApprovalReason(body string) string {
 func openLedgerFindings(entries []LedgerEntry) []engine.Finding {
 	var out []engine.Finding
 	for _, e := range entries {
-		if e.Status == statusResolved {
+		if !ledgerBlocksApproval(e.Status) {
 			continue
 		}
 		out = append(out, engine.Finding{Severity: e.Sev})

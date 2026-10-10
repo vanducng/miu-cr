@@ -1,0 +1,120 @@
+package wire
+
+import (
+	stdctx "context"
+	"log/slog"
+	"strconv"
+	"sync"
+	"time"
+
+	"github.com/vanducng/miu-cr/internal/config"
+	"github.com/vanducng/miu-cr/internal/engine/agent"
+	mgithub "github.com/vanducng/miu-cr/internal/github"
+	"github.com/vanducng/miu-cr/internal/serve"
+)
+
+var replyFlights sync.Map
+
+func withReplyFlight(key string, fn func() error) error {
+	v, _ := replyFlights.LoadOrStore(key, &sync.Mutex{})
+	mu := v.(*sync.Mutex)
+	mu.Lock()
+	defer mu.Unlock()
+	return fn()
+}
+
+func handleServeThreadReply(ctx stdctx.Context, job serve.Job) error {
+	if job.Reply == nil || job.Reply.CommentID <= 0 {
+		return nil
+	}
+	key := job.Ref + ":" + strconv.FormatInt(job.Reply.CommentID, 10)
+	return withReplyFlight(key, func() error {
+		return applyServeThreadReply(ctx, job)
+	})
+}
+
+func applyServeThreadReply(ctx stdctx.Context, job serve.Job) error {
+	client := newGitHubClient(job.Token)
+	ref, err := mgithub.ParseRef(job.Ref)
+	if err != nil {
+		return err
+	}
+	var info *mgithub.PRInfo
+	err = retryTransient(ctx, maxGitHubAttempts, func() error {
+		var e error
+		info, e = mgithub.FetchPR(ctx, client, ref)
+		return e
+	})
+	if err != nil {
+		return err
+	}
+	review := serve.JobReviewOptions{}
+	if job.Review != nil {
+		review = *job.Review
+	}
+	creds, err := agent.Resolve(agent.ResolveInput{
+		Ctx:           ctx,
+		Provider:      review.Provider,
+		APIKey:        review.APIKey,
+		BaseURL:       review.BaseURL,
+		AuthToken:     review.AuthToken,
+		Model:         review.Model,
+		OAuthResolver: oauthResolver(),
+	})
+	if err != nil {
+		return err
+	}
+	llm, err := agent.New(creds, job.Timeout)
+	if err != nil {
+		return err
+	}
+	res, err := mgithub.ApplyThreadReply(ctx, client, info, mgithub.ThreadReplyRequest{
+		CommentID: job.Reply.CommentID,
+		Body:      job.Reply.Body,
+		UserLogin: job.Reply.UserLogin,
+		InReplyTo: job.Reply.InReplyTo,
+		Kind:      job.Reply.Kind,
+	}, replyJudgeAdapter{llm: llm, retry: review.ProviderRetry}, review.Approval, time.Now())
+	attrs := []any{
+		"repo", info.Owner + "/" + info.Repo, "pr", info.Number, "head_sha", shortSHA(info.HeadSHA),
+		"comment_id", job.Reply.CommentID, "reason", res.Reason, "accepted", res.Accepted, "rejected", res.Rejected,
+	}
+	if res.Approved {
+		attrs = append(attrs, "approved", true)
+	} else if res.ApproveReason != "" {
+		attrs = append(attrs, "approve_skipped", res.ApproveReason)
+	}
+	if err != nil {
+		attrs = append(attrs, "error", config.RedactString(err.Error()))
+		slog.Warn("thread reply failed", attrs...)
+		return err
+	}
+	slog.Info("thread reply handled", attrs...)
+	return nil
+}
+
+type replyJudgeAdapter struct {
+	llm   agent.Agent
+	retry config.ProviderRetry
+}
+
+func (a replyJudgeAdapter) JudgeThreadReply(ctx stdctx.Context, in mgithub.ThreadReplyJudgeInput) (mgithub.ThreadReplyVerdict, error) {
+	verdict, err := a.llm.JudgeReply(ctx, agent.ReplyJudgeRequest{
+		Intent:        string(in.Intent),
+		Path:          in.Path,
+		Line:          in.Line,
+		Title:         in.Title,
+		Severity:      in.Severity,
+		FindingBody:   in.FindingBody,
+		Reply:         in.Reply,
+		Reason:        in.Reason,
+		CommitSHA:     in.CommitSHA,
+		CommitPatch:   in.CommitPatch,
+		LineInPatch:   in.LineInPatch,
+		ProviderRetry: a.retry,
+	})
+	if err != nil {
+		return mgithub.ThreadReplyVerdict{}, err
+	}
+	return mgithub.ThreadReplyVerdict{Accept: verdict.Accept, Explanation: verdict.Explanation}, nil
+}

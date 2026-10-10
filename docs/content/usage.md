@@ -306,7 +306,8 @@ Every review gets a built-in baseline plus any project rules under `.miu/cr/rule
 - `--mode review|checks`: inline review comments (default) or a GitHub CheckRun (survives force-push, works on fork PRs).
 - `--suggest`: emit one-click GitHub suggestions for proven fixes: single-line replacements and wrap/guard/insert fixes (a multi-line patch on a QuotedCode-proven single-line anchor).
 - `--approval off|clean|threshold`: submit `APPROVE` by policy. `clean` requires
-  zero findings; `threshold` allows findings at or below `--approval-max-priority`
+  zero blocking findings. Accepted deferrals and irrelevant off-diff notes do not
+  block. `threshold` allows blocking findings at or below `--approval-max-priority`
   (default `P4`: only P4 findings allowed, P0-P3 blocked). Approval reviews include
   short LGTM-style text with a link to the summary by default. Approval is
   head-SHA scoped, so a later push can be approved again. Clean re-approvals can

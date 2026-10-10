@@ -133,8 +133,8 @@ host:
 
 repos:
   # Use case: noisy, high-traffic service repo — inline only medium+, keep the
-  # summary comment lean, and mirror manual "Resolve conversation" clicks into
-  # the summary ledger between pushes.
+  # summary comment lean, mirror manual "Resolve conversation" clicks into
+  # the summary ledger between pushes, and judge thread replies on that poll.
   - <<: *repo_defaults
     name: service-api
     slug: example-org/service-api

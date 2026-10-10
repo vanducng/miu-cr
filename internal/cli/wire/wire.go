@@ -89,6 +89,7 @@ func init() {
 	engine.SetCleanReplacement(mgithub.ClassifyReplacement)
 	cli.SetReviewer(engineReviewer{})
 	cli.SetPRReviewer(prReviewer{})
+	cli.SetServeThreadReply(handleServeThreadReply)
 	cli.SetMCPServer(mcpServerImpl{})
 	cli.SetReviewStoreFactory(openReviewStore)
 	cli.SetHostStoreFactory(openHostStore)
@@ -950,11 +951,16 @@ func publishReviewWithDiffs(ctx stdctx.Context, client mgithub.Client, info *mgi
 		}
 	}
 
+	now := time.Now()
+	ledger := mgithub.MergeLedger(info.PriorLedger, publishFindings, info.HeadSHA, diffPathSet(diffs), now)
+	ledger = mgithub.ApplyOffDiffDisposition(ledger, publishFindings, diffs)
+	blocking := mgithub.BlockingFindings(publishFindings, ledger)
+
 	opts := mgithub.PostReviewOptions{
 		Suggest:       req.Suggest,
 		Approval:      req.Approval,
 		Gate:          req.Gate,
-		GateClean:     !engine.GateFailed(publishFindings, req.Gate) && !engine.SubagentsDegraded(res.Stats),
+		GateClean:     !engine.GateFailed(blocking, req.Gate) && !engine.SubagentsDegraded(res.Stats),
 		ReviewedFiles: reviewedFilesFromStats(res.Stats),
 		FilterMode:    filterModeOf(req.FilterMode),
 		MinSeverity:   req.MinSeverity,
@@ -971,8 +977,6 @@ func publishReviewWithDiffs(ctx stdctx.Context, client mgithub.Client, info *mgi
 	// summary may be upserted twice for overflow; merging twice would double-count
 	// reopens). MergeLedger returns non-nil even when empty, so the summary always
 	// renders in lifecycle mode on the PR path.
-	now := time.Now()
-	ledger := mgithub.MergeLedger(info.PriorLedger, publishFindings, info.HeadSHA, diffPathSet(diffs), now)
 	approvalReason := ""
 
 	// renderSummary builds the summary body for a given omitted set. info.ReviewCount
@@ -1015,7 +1019,7 @@ func publishReviewWithDiffs(ctx stdctx.Context, client mgithub.Client, info *mgi
 
 	// nil summaryFn: summary lives in the issue comment. COMMENT reviews keep the
 	// review body empty; APPROVE may add a short body.
-	pr, err := mgithub.PostReview(ctx, client, info, publishFindings, diffs, nil, skip, opts)
+	pr, err := mgithub.PostReview(ctx, client, info, blocking, diffs, nil, skip, opts)
 	if err != nil {
 		return err
 	}
@@ -1028,6 +1032,20 @@ func publishReviewWithDiffs(ctx stdctx.Context, client mgithub.Client, info *mgi
 		prResult.Posted = false
 		prResult.SummaryAction = "fork_fallback"
 		return nil
+	}
+
+	offDiff := mgithub.ActionableOffDiffFindings(publishFindings, diffs, ledger)
+	if url, oerr := mgithub.UpsertOffDiffComment(ctx, client, info, offDiff, diffs); oerr != nil {
+		slog.Warn("off-diff comment failed", "repo", info.Owner+"/"+info.Repo, "pr", info.Number, "head_sha", shortSHA(info.HeadSHA), "error", config.RedactString(oerr.Error()))
+	} else if url != "" {
+		if existing == nil {
+			existing = map[string]string{}
+		}
+		for _, f := range offDiff {
+			if fp := mgithub.Fingerprint(f); existing[fp] == "" {
+				existing[fp] = url
+			}
+		}
 	}
 
 	if action, _, uerr := mgithub.UpsertSummaryComment(ctx, client, info, renderSummary(pr.Omitted, pr.OmittedFindings, true)); uerr != nil {
@@ -1050,6 +1068,12 @@ func publishReviewWithDiffs(ctx stdctx.Context, client mgithub.Client, info *mgi
 	// PR-thread store): embed the actually-posted findings' scrubbed code anchors.
 	// Best-effort, never affects the published review.
 	ew.write(ctx, pr.PostedFindings, publishFindings, res.Stats)
+
+	if login, lerr := client.CurrentLogin(ctx); lerr != nil {
+		slog.Warn("response notice skipped", "repo", info.Owner+"/"+info.Repo, "pr", info.Number, "head_sha", shortSHA(info.HeadSHA), "reason", "comment_author_unverified", "error", config.RedactString(lerr.Error()))
+	} else if _, nerr := mgithub.UpsertResponseNotice(ctx, client, info, login, mgithub.OpenNoticeItems(ledger, existing, nil)); nerr != nil {
+		slog.Warn("response notice failed", "repo", info.Owner+"/"+info.Repo, "pr", info.Number, "head_sha", shortSHA(info.HeadSHA), "error", config.RedactString(nerr.Error()))
+	}
 
 	prResult.Posted = true
 	prResult.PostedInline = pr.Posted

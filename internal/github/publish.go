@@ -522,7 +522,7 @@ func PostReview(ctx stdctx.Context, client Client, info *PRInfo, findings []engi
 			suggestions++
 		}
 		fp := fingerprint(f)
-		body := rendered + "\n\n" + fpMarker(fp)
+		body := rendered + "\n\n" + threadReplyHint + "\n\n" + fpMarker(fp) + "\n" + botMarker
 		c := &gh.DraftReviewComment{
 			Path: gh.Ptr(f.File),
 			Body: gh.Ptr(body),

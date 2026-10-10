@@ -2,11 +2,13 @@ package serve
 
 import (
 	"errors"
+	"fmt"
 	"net/http"
 
 	"github.com/google/go-github/v84/github"
 
 	"github.com/vanducng/miu-cr/internal/config"
+	mgithub "github.com/vanducng/miu-cr/internal/github"
 )
 
 // actedActions are the PR webhook actions serve reviews on. Everything else
@@ -32,8 +34,11 @@ func (s *Server) handleWebhook(w http.ResponseWriter, r *http.Request) {
 
 	// Guard the event type before ValidatePayload/ParseWebHook: ParseWebHook
 	// panics on unregistered types, so unknown events get a cheap 200-ignore.
-	if et := github.WebHookType(r); et != "pull_request" {
-		s.log.Info("webhook ignored: non-pull_request event",
+	et := github.WebHookType(r)
+	switch et {
+	case "pull_request", "pull_request_review_comment", "issue_comment":
+	default:
+		s.log.Info("webhook ignored: unsupported event",
 			"delivery", delivery, "event", et)
 		writeJSON(w, http.StatusOK, `{"status":"ignored"}`)
 		return
@@ -54,41 +59,24 @@ func (s *Server) handleWebhook(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// ParseWebHook consumes only the validated []byte; r.Body is never re-read.
-	event, err := github.ParseWebHook("pull_request", payload)
+	event, err := github.ParseWebHook(et, payload)
 	if err != nil {
 		s.log.Warn("webhook rejected: parse failed",
 			"delivery", delivery, "error", config.RedactString(err.Error()))
 		http.Error(w, "bad payload", http.StatusBadRequest)
 		return
 	}
-	pe, ok := event.(*github.PullRequestEvent)
-	if !ok {
-		s.log.Warn("webhook rejected: not a PullRequestEvent", "delivery", delivery)
-		http.Error(w, "bad payload", http.StatusBadRequest)
-		return
-	}
-
-	action := pe.GetAction()
-	owner := pe.GetRepo().GetOwner().GetLogin()
-	repo := pe.GetRepo().GetName()
-	number := pe.GetNumber()
-
-	if _, acted := actedActions[action]; !acted {
-		s.log.Info("webhook ignored: action not acted",
-			"delivery", delivery, "repo", owner+"/"+repo, "number", number, "action", action)
+	job, ignoreReason := webhookJob(event)
+	if ignoreReason != "" {
+		owner, repo, number := webhookRepo(event)
+		s.log.Info("webhook ignored: "+ignoreReason,
+			"delivery", delivery, "repo", owner+"/"+repo, "number", number, "event", et)
 		writeJSON(w, http.StatusOK, `{"status":"ignored"}`)
 		return
 	}
-	// A PR opened as a draft carries no actionable review; skip until ready.
-	if action == "opened" && pe.GetPullRequest().GetDraft() {
-		s.log.Info("webhook ignored: draft on open",
-			"delivery", delivery, "repo", owner+"/"+repo, "number", number)
-		writeJSON(w, http.StatusOK, `{"status":"ignored"}`)
-		return
-	}
-	if !s.allow.allows(owner, repo) {
+	if !s.allow.allows(job.Key.Owner, job.Key.Repo) {
 		s.log.Info("webhook ignored: repo not in allowlist",
-			"delivery", delivery, "repo", owner+"/"+repo, "number", number)
+			"delivery", delivery, "repo", job.Key.Owner+"/"+job.Key.Repo, "number", job.Key.Number)
 		writeJSON(w, http.StatusOK, `{"status":"ignored"}`)
 		return
 	}
@@ -96,37 +84,112 @@ func (s *Server) handleWebhook(w http.ResponseWriter, r *http.Request) {
 	token, err := s.resolveToken()
 	if err != nil {
 		s.log.Error("webhook: token resolution failed",
-			"delivery", delivery, "repo", owner+"/"+repo, "number", number,
+			"delivery", delivery, "repo", job.Key.Owner+"/"+job.Key.Repo, "number", job.Key.Number,
 			"error", config.RedactString(err.Error()))
 		http.Error(w, "token unavailable", http.StatusInternalServerError)
 		return
 	}
+	job.Token = token
+	job.Timeout = s.reviewTO
+	job.StalledTimeout = s.stalledTO
 
 	// Respond 200 BEFORE dispatch so the review never runs on the HTTP goroutine
-	// and GitHub's delivery budget is never spent on the LLM. GitHub will not
-	// redeliver a delivery once it has been 200'd, so this is a deliberate
-	// respond-fast tradeoff: a subsequent dropped Submit (full queue) is loud-logged
-	// + counted (Pool.drops) rather than retried, the next push to the PR fires a
-	// fresh webhook that re-triggers the review.
+	// and GitHub's delivery budget is never spent on the LLM.
 	writeJSON(w, http.StatusOK, `{"status":"accepted"}`)
 
-	pk := prKey{Owner: owner, Repo: repo, Number: number}
-	job := Job{
-		Key:            pk,
-		Ref:            pk.String(), // single source of truth (server.go); no format drift
-		Token:          token,
-		Timeout:        s.reviewTO,
-		StalledTimeout: s.stalledTO,
-	}
 	if s.dispatcher.Submit(job) != SubmitQueued {
-		// Dropped (queue full): the 200'd delivery won't be redelivered by GitHub,
-		// so surface it loudly here instead of silently losing the review.
 		s.log.Error("webhook: job dropped, dispatch queue full",
-			"delivery", delivery, "repo", owner+"/"+repo, "number", number, "action", action)
+			"delivery", delivery, "repo", job.Key.Owner+"/"+job.Key.Repo, "number", job.Key.Number, "kind", job.Kind)
 		return
 	}
-	s.log.Info("webhook accepted: review dispatched",
-		"delivery", delivery, "repo", owner+"/"+repo, "number", number, "action", action)
+	s.log.Info("webhook accepted: job dispatched",
+		"delivery", delivery, "repo", job.Key.Owner+"/"+job.Key.Repo, "number", job.Key.Number, "kind", job.Kind)
+}
+
+func webhookJob(event any) (Job, string) {
+	switch pe := event.(type) {
+	case *github.PullRequestEvent:
+		action := pe.GetAction()
+		if _, acted := actedActions[action]; !acted {
+			return Job{}, "action not acted"
+		}
+		if action == "opened" && pe.GetPullRequest().GetDraft() {
+			return Job{}, "draft on open"
+		}
+		owner := pe.GetRepo().GetOwner().GetLogin()
+		repo := pe.GetRepo().GetName()
+		number := pe.GetNumber()
+		pk := prKey{Owner: owner, Repo: repo, Number: number}
+		return Job{Key: pk, Ref: pk.String()}, ""
+	case *github.PullRequestReviewCommentEvent:
+		if pe.GetAction() != "created" {
+			return Job{}, "action not acted"
+		}
+		body := pe.GetComment().GetBody()
+		if mgithub.IsBotBody(body) {
+			return Job{}, "bot comment"
+		}
+		if mgithub.ParseThreadReply(body).Intent == "" {
+			return Job{}, "unrecognized reply"
+		}
+		owner := pe.GetRepo().GetOwner().GetLogin()
+		repo := pe.GetRepo().GetName()
+		number := pe.GetPullRequest().GetNumber()
+		id := pe.GetComment().GetID()
+		return Job{
+			Key:  prKey{Owner: owner, Repo: repo, Number: number, CommentID: id},
+			Ref:  fmt.Sprintf("%s/%s#%d", owner, repo, number),
+			Kind: JobKindThreadReply,
+			Reply: &ThreadReply{
+				CommentID: id,
+				Body:      body,
+				UserLogin: pe.GetComment().GetUser().GetLogin(),
+				InReplyTo: pe.GetComment().GetInReplyTo(),
+				Kind:      "review_comment",
+			},
+		}, ""
+	case *github.IssueCommentEvent:
+		if pe.GetAction() != "created" || !pe.GetIssue().IsPullRequest() {
+			return Job{}, "action not acted"
+		}
+		body := pe.GetComment().GetBody()
+		if mgithub.IsBotBody(body) {
+			return Job{}, "bot comment"
+		}
+		if mgithub.ParseThreadReply(body).Intent == "" {
+			return Job{}, "unrecognized reply"
+		}
+		owner := pe.GetRepo().GetOwner().GetLogin()
+		repo := pe.GetRepo().GetName()
+		number := pe.GetIssue().GetNumber()
+		id := pe.GetComment().GetID()
+		return Job{
+			Key:  prKey{Owner: owner, Repo: repo, Number: number, CommentID: id},
+			Ref:  fmt.Sprintf("%s/%s#%d", owner, repo, number),
+			Kind: JobKindThreadReply,
+			Reply: &ThreadReply{
+				CommentID: id,
+				Body:      body,
+				UserLogin: pe.GetComment().GetUser().GetLogin(),
+				Kind:      "issue_comment",
+			},
+		}, ""
+	default:
+		return Job{}, "unsupported payload"
+	}
+}
+
+func webhookRepo(event any) (string, string, int) {
+	switch pe := event.(type) {
+	case *github.PullRequestEvent:
+		return pe.GetRepo().GetOwner().GetLogin(), pe.GetRepo().GetName(), pe.GetNumber()
+	case *github.PullRequestReviewCommentEvent:
+		return pe.GetRepo().GetOwner().GetLogin(), pe.GetRepo().GetName(), pe.GetPullRequest().GetNumber()
+	case *github.IssueCommentEvent:
+		return pe.GetRepo().GetOwner().GetLogin(), pe.GetRepo().GetName(), pe.GetIssue().GetNumber()
+	default:
+		return "", "", 0
+	}
 }
 
 func (s *Server) handleHealthz(w http.ResponseWriter, _ *http.Request) {

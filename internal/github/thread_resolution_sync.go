@@ -22,13 +22,27 @@ type ThreadResolutionSyncResult struct {
 }
 
 // LedgerFullyResolved reports whether the ledger has at least one entry and every
-// entry is resolved (no open or reopened findings) — i.e. clean by resolution.
+// entry is resolved (no open, reopened, or deferred findings).
 func LedgerFullyResolved(entries []LedgerEntry) bool {
 	if len(entries) == 0 {
 		return false
 	}
 	for _, e := range entries {
 		if e.Status != statusResolved {
+			return false
+		}
+	}
+	return true
+}
+
+// LedgerClearForApproval reports whether nothing open remains. Accepted deferrals
+// and irrelevant off-diff noise do not block. An empty ledger is not clear.
+func LedgerClearForApproval(entries []LedgerEntry) bool {
+	if len(entries) == 0 {
+		return false
+	}
+	for _, e := range entries {
+		if ledgerBlocksApproval(e.Status) {
 			return false
 		}
 	}
@@ -86,7 +100,7 @@ func SyncSummaryConversationResolved(ctx stdctx.Context, client Client, info *PR
 	// the current head IS the published head (non-empty and equal),
 	// so we never approve a commit we did not review; ApproveResolvedLedger applies the
 	// policy + trusted-author + already-approved guards and degrades silently on reject.
-	if reviewedHead := parsePublishedCommit(body); LedgerFullyResolved(next) && reviewedHead != "" && reviewedHead == info.HeadSHA {
+	if reviewedHead := parsePublishedCommit(body); LedgerClearForApproval(next) && reviewedHead != "" && reviewedHead == info.HeadSHA {
 		result.Approved, result.ApproveReason = ApproveResolvedLedger(ctx, client, info, policy, summaryCommentURL(info, targetID, ""))
 	}
 	return result, nil
@@ -105,11 +119,15 @@ func SyncLedgerConversationResolved(prior []LedgerEntry, resolved map[string]boo
 	for i := range out {
 		e := &out[i]
 		if resolved[e.FP] {
+			if e.Status == statusDeferred || e.Status == statusIrrelevant {
+				continue
+			}
 			if e.Status != statusResolved {
 				e.Status = statusResolved
 				e.ResSHA = e.OpenSHA
 				e.ResKind = resolutionConversation
 				e.ResAt = nowStr
+				e.Note = ""
 				delta.Resolved++
 			}
 			continue
@@ -224,7 +242,7 @@ func renderLedgerTables(info *PRInfo, ledger []LedgerEntry, inlineURLs map[strin
 }
 
 func ledgerTablesStart(body string) int {
-	return earliestIndex(body, 0, []string{"**⚠️ Open (", "**✅ Resolved ("})
+	return earliestIndex(body, 0, []string{"**⚠️ Open (", "**⏸️ Deferred (", "**✅ Resolved ("})
 }
 
 func ledgerTablesEnd(body string, start int) int {

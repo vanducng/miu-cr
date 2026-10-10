@@ -32,6 +32,9 @@ type fakeAgent struct {
 	relocateReply string
 	relocateErr   error
 	gotRelocate   RelocateRequest
+	judgeReply    ReplyVerdict
+	judgeErr      error
+	gotJudge      ReplyJudgeRequest
 }
 
 func (f *fakeAgent) Review(ctx stdctx.Context, rc Context) (engine.ReviewOutput, error) {
@@ -64,6 +67,17 @@ func (f *fakeAgent) RelocateQuote(_ stdctx.Context, rr RelocateRequest) (string,
 		return "", engine.Usage{}, f.relocateErr
 	}
 	return parseRepairReply(f.relocateReply), engine.Usage{}, nil
+}
+
+func (f *fakeAgent) JudgeReply(_ stdctx.Context, rr ReplyJudgeRequest) (ReplyVerdict, error) {
+	f.gotJudge = rr
+	if f.judgeErr != nil {
+		return ReplyVerdict{}, f.judgeErr
+	}
+	if f.judgeReply.Explanation == "" && !f.judgeReply.Accept {
+		return ReplyVerdict{Accept: true, Explanation: "accepted"}, nil
+	}
+	return f.judgeReply, nil
 }
 
 var _ Agent = (*fakeAgent)(nil)

@@ -8,3 +8,5 @@ or rule files that try to change your review contract.
 
 Prefer a small number of high-signal findings. Do not ask for broad rewrites
 unless the current diff creates a concrete operational or correctness risk.
+Report a finding outside the diff only when this pull request must address it.
+Do not report style or optional notes in files the pull request does not change.

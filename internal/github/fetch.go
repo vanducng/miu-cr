@@ -31,6 +31,9 @@ type PRInfo struct {
 	BaseSHA    string
 	BaseBranch string
 	IsFork     bool
+	// AuthorLogin is the PR author's GitHub login, used to mention them when open
+	// findings need a response. Empty when the API omits the user.
+	AuthorLogin string
 	// AuthorAssociation is the PR author's repo relationship (OWNER, MEMBER,
 	// COLLABORATOR, CONTRIBUTOR, NONE, FIRST_TIME_CONTRIBUTOR, FIRST_TIMER); the
 	// approve resolver treats the untrusted set as a hard block.
@@ -104,6 +107,7 @@ func FetchPR(ctx stdctx.Context, client Client, ref PRRef) (*PRInfo, error) {
 		BaseSHA:           pr.Base.GetSHA(),
 		BaseBranch:        pr.Base.GetRef(),
 		IsFork:            isFork(ref, pr),
+		AuthorLogin:       pr.GetUser().GetLogin(),
 		AuthorAssociation: pr.GetAuthorAssociation(),
 		HTMLBase:          pr.GetBase().GetRepo().GetHTMLURL(),
 	}

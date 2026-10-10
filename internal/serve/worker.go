@@ -12,9 +12,10 @@ import (
 )
 
 // Pool is a bounded worker pool implementing Dispatcher. A mutex-guarded
-// in-flight set keyed by {owner,repo,number} coalesces duplicate jobs for the
-// same PR; a full queue is loud-logged and counted, never silently dropped; each
-// job runs under recover() so one panic can't kill a worker.
+// in-flight set keyed by {owner,repo,number,comment} coalesces duplicate jobs
+// for the same PR review or the same thread reply. A full queue is loud-logged
+// and counted, never silently dropped. Each job runs under recover() so one
+// panic can't kill a worker.
 type Pool struct {
 	jobs     chan Job
 	mu       sync.Mutex

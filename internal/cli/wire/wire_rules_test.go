@@ -32,6 +32,10 @@ func (c *captureAgent) RelocateQuote(_ stdctx.Context, rr agent.RelocateRequest)
 	return "", engine.Usage{}, nil
 }
 
+func (c *captureAgent) JudgeReply(stdctx.Context, agent.ReplyJudgeRequest) (agent.ReplyVerdict, error) {
+	return agent.ReplyVerdict{}, nil
+}
+
 func TestAgentAdapterForwardsRules(t *testing.T) {
 	ca := &captureAgent{}
 	a := agentAdapter{inner: ca}

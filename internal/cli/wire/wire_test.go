@@ -299,7 +299,7 @@ func TestPublishReviewWireFlow(t *testing.T) {
 	if pr.SummaryAction != "edited" {
 		t.Fatalf("first run: want summary action edited, got %q", pr.SummaryAction)
 	}
-	if fake.createIssueN != 1 || fake.editN != 1 {
+	if fake.createIssueN != 2 || fake.editN != 1 {
 		t.Fatalf("first run must create then finalize the summary issue comment: create=%d edit=%d", fake.createIssueN, fake.editN)
 	}
 	// The review body must be EMPTY, the summary leaves the body entirely.
@@ -307,8 +307,8 @@ func TestPublishReviewWireFlow(t *testing.T) {
 		t.Fatalf("review body must be empty (summary lives in the issue comment), got:\n%s", b)
 	}
 	// The summary issue comment carries the marker + this run's Review attempts: 1 footer.
-	if len(fake.issueComments) != 1 {
-		t.Fatalf("want one summary issue comment, have %d", len(fake.issueComments))
+	if len(fake.issueComments) != 2 {
+		t.Fatalf("want the summary plus one response notice, have %d", len(fake.issueComments))
 	}
 	summary := fake.issueComments[0].GetBody()
 	if !strings.Contains(summary, mgithub.ReviewMarker) {
@@ -359,10 +359,10 @@ func TestPublishReviewWireFlow(t *testing.T) {
 	if len(fake.reviewComments) != 1 {
 		t.Errorf("re-run must not duplicate inline comments, have %d", len(fake.reviewComments))
 	}
-	if fake.createIssueN != 1 || fake.editN != 3 {
+	if fake.createIssueN != 2 || fake.editN != 4 {
 		t.Fatalf("re-run must EDIT (not stack) the summary: create=%d edit=%d", fake.createIssueN, fake.editN)
 	}
-	if len(fake.issueComments) != 1 {
+	if len(fake.issueComments) != 2 {
 		t.Fatalf("re-run must not create a second summary comment, have %d", len(fake.issueComments))
 	}
 	if got := fake.issueComments[0].GetBody(); !strings.Contains(got, "Review attempts: 2") {
@@ -437,7 +437,7 @@ func TestPublishReviewWithDiffSnapshotDoesNotNeedRepoAfterReview(t *testing.T) {
 	if pr.PostedInline != 1 || pr.SummaryAction != "edited" {
 		t.Fatalf("publish from snapshot failed: postedInline=%d summaryAction=%q", pr.PostedInline, pr.SummaryAction)
 	}
-	if fake.createIssueN != 1 || fake.editN != 1 {
+	if fake.createIssueN != 2 || fake.editN != 1 {
 		t.Fatalf("summary must create then finalize: create=%d edit=%d", fake.createIssueN, fake.editN)
 	}
 }
