@@ -572,6 +572,7 @@ func (prReviewer) ReviewPR(ctx stdctx.Context, req cli.PRReviewRequest) (cli.Rev
 		prResult.PatchesRepaired = patchRepairedCount(res.Stats)
 	}
 
+	noteLedgerGate(prResult, info, res.Findings, publishDiffs, req.Gate)
 	return cli.ReviewOutcome{
 		Findings: toCLIFindings(res.Findings),
 		Stats:    res.Stats,
@@ -891,6 +892,19 @@ func publishReview(ctx stdctx.Context, client mgithub.Client, runner *gitcmd.Run
 	return publishReviewWithDiffs(ctx, client, info, res, prResult, req, prStore, ew, categoryURLs, ruleCites, publishKey, diffs)
 }
 
+func noteLedgerGate(prResult *cli.PRResult, info *mgithub.PRInfo, findings []engine.Finding, diffs []diff.Diff, gate string) {
+	if prResult == nil || prResult.BlockingGateKnown || info == nil {
+		return
+	}
+	ledger := mgithub.MergeLedger(info.PriorLedger, findings, info.HeadSHA, diffPathSet(diffs), time.Now())
+	if len(diffs) > 0 {
+		ledger = mgithub.ApplyOffDiffDisposition(ledger, findings, diffs)
+	}
+	blocking := mgithub.BlockingFindings(findings, ledger)
+	prResult.BlockingGateKnown = true
+	prResult.BlockingGateFailed = engine.GateFailed(blocking, gate)
+}
+
 func publishDiffSnapshot(ctx stdctx.Context, runner *gitcmd.Runner, dir string, info *mgithub.PRInfo, captured bool, diffs []diff.Diff) ([]diff.Diff, error) {
 	if captured {
 		return diffs, nil
@@ -904,7 +918,9 @@ func publishReviewWithDiffs(ctx stdctx.Context, client mgithub.Client, info *mgi
 	}
 	key := fmt.Sprintf("%s/%s#%d", info.Owner, info.Repo, info.Number)
 	return serve.WithPRFlight(key, func() error {
-		if err := mgithub.ReloadPriorLedger(ctx, client, info); err != nil {
+		if err := retryTransient(ctx, maxGitHubAttempts, func() error {
+			return mgithub.ReloadPriorLedger(ctx, client, info)
+		}); err != nil {
 			return err
 		}
 		return publishReviewLocked(ctx, client, info, res, prResult, req, prStore, ew, categoryURLs, ruleCites, publishKey, diffs)

@@ -178,7 +178,7 @@ func ReloadPriorLedger(ctx stdctx.Context, client Client, info *PRInfo) error {
 	}
 	body, err := readSummaryBody(ctx, client, info)
 	if err != nil {
-		return err
+		return mapWriteError("github.summary_read_failed", "reloading summary ledger", err)
 	}
 	if body == "" {
 		return nil

@@ -1183,3 +1183,21 @@ func TestRetryTransient(t *testing.T) {
 		t.Fatalf("rate-limited error must not short-retry: err=%v calls=%d", err, calls)
 	}
 }
+
+func TestLedgerGateIgnoresAcceptedDeferralWithoutPosting(t *testing.T) {
+	f := engine.Finding{File: "a.go", Line: 4, Severity: "critical", Category: "bug", Title: "bounds", QuotedCode: "i <= n"}
+	info := &mgithub.PRInfo{
+		HeadSHA:     "abc",
+		PriorLedger: []mgithub.LedgerEntry{{FP: mgithub.Fingerprint(f), Path: "a.go", Status: "deferred", Sev: "critical"}},
+	}
+	pr := &cli.PRResult{}
+	noteLedgerGate(pr, info, []engine.Finding{f}, nil, "high")
+	if !pr.BlockingGateKnown || pr.BlockingGateFailed {
+		t.Fatalf("accepted deferral gate = known %v failed %v", pr.BlockingGateKnown, pr.BlockingGateFailed)
+	}
+	open := &cli.PRResult{}
+	noteLedgerGate(open, &mgithub.PRInfo{HeadSHA: "abc"}, []engine.Finding{f}, nil, "high")
+	if !open.BlockingGateKnown || !open.BlockingGateFailed {
+		t.Fatalf("open finding gate = known %v failed %v", open.BlockingGateKnown, open.BlockingGateFailed)
+	}
+}
