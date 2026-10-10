@@ -55,6 +55,38 @@ comment with a new marker); subsequent re-runs dedupe normally. On a
 first M5 review **manually** (or off-hours) to absorb the one-time re-post before
 the next scheduled run.
 
+## [0.90.0](https://github.com/vanducng/miu-cr/compare/v0.89.12...v0.90.0) (2026-10-10)
+
+
+### Features
+
+* **github:** answer review-thread replies and surface off-diff findings ([6b83cfd](https://github.com/vanducng/miu-cr/commit/6b83cfda7ce27aaa53cf8544305a18abc8de8306))
+* **github:** answer review-thread replies and surface off-diff findings ([7f8d714](https://github.com/vanducng/miu-cr/commit/7f8d7141df352cc0829ccf1b4e850c5d04150ea2))
+
+
+### Bug Fixes
+
+* **github:** abort a publish that cannot reread the ledger ([fa9d476](https://github.com/vanducng/miu-cr/commit/fa9d476b750fc1574ec866c0b1482300e0aa0e2f))
+* **github:** answer webhook reply failures and match paths exactly ([0490b4b](https://github.com/vanducng/miu-cr/commit/0490b4b79f560a4f658776409ff730f33608efb0))
+* **github:** bound reply retries and align the gate with deferrals ([9b71b65](https://github.com/vanducng/miu-cr/commit/9b71b65b25913825c1d97ba9686d26694e318727))
+* **github:** cool down quota failures and cover the host reply scan ([4fa82bd](https://github.com/vanducng/miu-cr/commit/4fa82bd413f5733a327533bd8bbe254d75aa072c))
+* **github:** do not claim a handled reply is on the wrong thread ([64e3d69](https://github.com/vanducng/miu-cr/commit/64e3d695dd78b983c10671369f4bdc97d5d6731d))
+* **github:** do not retry rate limits or close a reopened finding ([20e485d](https://github.com/vanducng/miu-cr/commit/20e485d185f93e1f1c613a78bce58b893617b361))
+* **github:** honor quota reset windows and keep clipped text valid ([d78beab](https://github.com/vanducng/miu-cr/commit/d78beab46e63d7889c445e57d5313d1620043c7a))
+* **github:** keep rate-limit retries and still publish a check ([022d6ad](https://github.com/vanducng/miu-cr/commit/022d6ad5f7d504ce2bfb358892ac61ad6fa76d04))
+* **github:** keep reply judgment off the summary lock ([ed46514](https://github.com/vanducng/miu-cr/commit/ed46514ef0f1496ebf76ed2d68b878f33731fa73))
+* **github:** keep the ledger on error notices and stop bad verdict loops ([824f17f](https://github.com/vanducng/miu-cr/commit/824f17f1b3403104d47a1bf7622c0a1f45e8c60b))
+* **github:** keep the ledger trust bit when the summary is reread ([812f52a](https://github.com/vanducng/miu-cr/commit/812f52a82917a2360cccb73d1e132227bac53dbf))
+* **github:** let a named reply reach an unposted finding ([86998c0](https://github.com/vanducng/miu-cr/commit/86998c08ad170aa6ff900f130b0fab19f3c75b62))
+* **github:** page commit files and read both rate-limit windows ([74d2bbe](https://github.com/vanducng/miu-cr/commit/74d2bbe956158c4d0d0c22edebfed511e52d15bf))
+* **github:** post one failure note and gate checks on blocking findings ([c5746b9](https://github.com/vanducng/miu-cr/commit/c5746b9620082d89d21bed41db61a9ecffefb534))
+* **github:** post the webhook failure note after the job context ends ([eba3dde](https://github.com/vanducng/miu-cr/commit/eba3ddeed58fe1243422ee5b72732615686016d9))
+* **github:** reload the ledger for checks and honor provider rate limits ([3fdf6e5](https://github.com/vanducng/miu-cr/commit/3fdf6e5dbcd7c65f7577a6fde4e5eecbe13cdd02))
+* **github:** retry the ledger reload and gate dry runs the same way ([fd9bf41](https://github.com/vanducng/miu-cr/commit/fd9bf41ef32cc039244e7d64880ef9b288341377))
+* **github:** serialize summary updates and restrict who can close findings ([ad9e3be](https://github.com/vanducng/miu-cr/commit/ad9e3be1044efe00c566cd66e5b2819d806b0071))
+* **github:** stop replaying handled replies and racing the thread sync ([80054bb](https://github.com/vanducng/miu-cr/commit/80054bbddba7fe2589b2d3e3931b0bf04d52cbfa))
+* **serve:** skip a busy summary update and cover reply judge requests ([90fe578](https://github.com/vanducng/miu-cr/commit/90fe57870309e5b3d342ed9209fa2297070b34b2))
+
 ## [0.89.12](https://github.com/vanducng/miu-cr/compare/v0.89.11...v0.89.12) (2026-10-09)
 
 
