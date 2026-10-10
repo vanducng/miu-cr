@@ -3,6 +3,7 @@ package agent
 import (
 	stdctx "context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"strings"
 
@@ -15,6 +16,9 @@ import (
 
 // replyJudgeMaxTokens stays at the other short-pass size because reasoning tokens count against it.
 const replyJudgeMaxTokens = 1024
+
+// ErrReplyVerdictParse means the model text was not a reply-verdict object.
+var ErrReplyVerdictParse = errors.New("agent: reply verdict is not JSON")
 
 const replyJudgeSystemPrompt = `You judge one developer reply on one code-review finding. Reply with JSON only: {"accept":true|false,"explanation":"one sentence"}.
 Accept a fix only when the cited commit changes the finding's file in a way that addresses it. Accept a deferral only when the reason names what is deferred, why it is safe to merge, and where it is tracked. Accept not-applicable only when the reason shows the finding does not apply to this change.
@@ -78,14 +82,14 @@ func ParseReplyVerdict(raw string) (ReplyVerdict, error) {
 	start := strings.Index(raw, "{")
 	end := strings.LastIndex(raw, "}")
 	if start < 0 || end <= start {
-		return ReplyVerdict{}, fmt.Errorf("agent: reply verdict is not JSON")
+		return ReplyVerdict{}, ErrReplyVerdictParse
 	}
 	var parsed struct {
 		Accept      bool   `json:"accept"`
 		Explanation string `json:"explanation"`
 	}
 	if err := json.Unmarshal([]byte(raw[start:end+1]), &parsed); err != nil {
-		return ReplyVerdict{}, fmt.Errorf("agent: reply verdict: %w", err)
+		return ReplyVerdict{}, fmt.Errorf("%w: %v", ErrReplyVerdictParse, err)
 	}
 	return ReplyVerdict{Accept: parsed.Accept, Explanation: clipJudge(parsed.Explanation, 400)}, nil
 }

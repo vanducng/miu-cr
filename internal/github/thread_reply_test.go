@@ -285,6 +285,16 @@ func TestApplyThreadReplyMarksUnparseableVerdict(t *testing.T) {
 	if err != nil || res.Reason != "judge_unparseable" || len(client.replies) != 1 || !strings.Contains(client.replies[0], "<!-- miu-cr-reply:11 -->") {
 		t.Fatalf("unparseable = %+v err=%v replies=%v", res, err, client.replies)
 	}
+
+	info, _, _, client = replyFixture(t, head)
+	judge = &fakeJudge{err: errString("agent: reply verdict: invalid character")}
+	res, err = ApplyThreadReply(stdctx.Background(), client, info, ThreadReplyRequest{
+		CommentID: 11, Body: "Deferred: tracked in #42 because this helper is unused and safe to ship later",
+		UserLogin: "dev", InReplyTo: 10, Kind: "review_comment",
+	}, judge, config.ApprovalPolicy{}, time.Now())
+	if err != nil || res.Reason != "judge_unparseable" || len(client.replies) != 1 {
+		t.Fatalf("braced verdict failure = %+v err=%v replies=%v", res, err, client.replies)
+	}
 }
 
 type errString string

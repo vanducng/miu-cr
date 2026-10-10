@@ -1,6 +1,7 @@
 package agent
 
 import (
+	"errors"
 	"strings"
 	"testing"
 )
@@ -13,8 +14,11 @@ func TestParseReplyVerdict(t *testing.T) {
 	if !got.Accept || got.Explanation != "the bound is fixed" {
 		t.Fatalf("verdict = %+v", got)
 	}
-	if _, err := ParseReplyVerdict("not json"); err == nil {
+	if _, err := ParseReplyVerdict("not json"); err == nil || !errors.Is(err, ErrReplyVerdictParse) {
 		t.Fatal("expected parse error")
+	}
+	if _, err := ParseReplyVerdict(`{"accept": true,}`); err == nil || !errors.Is(err, ErrReplyVerdictParse) {
+		t.Fatalf("braced but invalid JSON should be a parse error, got %v", err)
 	}
 }
 

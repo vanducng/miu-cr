@@ -83,6 +83,19 @@ func renderLedgerMarker(entries []LedgerEntry) string {
 	return fmt.Sprintf("<!-- %s%s -->", ledgerPrefix, base64.StdEncoding.EncodeToString(data))
 }
 
+// KeepLedgerMarker copies the hidden ledger from previous onto body when body
+// has none, so an error notice cannot wipe accepted deferrals.
+func KeepLedgerMarker(body, previous string) string {
+	if strings.Contains(body, "<!-- "+ledgerPrefix) {
+		return body
+	}
+	marker := ledgerMarkerRe.FindString(previous)
+	if marker == "" {
+		return body
+	}
+	return strings.TrimRight(body, "\n") + "\n" + marker + "\n"
+}
+
 // ParseLedger reads the prior ledger out of a summary comment body, returning
 // nil when no (or a corrupt) marker is present so the caller starts fresh.
 func ParseLedger(body string) []LedgerEntry {

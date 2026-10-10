@@ -544,6 +544,26 @@ func TestReviewErrorSummaryUsesFreshContext(t *testing.T) {
 	}
 }
 
+func TestReviewErrorSummaryKeepsLedger(t *testing.T) {
+	marker := "<!-- miu-cr-ledger:W10= -->"
+	fake := &fakeGitHub{issueComments: []*gh.IssueComment{{
+		ID:   gh.Ptr(int64(4)),
+		User: &gh.User{Login: gh.Ptr("reviewer")},
+		Body: gh.Ptr(mgithub.ReviewMarker + "\n## Code Review Summary\n\nprior\n" + marker + "\n"),
+	}}}
+	info := &mgithub.PRInfo{Owner: "o", Repo: "r", Number: 7, HeadSHA: "headsha"}
+	if err := upsertReviewErrorSummary(stdctx.Background(), fake, info, errors.New("publish failed")); err != nil {
+		t.Fatal(err)
+	}
+	if fake.createIssueN != 0 {
+		t.Fatalf("error notice should edit the existing summary, created %d", fake.createIssueN)
+	}
+	body := fake.issueComments[0].GetBody()
+	if !strings.Contains(body, marker) || !strings.Contains(body, "> [!CAUTION]") {
+		t.Fatalf("error notice dropped the ledger:\n%s", body)
+	}
+}
+
 func TestMaybeUpsertReviewErrorSummaryForPostFailure(t *testing.T) {
 	fake := &fakeGitHub{}
 	info := &mgithub.PRInfo{Owner: "o", Repo: "r", Number: 7, HeadSHA: "headsha"}

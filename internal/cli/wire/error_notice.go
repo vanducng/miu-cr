@@ -3,12 +3,14 @@ package wire
 import (
 	stdctx "context"
 	"errors"
+	"fmt"
 	"log/slog"
 	"strings"
 
 	"github.com/vanducng/miu-cr/internal/cli"
 	"github.com/vanducng/miu-cr/internal/config"
 	mgithub "github.com/vanducng/miu-cr/internal/github"
+	"github.com/vanducng/miu-cr/internal/serve"
 )
 
 // shouldPostReviewErrorSummary reports whether a failed review should upsert a
@@ -23,10 +25,21 @@ func shouldPostReviewErrorSummary(post, isFork bool, reviewErr error) bool {
 }
 
 func upsertReviewErrorSummary(ctx stdctx.Context, client mgithub.Client, info *mgithub.PRInfo, reviewErr error) error {
+	if info == nil {
+		return nil
+	}
 	cctx, cancel := stdctx.WithTimeout(stdctx.WithoutCancel(ctx), reviewErrorSummaryTimeout)
 	defer cancel()
-	_, _, err := mgithub.UpsertSummaryComment(cctx, client, info, mgithub.RenderErrorNotice(info, reviewErrorNotice(reviewErr), cli.Version()))
-	return err
+	key := fmt.Sprintf("%s/%s#%d", info.Owner, info.Repo, info.Number)
+	return serve.WithPRFlight(key, func() error {
+		current, err := mgithub.ExistingSummaryBody(cctx, client, info)
+		if err != nil {
+			return err
+		}
+		body := mgithub.KeepLedgerMarker(mgithub.RenderErrorNotice(info, reviewErrorNotice(reviewErr), cli.Version()), current)
+		_, _, err = mgithub.UpsertSummaryComment(cctx, client, info, body)
+		return err
+	})
 }
 
 func maybeUpsertReviewErrorSummary(ctx stdctx.Context, client mgithub.Client, info *mgithub.PRInfo, req cli.PRReviewRequest, reviewErr error) {

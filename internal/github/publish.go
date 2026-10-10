@@ -904,6 +904,12 @@ func UpsertSummaryStatus(ctx stdctx.Context, client Client, info *PRInfo, status
 	return UpsertEdited, summaryCommentURL(info, targetID, targetURL), nil
 }
 
+// ExistingSummaryBody is the current summary comment body, or "" when none exists.
+func ExistingSummaryBody(ctx stdctx.Context, client Client, info *PRInfo) (string, error) {
+	_, _, body, err := findSummaryCommentBody(ctx, client, info)
+	return body, err
+}
+
 func findSummaryCommentBody(ctx stdctx.Context, client Client, info *PRInfo) (int64, string, string, error) {
 	login, err := currentLogin(ctx, client)
 	if err != nil {
