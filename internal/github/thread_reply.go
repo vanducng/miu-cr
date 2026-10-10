@@ -209,7 +209,11 @@ func ApplyThreadReply(ctx stdctx.Context, client Client, info *PRInfo, req Threa
 		return ThreadReplyResult{Action: "replied", Reason: "clarification"}, nil
 	}
 	if len(targets) == 0 {
-		return ThreadReplyResult{Action: "ignored", Reason: "not_our_thread"}, nil
+		body := botMarker + "\n" + replyToMarker(req.CommentID) + "\n\nThis comment is not on a miu-cr finding thread.\n"
+		if err := postThreadReply(ctx, client, info, req, body); err != nil {
+			return ThreadReplyResult{Reason: "reply_post_failed"}, mapWriteError("github.thread_reply_failed", "posting reply", err)
+		}
+		return ThreadReplyResult{Action: "replied", Reason: "not_our_thread"}, nil
 	}
 
 	decisions := make([]replyDecision, 0, len(targets))
@@ -239,7 +243,11 @@ func ApplyThreadReply(ctx stdctx.Context, client Client, info *PRInfo, req Threa
 		applyAcceptedVerdict(&next[d.target.Index], parsed, d.fullSHA, d.verdict.Explanation, now)
 	}
 	if accepted == 0 && rejected == 0 {
-		return ThreadReplyResult{Action: "ignored", Reason: "already_handled"}, nil
+		replyBody := renderThreadReply(req.CommentID, parsed, decisions)
+		if err := postThreadReply(ctx, client, info, req, replyBody); err != nil {
+			return ThreadReplyResult{Reason: "reply_post_failed"}, mapWriteError("github.thread_reply_failed", "posting reply", err)
+		}
+		return ThreadReplyResult{Action: "replied", Reason: "already_handled"}, nil
 	}
 
 	renderInfo := *info

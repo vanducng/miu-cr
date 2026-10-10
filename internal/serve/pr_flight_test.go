@@ -1,4 +1,4 @@
-package wire
+package serve
 
 import (
 	"sync"
@@ -15,7 +15,7 @@ func TestWithPRFlightSerializesAndDrops(t *testing.T) {
 		wg.Add(1)
 		go func() {
 			defer wg.Done()
-			if err := withPRFlight("acme/app#1", func() error {
+			if err := WithPRFlight("acme/app#1", func() error {
 				mu.Lock()
 				in++
 				if in > maxIn {

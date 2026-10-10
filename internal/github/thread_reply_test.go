@@ -224,6 +224,30 @@ func TestApplyThreadReplyIgnoresBotAndDuplicate(t *testing.T) {
 	}
 }
 
+func TestApplyThreadReplyMarksAlreadyHandled(t *testing.T) {
+	head := "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+	info, _, _, client := replyFixture(t, head)
+	first, err := ApplyThreadReply(stdctx.Background(), client, info, ThreadReplyRequest{
+		CommentID: 11,
+		Body:      "Deferred: tracked in #42 because this helper is unused on the request path and safe to ship later",
+		UserLogin: "dev", InReplyTo: 10, Kind: "review_comment",
+	}, nil, config.ApprovalPolicy{}, time.Now())
+	if err != nil || first.Accepted != 1 {
+		t.Fatalf("first = %+v err=%v", first, err)
+	}
+	second, err := ApplyThreadReply(stdctx.Background(), client, info, ThreadReplyRequest{
+		CommentID: 12,
+		Body:      "Deferred: tracked in #42 because this helper is unused on the request path and safe to ship later",
+		UserLogin: "dev", InReplyTo: 10, Kind: "review_comment",
+	}, nil, config.ApprovalPolicy{}, time.Now())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if second.Reason != "already_handled" || len(client.replies) != 2 || !strings.Contains(client.replies[1], "<!-- miu-cr-reply:12 -->") || !strings.Contains(client.replies[1], "already handled") {
+		t.Fatalf("second=%+v replies=%v", second, client.replies)
+	}
+}
+
 func TestApplyThreadReplyIgnoresUntrustedCommenter(t *testing.T) {
 	head := "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
 	info, _, _, client := replyFixture(t, head)

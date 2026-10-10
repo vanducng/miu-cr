@@ -3,7 +3,6 @@ package wire
 import (
 	stdctx "context"
 	"log/slog"
-	"sync"
 	"time"
 
 	"github.com/vanducng/miu-cr/internal/config"
@@ -12,44 +11,11 @@ import (
 	"github.com/vanducng/miu-cr/internal/serve"
 )
 
-type prFlight struct {
-	mu sync.Mutex
-	n  int
-}
-
-var (
-	prFlightMu sync.Mutex
-	prFlights  = map[string]*prFlight{}
-)
-
-func withPRFlight(key string, fn func() error) error {
-	prFlightMu.Lock()
-	f := prFlights[key]
-	if f == nil {
-		f = &prFlight{}
-		prFlights[key] = f
-	}
-	f.n++
-	prFlightMu.Unlock()
-
-	f.mu.Lock()
-	defer func() {
-		f.mu.Unlock()
-		prFlightMu.Lock()
-		f.n--
-		if f.n == 0 && prFlights[key] == f {
-			delete(prFlights, key)
-		}
-		prFlightMu.Unlock()
-	}()
-	return fn()
-}
-
 func handleServeThreadReply(ctx stdctx.Context, job serve.Job) error {
 	if job.Reply == nil || job.Reply.CommentID <= 0 {
 		return nil
 	}
-	return withPRFlight(job.Ref, func() error {
+	return serve.WithPRFlight(job.Ref, func() error {
 		return applyServeThreadReply(ctx, job)
 	})
 }

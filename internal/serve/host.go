@@ -814,13 +814,17 @@ func deferredApprovalEnabled(policy config.ApprovalPolicy) bool {
 }
 
 func (h *HostRunner) syncThreadResolution(ctx stdctx.Context, client mgithub.Client, repo HostRepoConfig, info *mgithub.PRInfo, now time.Time, token string) {
-	if repo.ThreadResolutionSync.Enabled() {
-		h.syncConversationResolution(ctx, client, repo, info, now)
-	}
-	if deferredApprovalEnabled(repo.Review.Approval) {
-		h.retryDeferredApproval(ctx, client, repo, info)
-	}
-	h.scanThreadReplies(ctx, client, repo, info, token)
+	key := fmt.Sprintf("%s/%s#%d", info.Owner, info.Repo, info.Number)
+	_ = WithPRFlight(key, func() error {
+		if repo.ThreadResolutionSync.Enabled() {
+			h.syncConversationResolution(ctx, client, repo, info, now)
+		}
+		if deferredApprovalEnabled(repo.Review.Approval) {
+			h.retryDeferredApproval(ctx, client, repo, info)
+		}
+		h.scanThreadReplies(ctx, client, repo, info, token)
+		return nil
+	})
 }
 
 func (h *HostRunner) retryDeferredApproval(ctx stdctx.Context, client mgithub.Client, repo HostRepoConfig, info *mgithub.PRInfo) {
