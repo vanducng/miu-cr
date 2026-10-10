@@ -453,6 +453,14 @@ func TestRemapDecisionsDoesNotTreatReopenedFindingAsHandled(t *testing.T) {
 	}
 }
 
+func TestIssueReplySaysHandledWhenNothingIsOpen(t *testing.T) {
+	entry := LedgerEntry{FP: "aaaaaaaaaaaaaaaa", Path: "a.go", Line: 4, Status: statusResolved}
+	targets, clarify := selectIssueReplyTargets("Deferred: tracked in #9 because this is safe to ship later", nil, nil, []LedgerEntry{entry})
+	if clarify || len(targets) != 1 {
+		t.Fatalf("targets=%d clarify=%v", len(targets), clarify)
+	}
+}
+
 func TestIssueReplyCanNameAnUnpostedFinding(t *testing.T) {
 	posted := LedgerEntry{FP: "aaaaaaaaaaaaaaaa", Path: "a.go", Line: 4, Status: statusOpen}
 	unposted := LedgerEntry{FP: "bbbbbbbbbbbbbbbb", Path: "b.go", Line: 9, Status: statusOpen}

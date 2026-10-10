@@ -699,7 +699,14 @@ func selectIssueReplyTargets(body string, reviewComments []*gh.PullRequestCommen
 		return blocking, false
 	}
 	if len(blocking) == 0 {
-		return nil, false
+		if len(ledger) == 0 {
+			return nil, false
+		}
+		handled := make([]replyTarget, len(ledger))
+		for i, e := range ledger {
+			handled[i] = replyTarget{Index: i, Entry: e}
+		}
+		return handled, false
 	}
 	return nil, true
 }

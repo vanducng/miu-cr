@@ -90,11 +90,11 @@ func (g ghClient) PullRequestCommitSHAs(ctx stdctx.Context, owner, repo string, 
 			}
 		}
 		if resp == nil || resp.NextPage == 0 {
-			break
+			return shas, nil
 		}
 		opts.Page = resp.NextPage
 	}
-	return shas, nil
+	return nil, fmt.Errorf("github: pull request commit list truncated")
 }
 
 func (g ghClient) CommitFilePatch(ctx stdctx.Context, owner, repo, sha, path string) (bool, string, error) {
@@ -116,5 +116,5 @@ func (g ghClient) CommitFilePatch(ctx stdctx.Context, owner, repo, sha, path str
 		}
 		opts.Page = resp.NextPage
 	}
-	return false, "", nil
+	return false, "", fmt.Errorf("github: commit file list truncated")
 }
