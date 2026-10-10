@@ -86,6 +86,9 @@ type ThreadReplyRequest struct {
 	AuthorAssociation string
 	InReplyTo         int64
 	Kind              string // review_comment or issue_comment
+	// AroundWrite runs the summary update. The judge stays outside it so a model
+	// call does not block other writers for this pull request.
+	AroundWrite func(func() error) error
 }
 
 // ReplyAuthorized reports whether this commenter may close or defer a finding.
@@ -242,59 +245,113 @@ func ApplyThreadReply(ctx stdctx.Context, client Client, info *PRInfo, req Threa
 		decisions = append(decisions, replyDecision{target: target, verdict: verdict, fullSHA: fullSHA})
 	}
 
-	next := append([]LedgerEntry(nil), ledger...)
-	accepted, rejected := 0, 0
-	for _, d := range decisions {
-		if d.skip {
-			continue
+	var result ThreadReplyResult
+	err = req.aroundWrite(func() error {
+		var werr error
+		summaryID, _, summaryBody, werr = lowestMarkedComment(ctx, client, info, login)
+		if werr != nil {
+			result = ThreadReplyResult{Reason: "summary_fetch_failed"}
+			return mapWriteError("github.thread_reply_failed", "listing summary", werr)
 		}
-		if !d.verdict.Accept {
-			rejected++
-			continue
+		if summaryID == 0 {
+			result = ThreadReplyResult{Action: "ignored", Reason: "no_summary", CoolDown: replyNotReadyWait}
+			return nil
 		}
-		accepted++
-		applyAcceptedVerdict(&next[d.target.Index], parsed, d.fullSHA, d.verdict.Explanation, now)
-	}
-	if accepted == 0 && rejected == 0 {
+		ledger = ParseLedger(summaryBody)
+		if ledger == nil {
+			result = ThreadReplyResult{Action: "ignored", Reason: "no_ledger", CoolDown: replyNotReadyWait}
+			return nil
+		}
+		decisions = remapDecisions(decisions, ledger)
+		next := append([]LedgerEntry(nil), ledger...)
+		accepted, rejected := 0, 0
+		for _, d := range decisions {
+			if d.skip {
+				continue
+			}
+			if !d.verdict.Accept {
+				rejected++
+				continue
+			}
+			accepted++
+			applyAcceptedVerdict(&next[d.target.Index], parsed, d.fullSHA, d.verdict.Explanation, now)
+		}
+		if accepted == 0 && rejected == 0 {
+			replyBody := renderThreadReply(req.CommentID, parsed, decisions)
+			if perr := postThreadReply(ctx, client, info, req, replyBody); perr != nil {
+				result = ThreadReplyResult{Reason: "reply_post_failed"}
+				return mapWriteError("github.thread_reply_failed", "posting reply", perr)
+			}
+			result = ThreadReplyResult{Action: "replied", Reason: "already_handled"}
+			return nil
+		}
+
+		renderInfo := *info
+		if reviewed := parseReviewedCommit(summaryBody); reviewed != "" {
+			renderInfo.HeadSHA = reviewed
+		}
+		if runs := parseRunsCount(summaryBody); runs > 0 {
+			renderInfo.ReviewCount = runs
+		}
+		inlineURLs, _ := ExistingFingerprints(ctx, client, info)
+		nextBody, ok := replaceSummaryLedgerBody(summaryBody, &renderInfo, next, inlineURLs)
+		if !ok {
+			result = ThreadReplyResult{Reason: "summary_shape_unsupported", CoolDown: replyFailureWait}
+			return nil
+		}
+		if _, eerr := client.EditIssueComment(ctx, info.Owner, info.Repo, summaryID, &gh.IssueComment{Body: gh.Ptr(nextBody)}); eerr != nil {
+			result = ThreadReplyResult{Reason: "summary_edit_failed"}
+			return mapWriteError("github.thread_reply_failed", "editing summary", eerr)
+		}
+
 		replyBody := renderThreadReply(req.CommentID, parsed, decisions)
-		if err := postThreadReply(ctx, client, info, req, replyBody); err != nil {
-			return ThreadReplyResult{Reason: "reply_post_failed"}, mapWriteError("github.thread_reply_failed", "posting reply", err)
+		if perr := postThreadReply(ctx, client, info, req, replyBody); perr != nil {
+			result = ThreadReplyResult{Accepted: accepted, Rejected: rejected, Reason: "reply_post_failed"}
+			return mapWriteError("github.thread_reply_failed", "posting reply", perr)
 		}
-		return ThreadReplyResult{Action: "replied", Reason: "already_handled"}, nil
-	}
+		resolveAcceptedThreads(ctx, client, decisions, next, reviewComments)
 
-	renderInfo := *info
-	if reviewed := parseReviewedCommit(summaryBody); reviewed != "" {
-		renderInfo.HeadSHA = reviewed
-	}
-	if runs := parseRunsCount(summaryBody); runs > 0 {
-		renderInfo.ReviewCount = runs
-	}
-	inlineURLs, _ := ExistingFingerprints(ctx, client, info)
-	nextBody, ok := replaceSummaryLedgerBody(summaryBody, &renderInfo, next, inlineURLs)
-	if !ok {
-		return ThreadReplyResult{Reason: "summary_shape_unsupported", CoolDown: replyFailureWait}, nil
-	}
-	if _, err := client.EditIssueComment(ctx, info.Owner, info.Repo, summaryID, &gh.IssueComment{Body: gh.Ptr(nextBody)}); err != nil {
-		return ThreadReplyResult{Reason: "summary_edit_failed"}, mapWriteError("github.thread_reply_failed", "editing summary", err)
-	}
-
-	replyBody := renderThreadReply(req.CommentID, parsed, decisions)
-	if err := postThreadReply(ctx, client, info, req, replyBody); err != nil {
-		return ThreadReplyResult{Accepted: accepted, Rejected: rejected, Reason: "reply_post_failed"}, mapWriteError("github.thread_reply_failed", "posting reply", err)
-	}
-	resolveAcceptedThreads(ctx, client, decisions, next, reviewComments)
-
-	result := ThreadReplyResult{Action: "replied", Reason: "replied", Accepted: accepted, Rejected: rejected}
-	if rejected == 0 && LedgerClearForApproval(next) {
-		if reviewedHead := parsePublishedCommit(summaryBody); reviewedHead != "" && strings.EqualFold(reviewedHead, info.HeadSHA) {
-			result.Approved, result.ApproveReason = ApproveResolvedLedger(ctx, client, info, policy, summaryCommentURL(info, summaryID, ""))
+		result = ThreadReplyResult{Action: "replied", Reason: "replied", Accepted: accepted, Rejected: rejected}
+		if rejected == 0 && LedgerClearForApproval(next) {
+			if reviewedHead := parsePublishedCommit(summaryBody); reviewedHead != "" && strings.EqualFold(reviewedHead, info.HeadSHA) {
+				result.Approved, result.ApproveReason = ApproveResolvedLedger(ctx, client, info, policy, summaryCommentURL(info, summaryID, ""))
+			}
 		}
+		if _, nerr := UpsertResponseNotice(ctx, client, info, login, OpenNoticeItems(next, inlineURLs, nil)); nerr != nil {
+			result.Reason = "notice_failed"
+		}
+		return nil
+	})
+	return result, err
+}
+
+func (r ThreadReplyRequest) aroundWrite(fn func() error) error {
+	if r.AroundWrite == nil {
+		return fn()
 	}
-	if _, nerr := UpsertResponseNotice(ctx, client, info, login, OpenNoticeItems(next, inlineURLs, nil)); nerr != nil {
-		result.Reason = "notice_failed"
+	return r.AroundWrite(fn)
+}
+
+func remapDecisions(decisions []replyDecision, ledger []LedgerEntry) []replyDecision {
+	byFP := make(map[string]int, len(ledger))
+	for i, e := range ledger {
+		byFP[e.FP] = i
 	}
-	return result, nil
+	out := make([]replyDecision, 0, len(decisions))
+	for _, d := range decisions {
+		idx, ok := byFP[d.target.Entry.FP]
+		if !ok {
+			continue
+		}
+		d.target.Index = idx
+		d.target.Entry = ledger[idx]
+		if !ledgerBlocksApproval(ledger[idx].Status) {
+			d.skip = true
+			d.verdict = ThreadReplyVerdict{Accept: true, Explanation: "already handled"}
+		}
+		out = append(out, d)
+	}
+	return out
 }
 
 type replyDecision struct {
@@ -573,8 +630,7 @@ func selectIssueReplyTargets(body string, reviewComments []*gh.PullRequestCommen
 		}
 		target := replyTarget{Index: i, Entry: e, Body: findingBody(bodies, e.FP)}
 		open = append(open, target)
-		label := strings.ToLower(fmt.Sprintf("%s:%d", e.Path, e.Line))
-		if strings.Contains(lower, e.FP) || (e.Line > 0 && strings.Contains(lower, label)) {
+		if replyNamesTarget(lower, e.FP, e.Path, e.Line) {
 			named = append(named, target)
 		}
 	}
@@ -590,6 +646,29 @@ func selectIssueReplyTargets(body string, reviewComments []*gh.PullRequestCommen
 	return nil, true
 }
 
+func replyNamesTarget(body, fp, path string, line int) bool {
+	lower := strings.ToLower(body)
+	if fp != "" && strings.Contains(lower, strings.ToLower(fp)) {
+		return true
+	}
+	if line <= 0 || path == "" {
+		return false
+	}
+	label := strings.ToLower(fmt.Sprintf("%s:%d", path, line))
+	rest := lower
+	for {
+		i := strings.Index(rest, label)
+		if i < 0 {
+			return false
+		}
+		end := i + len(label)
+		if end >= len(rest) || rest[end] < '0' || rest[end] > '9' {
+			return true
+		}
+		rest = rest[end:]
+	}
+}
+
 func filterTargetsByReply(body string, targets []replyTarget) []replyTarget {
 	if len(targets) <= 1 {
 		return targets
@@ -598,8 +677,7 @@ func filterTargetsByReply(body string, targets []replyTarget) []replyTarget {
 	var hit []replyTarget
 	seen := map[string]bool{}
 	for _, t := range targets {
-		label := strings.ToLower(fmt.Sprintf("%s:%d", t.Entry.Path, t.Entry.Line))
-		if strings.Contains(lower, t.Entry.FP) || (t.Entry.Line > 0 && strings.Contains(lower, label)) {
+		if replyNamesTarget(lower, t.Entry.FP, t.Entry.Path, t.Entry.Line) {
 			if !seen[t.Entry.FP] {
 				seen[t.Entry.FP] = true
 				hit = append(hit, t)

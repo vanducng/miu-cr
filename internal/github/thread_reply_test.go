@@ -422,6 +422,18 @@ func TestLedgerClearForApprovalAllowsDeferrals(t *testing.T) {
 	}
 }
 
+func TestReplyNamesTargetRequiresBoundary(t *testing.T) {
+	if replyNamesTarget("please check a.go:51", "", "a.go", 5) {
+		t.Fatal("a.go:51 must not match a.go:5")
+	}
+	if !replyNamesTarget("please check a.go:51", "", "a.go", 51) {
+		t.Fatal("a.go:51 should match")
+	}
+	if !replyNamesTarget("fixed a.go:5.", "", "a.go", 5) {
+		t.Fatal("a.go:5 at a boundary should match")
+	}
+}
+
 func TestNoSummaryWaitsInsteadOfLooping(t *testing.T) {
 	info := &PRInfo{Owner: "acme", Repo: "app", Number: 1, HeadSHA: strings.Repeat("a", 40), AuthorLogin: "dev"}
 	client := &replyClient{recordClient: recordClient{login: "reviewer", issueStore: []*gh.IssueComment{}}}

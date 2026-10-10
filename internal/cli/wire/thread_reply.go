@@ -18,9 +18,7 @@ func handleServeThreadReply(ctx stdctx.Context, job serve.Job) error {
 	if job.Reply == nil || job.Reply.CommentID <= 0 {
 		return nil
 	}
-	return serve.WithPRFlight(job.Ref, func() error {
-		return applyServeThreadReply(ctx, job)
-	})
+	return applyServeThreadReply(ctx, job)
 }
 
 func applyServeThreadReply(ctx stdctx.Context, job serve.Job) error {
@@ -65,6 +63,9 @@ func applyServeThreadReply(ctx stdctx.Context, job serve.Job) error {
 		AuthorAssociation: job.Reply.AuthorAssociation,
 		InReplyTo:         job.Reply.InReplyTo,
 		Kind:              job.Reply.Kind,
+		AroundWrite: func(fn func() error) error {
+			return serve.WithPRFlight(job.Ref, fn)
+		},
 	}, replyJudgeAdapter{llm: llm, retry: review.ProviderRetry, ref: job.Ref}, review.Approval, time.Now())
 	attrs := []any{
 		"repo", info.Owner + "/" + info.Repo, "pr", info.Number, "head_sha", shortSHA(info.HeadSHA),

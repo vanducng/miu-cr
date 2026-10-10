@@ -16,18 +16,22 @@ func ReplyRetryKey(ref string, commentID int64) string {
 // DeferReplyRetry keeps the host poll from re-queuing a comment until until.
 func DeferReplyRetry(key string, until time.Time) {
 	replyRetry.Store(key, until)
+	sweepReplyRetry(time.Now())
 }
 
 // ReplyRetryReady reports whether a comment may be queued again.
 func ReplyRetryReady(key string, now time.Time) bool {
-	v, ok := replyRetry.Load(key)
-	if !ok {
+	sweepReplyRetry(now)
+	_, ok := replyRetry.Load(key)
+	return !ok
+}
+
+func sweepReplyRetry(now time.Time) {
+	replyRetry.Range(func(k, v any) bool {
+		until, ok := v.(time.Time)
+		if !ok || !now.Before(until) {
+			replyRetry.Delete(k)
+		}
 		return true
-	}
-	until, ok := v.(time.Time)
-	if !ok || !now.Before(until) {
-		replyRetry.Delete(key)
-		return true
-	}
-	return false
+	})
 }

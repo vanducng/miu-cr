@@ -5,6 +5,17 @@ import (
 	"time"
 )
 
+func TestDeferReplyRetrySweepsExpiredKeys(t *testing.T) {
+	replyRetry.Store("acme/app#3:1", time.Now().Add(-time.Minute))
+	DeferReplyRetry("acme/app#3:2", time.Now().Add(time.Hour))
+	if _, ok := replyRetry.Load("acme/app#3:1"); ok {
+		t.Fatal("expired cooldown should be swept")
+	}
+	if ReplyRetryReady("acme/app#3:2", time.Now()) {
+		t.Fatal("a future cooldown should still block")
+	}
+}
+
 func TestAllowReplySpendCapsPerPullRequest(t *testing.T) {
 	now := time.Date(2026, 6, 28, 10, 0, 0, 0, time.UTC)
 	ref := "acme/app#9"
