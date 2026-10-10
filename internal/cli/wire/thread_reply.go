@@ -125,8 +125,10 @@ func answerWebhookReply(ctx stdctx.Context, client mgithub.Client, info *mgithub
 	if job.Reply == nil || job.Reply.HostRetry {
 		return false
 	}
+	cctx, cancel := stdctx.WithTimeout(stdctx.WithoutCancel(ctx), reviewErrorSummaryTimeout)
+	defer cancel()
 	note := mgithub.ThreadReplyRequest{CommentID: job.Reply.CommentID, Kind: job.Reply.Kind}
-	if err := mgithub.PostThreadReply(ctx, client, info, note, mgithub.ReplyFailureNote(job.Reply.CommentID)); err != nil {
+	if err := mgithub.PostThreadReply(cctx, client, info, note, mgithub.ReplyFailureNote(job.Reply.CommentID)); err != nil {
 		return false
 	}
 	slog.Warn("thread reply unanswered",
