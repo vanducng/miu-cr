@@ -2,6 +2,7 @@ package github
 
 import (
 	stdctx "context"
+	"errors"
 	"fmt"
 	"strings"
 	"testing"
@@ -416,6 +417,17 @@ func TestLedgerClearForApprovalAllowsDeferrals(t *testing.T) {
 	}
 	if LedgerClearForApproval([]LedgerEntry{{Status: statusOpen}}) {
 		t.Fatal("open finding must block")
+	}
+}
+
+func TestReloadPriorLedgerDoesNotKeepStaleOnError(t *testing.T) {
+	info := &PRInfo{Owner: "acme", Repo: "app", Number: 1, PriorLedger: []LedgerEntry{{Status: statusDeferred, FP: "abc"}}}
+	client := &recordClient{login: "reviewer", listIssueErr: errors.New("github 500")}
+	if err := ReloadPriorLedger(stdctx.Background(), client, info); err == nil {
+		t.Fatal("a failed summary read must not look successful")
+	}
+	if info.PriorLedger[0].Status != statusDeferred {
+		t.Fatalf("stale ledger changed: %+v", info.PriorLedger)
 	}
 }
 

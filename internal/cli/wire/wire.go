@@ -904,7 +904,9 @@ func publishReviewWithDiffs(ctx stdctx.Context, client mgithub.Client, info *mgi
 	}
 	key := fmt.Sprintf("%s/%s#%d", info.Owner, info.Repo, info.Number)
 	return serve.WithPRFlight(key, func() error {
-		mgithub.ReloadPriorLedger(ctx, client, info)
+		if err := mgithub.ReloadPriorLedger(ctx, client, info); err != nil {
+			return err
+		}
 		return publishReviewLocked(ctx, client, info, res, prResult, req, prStore, ew, categoryURLs, ruleCites, publishKey, diffs)
 	})
 }

@@ -79,30 +79,46 @@ func applyServeThreadReply(ctx stdctx.Context, job serve.Job) error {
 	}
 	if err != nil {
 		if errors.Is(err, errReplyBudget) {
+			if answerWebhookReply(ctx, client, info, job) {
+				return nil
+			}
 			serve.DeferReplyRetry(serve.ReplyRetryKey(job.Ref, job.Reply.CommentID), time.Now().Add(time.Hour))
 			slog.Warn("thread reply skipped",
 				"repo", info.Owner+"/"+info.Repo, "pr", info.Number, "head_sha", shortSHA(info.HeadSHA),
 				"comment_id", job.Reply.CommentID, "reason", "reply_budget")
 			return nil
 		}
-		if !job.Reply.HostRetry {
-			note := mgithub.ThreadReplyRequest{CommentID: job.Reply.CommentID, Kind: job.Reply.Kind}
-			if nerr := mgithub.PostThreadReply(ctx, client, info, note, mgithub.ReplyFailureNote(job.Reply.CommentID)); nerr == nil {
-				slog.Warn("thread reply unanswered", append(attrs, "reason", "judge_failed")...)
-				return nil
-			}
+		if answerWebhookReply(ctx, client, info, job) {
+			return nil
 		}
 		attrs = append(attrs, "error", config.RedactString(err.Error()))
 		slog.Warn("thread reply failed", attrs...)
 		return err
 	}
 	if res.CoolDown > 0 {
+		if answerWebhookReply(ctx, client, info, job) {
+			return nil
+		}
 		serve.DeferReplyRetry(serve.ReplyRetryKey(job.Ref, job.Reply.CommentID), time.Now().Add(res.CoolDown))
 		slog.Info("thread reply waiting", attrs...)
 		return nil
 	}
 	slog.Info("thread reply handled", attrs...)
 	return nil
+}
+
+func answerWebhookReply(ctx stdctx.Context, client mgithub.Client, info *mgithub.PRInfo, job serve.Job) bool {
+	if job.Reply == nil || job.Reply.HostRetry {
+		return false
+	}
+	note := mgithub.ThreadReplyRequest{CommentID: job.Reply.CommentID, Kind: job.Reply.Kind}
+	if err := mgithub.PostThreadReply(ctx, client, info, note, mgithub.ReplyFailureNote(job.Reply.CommentID)); err != nil {
+		return false
+	}
+	slog.Warn("thread reply unanswered",
+		"repo", info.Owner+"/"+info.Repo, "pr", info.Number, "head_sha", shortSHA(info.HeadSHA),
+		"comment_id", job.Reply.CommentID, "reason", "webhook_no_retry")
+	return true
 }
 
 type replyJudgeAdapter struct {

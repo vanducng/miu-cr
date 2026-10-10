@@ -188,11 +188,21 @@ func ApplyThreadReply(ctx stdctx.Context, client Client, info *PRInfo, req Threa
 		return ThreadReplyResult{Action: "ignored", Reason: "untrusted_comment"}, nil
 	}
 
-	reviewComments, err := listAllReviewComments(ctx, client, info)
+	var reviewComments []*gh.PullRequestComment
+	var issueComments []*gh.IssueComment
+	err := withReadRetry(ctx, func() error {
+		var e error
+		reviewComments, e = listAllReviewComments(ctx, client, info)
+		return e
+	})
 	if err != nil {
 		return ThreadReplyResult{Reason: "list_review_comments_failed"}, mapWriteError("github.thread_reply_failed", "listing review comments", err)
 	}
-	issueComments, err := listAllIssueComments(ctx, client, info)
+	err = withReadRetry(ctx, func() error {
+		var e error
+		issueComments, e = listAllIssueComments(ctx, client, info)
+		return e
+	})
 	if err != nil {
 		return ThreadReplyResult{Reason: "list_issue_comments_failed"}, mapWriteError("github.thread_reply_failed", "listing issue comments", err)
 	}
@@ -330,6 +340,23 @@ func ApplyThreadReply(ctx stdctx.Context, client Client, info *PRInfo, req Threa
 		return nil
 	})
 	return result, err
+}
+
+func withReadRetry(ctx stdctx.Context, fn func() error) error {
+	var err error
+	for attempt := 0; attempt < 3; attempt++ {
+		if err = fn(); err == nil || ctx.Err() != nil || attempt == 2 {
+			return err
+		}
+		timer := time.NewTimer(time.Duration(attempt+1) * 20 * time.Millisecond)
+		select {
+		case <-ctx.Done():
+			timer.Stop()
+			return err
+		case <-timer.C:
+		}
+	}
+	return err
 }
 
 func (r ThreadReplyRequest) aroundWrite(fn func() error) error {

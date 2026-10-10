@@ -147,38 +147,46 @@ func FetchPR(ctx stdctx.Context, client Client, ref PRRef) (*PRInfo, error) {
 // marker of any author, because that dry-run cannot post. Any other login failure
 // returns "" so a copied marker cannot seed the runs counter, ledger, or publish key.
 func lowestMarkedCommentBody(ctx stdctx.Context, client Client, info *PRInfo) string {
-	login, err := currentLogin(ctx, client)
+	body, err := readSummaryBody(ctx, client, info)
 	if err != nil {
-		if !githubUnauthorized(err) {
-			os.Stderr.WriteString(config.RedactString("miucr: summary author unresolved: "+err.Error()) + "\n")
-			return ""
-		}
-		_, _, body, err := scanMarkedComments(ctx, client, info, "")
-		if err != nil {
-			return ""
-		}
-		return body
-	}
-	_, _, body, err := lowestMarkedComment(ctx, client, info, login)
-	if err != nil {
+		os.Stderr.WriteString(config.RedactString("miucr: summary read failed: "+err.Error()) + "\n")
 		return ""
 	}
 	return body
 }
 
+func readSummaryBody(ctx stdctx.Context, client Client, info *PRInfo) (string, error) {
+	login, err := currentLogin(ctx, client)
+	if err != nil {
+		if !githubUnauthorized(err) {
+			return "", err
+		}
+		_, _, body, err := scanMarkedComments(ctx, client, info, "")
+		return body, err
+	}
+	_, _, body, err := lowestMarkedComment(ctx, client, info, login)
+	return body, err
+}
+
 // ReloadPriorLedger re-reads the summary ledger immediately before a publish
 // writes it back, so a reply accepted during the review is not reverted.
-func ReloadPriorLedger(ctx stdctx.Context, client Client, info *PRInfo) {
+// A read error is returned so the publish does not overwrite a newer ledger
+// with the copy captured when the review started.
+func ReloadPriorLedger(ctx stdctx.Context, client Client, info *PRInfo) error {
 	if info == nil {
-		return
+		return nil
 	}
-	body := lowestMarkedCommentBody(ctx, client, info)
+	body, err := readSummaryBody(ctx, client, info)
+	if err != nil {
+		return err
+	}
 	if body == "" {
-		return
+		return nil
 	}
 	if led := ParseLedger(body); led != nil {
 		info.PriorLedger = led
 	}
+	return nil
 }
 
 // priorRunsCount reads the runs token from the lowest-id miucr summary issue
