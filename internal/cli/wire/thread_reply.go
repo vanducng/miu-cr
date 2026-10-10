@@ -102,9 +102,6 @@ func applyServeThreadReply(ctx stdctx.Context, job serve.Job) (err error) {
 				"comment_id", job.Reply.CommentID, "reason", "reply_budget")
 			return nil
 		}
-		if answerWebhookReply(ctx, client, info, job) {
-			return nil
-		}
 		attrs = append(attrs, "error", config.RedactString(err.Error()))
 		slog.Warn("thread reply failed", attrs...)
 		return err
