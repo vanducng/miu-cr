@@ -7,6 +7,7 @@ import (
 	"regexp"
 	"strings"
 	"time"
+	"unicode/utf8"
 
 	gh "github.com/google/go-github/v84/github"
 
@@ -989,5 +990,9 @@ func clipText(s string, n int) string {
 	if n <= 0 || len(s) <= n {
 		return s
 	}
-	return s[:n]
+	s = s[:n]
+	for len(s) > 0 && !utf8.ValidString(s) {
+		s = s[:len(s)-1]
+	}
+	return s
 }

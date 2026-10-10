@@ -1351,12 +1351,17 @@ func buildServeReviewFn(log *slog.Logger, gate string, st serve.ReviewStore, tra
 			defer cancel()
 			err := serveThreadReply(jobCtx, j)
 			if err != nil {
-				serve.DeferReplyRetry(serve.ReplyRetryKey(j.Ref, commentIDOf(j)), time.Now().Add(time.Hour))
+				wait := time.Hour
 				var ce *CLIError
 				if errors.As(err, &ce) && ce.Code == "quota.exceeded" {
+					if sec := quotaResetSeconds(ce.Details); sec > 0 {
+						wait = time.Duration(sec) * time.Second
+					}
+					serve.DeferReplyRetry(serve.ReplyRetryKey(j.Ref, commentIDOf(j)), time.Now().Add(wait))
 					log.Warn("thread reply skipped: provider quota exhausted", serveJobLogAttrs(j, "comment_id", commentIDOf(j), "err", config.RedactString(err.Error()))...)
 					return nil
 				}
+				serve.DeferReplyRetry(serve.ReplyRetryKey(j.Ref, commentIDOf(j)), time.Now().Add(wait))
 				log.Error("thread reply failed", serveJobLogAttrs(j, "comment_id", commentIDOf(j), "err", config.RedactString(err.Error()))...)
 				return err
 			}
@@ -1461,6 +1466,22 @@ func buildServeReviewFn(log *slog.Logger, gate string, st serve.ReviewStore, tra
 		log.Info("review done", serveJobLogAttrs(j, "review_id", out.ReviewID, "findings", len(out.Findings), "posted_inline", posted, "summary", action)...)
 		persistFinalReview(log, st, j.ReviewID, "done", out)
 		return nil
+	}
+}
+
+func quotaResetSeconds(details map[string]any) int {
+	if details == nil {
+		return 0
+	}
+	switch n := details["resets_in_seconds"].(type) {
+	case int:
+		return n
+	case int64:
+		return int(n)
+	case float64:
+		return int(n)
+	default:
+		return 0
 	}
 }
 

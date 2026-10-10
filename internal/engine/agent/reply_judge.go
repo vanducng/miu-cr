@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"strings"
+	"unicode/utf8"
 
 	"github.com/anthropics/anthropic-sdk-go"
 	openai "github.com/openai/openai-go/v3"
@@ -95,11 +96,19 @@ func ParseReplyVerdict(raw string) (ReplyVerdict, error) {
 }
 
 func clipJudge(s string, n int) string {
+	return clipRunes(s, n)
+}
+
+func clipRunes(s string, n int) string {
 	s = strings.TrimSpace(s)
 	if n <= 0 || len(s) <= n {
 		return s
 	}
-	return s[:n]
+	s = s[:n]
+	for len(s) > 0 && !utf8.ValidString(s) {
+		s = s[:len(s)-1]
+	}
+	return s
 }
 
 func (a *anthropicAgent) JudgeReply(ctx stdctx.Context, rr ReplyJudgeRequest) (ReplyVerdict, error) {

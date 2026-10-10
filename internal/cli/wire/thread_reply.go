@@ -21,19 +21,33 @@ func handleServeThreadReply(ctx stdctx.Context, job serve.Job) error {
 	return applyServeThreadReply(ctx, job)
 }
 
-func applyServeThreadReply(ctx stdctx.Context, job serve.Job) error {
+func applyServeThreadReply(ctx stdctx.Context, job serve.Job) (err error) {
 	client := newGitHubClient(job.Token)
+	var info *mgithub.PRInfo
+	defer func() {
+		if err == nil || info == nil {
+			return
+		}
+		if answerWebhookReply(ctx, client, info, job) {
+			err = nil
+		}
+	}()
 	ref, err := mgithub.ParseRef(job.Ref)
 	if err != nil {
 		return err
 	}
-	var info *mgithub.PRInfo
+	info = &mgithub.PRInfo{Owner: ref.Owner, Repo: ref.Repo, Number: ref.Number}
+	stub := info
 	err = retryTransient(ctx, maxGitHubAttempts, func() error {
-		var e error
-		info, e = mgithub.FetchPR(ctx, client, ref)
-		return e
+		fetched, e := mgithub.FetchPR(ctx, client, ref)
+		if e != nil {
+			return e
+		}
+		info = fetched
+		return nil
 	})
 	if err != nil {
+		info = stub
 		return err
 	}
 	review := serve.JobReviewOptions{}

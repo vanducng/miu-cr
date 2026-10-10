@@ -12,7 +12,7 @@ import (
 
 func TestThreadReplyQuotaCoolsDownInsteadOfRetrying(t *testing.T) {
 	SetServeThreadReply(func(context.Context, serve.Job) error {
-		return &CLIError{Code: "quota.exceeded", Message: "provider quota exhausted", Exit: 2}
+		return &CLIError{Code: "quota.exceeded", Message: "provider quota exhausted", Exit: 2, Details: map[string]any{"resets_in_seconds": 7200}}
 	})
 	t.Cleanup(func() { SetServeThreadReply(nil) })
 	fn := buildServeReviewFn(slog.New(slog.NewTextHandler(io.Discard, nil)), "high", nil, nil, false)
@@ -24,8 +24,11 @@ func TestThreadReplyQuotaCoolsDownInsteadOfRetrying(t *testing.T) {
 	if err := fn(job); err != nil {
 		t.Fatal(err)
 	}
-	if serve.ReplyRetryReady(serve.ReplyRetryKey(job.Ref, 41), time.Now()) {
-		t.Fatal("quota exhaustion should cool the comment down")
+	if serve.ReplyRetryReady(serve.ReplyRetryKey(job.Ref, 41), time.Now().Add(90*time.Minute)) {
+		t.Fatal("quota cooldown should follow resets_in_seconds, not one hour")
+	}
+	if !serve.ReplyRetryReady(serve.ReplyRetryKey(job.Ref, 41), time.Now().Add(3*time.Hour)) {
+		t.Fatal("quota cooldown should end after the reset window")
 	}
 }
 

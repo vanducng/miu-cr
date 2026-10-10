@@ -6,6 +6,15 @@ import (
 	"testing"
 )
 
+func TestClipJudgeKeepsRuneBoundary(t *testing.T) {
+	if got := clipJudge("你a", 2); got != "" {
+		t.Fatalf("clip = %q", got)
+	}
+	if got := clipJudge("你a", 3); got != "你" {
+		t.Fatalf("clip = %q", got)
+	}
+}
+
 func TestParseReplyVerdict(t *testing.T) {
 	got, err := ParseReplyVerdict("```json\n{\"accept\":true,\"explanation\":\"the bound is fixed\"}\n```")
 	if err != nil {
