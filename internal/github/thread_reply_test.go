@@ -2,6 +2,7 @@ package github
 
 import (
 	stdctx "context"
+	"fmt"
 	"strings"
 	"testing"
 	"time"
@@ -277,7 +278,7 @@ func TestApplyThreadReplyMarksUnparseableVerdict(t *testing.T) {
 	if err == nil || res.Reason != "judge_failed" || len(client.replies) != 0 {
 		t.Fatalf("transient judge error = %+v err=%v replies=%d", res, err, len(client.replies))
 	}
-	judge.err = errString("agent: reply verdict is not JSON")
+	judge.err = ErrUnparseableVerdict
 	res, err = ApplyThreadReply(stdctx.Background(), client, info, ThreadReplyRequest{
 		CommentID: 11, Body: "Deferred: tracked in #42 because this helper is unused and safe to ship later",
 		UserLogin: "dev", InReplyTo: 10, Kind: "review_comment",
@@ -287,7 +288,7 @@ func TestApplyThreadReplyMarksUnparseableVerdict(t *testing.T) {
 	}
 
 	info, _, _, client = replyFixture(t, head)
-	judge = &fakeJudge{err: errString("agent: reply verdict: invalid character")}
+	judge = &fakeJudge{err: fmt.Errorf("wrapped: %w", ErrUnparseableVerdict)}
 	res, err = ApplyThreadReply(stdctx.Background(), client, info, ThreadReplyRequest{
 		CommentID: 11, Body: "Deferred: tracked in #42 because this helper is unused and safe to ship later",
 		UserLogin: "dev", InReplyTo: 10, Kind: "review_comment",
@@ -296,10 +297,6 @@ func TestApplyThreadReplyMarksUnparseableVerdict(t *testing.T) {
 		t.Fatalf("braced verdict failure = %+v err=%v replies=%v", res, err, client.replies)
 	}
 }
-
-type errString string
-
-func (e errString) Error() string { return string(e) }
 
 func TestApplyThreadReplyMarksAlreadyHandled(t *testing.T) {
 	head := "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
@@ -431,6 +428,9 @@ func TestReplyNamesTargetRequiresBoundary(t *testing.T) {
 	}
 	if !replyNamesTarget("fixed a.go:5.", "", "a.go", 5) {
 		t.Fatal("a.go:5 at a boundary should match")
+	}
+	if replyNamesTarget("see pkg/a.go:5", "", "a.go", 5) {
+		t.Fatal("pkg/a.go:5 must not match a.go:5")
 	}
 }
 

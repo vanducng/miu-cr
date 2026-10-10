@@ -63,6 +63,7 @@ func applyServeThreadReply(ctx stdctx.Context, job serve.Job) error {
 		AuthorAssociation: job.Reply.AuthorAssociation,
 		InReplyTo:         job.Reply.InReplyTo,
 		Kind:              job.Reply.Kind,
+		HostRetry:         job.Reply.HostRetry,
 		AroundWrite: func(fn func() error) error {
 			return serve.WithPRFlight(job.Ref, fn)
 		},
@@ -83,6 +84,13 @@ func applyServeThreadReply(ctx stdctx.Context, job serve.Job) error {
 				"repo", info.Owner+"/"+info.Repo, "pr", info.Number, "head_sha", shortSHA(info.HeadSHA),
 				"comment_id", job.Reply.CommentID, "reason", "reply_budget")
 			return nil
+		}
+		if !job.Reply.HostRetry {
+			note := mgithub.ThreadReplyRequest{CommentID: job.Reply.CommentID, Kind: job.Reply.Kind}
+			if nerr := mgithub.PostThreadReply(ctx, client, info, note, mgithub.ReplyFailureNote(job.Reply.CommentID)); nerr == nil {
+				slog.Warn("thread reply unanswered", append(attrs, "reason", "judge_failed")...)
+				return nil
+			}
 		}
 		attrs = append(attrs, "error", config.RedactString(err.Error()))
 		slog.Warn("thread reply failed", attrs...)
@@ -121,6 +129,9 @@ func (a replyJudgeAdapter) JudgeThreadReply(ctx stdctx.Context, in mgithub.Threa
 		LineInPatch:   in.LineInPatch,
 		ProviderRetry: a.retry,
 	})
+	if errors.Is(err, agent.ErrReplyVerdictParse) {
+		return mgithub.ThreadReplyVerdict{}, mgithub.ErrUnparseableVerdict
+	}
 	if err != nil {
 		return mgithub.ThreadReplyVerdict{}, err
 	}

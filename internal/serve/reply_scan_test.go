@@ -33,6 +33,9 @@ func TestScanThreadRepliesQueuesAuthorizedReply(t *testing.T) {
 	if len(jobs) != 1 || jobs[0].Kind != JobKindThreadReply || jobs[0].Reply == nil || jobs[0].Reply.CommentID != 11 {
 		t.Fatalf("jobs = %+v", jobs)
 	}
+	if !jobs[0].Reply.HostRetry {
+		t.Fatal("host scan should retry a failed reply")
+	}
 	if jobs[0].Ref != "acme/app#7" || jobs[0].Key.CommentID != 11 {
 		t.Fatalf("key = %+v ref=%s", jobs[0].Key, jobs[0].Ref)
 	}

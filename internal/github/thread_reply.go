@@ -2,6 +2,7 @@ package github
 
 import (
 	stdctx "context"
+	"errors"
 	"fmt"
 	"regexp"
 	"strings"
@@ -22,6 +23,9 @@ const (
 	replyNotReadyWait = 15 * time.Minute
 	replyFailureWait  = time.Hour
 )
+
+// ErrUnparseableVerdict means the reply judge did not return a verdict object.
+var ErrUnparseableVerdict = errors.New("unparseable reply verdict")
 
 // IsBotBody reports whether body is a comment miu-cr itself posted. Developer
 // replies that quote a marker later in the body still parse; only a leading
@@ -86,6 +90,9 @@ type ThreadReplyRequest struct {
 	AuthorAssociation string
 	InReplyTo         int64
 	Kind              string // review_comment or issue_comment
+	// HostRetry is set when the host poll will try this comment again. A webhook
+	// delivery will not, so a failure there must leave an answer on the thread.
+	HostRetry bool
 	// AroundWrite runs the summary update. The judge stays outside it so a model
 	// call does not block other writers for this pull request.
 	AroundWrite func(func() error) error
@@ -233,7 +240,7 @@ func ApplyThreadReply(ctx stdctx.Context, client Client, info *PRInfo, req Threa
 		}
 		verdict, fullSHA, err := decideReply(ctx, client, info, parsed, target, judge)
 		if err != nil {
-			if strings.Contains(err.Error(), "agent: reply verdict") {
+			if errors.Is(err, ErrUnparseableVerdict) {
 				body := botMarker + "\n" + replyToMarker(req.CommentID) + "\n\nThis reply could not be judged. Reply again with a clearer reason.\n"
 				if perr := postThreadReply(ctx, client, info, req, body); perr != nil {
 					return ThreadReplyResult{Reason: "reply_post_failed"}, mapWriteError("github.thread_reply_failed", "posting reply", perr)
@@ -538,6 +545,16 @@ func safeExplain(s string) string {
 	return s
 }
 
+// ReplyFailureNote is the one answer a webhook leaves when a judgment cannot be retried.
+func ReplyFailureNote(commentID int64) string {
+	return botMarker + "\n" + replyToMarker(commentID) + "\n\nThis reply could not be judged. Reply again in a little while.\n"
+}
+
+// PostThreadReply posts one answer on the same thread as the developer comment.
+func PostThreadReply(ctx stdctx.Context, client Client, info *PRInfo, req ThreadReplyRequest, body string) error {
+	return postThreadReply(ctx, client, info, req, body)
+}
+
 func postThreadReply(ctx stdctx.Context, client Client, info *PRInfo, req ThreadReplyRequest, body string) error {
 	if req.Kind == "issue_comment" {
 		_, err := client.CreateIssueComment(ctx, info.Owner, info.Repo, info.Number, &gh.IssueComment{Body: gh.Ptr(body)})
@@ -655,18 +672,25 @@ func replyNamesTarget(body, fp, path string, line int) bool {
 		return false
 	}
 	label := strings.ToLower(fmt.Sprintf("%s:%d", path, line))
-	rest := lower
-	for {
-		i := strings.Index(rest, label)
-		if i < 0 {
+	for from := 0; from < len(lower); {
+		rel := strings.Index(lower[from:], label)
+		if rel < 0 {
 			return false
 		}
+		i := from + rel
 		end := i + len(label)
-		if end >= len(rest) || rest[end] < '0' || rest[end] > '9' {
+		rightOK := end >= len(lower) || lower[end] < '0' || lower[end] > '9'
+		leftOK := i == 0 || !isPathByte(lower[i-1])
+		if rightOK && leftOK {
 			return true
 		}
-		rest = rest[end:]
+		from = i + 1
 	}
+	return false
+}
+
+func isPathByte(b byte) bool {
+	return (b >= 'a' && b <= 'z') || (b >= '0' && b <= '9') || b == '/' || b == '.' || b == '_' || b == '-'
 }
 
 func filterTargetsByReply(body string, targets []replyTarget) []replyTarget {

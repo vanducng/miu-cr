@@ -47,6 +47,7 @@ type ThreadReply struct {
 	AuthorAssociation string
 	InReplyTo         int64
 	Kind              string
+	HostRetry         bool
 }
 
 // Job is a unit of work handed to the Dispatcher: the PR to review, the ref in

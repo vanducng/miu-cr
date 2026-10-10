@@ -902,6 +902,7 @@ func (h *HostRunner) scanThreadReplies(ctx stdctx.Context, client mgithub.Client
 				AuthorAssociation: body.AuthorAssociation,
 				InReplyTo:         body.InReplyTo,
 				Kind:              body.Kind,
+				HostRetry:         true,
 			},
 		}
 		if h.disp.Submit(job) != SubmitQueued {
