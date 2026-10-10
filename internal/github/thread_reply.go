@@ -675,29 +675,30 @@ func selectIssueReplyTargets(body string, reviewComments []*gh.PullRequestCommen
 	for _, fp := range fpsInBodies(bodies) {
 		known[fp] = true
 	}
-	var open []replyTarget
-	lower := strings.ToLower(body)
-	var named []replyTarget
+	var posted, named, blocking []replyTarget
 	for i, e := range ledger {
 		if !ledgerBlocksApproval(e.Status) {
 			continue
 		}
-		if len(known) > 0 && !known[e.FP] {
-			continue
-		}
 		target := replyTarget{Index: i, Entry: e, Body: findingBody(bodies, e.FP)}
-		open = append(open, target)
-		if replyNamesTarget(lower, e.FP, e.Path, e.Line) {
+		blocking = append(blocking, target)
+		if len(known) == 0 || known[e.FP] {
+			posted = append(posted, target)
+		}
+		if replyNamesTarget(body, e.FP, e.Path, e.Line) {
 			named = append(named, target)
 		}
 	}
 	if len(named) > 0 {
 		return named, false
 	}
-	if len(open) == 1 {
-		return open, false
+	if len(posted) == 1 {
+		return posted, false
 	}
-	if len(open) == 0 {
+	if len(posted) == 0 && len(blocking) == 1 {
+		return blocking, false
+	}
+	if len(blocking) == 0 {
 		return nil, false
 	}
 	return nil, true

@@ -893,7 +893,7 @@ func publishReview(ctx stdctx.Context, client mgithub.Client, runner *gitcmd.Run
 }
 
 func noteLedgerGate(prResult *cli.PRResult, info *mgithub.PRInfo, findings []engine.Finding, diffs []diff.Diff, gate string) {
-	if prResult == nil || prResult.BlockingGateKnown || info == nil {
+	if prResult == nil || prResult.BlockingGateKnown || info == nil || !info.LedgerTrusted {
 		return
 	}
 	ledger := mgithub.MergeLedger(info.PriorLedger, findings, info.HeadSHA, diffPathSet(diffs), time.Now())

@@ -1187,8 +1187,9 @@ func TestRetryTransient(t *testing.T) {
 func TestLedgerGateIgnoresAcceptedDeferralWithoutPosting(t *testing.T) {
 	f := engine.Finding{File: "a.go", Line: 4, Severity: "critical", Category: "bug", Title: "bounds", QuotedCode: "i <= n"}
 	info := &mgithub.PRInfo{
-		HeadSHA:     "abc",
-		PriorLedger: []mgithub.LedgerEntry{{FP: mgithub.Fingerprint(f), Path: "a.go", Status: "deferred", Sev: "critical"}},
+		HeadSHA:       "abc",
+		LedgerTrusted: true,
+		PriorLedger:   []mgithub.LedgerEntry{{FP: mgithub.Fingerprint(f), Path: "a.go", Status: "deferred", Sev: "critical"}},
 	}
 	pr := &cli.PRResult{}
 	noteLedgerGate(pr, info, []engine.Finding{f}, nil, "high")
@@ -1196,7 +1197,14 @@ func TestLedgerGateIgnoresAcceptedDeferralWithoutPosting(t *testing.T) {
 		t.Fatalf("accepted deferral gate = known %v failed %v", pr.BlockingGateKnown, pr.BlockingGateFailed)
 	}
 	open := &cli.PRResult{}
-	noteLedgerGate(open, &mgithub.PRInfo{HeadSHA: "abc"}, []engine.Finding{f}, nil, "high")
+	noteLedgerGate(open, &mgithub.PRInfo{HeadSHA: "abc", LedgerTrusted: true}, []engine.Finding{f}, nil, "high")
+	forged := &cli.PRResult{}
+	forgedInfo := *info
+	forgedInfo.LedgerTrusted = false
+	noteLedgerGate(forged, &forgedInfo, []engine.Finding{f}, nil, "high")
+	if forged.BlockingGateKnown {
+		t.Fatal("an unauthenticated ledger must not decide the exit gate")
+	}
 	if !open.BlockingGateKnown || !open.BlockingGateFailed {
 		t.Fatalf("open finding gate = known %v failed %v", open.BlockingGateKnown, open.BlockingGateFailed)
 	}

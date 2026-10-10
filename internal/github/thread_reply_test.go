@@ -453,6 +453,19 @@ func TestRemapDecisionsDoesNotTreatReopenedFindingAsHandled(t *testing.T) {
 	}
 }
 
+func TestIssueReplyCanNameAnUnpostedFinding(t *testing.T) {
+	posted := LedgerEntry{FP: "aaaaaaaaaaaaaaaa", Path: "a.go", Line: 4, Status: statusOpen}
+	unposted := LedgerEntry{FP: "bbbbbbbbbbbbbbbb", Path: "b.go", Line: 9, Status: statusOpen}
+	comments := []*gh.PullRequestComment{{Body: gh.Ptr("<!-- miucr:fp=aaaaaaaaaaaaaaaa -->")}}
+	targets, clarify := selectIssueReplyTargets(
+		"Deferred: b.go:9 is tracked in #9 and safe to ship",
+		comments, nil, []LedgerEntry{posted, unposted},
+	)
+	if clarify || len(targets) != 1 || targets[0].Entry.Path != "b.go" {
+		t.Fatalf("targets=%+v clarify=%v", targets, clarify)
+	}
+}
+
 func TestReplyNamesTargetRequiresBoundary(t *testing.T) {
 	if replyNamesTarget("please check a.go:51", "", "a.go", 5) {
 		t.Fatal("a.go:51 must not match a.go:5")
