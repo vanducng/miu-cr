@@ -1118,16 +1118,20 @@ func publishReviewLocked(ctx stdctx.Context, client mgithub.Client, info *mgithu
 // of inline comments + a summary. No fingerprint dedupe / summary upsert: a CheckRun
 // is replaced wholesale each run by the same name, so re-runs are naturally idempotent.
 func publishChecks(ctx stdctx.Context, client mgithub.Client, info *mgithub.PRInfo, res engine.ReviewResult, diffs []diff.Diff, prResult *cli.PRResult, req cli.PRReviewRequest, ew embedWriter) error {
+	blocking := res.Findings
 	if err := retryTransient(ctx, maxGitHubAttempts, func() error {
 		return mgithub.ReloadPriorLedger(ctx, client, info)
 	}); err != nil {
-		return err
+		slog.Warn("checks ledger reload failed, gating on this run",
+			"repo", info.Owner+"/"+info.Repo, "pr", info.Number, "head_sha", shortSHA(info.HeadSHA),
+			"error", config.RedactString(err.Error()))
+	} else {
+		ledger := mgithub.MergeLedger(info.PriorLedger, res.Findings, info.HeadSHA, diffPathSet(diffs), time.Now())
+		if len(diffs) > 0 {
+			ledger = mgithub.ApplyOffDiffDisposition(ledger, res.Findings, diffs)
+		}
+		blocking = mgithub.BlockingFindings(res.Findings, ledger)
 	}
-	ledger := mgithub.MergeLedger(info.PriorLedger, res.Findings, info.HeadSHA, diffPathSet(diffs), time.Now())
-	if len(diffs) > 0 {
-		ledger = mgithub.ApplyOffDiffDisposition(ledger, res.Findings, diffs)
-	}
-	blocking := mgithub.BlockingFindings(res.Findings, ledger)
 	if prResult != nil {
 		prResult.BlockingGateKnown = true
 		prResult.BlockingGateFailed = engine.GateFailed(blocking, req.Gate)

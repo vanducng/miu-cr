@@ -6,6 +6,7 @@ import (
 	"log/slog"
 	"time"
 
+	"github.com/vanducng/miu-cr/internal/cli"
 	"github.com/vanducng/miu-cr/internal/config"
 	"github.com/vanducng/miu-cr/internal/engine/agent"
 	mgithub "github.com/vanducng/miu-cr/internal/github"
@@ -25,7 +26,7 @@ func applyServeThreadReply(ctx stdctx.Context, job serve.Job) (err error) {
 	client := newGitHubClient(job.Token)
 	var info *mgithub.PRInfo
 	defer func() {
-		if err == nil || info == nil {
+		if err == nil || info == nil || replyRateLimited(err) {
 			return
 		}
 		if answerWebhookReply(ctx, client, info, job) {
@@ -116,6 +117,11 @@ func applyServeThreadReply(ctx stdctx.Context, job serve.Job) (err error) {
 	}
 	slog.Info("thread reply handled", attrs...)
 	return nil
+}
+
+func replyRateLimited(err error) bool {
+	var ce *cli.CLIError
+	return errors.As(err, &ce) && (ce.Code == "quota.exceeded" || ce.Code == "provider.rate_limited")
 }
 
 func answerWebhookReply(ctx stdctx.Context, client mgithub.Client, info *mgithub.PRInfo, job serve.Job) bool {
