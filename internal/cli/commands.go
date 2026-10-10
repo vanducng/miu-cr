@@ -1353,7 +1353,7 @@ func buildServeReviewFn(log *slog.Logger, gate string, st serve.ReviewStore, tra
 			if err != nil {
 				wait := time.Hour
 				var ce *CLIError
-				if errors.As(err, &ce) && ce.Code == "quota.exceeded" {
+				if errors.As(err, &ce) && (ce.Code == "quota.exceeded" || ce.Code == "provider.rate_limited") {
 					if sec := quotaResetSeconds(ce.Details); sec > 0 {
 						wait = time.Duration(sec) * time.Second
 					}

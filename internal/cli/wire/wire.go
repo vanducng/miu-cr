@@ -1118,6 +1118,11 @@ func publishReviewLocked(ctx stdctx.Context, client mgithub.Client, info *mgithu
 // of inline comments + a summary. No fingerprint dedupe / summary upsert: a CheckRun
 // is replaced wholesale each run by the same name, so re-runs are naturally idempotent.
 func publishChecks(ctx stdctx.Context, client mgithub.Client, info *mgithub.PRInfo, res engine.ReviewResult, diffs []diff.Diff, prResult *cli.PRResult, req cli.PRReviewRequest, ew embedWriter) error {
+	if err := retryTransient(ctx, maxGitHubAttempts, func() error {
+		return mgithub.ReloadPriorLedger(ctx, client, info)
+	}); err != nil {
+		return err
+	}
 	ledger := mgithub.MergeLedger(info.PriorLedger, res.Findings, info.HeadSHA, diffPathSet(diffs), time.Now())
 	if len(diffs) > 0 {
 		ledger = mgithub.ApplyOffDiffDisposition(ledger, res.Findings, diffs)
