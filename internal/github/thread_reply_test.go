@@ -420,6 +420,17 @@ func TestLedgerClearForApprovalAllowsDeferrals(t *testing.T) {
 	}
 }
 
+func TestReloadPriorLedgerRecordsTrust(t *testing.T) {
+	info := &PRInfo{Owner: "acme", Repo: "app", Number: 1}
+	client := &recordClient{login: "reviewer", issueStore: []*gh.IssueComment{}}
+	if err := ReloadPriorLedger(stdctx.Background(), client, info); err != nil {
+		t.Fatal(err)
+	}
+	if !info.LedgerTrusted {
+		t.Fatal("an authenticated reload must mark the ledger trusted")
+	}
+}
+
 func TestReloadPriorLedgerDoesNotKeepStaleOnError(t *testing.T) {
 	info := &PRInfo{Owner: "acme", Repo: "app", Number: 1, PriorLedger: []LedgerEntry{{Status: statusDeferred, FP: "abc"}}}
 	client := &recordClient{login: "reviewer", listIssueErr: errors.New("github 500")}

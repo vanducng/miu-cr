@@ -186,11 +186,12 @@ func ReloadPriorLedger(ctx stdctx.Context, client Client, info *PRInfo) error {
 	if info == nil {
 		return nil
 	}
-	body, _, err := readSummaryBody(ctx, client, info)
+	body, trusted, err := readSummaryBody(ctx, client, info)
 	if err != nil {
 		return mapWriteError("github.summary_read_failed", "reloading summary ledger", err)
 	}
-	if body == "" {
+	info.LedgerTrusted = trusted
+	if !trusted || body == "" {
 		return nil
 	}
 	if led := ParseLedger(body); led != nil {
