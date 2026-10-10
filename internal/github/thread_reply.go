@@ -224,6 +224,13 @@ func ApplyThreadReply(ctx stdctx.Context, client Client, info *PRInfo, req Threa
 		}
 		verdict, fullSHA, err := decideReply(ctx, client, info, parsed, target, judge)
 		if err != nil {
+			if strings.Contains(err.Error(), "reply verdict is not JSON") {
+				body := botMarker + "\n" + replyToMarker(req.CommentID) + "\n\nThis reply could not be judged. Reply again with a clearer reason.\n"
+				if perr := postThreadReply(ctx, client, info, req, body); perr != nil {
+					return ThreadReplyResult{Reason: "reply_post_failed"}, mapWriteError("github.thread_reply_failed", "posting reply", perr)
+				}
+				return ThreadReplyResult{Action: "replied", Reason: "judge_unparseable"}, nil
+			}
 			return ThreadReplyResult{Reason: "judge_failed"}, err
 		}
 		decisions = append(decisions, replyDecision{target: target, verdict: verdict, fullSHA: fullSHA})

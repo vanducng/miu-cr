@@ -866,7 +866,17 @@ func (h *HostRunner) scanThreadReplies(ctx stdctx.Context, client mgithub.Client
 		timeout = 15 * time.Minute
 	}
 	ref := fmt.Sprintf("%s/%s#%d", info.Owner, info.Repo, info.Number)
+	now := time.Now()
+	if h.now != nil {
+		now = h.now()
+	}
 	for _, reply := range replies {
+		if !ReplyRetryReady(ReplyRetryKey(ref, reply.CommentID), now) {
+			h.log.Debug("host: thread reply cooling down",
+				"repo", repo.Slug, "pr", info.Number, "head_sha", ShortSHA(info.HeadSHA),
+				"comment_id", reply.CommentID, "reason", "retry_deferred")
+			continue
+		}
 		opts := repo.Review
 		body := reply
 		job := Job{

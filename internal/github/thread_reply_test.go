@@ -224,6 +224,73 @@ func TestApplyThreadReplyIgnoresBotAndDuplicate(t *testing.T) {
 	}
 }
 
+func TestListActionableRepliesFiltersAndCaps(t *testing.T) {
+	info := &PRInfo{Owner: "acme", Repo: "app", Number: 1, AuthorLogin: "dev"}
+	root := &gh.PullRequestComment{
+		ID: gh.Ptr(int64(1)), User: &gh.User{Login: gh.Ptr("reviewer")},
+		Body: gh.Ptr("<!-- miucr:fp=aaaaaaaaaaaaaaaa -->\n" + botMarker),
+	}
+	comments := []*gh.PullRequestComment{root}
+	comments = append(comments, &gh.PullRequestComment{
+		ID: gh.Ptr(int64(2)), InReplyTo: gh.Ptr(int64(1)), User: &gh.User{Login: gh.Ptr("reviewer")},
+		Body: gh.Ptr("Deferred: tracked in #42 because this helper is unused and safe to ship later"),
+	})
+	comments = append(comments, &gh.PullRequestComment{
+		ID: gh.Ptr(int64(3)), InReplyTo: gh.Ptr(int64(1)), User: &gh.User{Login: gh.Ptr("stranger")}, AuthorAssociation: gh.Ptr("NONE"),
+		Body: gh.Ptr("Deferred: tracked in #42 because this helper is unused and safe to ship later"),
+	})
+	comments = append(comments, &gh.PullRequestComment{
+		ID: gh.Ptr(int64(4)), InReplyTo: gh.Ptr(int64(1)), User: &gh.User{Login: gh.Ptr("dev")},
+		Body: gh.Ptr("thanks"),
+	})
+	for i := int64(5); i <= 13; i++ {
+		comments = append(comments, &gh.PullRequestComment{
+			ID: gh.Ptr(i), InReplyTo: gh.Ptr(int64(1)), User: &gh.User{Login: gh.Ptr("dev")},
+			Body: gh.Ptr("Deferred: tracked in #42 because this helper is unused and safe to ship later"),
+		})
+	}
+	comments = append(comments, &gh.PullRequestComment{
+		ID: gh.Ptr(int64(99)), User: &gh.User{Login: gh.Ptr("reviewer")},
+		Body: gh.Ptr("<!-- miu-cr-reply:5 -->\nok"),
+	})
+	client := &replyClient{recordClient: recordClient{login: "reviewer", reviewComments: [][]*gh.PullRequestComment{comments}}}
+	got, err := ListActionableReplies(stdctx.Background(), client, info)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(got) != 8 {
+		t.Fatalf("got %d replies, want 8: %+v", len(got), got)
+	}
+	if got[0].CommentID == 2 || got[0].CommentID == 3 || got[0].CommentID == 4 || got[0].CommentID == 5 {
+		t.Fatalf("first queued comment = %d", got[0].CommentID)
+	}
+}
+
+func TestApplyThreadReplyMarksUnparseableVerdict(t *testing.T) {
+	head := "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+	info, _, _, client := replyFixture(t, head)
+	judge := &fakeJudge{err: stdctx.DeadlineExceeded}
+	res, err := ApplyThreadReply(stdctx.Background(), client, info, ThreadReplyRequest{
+		CommentID: 11, Body: "Deferred: tracked in #42 because this helper is unused and safe to ship later",
+		UserLogin: "dev", InReplyTo: 10, Kind: "review_comment",
+	}, judge, config.ApprovalPolicy{}, time.Now())
+	if err == nil || res.Reason != "judge_failed" || len(client.replies) != 0 {
+		t.Fatalf("transient judge error = %+v err=%v replies=%d", res, err, len(client.replies))
+	}
+	judge.err = errString("agent: reply verdict is not JSON")
+	res, err = ApplyThreadReply(stdctx.Background(), client, info, ThreadReplyRequest{
+		CommentID: 11, Body: "Deferred: tracked in #42 because this helper is unused and safe to ship later",
+		UserLogin: "dev", InReplyTo: 10, Kind: "review_comment",
+	}, judge, config.ApprovalPolicy{}, time.Now())
+	if err != nil || res.Reason != "judge_unparseable" || len(client.replies) != 1 || !strings.Contains(client.replies[0], "<!-- miu-cr-reply:11 -->") {
+		t.Fatalf("unparseable = %+v err=%v replies=%v", res, err, client.replies)
+	}
+}
+
+type errString string
+
+func (e errString) Error() string { return string(e) }
+
 func TestApplyThreadReplyMarksAlreadyHandled(t *testing.T) {
 	head := "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
 	info, _, _, client := replyFixture(t, head)
