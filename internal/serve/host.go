@@ -646,10 +646,16 @@ func (h *HostRunner) updateQueuedSummaryStatus(ctx stdctx.Context, client mgithu
 	var action mgithub.UpsertAction
 	var url string
 	var err error
-	_ = WithPRFlight(key, func() error {
+	ran, _ := TryWithPRFlight(key, func() error {
 		action, url, err = mgithub.UpsertSummaryStatus(ctx, client, info, mgithub.RenderQueuedSummaryStatus(info, availableAt, debounce), mgithub.RenderQueuedSummary(info, availableAt, debounce, ""))
 		return nil
 	})
+	if !ran {
+		h.log.Debug("host: queued summary status skipped",
+			"repo", repo.Slug, "pr", info.Number, "head_sha", ShortSHA(info.HeadSHA),
+			"reason", "pr_flight_busy")
+		return
+	}
 	if err != nil {
 		h.log.Warn("host: failed to update queued summary status",
 			"repo", repo.Slug, "pr", info.Number, "head_sha", ShortSHA(info.HeadSHA),

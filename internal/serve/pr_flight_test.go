@@ -6,6 +6,31 @@ import (
 	"time"
 )
 
+func TestTryWithPRFlightSkipsWhenBusy(t *testing.T) {
+	started := make(chan struct{})
+	release := make(chan struct{})
+	done := make(chan struct{})
+	go func() {
+		defer close(done)
+		_ = WithPRFlight("acme/app#4", func() error {
+			close(started)
+			<-release
+			return nil
+		})
+	}()
+	<-started
+	ran, err := TryWithPRFlight("acme/app#4", func() error { return nil })
+	if err != nil || ran {
+		t.Fatalf("busy flight ran=%v err=%v", ran, err)
+	}
+	close(release)
+	<-done
+	ran, err = TryWithPRFlight("acme/app#4", func() error { return nil })
+	if err != nil || !ran {
+		t.Fatalf("free flight ran=%v err=%v", ran, err)
+	}
+}
+
 func TestWithPRFlightSerializesAndDrops(t *testing.T) {
 	var mu sync.Mutex
 	var in int

@@ -371,6 +371,31 @@ func TestAnthropicAgentClassifies401(t *testing.T) {
 // RepairPatch issues one tools-less, low-token completion and returns the
 // fence-stripped reply; the request must carry repairSystemPrompt + the span and
 // NO tools.
+func TestAnthropicAgentJudgeReply(t *testing.T) {
+	fc := &fakeAnthropic{responses: []string{textMessage(`{"accept":true,"explanation":"the bound is fixed"}`)}}
+	a := &anthropicAgent{client: fc, model: "claude-test", temperature: 0}
+	got, err := a.JudgeReply(stdctx.Background(), ReplyJudgeRequest{Intent: "fix", Path: "a.go", Reply: "Fixed in abcdef1: done"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !got.Accept || got.Explanation != "the bound is fixed" {
+		t.Fatalf("verdict = %+v", got)
+	}
+	if fc.seen[0].MaxTokens != replyJudgeMaxTokens {
+		t.Fatalf("max tokens = %d", fc.seen[0].MaxTokens)
+	}
+	if len(fc.seen[0].Tools) != 0 {
+		t.Fatalf("judge must offer no tools, got %d", len(fc.seen[0].Tools))
+	}
+	if fc.seen[0].System[0].Text != replyJudgeSystemPrompt {
+		t.Fatal("judge system prompt mismatch")
+	}
+	raw, _ := json.Marshal(fc.seen[0])
+	if !strings.Contains(string(raw), "a.go") {
+		t.Fatalf("path missing from judge request: %s", raw)
+	}
+}
+
 func TestAnthropicAgentRepairPatch(t *testing.T) {
 	fc := &fakeAnthropic{responses: []string{textMessage("```go\nval, ok := m[key]\n```")}}
 	a := &anthropicAgent{client: fc, model: "claude-test"}

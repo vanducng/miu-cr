@@ -293,6 +293,29 @@ func TestOpenAIAgentForcedFinalizeStillErrors(t *testing.T) {
 
 // RepairPatch issues one tools-less, low-token completion and returns the
 // fence-stripped reply (lockstep with the Anthropic backend).
+func TestOpenAIAgentJudgeReply(t *testing.T) {
+	fc := &fakeOpenAI{responses: []string{textCompletion(`{"accept":false,"explanation":"the reason is too vague"}`)}}
+	a := &openaiAgent{client: fc, model: "gpt-test", temperature: 0}
+	got, err := a.JudgeReply(stdctx.Background(), ReplyJudgeRequest{Intent: "defer", Path: "a.go", Reply: "Deferred: later"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got.Accept || got.Explanation != "the reason is too vague" {
+		t.Fatalf("verdict = %+v", got)
+	}
+	p := fc.seen[0]
+	if p.MaxTokens.Value != int64(replyJudgeMaxTokens) {
+		t.Fatalf("max tokens = %v", p.MaxTokens)
+	}
+	if len(p.Tools) != 0 {
+		t.Fatalf("judge must offer no tools, got %d", len(p.Tools))
+	}
+	raw, _ := json.Marshal(p)
+	if !strings.Contains(string(raw), "a.go") {
+		t.Fatalf("path missing from judge request: %s", raw)
+	}
+}
+
 func TestOpenAIAgentRepairPatch(t *testing.T) {
 	fc := &fakeOpenAI{responses: []string{textCompletion("```go\nval, ok := m[key]\n```")}}
 	a := &openaiAgent{client: fc, model: "gpt-test"}
