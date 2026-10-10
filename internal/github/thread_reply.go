@@ -11,6 +11,7 @@ import (
 
 	gh "github.com/google/go-github/v84/github"
 
+	"github.com/vanducng/miu-cr/internal/cli/clierr"
 	"github.com/vanducng/miu-cr/internal/config"
 	"github.com/vanducng/miu-cr/internal/engine/diff"
 )
@@ -346,7 +347,7 @@ func ApplyThreadReply(ctx stdctx.Context, client Client, info *PRInfo, req Threa
 func withReadRetry(ctx stdctx.Context, fn func() error) error {
 	var err error
 	for attempt := 0; attempt < 3; attempt++ {
-		if err = fn(); err == nil || ctx.Err() != nil || attempt == 2 {
+		if err = fn(); err == nil || ctx.Err() != nil || attempt == 2 || !readRetryable(err) {
 			return err
 		}
 		timer := time.NewTimer(time.Duration(attempt+1) * 20 * time.Millisecond)
@@ -358,6 +359,14 @@ func withReadRetry(ctx stdctx.Context, fn func() error) error {
 		}
 	}
 	return err
+}
+
+func readRetryable(err error) bool {
+	var ce *clierr.CLIError
+	if !errors.As(ghAPIError("github.thread_reply_failed", "listing", err), &ce) || !ce.Retry {
+		return false
+	}
+	return ce.Code != "github.rate_limited"
 }
 
 func (r ThreadReplyRequest) aroundWrite(fn func() error) error {
@@ -383,6 +392,9 @@ func remapDecisions(decisions []replyDecision, ledger []LedgerEntry) []replyDeci
 		if !ledgerBlocksApproval(ledger[idx].Status) {
 			d.skip = true
 			d.verdict = ThreadReplyVerdict{Accept: true, Explanation: "already handled"}
+		} else if d.skip {
+			d.skip = false
+			d.verdict = ThreadReplyVerdict{Accept: false, Explanation: "this finding is open again"}
 		}
 		out = append(out, d)
 	}

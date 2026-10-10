@@ -431,6 +431,28 @@ func TestReloadPriorLedgerDoesNotKeepStaleOnError(t *testing.T) {
 	}
 }
 
+func TestWithReadRetryDoesNotHammerRateLimit(t *testing.T) {
+	calls := 0
+	err := withReadRetry(stdctx.Background(), func() error {
+		calls++
+		return &gh.RateLimitError{}
+	})
+	if err == nil || calls != 1 {
+		t.Fatalf("rate limit calls=%d err=%v", calls, err)
+	}
+}
+
+func TestRemapDecisionsDoesNotTreatReopenedFindingAsHandled(t *testing.T) {
+	got := remapDecisions([]replyDecision{{
+		skip:    true,
+		target:  replyTarget{Entry: LedgerEntry{FP: "fp", Status: statusIrrelevant}},
+		verdict: ThreadReplyVerdict{Accept: true, Explanation: "already handled"},
+	}}, []LedgerEntry{{FP: "fp", Status: statusOpen}})
+	if len(got) != 1 || got[0].skip || got[0].verdict.Accept {
+		t.Fatalf("%+v", got)
+	}
+}
+
 func TestReplyNamesTargetRequiresBoundary(t *testing.T) {
 	if replyNamesTarget("please check a.go:51", "", "a.go", 5) {
 		t.Fatal("a.go:51 must not match a.go:5")
