@@ -95,7 +95,7 @@ func TestStoreCrossPush(t *testing.T) {
 	if prB.SummaryAction != "edited" {
 		t.Fatalf("run B must edit the summary comment, got %q", prB.SummaryAction)
 	}
-	if fake.editN != 3 || fake.createIssueN != 1 {
+	if fake.editN != 4 || fake.createIssueN != 2 {
 		t.Fatalf("run B must EDIT (not stack) the summary: create=%d edit=%d", fake.createIssueN, fake.editN)
 	}
 }
@@ -242,7 +242,7 @@ func TestPublishNoStoreUnchanged(t *testing.T) {
 	if err := publishReview(stdctx.Background(), client, runner, dir, info, res, pr, cli.PRReviewRequest{Gate: "high"}, nil, embedWriter{}, nil, nil, ""); err != nil {
 		t.Fatalf("run 1: %v", err)
 	}
-	wantOrder1 := []string{"list_review", "list_issue", "create_issue", "create_review", "list_issue", "edit_issue"}
+	wantOrder1 := []string{"list_issue", "list_review", "list_issue", "create_issue", "create_review", "list_review", "list_issue", "list_issue", "edit_issue", "list_issue", "create_issue"}
 	if !equalStr(fake.order, wantOrder1) {
 		t.Fatalf("run 1 call order = %v, want %v", fake.order, wantOrder1)
 	}
@@ -255,11 +255,11 @@ func TestPublishNoStoreUnchanged(t *testing.T) {
 	if err := publishReview(stdctx.Background(), client, runner, dir, info, res, pr2, cli.PRReviewRequest{Gate: "high"}, nil, embedWriter{}, nil, nil, ""); err != nil {
 		t.Fatalf("run 2: %v", err)
 	}
-	wantOrder2 := []string{"list_review", "list_issue", "edit_issue", "list_issue", "edit_issue"}
+	wantOrder2 := []string{"list_issue", "list_review", "list_issue", "edit_issue", "list_review", "list_issue", "list_issue", "edit_issue", "list_issue", "edit_issue"}
 	if !equalStr(fake.order, wantOrder2) {
 		t.Fatalf("run 2 call order = %v, want %v", fake.order, wantOrder2)
 	}
-	if fake.createReviewN != 1 || fake.createIssueN != 1 || fake.editN != 3 {
+	if fake.createReviewN != 1 || fake.createIssueN != 2 || fake.editN != 4 {
 		t.Fatalf("no-store counts: createReview=%d createIssue=%d edit=%d", fake.createReviewN, fake.createIssueN, fake.editN)
 	}
 }

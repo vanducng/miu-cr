@@ -135,6 +135,42 @@ func TestCodexAgentPostsResponsesAndParses(t *testing.T) {
 // RepairPatch must use the SAME SSE/stream path as Review (stream:true, Accept:
 // text/event-stream, no tools, repairSystemPrompt instructions) and return the
 // fence-stripped reply.
+func TestCodexAgentJudgeReply(t *testing.T) {
+	var gotBody codexReq
+	var gotAccept string
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		gotAccept = r.Header.Get("Accept")
+		raw, _ := io.ReadAll(r.Body)
+		_ = json.Unmarshal(raw, &gotBody)
+		io.WriteString(w, codexMessageResp(`{"accept":true,"explanation":"tracked"}`))
+	}))
+	defer srv.Close()
+
+	a := newTestCodexAgent(t, srv)
+	got, err := a.JudgeReply(stdctx.Background(), ReplyJudgeRequest{Intent: "defer", Path: "a.go", Reply: "Deferred: tracked in #4 because this is safe to ship"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !got.Accept || got.Explanation != "tracked" {
+		t.Fatalf("verdict = %+v", got)
+	}
+	if !gotBody.Stream {
+		t.Error("judge must use stream:true")
+	}
+	if gotAccept != "text/event-stream" {
+		t.Errorf("Accept = %q", gotAccept)
+	}
+	if len(gotBody.Tools) != 0 {
+		t.Errorf("judge must offer no tools, got %d", len(gotBody.Tools))
+	}
+	if gotBody.MaxOutputTokens != replyJudgeMaxTokens {
+		t.Errorf("max output tokens = %d", gotBody.MaxOutputTokens)
+	}
+	if len(gotBody.Input) == 0 || !strings.Contains(gotBody.Input[0].Content[0].Text, "a.go") {
+		t.Errorf("path missing from judge input: %+v", gotBody.Input)
+	}
+}
+
 func TestCodexAgentRepairPatch(t *testing.T) {
 	var gotBody codexReq
 	var gotAccept string

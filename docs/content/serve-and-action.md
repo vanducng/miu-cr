@@ -29,7 +29,7 @@ WEBHOOK_SECRET=… GITHUB_TOKEN=… ANTHROPIC_API_KEY=… \
 
 | Method | Path        | Behaviour                                                    |
 |--------|-------------|-------------------------------------------------------------|
-| `POST` | `/webhook`  | HMAC-verified GitHub `pull_request` receiver.               |
+| `POST` | `/webhook`  | HMAC-verified receiver for `pull_request` reviews and for `pull_request_review_comment` / pull-request `issue_comment` replies. |
 | `GET`  | `/healthz`  | `200 {"status":"ok"}` liveness probe (no auth).             |
 
 ### Configuration
@@ -52,22 +52,30 @@ reaches a log line, because the clone URL embeds the PAT.
 
 1. **Body cap**: the request body is wrapped in a 5 MB `MaxBytesReader`
    *before* HMAC validation; an oversized body is rejected `413`.
-2. **Event guard**: non-`pull_request` deliveries get a cheap `200` ignore
-   before parsing (so unknown event types can't crash the parser).
+2. **Event guard**: deliveries other than `pull_request`,
+   `pull_request_review_comment`, and `issue_comment` get a cheap `200` ignore
+   before HMAC (so unknown event types can't crash the parser).
 3. **HMAC**: a bad or missing `X-Hub-Signature-256` is rejected `401`; nothing
    is dispatched.
-4. **Filter**: only `opened`, `synchronize`, `reopened`, `ready_for_review` are
-   reviewed; draft/closed PRs are ignored, and host polling cancels unfinished
-   jobs once the PR leaves the open set. An event for a repo outside `--repos`
-   is `200`-ignored and logged.
+4. **Filter**: pull request actions `opened`, `synchronize`, `reopened`, and
+   `ready_for_review` start a review. Draft opens and closed PRs are ignored, and
+   host polling cancels unfinished jobs once the PR leaves the open set. A review
+   comment or issue comment starts a thread reply only when the action is
+   `created`, the body is a fix, deferral, or not-applicable reply, the body
+   is not one the bot wrote, and the commenter is the pull request author or an
+   owner, member, or collaborator. Issue comments must belong to a pull request. An
+   event for a repo outside `--repos` is `200`-ignored and logged.
 5. **Respond first**: serve returns `200` *before* dispatching, so GitHub's
    ~10 s delivery budget is never spent on the LLM review.
 6. **Bounded async worker**: the review runs on a worker pool, never on the HTTP
    goroutine. A panic in one review is recovered and can't kill a worker.
-7. **Per-PR coalesce**: two rapid events for the same `{owner, repo, number}`
-   collapse to a single in-flight review. (Re-runs are also safe at the publish
+7. **Per-PR coalesce**: two rapid review events for the same `{owner, repo, number}`
+   collapse to a single in-flight review. A thread reply is keyed by its comment
+   id, so it does not collapse into that review, and a repeated delivery of the
+   same comment collapses to one judgment. Re-runs are also safe at the publish
    layer: the summary issue comment is upserted in place, and inline-comment
-   fingerprints prevent duplicates across commits.)
+   fingerprints prevent duplicates across commits. The reply itself is posted
+   once; a later delivery sees the reply marker and stops.
 8. **No silent drop**: if the queue is genuinely full, the drop is loud-logged
    and counted; it is never swallowed silently.
 
@@ -78,7 +86,7 @@ In the target repo: **Settings → Webhooks → Add webhook**.
 - **Payload URL:** `https://your-host/webhook`
 - **Content type:** `application/json`
 - **Secret:** the same value as `WEBHOOK_SECRET`
-- **Events:** *Let me select individual events* → **Pull requests**
+- **Events:** *Let me select individual events* → **Pull requests**, **Pull request review comments**, and **Issue comments**. Review comments and issue comments are judged only when the action is `created` and the body is a fix, deferral, or not-applicable reply. The bot ignores its own comments.
 
 ### Shutdown
 
@@ -387,8 +395,9 @@ forces the final JSON answer; `0` or unset keeps the default `24`, and the value
 is capped at `64`. Bad tool arguments, unknown tools, missing files, and canceled
 contexts are returned to the model immediately.
 
-`mode: clean` approves only zero-finding reviews. `mode: threshold` approves
-when the worst active finding is at or below `max_priority`. For example,
+`mode: clean` approves only when no blocking findings remain. Accepted deferrals
+and irrelevant off-diff notes do not block. `mode: threshold` approves
+when the worst blocking finding is at or below `max_priority`. For example,
 `max_priority: P3` allows P3/P4 findings and blocks approval for P0-P2. By
 default, a first approval body is short LGTM-style copy with a link to the code
 review summary. Clean re-approvals after a later push can stay bodyless. Set
@@ -401,14 +410,7 @@ where the host should periodically mirror GitHub review-thread state into the
 summary table. If a miucr inline conversation is manually resolved, the existing
 summary row moves to Resolved with `conversation resolved`; if that same
 conversation is later unresolved, only that conversation-resolved row reopens.
-`interval` controls the per-PR polling cadence and defaults to `5m`. This never
-starts an LLM review. When the ledger becomes fully resolved, the same poll can
-approve the current head under the repo approval policy. A review that already
-passed policy but waited on CI or unverified mergeability is retried on that
-poll too, even when thread sync is off, as long as approval is `clean` or
-`threshold`. The retry and the summary upsert both use the comment written by
-the authenticated user, including a GitHub App bot. Shutdown waits for that
-in-flight retry to finish.
+`interval` controls the per-PR polling cadence and defaults to `5m`. Mirroring a manually resolved thread does not start a model review. The same poll also judges developer replies already on the threads (`Fixed in <sha>: ...`, `Deferred: ...`, `Not applicable: ...`) with one short model call per reply, and it does that when thread sync is on or when approval is `clean` or `threshold`. A reply that is waiting on a summary is tried again after 15 minutes. A failed judgment waits an hour. Each pull request accepts at most 24 reply judgments per hour. When nothing open remains, including when only accepted deferrals remain, the same poll can approve the current head under the repo approval policy. A review that already passed policy but waited on CI or unverified mergeability is retried on that poll too, even when thread sync is off, as long as approval is `clean` or `threshold`. The retry and the summary upsert both use the comment written by the authenticated user, including a GitHub App bot. Shutdown waits for that in-flight retry to finish.
 
 GitHub also exposes
 [`pull_request_review_thread`](https://docs.github.com/en/webhooks/webhook-events-and-payloads#pull_request_review_thread)

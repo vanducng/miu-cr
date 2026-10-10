@@ -89,6 +89,7 @@ func init() {
 	engine.SetCleanReplacement(mgithub.ClassifyReplacement)
 	cli.SetReviewer(engineReviewer{})
 	cli.SetPRReviewer(prReviewer{})
+	cli.SetServeThreadReply(handleServeThreadReply)
 	cli.SetMCPServer(mcpServerImpl{})
 	cli.SetReviewStoreFactory(openReviewStore)
 	cli.SetHostStoreFactory(openHostStore)
@@ -571,6 +572,7 @@ func (prReviewer) ReviewPR(ctx stdctx.Context, req cli.PRReviewRequest) (cli.Rev
 		prResult.PatchesRepaired = patchRepairedCount(res.Stats)
 	}
 
+	noteLedgerGate(prResult, info, res.Findings, publishDiffs, req.Gate)
 	return cli.ReviewOutcome{
 		Findings: toCLIFindings(res.Findings),
 		Stats:    res.Stats,
@@ -890,6 +892,19 @@ func publishReview(ctx stdctx.Context, client mgithub.Client, runner *gitcmd.Run
 	return publishReviewWithDiffs(ctx, client, info, res, prResult, req, prStore, ew, categoryURLs, ruleCites, publishKey, diffs)
 }
 
+func noteLedgerGate(prResult *cli.PRResult, info *mgithub.PRInfo, findings []engine.Finding, diffs []diff.Diff, gate string) {
+	if prResult == nil || prResult.BlockingGateKnown || info == nil || !info.LedgerTrusted {
+		return
+	}
+	ledger := mgithub.MergeLedger(info.PriorLedger, findings, info.HeadSHA, diffPathSet(diffs), time.Now())
+	if len(diffs) > 0 {
+		ledger = mgithub.ApplyOffDiffDisposition(ledger, findings, diffs)
+	}
+	blocking := mgithub.BlockingFindings(findings, ledger)
+	prResult.BlockingGateKnown = true
+	prResult.BlockingGateFailed = engine.GateFailed(blocking, gate)
+}
+
 func publishDiffSnapshot(ctx stdctx.Context, runner *gitcmd.Runner, dir string, info *mgithub.PRInfo, captured bool, diffs []diff.Diff) ([]diff.Diff, error) {
 	if captured {
 		return diffs, nil
@@ -901,6 +916,18 @@ func publishReviewWithDiffs(ctx stdctx.Context, client mgithub.Client, info *mgi
 	if req.Mode == "checks" {
 		return publishChecks(ctx, client, info, res, diffs, prResult, req, ew)
 	}
+	key := fmt.Sprintf("%s/%s#%d", info.Owner, info.Repo, info.Number)
+	return serve.WithPRFlight(key, func() error {
+		if err := retryTransient(ctx, maxGitHubAttempts, func() error {
+			return mgithub.ReloadPriorLedger(ctx, client, info)
+		}); err != nil {
+			return err
+		}
+		return publishReviewLocked(ctx, client, info, res, prResult, req, prStore, ew, categoryURLs, ruleCites, publishKey, diffs)
+	})
+}
+
+func publishReviewLocked(ctx stdctx.Context, client mgithub.Client, info *mgithub.PRInfo, res engine.ReviewResult, prResult *cli.PRResult, req cli.PRReviewRequest, prStore store.PRThreadStore, ew embedWriter, categoryURLs map[string]string, ruleCites map[string]mgithub.RuleCitation, publishKey string, diffs []diff.Diff) error {
 	var existing map[string]string
 	err := retryTransient(ctx, maxGitHubAttempts, func() error {
 		var e error
@@ -950,11 +977,20 @@ func publishReviewWithDiffs(ctx stdctx.Context, client mgithub.Client, info *mgi
 		}
 	}
 
+	now := time.Now()
+	ledger := mgithub.MergeLedger(info.PriorLedger, publishFindings, info.HeadSHA, diffPathSet(diffs), now)
+	ledger = mgithub.ApplyOffDiffDisposition(ledger, publishFindings, diffs)
+	blocking := mgithub.BlockingFindings(publishFindings, ledger)
+	if prResult != nil {
+		prResult.BlockingGateKnown = true
+		prResult.BlockingGateFailed = engine.GateFailed(blocking, req.Gate)
+	}
+
 	opts := mgithub.PostReviewOptions{
 		Suggest:       req.Suggest,
 		Approval:      req.Approval,
 		Gate:          req.Gate,
-		GateClean:     !engine.GateFailed(publishFindings, req.Gate) && !engine.SubagentsDegraded(res.Stats),
+		GateClean:     !engine.GateFailed(blocking, req.Gate) && !engine.SubagentsDegraded(res.Stats),
 		ReviewedFiles: reviewedFilesFromStats(res.Stats),
 		FilterMode:    filterModeOf(req.FilterMode),
 		MinSeverity:   req.MinSeverity,
@@ -971,8 +1007,6 @@ func publishReviewWithDiffs(ctx stdctx.Context, client mgithub.Client, info *mgi
 	// summary may be upserted twice for overflow; merging twice would double-count
 	// reopens). MergeLedger returns non-nil even when empty, so the summary always
 	// renders in lifecycle mode on the PR path.
-	now := time.Now()
-	ledger := mgithub.MergeLedger(info.PriorLedger, publishFindings, info.HeadSHA, diffPathSet(diffs), now)
 	approvalReason := ""
 
 	// renderSummary builds the summary body for a given omitted set. info.ReviewCount
@@ -1015,7 +1049,7 @@ func publishReviewWithDiffs(ctx stdctx.Context, client mgithub.Client, info *mgi
 
 	// nil summaryFn: summary lives in the issue comment. COMMENT reviews keep the
 	// review body empty; APPROVE may add a short body.
-	pr, err := mgithub.PostReview(ctx, client, info, publishFindings, diffs, nil, skip, opts)
+	pr, err := mgithub.PostReview(ctx, client, info, blocking, diffs, nil, skip, opts)
 	if err != nil {
 		return err
 	}
@@ -1028,6 +1062,20 @@ func publishReviewWithDiffs(ctx stdctx.Context, client mgithub.Client, info *mgi
 		prResult.Posted = false
 		prResult.SummaryAction = "fork_fallback"
 		return nil
+	}
+
+	offDiff := mgithub.MinSeverityFloor(mgithub.ActionableOffDiffFindings(publishFindings, diffs, ledger), opts.MinSeverity)
+	if url, oerr := mgithub.UpsertOffDiffComment(ctx, client, info, offDiff, diffs); oerr != nil {
+		slog.Warn("off-diff comment failed", "repo", info.Owner+"/"+info.Repo, "pr", info.Number, "head_sha", shortSHA(info.HeadSHA), "error", config.RedactString(oerr.Error()))
+	} else if url != "" {
+		if existing == nil {
+			existing = map[string]string{}
+		}
+		for _, f := range offDiff {
+			if fp := mgithub.Fingerprint(f); existing[fp] == "" {
+				existing[fp] = url
+			}
+		}
 	}
 
 	if action, _, uerr := mgithub.UpsertSummaryComment(ctx, client, info, renderSummary(pr.Omitted, pr.OmittedFindings, true)); uerr != nil {
@@ -1051,6 +1099,12 @@ func publishReviewWithDiffs(ctx stdctx.Context, client mgithub.Client, info *mgi
 	// Best-effort, never affects the published review.
 	ew.write(ctx, pr.PostedFindings, publishFindings, res.Stats)
 
+	if login, lerr := client.CurrentLogin(ctx); lerr != nil {
+		slog.Warn("response notice skipped", "repo", info.Owner+"/"+info.Repo, "pr", info.Number, "head_sha", shortSHA(info.HeadSHA), "reason", "comment_author_unverified", "error", config.RedactString(lerr.Error()))
+	} else if _, nerr := mgithub.UpsertResponseNotice(ctx, client, info, login, mgithub.OpenNoticeItems(ledger, existing, nil)); nerr != nil {
+		slog.Warn("response notice failed", "repo", info.Owner+"/"+info.Repo, "pr", info.Number, "head_sha", shortSHA(info.HeadSHA), "error", config.RedactString(nerr.Error()))
+	}
+
 	prResult.Posted = true
 	prResult.PostedInline = pr.Posted
 	prResult.SuggestionsPosted = pr.Suggestions
@@ -1064,7 +1118,25 @@ func publishReviewWithDiffs(ctx stdctx.Context, client mgithub.Client, info *mgi
 // of inline comments + a summary. No fingerprint dedupe / summary upsert: a CheckRun
 // is replaced wholesale each run by the same name, so re-runs are naturally idempotent.
 func publishChecks(ctx stdctx.Context, client mgithub.Client, info *mgithub.PRInfo, res engine.ReviewResult, diffs []diff.Diff, prResult *cli.PRResult, req cli.PRReviewRequest, ew embedWriter) error {
-	gateClean := !engine.GateFailed(res.Findings, req.Gate) && !engine.SubagentsDegraded(res.Stats)
+	blocking := res.Findings
+	if err := retryTransient(ctx, maxGitHubAttempts, func() error {
+		return mgithub.ReloadPriorLedger(ctx, client, info)
+	}); err != nil {
+		slog.Warn("checks ledger reload failed, gating on this run",
+			"repo", info.Owner+"/"+info.Repo, "pr", info.Number, "head_sha", shortSHA(info.HeadSHA),
+			"error", config.RedactString(err.Error()))
+	} else {
+		ledger := mgithub.MergeLedger(info.PriorLedger, res.Findings, info.HeadSHA, diffPathSet(diffs), time.Now())
+		if len(diffs) > 0 {
+			ledger = mgithub.ApplyOffDiffDisposition(ledger, res.Findings, diffs)
+		}
+		blocking = mgithub.BlockingFindings(res.Findings, ledger)
+	}
+	if prResult != nil {
+		prResult.BlockingGateKnown = true
+		prResult.BlockingGateFailed = engine.GateFailed(blocking, req.Gate)
+	}
+	gateClean := !engine.GateFailed(blocking, req.Gate) && !engine.SubagentsDegraded(res.Stats)
 	cr, err := mgithub.PostChecks(ctx, client, info, res.Findings, diffs, res.Stats, gateClean, filterModeOf(req.FilterMode))
 	if err != nil {
 		return err

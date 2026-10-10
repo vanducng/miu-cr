@@ -299,7 +299,7 @@ func TestPublishReviewWireFlow(t *testing.T) {
 	if pr.SummaryAction != "edited" {
 		t.Fatalf("first run: want summary action edited, got %q", pr.SummaryAction)
 	}
-	if fake.createIssueN != 1 || fake.editN != 1 {
+	if fake.createIssueN != 2 || fake.editN != 1 {
 		t.Fatalf("first run must create then finalize the summary issue comment: create=%d edit=%d", fake.createIssueN, fake.editN)
 	}
 	// The review body must be EMPTY, the summary leaves the body entirely.
@@ -307,8 +307,8 @@ func TestPublishReviewWireFlow(t *testing.T) {
 		t.Fatalf("review body must be empty (summary lives in the issue comment), got:\n%s", b)
 	}
 	// The summary issue comment carries the marker + this run's Review attempts: 1 footer.
-	if len(fake.issueComments) != 1 {
-		t.Fatalf("want one summary issue comment, have %d", len(fake.issueComments))
+	if len(fake.issueComments) != 2 {
+		t.Fatalf("want the summary plus one response notice, have %d", len(fake.issueComments))
 	}
 	summary := fake.issueComments[0].GetBody()
 	if !strings.Contains(summary, mgithub.ReviewMarker) {
@@ -359,10 +359,10 @@ func TestPublishReviewWireFlow(t *testing.T) {
 	if len(fake.reviewComments) != 1 {
 		t.Errorf("re-run must not duplicate inline comments, have %d", len(fake.reviewComments))
 	}
-	if fake.createIssueN != 1 || fake.editN != 3 {
+	if fake.createIssueN != 2 || fake.editN != 4 {
 		t.Fatalf("re-run must EDIT (not stack) the summary: create=%d edit=%d", fake.createIssueN, fake.editN)
 	}
-	if len(fake.issueComments) != 1 {
+	if len(fake.issueComments) != 2 {
 		t.Fatalf("re-run must not create a second summary comment, have %d", len(fake.issueComments))
 	}
 	if got := fake.issueComments[0].GetBody(); !strings.Contains(got, "Review attempts: 2") {
@@ -437,7 +437,7 @@ func TestPublishReviewWithDiffSnapshotDoesNotNeedRepoAfterReview(t *testing.T) {
 	if pr.PostedInline != 1 || pr.SummaryAction != "edited" {
 		t.Fatalf("publish from snapshot failed: postedInline=%d summaryAction=%q", pr.PostedInline, pr.SummaryAction)
 	}
-	if fake.createIssueN != 1 || fake.editN != 1 {
+	if fake.createIssueN != 2 || fake.editN != 1 {
 		t.Fatalf("summary must create then finalize: create=%d edit=%d", fake.createIssueN, fake.editN)
 	}
 }
@@ -541,6 +541,26 @@ func TestReviewErrorSummaryUsesFreshContext(t *testing.T) {
 	}
 	if len(fake.issueListCtxErrs) == 0 || fake.issueListCtxErrs[0] != nil {
 		t.Fatalf("summary upsert used canceled parent context: %v", fake.issueListCtxErrs)
+	}
+}
+
+func TestReviewErrorSummaryKeepsLedger(t *testing.T) {
+	marker := "<!-- miu-cr-ledger:W10= -->"
+	fake := &fakeGitHub{issueComments: []*gh.IssueComment{{
+		ID:   gh.Ptr(int64(4)),
+		User: &gh.User{Login: gh.Ptr("reviewer")},
+		Body: gh.Ptr(mgithub.ReviewMarker + "\n## Code Review Summary\n\nprior\n" + marker + "\n"),
+	}}}
+	info := &mgithub.PRInfo{Owner: "o", Repo: "r", Number: 7, HeadSHA: "headsha"}
+	if err := upsertReviewErrorSummary(stdctx.Background(), fake, info, errors.New("publish failed")); err != nil {
+		t.Fatal(err)
+	}
+	if fake.createIssueN != 0 {
+		t.Fatalf("error notice should edit the existing summary, created %d", fake.createIssueN)
+	}
+	body := fake.issueComments[0].GetBody()
+	if !strings.Contains(body, marker) || !strings.Contains(body, "> [!CAUTION]") {
+		t.Fatalf("error notice dropped the ledger:\n%s", body)
 	}
 }
 
@@ -1161,5 +1181,31 @@ func TestRetryTransient(t *testing.T) {
 	})
 	if err == nil || calls != 1 {
 		t.Fatalf("rate-limited error must not short-retry: err=%v calls=%d", err, calls)
+	}
+}
+
+func TestLedgerGateIgnoresAcceptedDeferralWithoutPosting(t *testing.T) {
+	f := engine.Finding{File: "a.go", Line: 4, Severity: "critical", Category: "bug", Title: "bounds", QuotedCode: "i <= n"}
+	info := &mgithub.PRInfo{
+		HeadSHA:       "abc",
+		LedgerTrusted: true,
+		PriorLedger:   []mgithub.LedgerEntry{{FP: mgithub.Fingerprint(f), Path: "a.go", Status: "deferred", Sev: "critical"}},
+	}
+	pr := &cli.PRResult{}
+	noteLedgerGate(pr, info, []engine.Finding{f}, nil, "high")
+	if !pr.BlockingGateKnown || pr.BlockingGateFailed {
+		t.Fatalf("accepted deferral gate = known %v failed %v", pr.BlockingGateKnown, pr.BlockingGateFailed)
+	}
+	open := &cli.PRResult{}
+	noteLedgerGate(open, &mgithub.PRInfo{HeadSHA: "abc", LedgerTrusted: true}, []engine.Finding{f}, nil, "high")
+	forged := &cli.PRResult{}
+	forgedInfo := *info
+	forgedInfo.LedgerTrusted = false
+	noteLedgerGate(forged, &forgedInfo, []engine.Finding{f}, nil, "high")
+	if forged.BlockingGateKnown {
+		t.Fatal("an unauthenticated ledger must not decide the exit gate")
+	}
+	if !open.BlockingGateKnown || !open.BlockingGateFailed {
+		t.Fatalf("open finding gate = known %v failed %v", open.BlockingGateKnown, open.BlockingGateFailed)
 	}
 }

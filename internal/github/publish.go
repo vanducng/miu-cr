@@ -122,11 +122,11 @@ func ValidMinSeverity(s string) bool {
 	return false
 }
 
-// minSeverityFloor keeps only findings whose severity reaches min (a high→low
+// MinSeverityFloor keeps only findings whose severity reaches min (a high→low
 // rank). An empty/"none" min is a no-op (current behavior). An unknown-severity
 // finding (rank past the table) is dropped only when a real floor is set, so a
 // floor never silently posts an ungraded finding inline.
-func minSeverityFloor(findings []engine.Finding, min string) []engine.Finding {
+func MinSeverityFloor(findings []engine.Finding, min string) []engine.Finding {
 	if min == "" || min == "none" {
 		return findings
 	}
@@ -478,7 +478,7 @@ func PostReview(ctx stdctx.Context, client Client, info *PRInfo, findings []engi
 		}
 	}
 
-	inHunk := minSeverityFloor(inlineEligible(findings, diffs, opts.FilterMode), opts.MinSeverity)
+	inHunk := MinSeverityFloor(inlineEligible(findings, diffs, opts.FilterMode), opts.MinSeverity)
 
 	toPost := make([]engine.Finding, 0, len(inHunk))
 	for _, f := range inHunk {
@@ -522,7 +522,7 @@ func PostReview(ctx stdctx.Context, client Client, info *PRInfo, findings []engi
 			suggestions++
 		}
 		fp := fingerprint(f)
-		body := rendered + "\n\n" + fpMarker(fp)
+		body := rendered + "\n\n" + threadReplyHint + "\n\n" + fpMarker(fp) + "\n" + botMarker
 		c := &gh.DraftReviewComment{
 			Path: gh.Ptr(f.File),
 			Body: gh.Ptr(body),
@@ -902,6 +902,12 @@ func UpsertSummaryStatus(ctx stdctx.Context, client Client, info *PRInfo, status
 		targetURL = edited.GetHTMLURL()
 	}
 	return UpsertEdited, summaryCommentURL(info, targetID, targetURL), nil
+}
+
+// ExistingSummaryBody is the current summary comment body, or "" when none exists.
+func ExistingSummaryBody(ctx stdctx.Context, client Client, info *PRInfo) (string, error) {
+	_, _, body, err := findSummaryCommentBody(ctx, client, info)
+	return body, err
 }
 
 func findSummaryCommentBody(ctx stdctx.Context, client Client, info *PRInfo) (int64, string, string, error) {

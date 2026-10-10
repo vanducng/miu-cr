@@ -293,9 +293,14 @@ without a local PR-thread store:
   is **reopened** and re-posted, so LLM non-determinism can never permanently
   suppress a real finding.
 
-`serve --host` can optionally mirror manual GitHub "Resolve conversation" state
-into that same summary table with `thread_resolution_sync.mode: poll`. This is
-metadata-only: it never starts an LLM review and never feeds approval decisions.
+Developers answer a finding on its thread:
+
+- `Fixed in <sha>: ...` checks that the commit is on the pull request and changes the finding's file, then resolves the thread or explains why it is still open. Only the pull request author, or an owner, member, or collaborator, is judged.
+- `Deferred: ...` or `Not applicable: ...` is judged from that reason. An accepted deferral moves to **⏸️ Deferred** and does not block approval. A vague reason stays open.
+- Findings outside the changed lines share one thread on the nearest changed line, or one pull request comment when no line can hold it. Info-level notes in files the pull request does not change are marked irrelevant and are not blocking.
+- One notice comment per review mentions the pull request author while findings are open and is edited in place.
+
+`serve --host` mirrors manual GitHub "Resolve conversation" into that same summary table when `thread_resolution_sync.mode: poll`. That mirror does not start a model review. Reply judgment is separate: it calls the model only for the changed thread, on the webhook path and on the same host poll that syncs threads or retries approval. Accepted deferrals count as clear for approval.
 
 For `miucr review --pr --post` outside the Action path, `MIUCR_PR_STORE=1` also
 opens the optional PR-thread store. That store layers prior posted/resolved
@@ -324,16 +329,18 @@ lost. The whole review can't 422 on size.
 | `file` | findings on any file present in the diff |
 | `nofilter` | every finding |
 
-`file` and `nofilter` never widen the **inline** set past the diff (GitHub 422s
-an off-diff inline comment); they route the extra off-diff findings to the
-**summary**, **SARIF**, and **local output** instead, never inline.
+`file` and `nofilter` never put a finding on a line GitHub will reject. A finding
+that cannot sit on its own changed line shares one thread on the nearest changed
+line, or one pull request comment when no line can hold it. Info-level notes in
+files the pull request does not change are marked irrelevant and are not blocking.
+They still appear in the summary, SARIF, and local output.
 
 ## Inline severity floor (`--min-severity`)
 
 `--min-severity none|info|low|medium|high|critical` raises the floor on which
-findings post **inline**. Findings below the threshold are excluded from inline
-comments only; they still appear in the summary header counts and SARIF, so
-nothing is dropped. Omitting the flag (the default) keeps the current behavior (no
+findings post **inline**, including the shared off-diff thread. Findings below
+the threshold are excluded from those comments; they still appear in the summary
+header counts and SARIF, so nothing is dropped. Omitting the flag (the default) keeps the current behavior (no
 floor).
 
 ```sh
@@ -412,9 +419,10 @@ The count emitted this run is reported as `suggestions_posted`.
 ### `--approval`: approve by policy
 
 Submits `Event=APPROVE` instead of `COMMENT` when the configured policy and every
-safety precondition hold. `--approval clean` requires **zero findings**.
-`--approval threshold --approval-max-priority P3` approves when the worst active
-finding is P3 or P4; P0, P1, and P2 block approval. If findings remain, the
+safety precondition hold. `--approval clean` requires **zero blocking findings**.
+Accepted deferrals and irrelevant off-diff notes do not block.
+`--approval threshold --approval-max-priority P3` approves when the worst blocking
+finding is P3 or P4; P0, P1, and P2 block approval. If blocking findings remain, the
 approval review notes the configured threshold. The first approval body is short,
 starts with LGTM-style copy, and links to the code review summary by default;
 set `--approval-note none` to suppress it, or `on_findings` to keep clean

@@ -24,12 +24,31 @@ const maxBodyBytes = 5 << 20 // 5MB
 // prKey identifies a PR for coalesce. A single daemon serves many repos, so the
 // PR number alone is not unique, the owner/repo pair is part of the key.
 type prKey struct {
-	Owner  string
-	Repo   string
-	Number int
+	Owner     string
+	Repo      string
+	Number    int
+	CommentID int64
 }
 
-func (k prKey) String() string { return fmt.Sprintf("%s/%s#%d", k.Owner, k.Repo, k.Number) }
+func (k prKey) String() string {
+	if k.CommentID == 0 {
+		return fmt.Sprintf("%s/%s#%d", k.Owner, k.Repo, k.Number)
+	}
+	return fmt.Sprintf("%s/%s#%d comment %d", k.Owner, k.Repo, k.Number, k.CommentID)
+}
+
+const JobKindThreadReply = "thread_reply"
+
+// ThreadReply is one developer comment to judge. A review job leaves it nil.
+type ThreadReply struct {
+	CommentID         int64
+	Body              string
+	UserLogin         string
+	AuthorAssociation string
+	InReplyTo         int64
+	Kind              string
+	HostRetry         bool
+}
 
 // Job is a unit of work handed to the Dispatcher: the PR to review, the ref in
 // owner/repo#N form, and the resolved (in-memory-only) GitHub token. The token
@@ -51,6 +70,10 @@ type Job struct {
 	// webhook/poll paths). reviewFn persists the FINAL record under this id; the
 	// CLI/webhook/poll paths leave it empty and skip that upsert.
 	ReviewID string
+	// Kind is empty for a full review. JobKindThreadReply judges one comment.
+	Kind string
+	// Reply is set only for JobKindThreadReply.
+	Reply *ThreadReply
 	// OnDone, when non-nil, runs after the review returns: nil on success, the
 	// reviewFn's error (or a recovered panic) on failure. Additive, the webhook Job leaves it nil so the
 	// webhook path is byte-for-byte unchanged; the poller sets it to record its

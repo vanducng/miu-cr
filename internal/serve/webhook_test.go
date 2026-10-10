@@ -260,6 +260,93 @@ func TestWebhook_NoSecretsInLog(t *testing.T) {
 	assertNoSecrets(t, logBuf.String())
 }
 
+func TestWebhook_ReviewCommentDispatchesReply(t *testing.T) {
+	disp := &fakeDispatcher{accept: true}
+	srv := newTestServer(t, disp, io.Discard)
+	body := []byte(`{
+		"action": "created",
+		"pull_request": {"number": 42, "user": {"login": "dev"}},
+		"comment": {"id": 9, "body": "Fixed in abcdef1: tightened the bound", "user": {"login": "dev"}, "in_reply_to_id": 8},
+		"repository": {"name": "hello", "owner": {"login": "octocat"}}
+	}`)
+	rec := post(t, srv, "pull_request_review_comment", body, sign([]byte(testSecret), body))
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d body=%s", rec.Code, rec.Body.String())
+	}
+	jobs := disp.submitted()
+	if len(jobs) != 1 || jobs[0].Kind != JobKindThreadReply || jobs[0].Reply == nil || jobs[0].Reply.CommentID != 9 {
+		t.Fatalf("jobs = %+v", jobs)
+	}
+	if jobs[0].Ref != "octocat/hello#42" || jobs[0].Key.CommentID != 9 {
+		t.Fatalf("job key = %+v ref=%s", jobs[0].Key, jobs[0].Ref)
+	}
+}
+
+func TestWebhook_BotCommentIgnored(t *testing.T) {
+	disp := &fakeDispatcher{accept: true}
+	srv := newTestServer(t, disp, io.Discard)
+	body := []byte(`{
+		"action": "created",
+		"pull_request": {"number": 42},
+		"comment": {"id": 9, "body": "<!-- miu-cr-bot -->\nresolved", "user": {"login": "miucr"}, "in_reply_to_id": 8},
+		"repository": {"name": "hello", "owner": {"login": "octocat"}}
+	}`)
+	rec := post(t, srv, "pull_request_review_comment", body, sign([]byte(testSecret), body))
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d", rec.Code)
+	}
+	if len(disp.submitted()) != 0 {
+		t.Fatal("bot comment dispatched")
+	}
+}
+
+func TestWebhook_UntrustedReplyIgnored(t *testing.T) {
+	disp := &fakeDispatcher{accept: true}
+	srv := newTestServer(t, disp, io.Discard)
+	body := []byte(`{
+		"action": "created",
+		"pull_request": {"number": 42, "user": {"login": "dev"}},
+		"comment": {"id": 9, "body": "Deferred: tracked in #4 because this is safe to ship later", "user": {"login": "stranger"}, "author_association": "NONE", "in_reply_to_id": 8},
+		"repository": {"name": "hello", "owner": {"login": "octocat"}}
+	}`)
+	rec := post(t, srv, "pull_request_review_comment", body, sign([]byte(testSecret), body))
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d", rec.Code)
+	}
+	if len(disp.submitted()) != 0 {
+		t.Fatal("untrusted reply dispatched")
+	}
+}
+
+func TestWebhook_IssueCommentRequiresPullRequest(t *testing.T) {
+	disp := &fakeDispatcher{accept: true}
+	srv := newTestServer(t, disp, io.Discard)
+	plain := []byte(`{
+		"action": "created",
+		"issue": {"number": 7},
+		"comment": {"id": 3, "body": "Deferred: tracked in #4 because the change is safe", "user": {"login": "dev"}},
+		"repository": {"name": "hello", "owner": {"login": "octocat"}}
+	}`)
+	rec := post(t, srv, "issue_comment", plain, sign([]byte(testSecret), plain))
+	if rec.Code != http.StatusOK || len(disp.submitted()) != 0 {
+		t.Fatalf("non-PR issue comment dispatched: status=%d jobs=%d", rec.Code, len(disp.submitted()))
+	}
+	pr := []byte(`{
+		"action": "created",
+		"issue": {"number": 7, "user": {"login": "dev"}, "pull_request": {"url": "https://api.github.com/repos/octocat/hello/pulls/7"}},
+		"comment": {"id": 4, "body": "Deferred: tracked in #4 because the change is safe", "user": {"login": "dev"}},
+		"repository": {"name": "hello", "owner": {"login": "octocat"}}
+	}`)
+	rec = post(t, srv, "issue_comment", pr, sign([]byte(testSecret), pr))
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d", rec.Code)
+	}
+	jobs := disp.submitted()
+	if len(jobs) != 1 || jobs[0].Kind != JobKindThreadReply || jobs[0].Reply.Kind != "issue_comment" {
+		t.Fatalf("jobs = %+v", jobs)
+	}
+}
+
 func assertNoSecrets(t *testing.T, logOut string) {
 	t.Helper()
 	if strings.Contains(logOut, testSecret) {

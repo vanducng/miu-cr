@@ -619,7 +619,7 @@ func (h *HostRunner) pollRepo(ctx stdctx.Context, snap hostRunnerSnapshot, repo 
 			h.updateQueuedSummaryStatus(ctx, getGitHubClient(), repo, pr, job.AvailableAt, repo.Debounce)
 		}
 		if repo.ThreadResolutionSync.Enabled() || deferredApprovalEnabled(repo.Review.Approval) {
-			h.enqueueThreadResolutionSync(ctx, getGitHubClient(), repo, pr, now)
+			h.enqueueThreadResolutionSync(ctx, getGitHubClient(), repo, pr, now, token)
 		}
 	}
 	superseded, supersededErr := h.store.ReconcileHostSupersededPRHeads(ctx, store.HostSupersededPRHeadsInput{RepoID: repoID, Heads: openHeads, Now: now})
@@ -642,7 +642,20 @@ func (h *HostRunner) pollRepo(ctx stdctx.Context, snap hostRunnerSnapshot, repo 
 
 func (h *HostRunner) updateQueuedSummaryStatus(ctx stdctx.Context, client mgithub.Client, repo HostRepoConfig, pr *github.PullRequest, availableAt time.Time, debounce time.Duration) {
 	info := hostPRInfo(repo, pr)
-	action, url, err := mgithub.UpsertSummaryStatus(ctx, client, info, mgithub.RenderQueuedSummaryStatus(info, availableAt, debounce), mgithub.RenderQueuedSummary(info, availableAt, debounce, ""))
+	key := fmt.Sprintf("%s/%s#%d", info.Owner, info.Repo, info.Number)
+	var action mgithub.UpsertAction
+	var url string
+	var err error
+	ran, _ := TryWithPRFlight(key, func() error {
+		action, url, err = mgithub.UpsertSummaryStatus(ctx, client, info, mgithub.RenderQueuedSummaryStatus(info, availableAt, debounce), mgithub.RenderQueuedSummary(info, availableAt, debounce, ""))
+		return nil
+	})
+	if !ran {
+		h.log.Debug("host: queued summary status skipped",
+			"repo", repo.Slug, "pr", info.Number, "head_sha", ShortSHA(info.HeadSHA),
+			"reason", "pr_flight_busy")
+		return
+	}
 	if err != nil {
 		h.log.Warn("host: failed to update queued summary status",
 			"repo", repo.Slug, "pr", info.Number, "head_sha", ShortSHA(info.HeadSHA),
@@ -686,6 +699,7 @@ func hostPRInfo(repo HostRepoConfig, pr *github.PullRequest) *mgithub.PRInfo {
 		ChangedFiles:      pr.GetChangedFiles(),
 		Additions:         int64(pr.GetAdditions()),
 		Deletions:         int64(pr.GetDeletions()),
+		AuthorLogin:       pr.GetUser().GetLogin(),
 		AuthorAssociation: pr.GetAuthorAssociation(),
 		IsFork:            isFork,
 	}
@@ -740,7 +754,7 @@ func (h *HostRunner) pruneThreadResolutionSync(slug string, openNumbers []int64)
 	}
 }
 
-func (h *HostRunner) enqueueThreadResolutionSync(ctx stdctx.Context, client mgithub.Client, repo HostRepoConfig, pr *github.PullRequest, now time.Time) {
+func (h *HostRunner) enqueueThreadResolutionSync(ctx stdctx.Context, client mgithub.Client, repo HostRepoConfig, pr *github.PullRequest, now time.Time, token string) {
 	info := hostPRInfo(repo, pr)
 	ok, reason := h.reserveThreadResolutionSync(repo.Slug, int64(info.Number), repo.ThreadResolutionSync.Interval, now)
 	if !ok {
@@ -758,7 +772,7 @@ func (h *HostRunner) enqueueThreadResolutionSync(ctx stdctx.Context, client mgit
 		defer h.finishThreadResolutionSync()
 		defer h.untrackSyncCancel(tracked)
 		defer cancel()
-		h.syncThreadResolution(syncCtx, client, repo, info, now)
+		h.syncThreadResolution(syncCtx, client, repo, info, now, token)
 	}()
 }
 
@@ -812,13 +826,21 @@ func deferredApprovalEnabled(policy config.ApprovalPolicy) bool {
 	return policy.Mode == "clean" || policy.Mode == "threshold"
 }
 
-func (h *HostRunner) syncThreadResolution(ctx stdctx.Context, client mgithub.Client, repo HostRepoConfig, info *mgithub.PRInfo, now time.Time) {
-	if repo.ThreadResolutionSync.Enabled() {
-		h.syncConversationResolution(ctx, client, repo, info, now)
-	}
-	if !deferredApprovalEnabled(repo.Review.Approval) {
-		return
-	}
+func (h *HostRunner) syncThreadResolution(ctx stdctx.Context, client mgithub.Client, repo HostRepoConfig, info *mgithub.PRInfo, now time.Time, token string) {
+	key := fmt.Sprintf("%s/%s#%d", info.Owner, info.Repo, info.Number)
+	_ = WithPRFlight(key, func() error {
+		if repo.ThreadResolutionSync.Enabled() {
+			h.syncConversationResolution(ctx, client, repo, info, now)
+		}
+		if deferredApprovalEnabled(repo.Review.Approval) {
+			h.retryDeferredApproval(ctx, client, repo, info)
+		}
+		h.scanThreadReplies(ctx, client, repo, info, token)
+		return nil
+	})
+}
+
+func (h *HostRunner) retryDeferredApproval(ctx stdctx.Context, client mgithub.Client, repo HostRepoConfig, info *mgithub.PRInfo) {
 	res, err := mgithub.RetryDeferredApproval(ctx, client, info, repo.Review.Approval)
 	attrs := []any{"repo", repo.Slug, "pr", info.Number, "head_sha", ShortSHA(info.HeadSHA), "reason", res.Reason}
 	if res.Approved {
@@ -839,6 +861,66 @@ func (h *HostRunner) syncThreadResolution(ctx stdctx.Context, client mgithub.Cli
 		return
 	}
 	h.log.Debug("host: deferred approval retry skipped", attrs...)
+}
+
+func (h *HostRunner) scanThreadReplies(ctx stdctx.Context, client mgithub.Client, repo HostRepoConfig, info *mgithub.PRInfo, token string) {
+	if h.disp == nil || client == nil || info == nil || strings.TrimSpace(token) == "" {
+		return
+	}
+	replies, err := mgithub.ListActionableReplies(ctx, client, info)
+	if err != nil {
+		h.log.Warn("host: thread reply scan failed",
+			"repo", repo.Slug, "pr", info.Number, "head_sha", ShortSHA(info.HeadSHA),
+			"reason", "list_failed", "error", config.RedactString(err.Error()))
+		return
+	}
+	timeout := repo.ReviewTimeout
+	if timeout <= 0 {
+		timeout = 15 * time.Minute
+	}
+	ref := fmt.Sprintf("%s/%s#%d", info.Owner, info.Repo, info.Number)
+	now := time.Now()
+	if h.now != nil {
+		now = h.now()
+	}
+	for _, reply := range replies {
+		if !ReplyRetryReady(ReplyRetryKey(ref, reply.CommentID), now) {
+			h.log.Debug("host: thread reply cooling down",
+				"repo", repo.Slug, "pr", info.Number, "head_sha", ShortSHA(info.HeadSHA),
+				"comment_id", reply.CommentID, "reason", "retry_deferred")
+			continue
+		}
+		opts := repo.Review
+		body := reply
+		job := Job{
+			Key:            prKey{Owner: info.Owner, Repo: info.Repo, Number: info.Number, CommentID: reply.CommentID},
+			Ref:            ref,
+			Token:          token,
+			Timeout:        timeout,
+			StalledTimeout: opts.StalledTimeout,
+			Review:         &opts,
+			HeadSHA:        info.HeadSHA,
+			Kind:           JobKindThreadReply,
+			Reply: &ThreadReply{
+				CommentID:         body.CommentID,
+				Body:              body.Body,
+				UserLogin:         body.UserLogin,
+				AuthorAssociation: body.AuthorAssociation,
+				InReplyTo:         body.InReplyTo,
+				Kind:              body.Kind,
+				HostRetry:         true,
+			},
+		}
+		if h.disp.Submit(job) != SubmitQueued {
+			h.log.Warn("host: thread reply not queued",
+				"repo", repo.Slug, "pr", info.Number, "head_sha", ShortSHA(info.HeadSHA),
+				"comment_id", reply.CommentID, "reason", "dispatch_rejected")
+			continue
+		}
+		h.log.Info("host: thread reply queued",
+			"repo", repo.Slug, "pr", info.Number, "head_sha", ShortSHA(info.HeadSHA),
+			"comment_id", reply.CommentID)
+	}
 }
 
 func (h *HostRunner) syncConversationResolution(ctx stdctx.Context, client mgithub.Client, repo HostRepoConfig, info *mgithub.PRInfo, now time.Time) {

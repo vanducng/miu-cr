@@ -1325,8 +1325,49 @@ func buildTokenSource(g config.Github) (ghub.TokenSource, error) {
 // RETURNED cli.ReviewOutcome (not in Job.OnDone(error)), so the upsert rides here,
 // inside reviewFn, not in OnDone. The webhook/poll paths leave ReviewID empty and
 // skip the upsert (byte-for-byte unchanged).
+// ServeThreadReply runs one developer-reply job. wire.init installs it.
+type ServeThreadReplyFunc func(ctx stdctx.Context, job serve.Job) error
+
+var serveThreadReply ServeThreadReplyFunc
+
+// SetServeThreadReply wires reply handling. Called once from wire.init before workers start.
+func SetServeThreadReply(fn ServeThreadReplyFunc) { serveThreadReply = fn }
+
 func buildServeReviewFn(log *slog.Logger, gate string, st serve.ReviewStore, traceSinkFactory func(*slog.Logger) func(step string, payload any), captureReasoning bool) func(serve.Job) error {
 	return func(j serve.Job) error {
+		if j.Kind == serve.JobKindThreadReply {
+			if serveThreadReply == nil {
+				return &CLIError{Code: "review.not_wired", Message: "thread reply handler not wired", Exit: 1}
+			}
+			parentCtx := j.Context
+			if parentCtx == nil {
+				parentCtx = stdctx.Background()
+			}
+			timeout := j.Timeout
+			if timeout <= 0 {
+				timeout = 15 * time.Minute
+			}
+			jobCtx, cancel := stdctx.WithTimeout(parentCtx, timeout)
+			defer cancel()
+			err := serveThreadReply(jobCtx, j)
+			if err != nil {
+				wait := time.Hour
+				var ce *CLIError
+				if errors.As(err, &ce) && (ce.Code == "quota.exceeded" || ce.Code == "provider.rate_limited") {
+					if sec := quotaResetSeconds(ce.Details); sec > 0 {
+						wait = time.Duration(sec) * time.Second
+					}
+					serve.DeferReplyRetry(serve.ReplyRetryKey(j.Ref, commentIDOf(j)), time.Now().Add(wait))
+					log.Warn("thread reply skipped: provider quota exhausted", serveJobLogAttrs(j, "comment_id", commentIDOf(j), "err", config.RedactString(err.Error()))...)
+					return nil
+				}
+				serve.DeferReplyRetry(serve.ReplyRetryKey(j.Ref, commentIDOf(j)), time.Now().Add(wait))
+				log.Error("thread reply failed", serveJobLogAttrs(j, "comment_id", commentIDOf(j), "err", config.RedactString(err.Error()))...)
+				return err
+			}
+			log.Info("thread reply done", serveJobLogAttrs(j, "comment_id", commentIDOf(j))...)
+			return nil
+		}
 		var traceSink func(step string, payload any)
 		if traceSinkFactory != nil {
 			traceSink = traceSinkFactory(log.With(serveJobLogAttrs(j)...))
@@ -1426,6 +1467,36 @@ func buildServeReviewFn(log *slog.Logger, gate string, st serve.ReviewStore, tra
 		persistFinalReview(log, st, j.ReviewID, "done", out)
 		return nil
 	}
+}
+
+func quotaResetSeconds(details map[string]any) int {
+	if details == nil {
+		return 0
+	}
+	for _, key := range []string{"resets_in_seconds", "retry_after_seconds"} {
+		switch n := details[key].(type) {
+		case int:
+			if n > 0 {
+				return n
+			}
+		case int64:
+			if n > 0 {
+				return int(n)
+			}
+		case float64:
+			if n > 0 {
+				return int(n)
+			}
+		}
+	}
+	return 0
+}
+
+func commentIDOf(j serve.Job) int64 {
+	if j.Reply != nil {
+		return j.Reply.CommentID
+	}
+	return j.Key.CommentID
 }
 
 func serveJobLogAttrs(j serve.Job, attrs ...any) []any {

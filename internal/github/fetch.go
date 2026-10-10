@@ -31,6 +31,9 @@ type PRInfo struct {
 	BaseSHA    string
 	BaseBranch string
 	IsFork     bool
+	// AuthorLogin is the PR author's GitHub login, used to mention them when open
+	// findings need a response. Empty when the API omits the user.
+	AuthorLogin string
 	// AuthorAssociation is the PR author's repo relationship (OWNER, MEMBER,
 	// COLLABORATOR, CONTRIBUTOR, NONE, FIRST_TIME_CONTRIBUTOR, FIRST_TIMER); the
 	// approve resolver treats the untrusted set as a hard block.
@@ -50,6 +53,10 @@ type PRInfo struct {
 	// comment (the storeless source of truth). nil on the first review. The wire
 	// layer merges this run's findings into it (MergeLedger) before rendering.
 	PriorLedger []LedgerEntry
+	// LedgerTrusted is set when PriorLedger came from the authenticated user's
+	// summary. A tokenless read can see another author's comment, which must not
+	// decide the process exit.
+	LedgerTrusted bool
 	// PriorSummaryHeadSHA is the commit shown in the existing miucr summary.
 	PriorSummaryHeadSHA string
 	// PriorPublishedHeadSHA is set only after a prior publish reached its final step.
@@ -104,6 +111,7 @@ func FetchPR(ctx stdctx.Context, client Client, ref PRRef) (*PRInfo, error) {
 		BaseSHA:           pr.Base.GetSHA(),
 		BaseBranch:        pr.Base.GetRef(),
 		IsFork:            isFork(ref, pr),
+		AuthorLogin:       pr.GetUser().GetLogin(),
 		AuthorAssociation: pr.GetAuthorAssociation(),
 		HTMLBase:          pr.GetBase().GetRepo().GetHTMLURL(),
 	}
@@ -129,7 +137,13 @@ func FetchPR(ctx stdctx.Context, client Client, ref PRRef) (*PRInfo, error) {
 	}
 	// One read of the prior summary comment seeds BOTH the storeless runs counter
 	// and the finding ledger (both live in the same lowest-id marked comment).
-	priorBody := lowestMarkedCommentBody(ctx, client, info)
+	priorBody, trusted, readErr := readSummaryBody(ctx, client, info)
+	if readErr != nil {
+		os.Stderr.WriteString(config.RedactString("miucr: summary read failed: "+readErr.Error()) + "\n")
+		priorBody = ""
+		trusted = false
+	}
+	info.LedgerTrusted = trusted
 	info.ReviewCount = parseRunsCount(priorBody) + 1 // include this in-flight run; first review = 1
 	info.PriorLedger = ParseLedger(priorBody)
 	info.PriorSummaryHeadSHA = parseReviewedCommit(priorBody)
@@ -143,23 +157,47 @@ func FetchPR(ctx stdctx.Context, client Client, ref PRRef) (*PRInfo, error) {
 // marker of any author, because that dry-run cannot post. Any other login failure
 // returns "" so a copied marker cannot seed the runs counter, ledger, or publish key.
 func lowestMarkedCommentBody(ctx stdctx.Context, client Client, info *PRInfo) string {
-	login, err := currentLogin(ctx, client)
+	body, _, err := readSummaryBody(ctx, client, info)
 	if err != nil {
-		if !githubUnauthorized(err) {
-			os.Stderr.WriteString(config.RedactString("miucr: summary author unresolved: "+err.Error()) + "\n")
-			return ""
-		}
-		_, _, body, err := scanMarkedComments(ctx, client, info, "")
-		if err != nil {
-			return ""
-		}
-		return body
-	}
-	_, _, body, err := lowestMarkedComment(ctx, client, info, login)
-	if err != nil {
+		os.Stderr.WriteString(config.RedactString("miucr: summary read failed: "+err.Error()) + "\n")
 		return ""
 	}
 	return body
+}
+
+func readSummaryBody(ctx stdctx.Context, client Client, info *PRInfo) (string, bool, error) {
+	login, err := currentLogin(ctx, client)
+	if err != nil {
+		if !githubUnauthorized(err) {
+			return "", false, err
+		}
+		_, _, body, err := scanMarkedComments(ctx, client, info, "")
+		return body, false, err
+	}
+	_, _, body, err := lowestMarkedComment(ctx, client, info, login)
+	return body, err == nil, err
+}
+
+// ReloadPriorLedger re-reads the summary ledger immediately before a publish
+// writes it back, so a reply accepted during the review is not reverted.
+// A read error is returned so the publish does not overwrite a newer ledger
+// with the copy captured when the review started.
+func ReloadPriorLedger(ctx stdctx.Context, client Client, info *PRInfo) error {
+	if info == nil {
+		return nil
+	}
+	body, trusted, err := readSummaryBody(ctx, client, info)
+	if err != nil {
+		return mapWriteError("github.summary_read_failed", "reloading summary ledger", err)
+	}
+	info.LedgerTrusted = trusted
+	if !trusted || body == "" {
+		return nil
+	}
+	if led := ParseLedger(body); led != nil {
+		info.PriorLedger = led
+	}
+	return nil
 }
 
 // priorRunsCount reads the runs token from the lowest-id miucr summary issue

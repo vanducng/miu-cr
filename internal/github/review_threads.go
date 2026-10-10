@@ -11,12 +11,16 @@ import (
 )
 
 type ReviewThread struct {
+	ID       string
 	Resolved bool
 	Comments []ReviewThreadComment
 }
 
 type ReviewThreadComment struct {
-	Body string
+	ID     int64
+	Body   string
+	Author string
+	URL    string
 }
 
 type reviewThreadsClient interface {
@@ -61,10 +65,14 @@ query($owner: String!, $repo: String!, $number: Int!, $cursor: String) {
           endCursor
         }
         nodes {
+          id
           isResolved
           comments(first: 100) {
             nodes {
+              databaseId
               body
+              url
+              author { login }
             }
           }
         }
@@ -85,9 +93,13 @@ query($owner: String!, $repo: String!, $number: Int!, $cursor: String) {
 			return nil, err
 		}
 		for _, node := range page.Nodes {
-			thread := ReviewThread{Resolved: node.IsResolved, Comments: make([]ReviewThreadComment, 0, len(node.Comments.Nodes))}
+			thread := ReviewThread{ID: node.ID, Resolved: node.IsResolved, Comments: make([]ReviewThreadComment, 0, len(node.Comments.Nodes))}
 			for _, c := range node.Comments.Nodes {
-				thread.Comments = append(thread.Comments, ReviewThreadComment{Body: c.Body})
+				author := ""
+				if c.Author != nil {
+					author = c.Author.Login
+				}
+				thread.Comments = append(thread.Comments, ReviewThreadComment{ID: c.DatabaseID, Body: c.Body, Author: author, URL: c.URL})
 			}
 			all = append(all, thread)
 		}
@@ -106,10 +118,16 @@ type reviewThreadsPage struct {
 		EndCursor   string `json:"endCursor"`
 	} `json:"pageInfo"`
 	Nodes []struct {
-		IsResolved bool `json:"isResolved"`
+		ID         string `json:"id"`
+		IsResolved bool   `json:"isResolved"`
 		Comments   struct {
 			Nodes []struct {
-				Body string `json:"body"`
+				DatabaseID int64  `json:"databaseId"`
+				Body       string `json:"body"`
+				URL        string `json:"url"`
+				Author     *struct {
+					Login string `json:"login"`
+				} `json:"author"`
 			} `json:"nodes"`
 		} `json:"comments"`
 	} `json:"nodes"`

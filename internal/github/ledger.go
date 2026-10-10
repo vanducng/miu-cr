@@ -18,12 +18,18 @@ import (
 // Finding lifecycle states carried in the comment-embedded ledger. "open" and
 // "reopened" are both currently-flagged (reopened = was resolved, came back);
 // "resolved" means a later commit dropped it from the diff'd findings.
+// "deferred" is an accepted deferral and does not block approval.
+// "irrelevant" is off-diff noise that was dropped and does not block approval.
 const (
-	statusOpen     = "open"
-	statusResolved = "resolved"
-	statusReopened = "reopened"
+	statusOpen       = "open"
+	statusResolved   = "resolved"
+	statusReopened   = "reopened"
+	statusDeferred   = "deferred"
+	statusIrrelevant = "irrelevant"
 
-	resolutionConversation = "conversation"
+	resolutionConversation  = "conversation"
+	resolutionDeferral      = "deferral"
+	resolutionNotApplicable = "not_applicable"
 )
 
 // maxLedgerEntries bounds the tracked set so the hidden marker + rendered tables
@@ -47,12 +53,13 @@ type LedgerEntry struct {
 	Line     int    `json:"l,omitempty"`  // last-known line
 	Title    string `json:"t,omitempty"`  // short title (untrusted model text)
 	Category string `json:"c,omitempty"`  // category (untrusted model text)
-	Status   string `json:"s"`            // open | resolved | reopened
+	Status   string `json:"s"`            // open | resolved | reopened | deferred | irrelevant
 	Sev      string `json:"v"`            // current/last severity
 	FirstSev string `json:"fv"`           // severity when first opened (the "before")
 	OpenSHA  string `json:"os"`           // origin commit (head when first opened)
 	ResSHA   string `json:"rs,omitempty"` // head when resolved
-	ResKind  string `json:"rk,omitempty"` // conversation when resolved outside review result
+	ResKind  string `json:"rk,omitempty"` // conversation, deferral, or not_applicable
+	Note     string `json:"n,omitempty"`  // short reason for a deferral or not-applicable resolution
 	FirstAt  string `json:"fa"`           // RFC3339 first opened
 	ResAt    string `json:"ra,omitempty"` // RFC3339 resolved
 	Reopens  int    `json:"ro,omitempty"` // times resolved-then-reappeared
@@ -74,6 +81,19 @@ func renderLedgerMarker(entries []LedgerEntry) string {
 		return ""
 	}
 	return fmt.Sprintf("<!-- %s%s -->", ledgerPrefix, base64.StdEncoding.EncodeToString(data))
+}
+
+// KeepLedgerMarker copies the hidden ledger from previous onto body when body
+// has none, so an error notice cannot wipe accepted deferrals.
+func KeepLedgerMarker(body, previous string) string {
+	if strings.Contains(body, "<!-- "+ledgerPrefix) {
+		return body
+	}
+	marker := ledgerMarkerRe.FindString(previous)
+	if marker == "" {
+		return body
+	}
+	return strings.TrimRight(body, "\n") + "\n" + marker + "\n"
 }
 
 // ParseLedger reads the prior ledger out of a summary comment body, returning
@@ -123,8 +143,10 @@ func MergeLedger(prior []LedgerEntry, current []engine.Finding, headSHA string, 
 				e.ResSHA = ""
 				e.ResKind = ""
 				e.ResAt = ""
-			case statusReopened, statusOpen:
-				// already current; keep status
+				e.Note = ""
+			case statusDeferred, statusIrrelevant, statusReopened, statusOpen:
+				// deferred stays deferred while the model still reports it;
+				// irrelevant stays irrelevant until a later pass sees it on the diff
 			default:
 				e.Status = statusOpen // normalize "" / unknown (e.g. tampered or cross-version) status
 			}
@@ -162,6 +184,7 @@ func MergeLedger(prior []LedgerEntry, current []engine.Finding, headSHA string, 
 			e.ResSHA = headSHA
 			e.ResKind = ""
 			e.ResAt = nowStr
+			e.Note = ""
 		} else if e.Status == statusResolved && e.ResKind == resolutionConversation && diffPaths[e.Path] {
 			e.ResSHA = headSHA
 			e.ResKind = ""
@@ -241,18 +264,26 @@ func (s reviewChangeSize) tier() string {
 
 func ledgerResultLine(entries []LedgerEntry, reviewCount int, headSHA string, size reviewChangeSize) string {
 	counts := map[string]int{}
-	open, resolved := 0, 0
+	open, resolved, deferred := 0, 0, 0
 	for _, e := range entries {
-		if e.Status == statusResolved {
+		switch e.Status {
+		case statusResolved:
 			resolved++
-			continue
+		case statusDeferred, statusIrrelevant:
+			if e.Status == statusDeferred {
+				deferred++
+			}
+		default:
+			open++
+			counts[severityLabel(e.Sev)]++
 		}
-		open++
-		counts[severityLabel(e.Sev)]++
 	}
 
 	if open == 0 {
 		note := mdInline(reviewPassedNote(resolved, reviewCount, headSHA, size))
+		if deferred > 0 {
+			return fmt.Sprintf("Review passed! %d finding%s deferred. %s", deferred, plural(deferred), note)
+		}
 		if resolved > 0 {
 			return fmt.Sprintf("Review passed! %d finding%s resolved. %s", resolved, plural(resolved), note)
 		}
@@ -417,7 +448,7 @@ func stableIndex(headSHA string, resolved, reviewCount int, size reviewChangeSiz
 func ledgerResultPlain(entries []LedgerEntry) string {
 	open := 0
 	for _, e := range entries {
-		if e.Status != statusResolved {
+		if ledgerBlocksApproval(e.Status) {
 			open++
 		}
 	}
@@ -434,11 +465,17 @@ func ledgerResultPlain(entries []LedgerEntry) string {
 // escaped; commit SHAs link to their commit page. inlineURLs (fp -> inline
 // comment URL) links the Location cell to the review thread when one exists.
 func renderLedger(b *strings.Builder, info *PRInfo, entries []LedgerEntry, inlineURLs map[string]string, offDiff map[string]bool) {
-	var open, resolved []LedgerEntry
+	var open, deferred, resolved []LedgerEntry
+	irrelevant := 0
 	for _, e := range entries {
-		if e.Status == statusResolved {
+		switch e.Status {
+		case statusResolved:
 			resolved = append(resolved, e)
-		} else {
+		case statusDeferred:
+			deferred = append(deferred, e)
+		case statusIrrelevant:
+			irrelevant++
+		default:
 			open = append(open, e)
 		}
 	}
@@ -449,6 +486,20 @@ func renderLedger(b *strings.Builder, info *PRInfo, entries []LedgerEntry, inlin
 		b.WriteString("| Priority | Issue | Location | Opened |\n|----------|-------|----------|--------|\n")
 		for _, e := range open {
 			fmt.Fprintf(b, "| %s | %s | %s | %s |\n", ledgerSevCell(e, false), ledgerIssue(e, offDiff[e.FP]), ledgerLocation(info, e, inlineURLs), shaLink(info, e.OpenSHA))
+		}
+		b.WriteString("\n")
+	}
+
+	if len(deferred) > 0 {
+		sortLedgerBySeverity(deferred)
+		fmt.Fprintf(b, "**⏸️ Deferred (%d)**\n\n", len(deferred))
+		b.WriteString("| Priority | Issue | Location | Note |\n|----------|-------|----------|------|\n")
+		for _, e := range deferred {
+			note := mdInline(e.Note)
+			if note == "" {
+				note = "-"
+			}
+			fmt.Fprintf(b, "| %s | %s | %s | %s |\n", ledgerSevCell(e, false), ledgerIssue(e, false), ledgerLocation(info, e, inlineURLs), note)
 		}
 		b.WriteString("\n")
 	}
@@ -470,6 +521,20 @@ func renderLedger(b *strings.Builder, info *PRInfo, entries []LedgerEntry, inlin
 		}
 		b.WriteString("\n")
 	}
+	if irrelevant > 0 {
+		fmt.Fprintf(b, "_%d off-diff finding%s marked irrelevant and not blocking._\n\n", irrelevant, plural(irrelevant))
+	}
+}
+
+// ledgerBlocksApproval reports whether a ledger status still needs a response
+// before a clean approval. Accepted deferrals and dropped off-diff noise do not.
+func ledgerBlocksApproval(status string) bool {
+	switch status {
+	case statusResolved, statusDeferred, statusIrrelevant:
+		return false
+	default:
+		return true
+	}
 }
 
 // ledgerResolvedCell renders the "Resolved" column. A commit resolution shows the
@@ -479,11 +544,17 @@ func renderLedger(b *strings.Builder, info *PRInfo, entries []LedgerEntry, inlin
 // exists (inlineURLs[fp], GitHub-server-assigned so angle-bracketed), visually
 // distinct from commit rows.
 func ledgerResolvedCell(info *PRInfo, e LedgerEntry, inlineURLs map[string]string) string {
-	if e.ResKind == resolutionConversation {
+	switch e.ResKind {
+	case resolutionConversation:
 		if u := inlineURLs[e.FP]; u != "" {
 			return fmt.Sprintf("[💬 conversation](<%s>)", u)
 		}
 		return "💬 conversation"
+	case resolutionNotApplicable:
+		if u := inlineURLs[e.FP]; u != "" {
+			return fmt.Sprintf("[not applicable](<%s>)", u)
+		}
+		return "not applicable"
 	}
 	cell := shaLink(info, e.ResSHA)
 	if e.OpenSHA != "" && e.ResSHA != "" && e.OpenSHA != e.ResSHA {

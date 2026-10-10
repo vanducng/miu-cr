@@ -232,7 +232,7 @@ func TestHostRunnerThreadResolutionSyncDropClearsThrottle(t *testing.T) {
 		log:              slog.New(slog.NewTextHandler(io.Discard, nil)),
 	}
 
-	r.enqueueThreadResolutionSync(stdctx.Background(), nil, HostRepoConfig{Slug: "octo/hello"}, prWithHead(1, "sha-A"), now)
+	r.enqueueThreadResolutionSync(stdctx.Background(), nil, HostRepoConfig{Slug: "octo/hello"}, prWithHead(1, "sha-A"), now, "")
 
 	if _, ok := r.threadSyncLast["octo/hello#1"]; ok {
 		t.Fatal("dropped sync kept throttle reservation")
@@ -257,7 +257,7 @@ func TestHostRunnerThreadResolutionSyncDetachesFromPollContext(t *testing.T) {
 			Mode:     "poll",
 			Interval: time.Minute,
 		},
-	}, prWithHead(1, "sha-A"), now)
+	}, prWithHead(1, "sha-A"), now, "")
 
 	if !r.waitThreadResolutionSync(time.Second) {
 		t.Fatal("sync worker did not finish")
@@ -1095,7 +1095,7 @@ func TestRunHostDrainWaitsForSyncBudget(t *testing.T) {
 			Mode:     "poll",
 			Interval: time.Minute,
 		},
-	}, prWithHead(1, "sha-A"), time.Now())
+	}, prWithHead(1, "sha-A"), time.Now(), "")
 
 	ctx, cancel := stdctx.WithCancel(stdctx.Background())
 	cancel()
@@ -1127,7 +1127,7 @@ func TestHostRunnerCancelsSyncWhenDrainTimesOut(t *testing.T) {
 			Mode:     "poll",
 			Interval: time.Minute,
 		},
-	}, prWithHead(1, "sha-A"), now)
+	}, prWithHead(1, "sha-A"), now, "")
 	if r.waitThreadResolutionSync(30 * time.Millisecond) {
 		t.Fatal("wait returned while sync was still blocked")
 	}

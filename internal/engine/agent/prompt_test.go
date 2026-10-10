@@ -31,6 +31,7 @@ func TestSystemPromptDescribesSymbolContextRelations(t *testing.T) {
 			"relation=implementations",
 			"relation=dependencies",
 			"Verify the relevant lines with file_read",
+			"Report a finding outside the changed lines only when this pull request must address it.",
 		} {
 			if !strings.Contains(prompt, want) {
 				t.Fatalf("%s system prompt missing %q", name, want)

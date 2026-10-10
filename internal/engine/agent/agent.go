@@ -113,6 +113,9 @@ type Agent interface {
 	// its deterministic anchorer; "" means no usable quote (the finding stays
 	// dropped).
 	RelocateQuote(ctx stdctx.Context, rr RelocateRequest) (string, engine.Usage, error)
+	// JudgeReply runs one tools-less completion for a single developer reply on
+	// one finding. It must not review the rest of the pull request.
+	JudgeReply(ctx stdctx.Context, rr ReplyJudgeRequest) (ReplyVerdict, error)
 }
 
 const (
