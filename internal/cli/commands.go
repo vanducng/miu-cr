@@ -1473,16 +1473,23 @@ func quotaResetSeconds(details map[string]any) int {
 	if details == nil {
 		return 0
 	}
-	switch n := details["resets_in_seconds"].(type) {
-	case int:
-		return n
-	case int64:
-		return int(n)
-	case float64:
-		return int(n)
-	default:
-		return 0
+	for _, key := range []string{"resets_in_seconds", "retry_after_seconds"} {
+		switch n := details[key].(type) {
+		case int:
+			if n > 0 {
+				return n
+			}
+		case int64:
+			if n > 0 {
+				return int(n)
+			}
+		case float64:
+			if n > 0 {
+				return int(n)
+			}
+		}
 	}
+	return 0
 }
 
 func commentIDOf(j serve.Job) int64 {

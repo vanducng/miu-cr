@@ -12,7 +12,7 @@ import (
 
 func TestThreadReplyQuotaCoolsDownInsteadOfRetrying(t *testing.T) {
 	SetServeThreadReply(func(context.Context, serve.Job) error {
-		return &CLIError{Code: "provider.rate_limited", Message: "provider rate limited", Exit: 2, Details: map[string]any{"resets_in_seconds": 7200}}
+		return &CLIError{Code: "provider.rate_limited", Message: "provider rate limited", Exit: 2, Details: map[string]any{"retry_after_seconds": 7200}}
 	})
 	t.Cleanup(func() { SetServeThreadReply(nil) })
 	fn := buildServeReviewFn(slog.New(slog.NewTextHandler(io.Discard, nil)), "high", nil, nil, false)
