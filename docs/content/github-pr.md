@@ -295,7 +295,7 @@ without a local PR-thread store:
 
 Developers answer a finding on its thread:
 
-- `Fixed in <sha>: ...` checks that the commit is on the pull request and changes the finding's file, then resolves the thread or explains why it is still open.
+- `Fixed in <sha>: ...` checks that the commit is on the pull request and changes the finding's file, then resolves the thread or explains why it is still open. Only the pull request author, or an owner, member, or collaborator, is judged.
 - `Deferred: ...` or `Not applicable: ...` is judged from that reason. An accepted deferral moves to **⏸️ Deferred** and does not block approval. A vague reason stays open.
 - Findings outside the changed lines share one thread on the nearest changed line, or one pull request comment when no line can hold it. Info-level notes in files the pull request does not change are marked irrelevant and are not blocking.
 - One notice comment per review mentions the pull request author while findings are open and is edited in place.

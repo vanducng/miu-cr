@@ -72,7 +72,7 @@ It is written **only on a successful review** (atomically: temp file + rename), 
 | `file` | findings on any file present in the diff |
 | `nofilter` | every finding |
 
-`file` and `nofilter` never widen the **inline** set past the diff (GitHub rejects an off-diff inline comment); they surface the extra findings in the summary, SARIF, and local output instead.
+`file` and `nofilter` never put a finding on a line GitHub will reject. A finding that cannot sit on its own changed line shares one thread on the nearest changed line, or one pull request comment. Info notes in files the pull request does not change are marked irrelevant and are not blocking. They still appear in the summary, SARIF, and local output.
 
 ### `--format`
 

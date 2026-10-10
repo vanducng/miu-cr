@@ -77,11 +77,22 @@ func ParseThreadReply(body string) ParsedReply {
 
 // ThreadReplyRequest is one human comment the reply handler should judge.
 type ThreadReplyRequest struct {
-	CommentID int64
-	Body      string
-	UserLogin string
-	InReplyTo int64
-	Kind      string // review_comment or issue_comment
+	CommentID         int64
+	Body              string
+	UserLogin         string
+	AuthorAssociation string
+	InReplyTo         int64
+	Kind              string // review_comment or issue_comment
+}
+
+// ReplyAuthorized reports whether this commenter may close or defer a finding.
+// The pull request author may always reply. Anyone else must be an owner,
+// member, or collaborator. An empty association is not trusted.
+func ReplyAuthorized(login, association, authorLogin string) bool {
+	if authorLogin != "" && strings.EqualFold(strings.TrimSpace(login), authorLogin) {
+		return true
+	}
+	return trustedAssociations[association]
 }
 
 // ThreadReplyJudge judges one finding on one reply. Implementations must not
@@ -156,6 +167,9 @@ func ApplyThreadReply(ctx stdctx.Context, client Client, info *PRInfo, req Threa
 	parsed := ParseThreadReply(req.Body)
 	if parsed.Intent == "" {
 		return ThreadReplyResult{Action: "ignored", Reason: "unrecognized"}, nil
+	}
+	if !ReplyAuthorized(req.UserLogin, req.AuthorAssociation, info.AuthorLogin) {
+		return ThreadReplyResult{Action: "ignored", Reason: "untrusted_comment"}, nil
 	}
 
 	reviewComments, err := listAllReviewComments(ctx, client, info)
@@ -248,7 +262,7 @@ func ApplyThreadReply(ctx stdctx.Context, client Client, info *PRInfo, req Threa
 	if err := postThreadReply(ctx, client, info, req, replyBody); err != nil {
 		return ThreadReplyResult{Accepted: accepted, Rejected: rejected, Reason: "reply_post_failed"}, mapWriteError("github.thread_reply_failed", "posting reply", err)
 	}
-	resolveAcceptedThreads(ctx, client, decisions, next)
+	resolveAcceptedThreads(ctx, client, decisions, next, reviewComments)
 
 	result := ThreadReplyResult{Action: "replied", Reason: "replied", Accepted: accepted, Rejected: rejected}
 	if rejected == 0 && LedgerClearForApproval(next) {
@@ -459,7 +473,7 @@ func postThreadReply(ctx stdctx.Context, client Client, info *PRInfo, req Thread
 	return err
 }
 
-func resolveAcceptedThreads(ctx stdctx.Context, client Client, decisions []replyDecision, ledger []LedgerEntry) {
+func resolveAcceptedThreads(ctx stdctx.Context, client Client, decisions []replyDecision, ledger []LedgerEntry, reviewComments []*gh.PullRequestComment) {
 	writer, ok := client.(reviewThreadWriter)
 	if !ok {
 		return
@@ -469,7 +483,7 @@ func resolveAcceptedThreads(ctx stdctx.Context, client Client, decisions []reply
 		if d.target.Thread == "" || seen[d.target.Thread] {
 			continue
 		}
-		if !threadClear(d.target.Thread, decisions, ledger) {
+		if !threadClear(d.target.RootID, reviewComments, ledger) {
 			continue
 		}
 		seen[d.target.Thread] = true
@@ -477,12 +491,18 @@ func resolveAcceptedThreads(ctx stdctx.Context, client Client, decisions []reply
 	}
 }
 
-func threadClear(threadID string, decisions []replyDecision, ledger []LedgerEntry) bool {
-	for _, d := range decisions {
-		if d.target.Thread != threadID {
-			continue
-		}
-		if ledgerBlocksApproval(ledger[d.target.Index].Status) {
+func threadClear(root int64, comments []*gh.PullRequestComment, ledger []LedgerEntry) bool {
+	bodies, _ := threadBodies(comments, nil, root, root)
+	fps := fpsInBodies(bodies)
+	if len(fps) == 0 {
+		return false
+	}
+	status := make(map[string]string, len(ledger))
+	for _, e := range ledger {
+		status[e.FP] = e.Status
+	}
+	for _, fp := range fps {
+		if ledgerBlocksApproval(status[fp]) {
 			return false
 		}
 	}
@@ -697,8 +717,8 @@ func ListActionableReplies(ctx stdctx.Context, client Client, info *PRInfo) ([]T
 		if len(out) >= 8 {
 			break
 		}
-		req := ThreadReplyRequest{CommentID: c.GetID(), Body: c.GetBody(), UserLogin: c.GetUser().GetLogin(), InReplyTo: c.GetInReplyTo(), Kind: "review_comment"}
-		if !actionableReply(req, login, reviewComments, issueComments) {
+		req := ThreadReplyRequest{CommentID: c.GetID(), Body: c.GetBody(), UserLogin: c.GetUser().GetLogin(), AuthorAssociation: c.GetAuthorAssociation(), InReplyTo: c.GetInReplyTo(), Kind: "review_comment"}
+		if !actionableReply(req, login, info.AuthorLogin, reviewComments, issueComments) {
 			continue
 		}
 		if !threadHasFingerprint(reviewComments, req) {
@@ -710,8 +730,8 @@ func ListActionableReplies(ctx stdctx.Context, client Client, info *PRInfo) ([]T
 		if len(out) >= 8 {
 			break
 		}
-		req := ThreadReplyRequest{CommentID: c.GetID(), Body: c.GetBody(), UserLogin: c.GetUser().GetLogin(), Kind: "issue_comment"}
-		if !actionableReply(req, login, reviewComments, issueComments) {
+		req := ThreadReplyRequest{CommentID: c.GetID(), Body: c.GetBody(), UserLogin: c.GetUser().GetLogin(), AuthorAssociation: c.GetAuthorAssociation(), Kind: "issue_comment"}
+		if !actionableReply(req, login, info.AuthorLogin, reviewComments, issueComments) {
 			continue
 		}
 		out = append(out, req)
@@ -719,7 +739,7 @@ func ListActionableReplies(ctx stdctx.Context, client Client, info *PRInfo) ([]T
 	return out, nil
 }
 
-func actionableReply(req ThreadReplyRequest, botLogin string, reviewComments []*gh.PullRequestComment, issueComments []*gh.IssueComment) bool {
+func actionableReply(req ThreadReplyRequest, botLogin, authorLogin string, reviewComments []*gh.PullRequestComment, issueComments []*gh.IssueComment) bool {
 	if req.CommentID <= 0 || IsBotBody(req.Body) {
 		return false
 	}
@@ -727,6 +747,9 @@ func actionableReply(req ThreadReplyRequest, botLogin string, reviewComments []*
 		return false
 	}
 	if ParseThreadReply(req.Body).Intent == "" {
+		return false
+	}
+	if !ReplyAuthorized(req.UserLogin, req.AuthorAssociation, authorLogin) {
 		return false
 	}
 	return !replyAlreadyPosted(reviewComments, issueComments, req.CommentID)

@@ -902,6 +902,14 @@ func publishReviewWithDiffs(ctx stdctx.Context, client mgithub.Client, info *mgi
 	if req.Mode == "checks" {
 		return publishChecks(ctx, client, info, res, diffs, prResult, req, ew)
 	}
+	key := fmt.Sprintf("%s/%s#%d", info.Owner, info.Repo, info.Number)
+	return withPRFlight(key, func() error {
+		mgithub.ReloadPriorLedger(ctx, client, info)
+		return publishReviewLocked(ctx, client, info, res, prResult, req, prStore, ew, categoryURLs, ruleCites, publishKey, diffs)
+	})
+}
+
+func publishReviewLocked(ctx stdctx.Context, client mgithub.Client, info *mgithub.PRInfo, res engine.ReviewResult, prResult *cli.PRResult, req cli.PRReviewRequest, prStore store.PRThreadStore, ew embedWriter, categoryURLs map[string]string, ruleCites map[string]mgithub.RuleCitation, publishKey string, diffs []diff.Diff) error {
 	var existing map[string]string
 	err := retryTransient(ctx, maxGitHubAttempts, func() error {
 		var e error

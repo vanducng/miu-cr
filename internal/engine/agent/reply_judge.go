@@ -13,7 +13,8 @@ import (
 	"github.com/vanducng/miu-cr/internal/config"
 )
 
-const replyJudgeMaxTokens = 256
+// replyJudgeMaxTokens stays at the other short-pass size because reasoning tokens count against it.
+const replyJudgeMaxTokens = 1024
 
 const replyJudgeSystemPrompt = `You judge one developer reply on one code-review finding. Reply with JSON only: {"accept":true|false,"explanation":"one sentence"}.
 Accept a fix only when the cited commit changes the finding's file in a way that addresses it. Accept a deferral only when the reason names what is deferred, why it is safe to merge, and where it is tracked. Accept not-applicable only when the reason shows the finding does not apply to this change.

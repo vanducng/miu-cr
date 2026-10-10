@@ -265,7 +265,7 @@ func TestWebhook_ReviewCommentDispatchesReply(t *testing.T) {
 	srv := newTestServer(t, disp, io.Discard)
 	body := []byte(`{
 		"action": "created",
-		"pull_request": {"number": 42},
+		"pull_request": {"number": 42, "user": {"login": "dev"}},
 		"comment": {"id": 9, "body": "Fixed in abcdef1: tightened the bound", "user": {"login": "dev"}, "in_reply_to_id": 8},
 		"repository": {"name": "hello", "owner": {"login": "octocat"}}
 	}`)
@@ -300,6 +300,24 @@ func TestWebhook_BotCommentIgnored(t *testing.T) {
 	}
 }
 
+func TestWebhook_UntrustedReplyIgnored(t *testing.T) {
+	disp := &fakeDispatcher{accept: true}
+	srv := newTestServer(t, disp, io.Discard)
+	body := []byte(`{
+		"action": "created",
+		"pull_request": {"number": 42, "user": {"login": "dev"}},
+		"comment": {"id": 9, "body": "Deferred: tracked in #4 because this is safe to ship later", "user": {"login": "stranger"}, "author_association": "NONE", "in_reply_to_id": 8},
+		"repository": {"name": "hello", "owner": {"login": "octocat"}}
+	}`)
+	rec := post(t, srv, "pull_request_review_comment", body, sign([]byte(testSecret), body))
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d", rec.Code)
+	}
+	if len(disp.submitted()) != 0 {
+		t.Fatal("untrusted reply dispatched")
+	}
+}
+
 func TestWebhook_IssueCommentRequiresPullRequest(t *testing.T) {
 	disp := &fakeDispatcher{accept: true}
 	srv := newTestServer(t, disp, io.Discard)
@@ -315,7 +333,7 @@ func TestWebhook_IssueCommentRequiresPullRequest(t *testing.T) {
 	}
 	pr := []byte(`{
 		"action": "created",
-		"issue": {"number": 7, "pull_request": {"url": "https://api.github.com/repos/octocat/hello/pulls/7"}},
+		"issue": {"number": 7, "user": {"login": "dev"}, "pull_request": {"url": "https://api.github.com/repos/octocat/hello/pulls/7"}},
 		"comment": {"id": 4, "body": "Deferred: tracked in #4 because the change is safe", "user": {"login": "dev"}},
 		"repository": {"name": "hello", "owner": {"login": "octocat"}}
 	}`)

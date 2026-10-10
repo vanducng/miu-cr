@@ -166,6 +166,21 @@ func lowestMarkedCommentBody(ctx stdctx.Context, client Client, info *PRInfo) st
 	return body
 }
 
+// ReloadPriorLedger re-reads the summary ledger immediately before a publish
+// writes it back, so a reply accepted during the review is not reverted.
+func ReloadPriorLedger(ctx stdctx.Context, client Client, info *PRInfo) {
+	if info == nil {
+		return
+	}
+	body := lowestMarkedCommentBody(ctx, client, info)
+	if body == "" {
+		return
+	}
+	if led := ParseLedger(body); led != nil {
+		info.PriorLedger = led
+	}
+}
+
 // priorRunsCount reads the runs token from the lowest-id miucr summary issue
 // comment, returning N (0 when absent/garbled). Retained for the unit test; the
 // FetchPR path reads the body once via lowestMarkedCommentBody.

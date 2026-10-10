@@ -61,8 +61,9 @@ reaches a log line, because the clone URL embeds the PAT.
    `ready_for_review` start a review. Draft opens and closed PRs are ignored, and
    host polling cancels unfinished jobs once the PR leaves the open set. A review
    comment or issue comment starts a thread reply only when the action is
-   `created`, the body is a fix, deferral, or not-applicable reply, and the body
-   is not one the bot wrote. Issue comments must belong to a pull request. An
+   `created`, the body is a fix, deferral, or not-applicable reply, the body
+   is not one the bot wrote, and the commenter is the pull request author or an
+   owner, member, or collaborator. Issue comments must belong to a pull request. An
    event for a repo outside `--repos` is `200`-ignored and logged.
 5. **Respond first**: serve returns `200` *before* dispatching, so GitHub's
    ~10 s delivery budget is never spent on the LLM review.

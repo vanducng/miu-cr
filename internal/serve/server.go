@@ -41,11 +41,12 @@ const JobKindThreadReply = "thread_reply"
 
 // ThreadReply is one developer comment to judge. A review job leaves it nil.
 type ThreadReply struct {
-	CommentID int64
-	Body      string
-	UserLogin string
-	InReplyTo int64
-	Kind      string
+	CommentID         int64
+	Body              string
+	UserLogin         string
+	AuthorAssociation string
+	InReplyTo         int64
+	Kind              string
 }
 
 // Job is a unit of work handed to the Dispatcher: the PR to review, the ref in

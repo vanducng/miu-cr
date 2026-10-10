@@ -875,11 +875,12 @@ func (h *HostRunner) scanThreadReplies(ctx stdctx.Context, client mgithub.Client
 			HeadSHA:        info.HeadSHA,
 			Kind:           JobKindThreadReply,
 			Reply: &ThreadReply{
-				CommentID: body.CommentID,
-				Body:      body.Body,
-				UserLogin: body.UserLogin,
-				InReplyTo: body.InReplyTo,
-				Kind:      body.Kind,
+				CommentID:         body.CommentID,
+				Body:              body.Body,
+				UserLogin:         body.UserLogin,
+				AuthorAssociation: body.AuthorAssociation,
+				InReplyTo:         body.InReplyTo,
+				Kind:              body.Kind,
 			},
 		}
 		if h.disp.Submit(job) != SubmitQueued {

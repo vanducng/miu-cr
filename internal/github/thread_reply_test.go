@@ -224,6 +224,69 @@ func TestApplyThreadReplyIgnoresBotAndDuplicate(t *testing.T) {
 	}
 }
 
+func TestApplyThreadReplyIgnoresUntrustedCommenter(t *testing.T) {
+	head := "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+	info, _, _, client := replyFixture(t, head)
+	judge := &fakeJudge{accept: true, explain: "should not run"}
+	res, err := ApplyThreadReply(stdctx.Background(), client, info, ThreadReplyRequest{
+		CommentID: 11, Body: "Deferred: tracked in #42 because this helper is unused and safe to ship later",
+		UserLogin: "stranger", AuthorAssociation: "NONE", InReplyTo: 10, Kind: "review_comment",
+	}, judge, config.ApprovalPolicy{Mode: "clean"}, time.Now())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if res.Reason != "untrusted_comment" || judge.n != 0 || len(client.replies) != 0 || res.Approved {
+		t.Fatalf("result=%+v judge=%d replies=%d", res, judge.n, len(client.replies))
+	}
+}
+
+func TestApplyThreadReplyKeepsSharedThreadOpen(t *testing.T) {
+	head := "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+	now := time.Date(2026, 6, 28, 10, 0, 0, 0, time.UTC)
+	info := &PRInfo{Owner: "acme", Repo: "app", Number: 1, HeadSHA: head, HTMLBase: "https://github.com/acme/app", ReviewCount: 1, AuthorAssociation: "MEMBER", AuthorLogin: "dev"}
+	first := engine.Finding{File: "a.go", Line: 5, Severity: "low", Category: "bug", Title: "bounds", QuotedCode: "i <= n"}
+	second := engine.Finding{File: "b.go", Line: 9, Severity: "low", Category: "bug", Title: "other", QuotedCode: "return x"}
+	findings := []engine.Finding{first, second}
+	body := RenderSummaryFull(info, findings, nil, 0, nil, nil, SummaryOptions{
+		Ledger:    MergeLedger(nil, findings, "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", map[string]bool{"a.go": true, "b.go": true}, now),
+		Published: true,
+	})
+	rootBody := "shared\n\n" + fpMarker(Fingerprint(first)) + "\n" + fpMarker(Fingerprint(second)) + "\n" + botMarker
+	root := &gh.PullRequestComment{ID: gh.Ptr(int64(10)), User: &gh.User{Login: gh.Ptr("reviewer")}, Body: gh.Ptr(rootBody)}
+	client := &replyClient{
+		recordClient: recordClient{
+			login:   "reviewer",
+			headSHA: head,
+			issueStore: []*gh.IssueComment{{
+				ID: gh.Ptr(int64(7)), User: &gh.User{Login: gh.Ptr("reviewer")}, Body: gh.Ptr(body),
+			}},
+			reviewComments: [][]*gh.PullRequestComment{{root}},
+		},
+		threads: []ReviewThread{{ID: "THR_SHARED", Comments: []ReviewThreadComment{{ID: 10, Body: rootBody}}}},
+	}
+	res, err := ApplyThreadReply(stdctx.Background(), client, info, ThreadReplyRequest{
+		CommentID: 11,
+		Body:      "Deferred: a.go:5 tracked in #42 because this helper is unused on the request path and safe to ship later",
+		UserLogin: "dev", InReplyTo: 10, Kind: "review_comment",
+	}, nil, config.ApprovalPolicy{Mode: "clean"}, now)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if res.Accepted != 1 || res.Approved || len(client.resolved) != 0 {
+		t.Fatalf("result=%+v resolved=%v", res, client.resolved)
+	}
+	ledger := ParseLedger(client.editedBody)
+	open := 0
+	for _, e := range ledger {
+		if e.Status == statusOpen {
+			open++
+		}
+	}
+	if open != 1 {
+		t.Fatalf("want one finding still open, ledger=%+v", ledger)
+	}
+}
+
 func TestSyncLedgerConversationResolvedKeepsDeferred(t *testing.T) {
 	now := time.Date(2026, 6, 28, 10, 0, 0, 0, time.UTC)
 	entries := []LedgerEntry{{

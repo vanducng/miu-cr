@@ -3,7 +3,6 @@ package wire
 import (
 	stdctx "context"
 	"log/slog"
-	"strconv"
 	"sync"
 	"time"
 
@@ -13,13 +12,36 @@ import (
 	"github.com/vanducng/miu-cr/internal/serve"
 )
 
-var replyFlights sync.Map
+type prFlight struct {
+	mu sync.Mutex
+	n  int
+}
 
-func withReplyFlight(key string, fn func() error) error {
-	v, _ := replyFlights.LoadOrStore(key, &sync.Mutex{})
-	mu := v.(*sync.Mutex)
-	mu.Lock()
-	defer mu.Unlock()
+var (
+	prFlightMu sync.Mutex
+	prFlights  = map[string]*prFlight{}
+)
+
+func withPRFlight(key string, fn func() error) error {
+	prFlightMu.Lock()
+	f := prFlights[key]
+	if f == nil {
+		f = &prFlight{}
+		prFlights[key] = f
+	}
+	f.n++
+	prFlightMu.Unlock()
+
+	f.mu.Lock()
+	defer func() {
+		f.mu.Unlock()
+		prFlightMu.Lock()
+		f.n--
+		if f.n == 0 && prFlights[key] == f {
+			delete(prFlights, key)
+		}
+		prFlightMu.Unlock()
+	}()
 	return fn()
 }
 
@@ -27,8 +49,7 @@ func handleServeThreadReply(ctx stdctx.Context, job serve.Job) error {
 	if job.Reply == nil || job.Reply.CommentID <= 0 {
 		return nil
 	}
-	key := job.Ref + ":" + strconv.FormatInt(job.Reply.CommentID, 10)
-	return withReplyFlight(key, func() error {
+	return withPRFlight(job.Ref, func() error {
 		return applyServeThreadReply(ctx, job)
 	})
 }
@@ -69,11 +90,12 @@ func applyServeThreadReply(ctx stdctx.Context, job serve.Job) error {
 		return err
 	}
 	res, err := mgithub.ApplyThreadReply(ctx, client, info, mgithub.ThreadReplyRequest{
-		CommentID: job.Reply.CommentID,
-		Body:      job.Reply.Body,
-		UserLogin: job.Reply.UserLogin,
-		InReplyTo: job.Reply.InReplyTo,
-		Kind:      job.Reply.Kind,
+		CommentID:         job.Reply.CommentID,
+		Body:              job.Reply.Body,
+		UserLogin:         job.Reply.UserLogin,
+		AuthorAssociation: job.Reply.AuthorAssociation,
+		InReplyTo:         job.Reply.InReplyTo,
+		Kind:              job.Reply.Kind,
 	}, replyJudgeAdapter{llm: llm, retry: review.ProviderRetry}, review.Approval, time.Now())
 	attrs := []any{
 		"repo", info.Owner + "/" + info.Repo, "pr", info.Number, "head_sha", shortSHA(info.HeadSHA),

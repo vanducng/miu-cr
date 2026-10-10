@@ -132,6 +132,11 @@ func webhookJob(event any) (Job, string) {
 		if mgithub.ParseThreadReply(body).Intent == "" {
 			return Job{}, "unrecognized reply"
 		}
+		commentLogin := pe.GetComment().GetUser().GetLogin()
+		association := pe.GetComment().GetAuthorAssociation()
+		if !mgithub.ReplyAuthorized(commentLogin, association, pe.GetPullRequest().GetUser().GetLogin()) {
+			return Job{}, "untrusted reply"
+		}
 		owner := pe.GetRepo().GetOwner().GetLogin()
 		repo := pe.GetRepo().GetName()
 		number := pe.GetPullRequest().GetNumber()
@@ -141,11 +146,12 @@ func webhookJob(event any) (Job, string) {
 			Ref:  fmt.Sprintf("%s/%s#%d", owner, repo, number),
 			Kind: JobKindThreadReply,
 			Reply: &ThreadReply{
-				CommentID: id,
-				Body:      body,
-				UserLogin: pe.GetComment().GetUser().GetLogin(),
-				InReplyTo: pe.GetComment().GetInReplyTo(),
-				Kind:      "review_comment",
+				CommentID:         id,
+				Body:              body,
+				UserLogin:         commentLogin,
+				AuthorAssociation: association,
+				InReplyTo:         pe.GetComment().GetInReplyTo(),
+				Kind:              "review_comment",
 			},
 		}, ""
 	case *github.IssueCommentEvent:
@@ -159,6 +165,11 @@ func webhookJob(event any) (Job, string) {
 		if mgithub.ParseThreadReply(body).Intent == "" {
 			return Job{}, "unrecognized reply"
 		}
+		commentLogin := pe.GetComment().GetUser().GetLogin()
+		association := pe.GetComment().GetAuthorAssociation()
+		if !mgithub.ReplyAuthorized(commentLogin, association, pe.GetIssue().GetUser().GetLogin()) {
+			return Job{}, "untrusted reply"
+		}
 		owner := pe.GetRepo().GetOwner().GetLogin()
 		repo := pe.GetRepo().GetName()
 		number := pe.GetIssue().GetNumber()
@@ -168,10 +179,11 @@ func webhookJob(event any) (Job, string) {
 			Ref:  fmt.Sprintf("%s/%s#%d", owner, repo, number),
 			Kind: JobKindThreadReply,
 			Reply: &ThreadReply{
-				CommentID: id,
-				Body:      body,
-				UserLogin: pe.GetComment().GetUser().GetLogin(),
-				Kind:      "issue_comment",
+				CommentID:         id,
+				Body:              body,
+				UserLogin:         commentLogin,
+				AuthorAssociation: association,
+				Kind:              "issue_comment",
 			},
 		}, ""
 	default:
