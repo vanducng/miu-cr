@@ -55,6 +55,20 @@ comment with a new marker); subsequent re-runs dedupe normally. On a
 first M5 review **manually** (or off-hours) to absorb the one-time re-post before
 the next scheduled run.
 
+## [0.90.1](https://github.com/vanducng/miu-cr/compare/v0.90.0...v0.90.1) (2026-10-11)
+
+
+### Bug Fixes
+
+* **github:** do not link a removed file in a reply ([954c3c6](https://github.com/vanducng/miu-cr/commit/954c3c6ff73d9ed4a127db7d81e61a6847f86a3b))
+* **github:** keep reply wording and blob links on live files ([0da1a07](https://github.com/vanducng/miu-cr/commit/0da1a07aef2e862877162c2793a44cc6826a089e))
+* **github:** keep the judge reason and test reply pickup ([30cba17](https://github.com/vanducng/miu-cr/commit/30cba178245bc94185f7b0c5d524c5b259594eb5))
+* **github:** leave double-backtick paths as code ([7324527](https://github.com/vanducng/miu-cr/commit/732452718a0552b8f9673bcc9a99de1becee82e1))
+* **host:** answer pull request replies on the next poll ([0fbbff2](https://github.com/vanducng/miu-cr/commit/0fbbff2b1569030b9d93a3d8c034c4c2aa308a0b))
+* **host:** answer pull request replies on the next poll ([0ba9637](https://github.com/vanducng/miu-cr/commit/0ba9637e9b513dd4a9cef3d227c72c28b33f82d6))
+* **host:** drop the unused reply-scan result ([cbce58b](https://github.com/vanducng/miu-cr/commit/cbce58b583cd3ce6a2f6bc7782f0124c6ffdd384))
+* **host:** list thread replies on every poll ([74bb86e](https://github.com/vanducng/miu-cr/commit/74bb86eaf63ea359892e8ca5db25f626f68319c4))
+
 ## [0.90.0](https://github.com/vanducng/miu-cr/compare/v0.89.12...v0.90.0) (2026-10-10)
 
 
