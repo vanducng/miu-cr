@@ -558,4 +558,12 @@ func TestRenderThreadReplyLinksFileAndSaysWhetherFixIsCorrect(t *testing.T) {
 	if strings.Contains(reopened, "Fix is not correct") || !strings.Contains(reopened, "is open again") {
 		t.Fatalf("deferral reopen = %s", reopened)
 	}
+	kept := renderThreadReply(info, 11, parsed, []replyDecision{{
+		target:  replyTarget{Entry: entry},
+		fullSHA: full,
+		verdict: ThreadReplyVerdict{Accept: false, Explanation: "The fix is not correct: the guard checks the wrong variable"},
+	}})
+	if !strings.Contains(kept, "Fix is not correct.") || !strings.Contains(kept, "the guard checks the wrong variable") {
+		t.Fatalf("reason dropped: %s", kept)
+	}
 }

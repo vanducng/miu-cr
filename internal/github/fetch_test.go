@@ -163,6 +163,9 @@ func TestFetchPR(t *testing.T) {
 		if got := strings.Join(info.Files, ","); got != "a.go,b.go,c.go" {
 			t.Fatalf("files = %q, want a.go,b.go,c.go (pagination)", got)
 		}
+		if got := strings.Join(info.LinkFiles, ","); got != "a.go,b.go,c.go" {
+			t.Fatalf("link files = %q", got)
+		}
 		if fc.listCalls != 2 {
 			t.Errorf("want 2 ListFiles calls (2 pages), got %d", fc.listCalls)
 		}
@@ -283,6 +286,26 @@ func prFixture(headOwner, headRepo, headSHA, baseSHA, baseRef string) *gh.PullRe
 }
 
 func commitFile(name string) *gh.CommitFile { return &gh.CommitFile{Filename: gh.Ptr(name)} }
+
+func TestFetchPROmitsRemovedFilesFromLinks(t *testing.T) {
+	ref := PRRef{Owner: "vanducng", Repo: "miu-cr", Number: 1}
+	removed := commitFile("old.go")
+	removed.Status = gh.Ptr("removed")
+	fc := &fakeClient{pr: prFixture("vanducng", "miu-cr", "headsha", "basesha", "main"), pages: [][]*gh.CommitFile{{
+		commitFile("keep.go"),
+		removed,
+	}}}
+	info, err := FetchPR(stdctx.Background(), fc, ref)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Join(info.Files, ",") != "keep.go,old.go" {
+		t.Fatalf("files = %v", info.Files)
+	}
+	if strings.Join(info.LinkFiles, ",") != "keep.go" {
+		t.Fatalf("link files = %v", info.LinkFiles)
+	}
+}
 
 func asCLIErr(err error, target **clierr.CLIError) bool {
 	if ce, ok := err.(*clierr.CLIError); ok {

@@ -641,10 +641,8 @@ func replyExtra(s string) string {
 		return ""
 	}
 	low := strings.ToLower(s)
-	switch {
-	case strings.HasPrefix(low, "fix is correct"), strings.HasPrefix(low, "fix is not correct"),
-		strings.HasPrefix(low, "the fix is correct"), strings.HasPrefix(low, "the fix is not correct"),
-		strings.HasPrefix(low, "deferral accepted"), strings.HasPrefix(low, "not applicable accepted"):
+	switch low {
+	case "fix is correct", "fix is not correct", "the fix is correct", "the fix is not correct", "deferral accepted", "not applicable accepted":
 		return ""
 	default:
 		return s
