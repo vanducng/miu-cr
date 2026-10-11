@@ -8,7 +8,10 @@ func last(items []int) int {
 }
 
 func first(items []int) int {
-	return items[1]
+	if len(items) == 0 {
+		return 0
+	}
+	return items[0]
 }
 
 func scale(n int) int {
