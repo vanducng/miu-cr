@@ -833,6 +833,14 @@ func knownRepoFile(info *PRInfo, findingFile, path string) bool {
 	if path == "" || strings.Contains(path, "~") {
 		return false
 	}
+	if info != nil && info.LinkFiles != nil {
+		for _, f := range info.LinkFiles {
+			if f == path {
+				return true
+			}
+		}
+		return false
+	}
 	if findingFile != "" && path == findingFile {
 		return true
 	}

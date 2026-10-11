@@ -556,6 +556,14 @@ func (h *HostRunner) pollRepo(ctx stdctx.Context, snap hostRunnerSnapshot, repo 
 		}
 		return ghClient
 	}
+	var botLogin string
+	var loginOnce sync.Once
+	lookupLogin := func() string {
+		loginOnce.Do(func() {
+			botLogin, _ = getGitHubClient().CurrentLogin(ctx)
+		})
+		return botLogin
+	}
 	now := h.now().UTC()
 	if err := h.store.UpsertHostPollCursor(ctx, store.HostPollCursorInput{RepoID: repoID, Source: string(sourcePulls), Cursor: now.Format(time.RFC3339Nano), LastPolledAt: now}); err != nil {
 		return pollFloor, err
@@ -573,7 +581,7 @@ func (h *HostRunner) pollRepo(ctx stdctx.Context, snap hostRunnerSnapshot, repo 
 			h.log.Debug("host: PR ignored by filter", hostPRFilterLogAttrs(repo, pr, decision)...)
 			continue
 		}
-		h.scanRepliesOnPoll(ctx, getGitHubClient(), repo, pr, token)
+		h.scanRepliesOnPoll(ctx, getGitHubClient(), repo, pr, token, lookupLogin())
 		if head == "" {
 			openNumbers = append(openNumbers, number)
 			continue
@@ -863,20 +871,20 @@ func (h *HostRunner) retryDeferredApproval(ctx stdctx.Context, client mgithub.Cl
 	h.log.Debug("host: deferred approval retry skipped", attrs...)
 }
 
-func (h *HostRunner) scanRepliesOnPoll(ctx stdctx.Context, client mgithub.Client, repo HostRepoConfig, pr *github.PullRequest, token string) {
+func (h *HostRunner) scanRepliesOnPoll(ctx stdctx.Context, client mgithub.Client, repo HostRepoConfig, pr *github.PullRequest, token, botLogin string) {
 	if pr == nil || pr.GetNumber() <= 0 {
 		return
 	}
 	h.log.Debug("host: scanning thread replies",
 		"repo", repo.Slug, "pr", pr.GetNumber(), "reason", "poll")
-	h.scanThreadReplies(ctx, client, repo, hostPRInfo(repo, pr), token)
+	h.scanThreadReplies(ctx, client, repo, hostPRInfo(repo, pr), token, botLogin)
 }
 
-func (h *HostRunner) scanThreadReplies(ctx stdctx.Context, client mgithub.Client, repo HostRepoConfig, info *mgithub.PRInfo, token string) bool {
+func (h *HostRunner) scanThreadReplies(ctx stdctx.Context, client mgithub.Client, repo HostRepoConfig, info *mgithub.PRInfo, token, botLogin string) bool {
 	if h.disp == nil || client == nil || info == nil || strings.TrimSpace(token) == "" {
 		return false
 	}
-	replies, err := mgithub.ListActionableReplies(ctx, client, info)
+	replies, err := mgithub.ListActionableReplies(ctx, client, info, botLogin)
 	if err != nil {
 		h.log.Warn("host: thread reply scan failed",
 			"repo", repo.Slug, "pr", info.Number, "head_sha", ShortSHA(info.HeadSHA),

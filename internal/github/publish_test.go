@@ -741,12 +741,17 @@ func TestCommentBodyRationaleEscaped(t *testing.T) {
 }
 
 func TestCommentBodyLinksCitedFile(t *testing.T) {
-	info := &PRInfo{HTMLBase: "https://github.com/acme/app", HeadSHA: strings.Repeat("a", 40), Files: []string{"pkg/report.sql"}}
+	info := &PRInfo{
+		HTMLBase:  "https://github.com/acme/app",
+		HeadSHA:   strings.Repeat("a", 40),
+		Files:     []string{"pkg/report.sql", "old/gone.sql"},
+		LinkFiles: []string{"pkg/report.sql"},
+	}
 	f := engine.Finding{
 		Severity:  "low",
 		Category:  "bug",
 		Title:     "Filter misses the child rows",
-		Rationale: "The filter on `env_tag` does not cover `pkg/report.sql`.\n\nSee `pkg/report.sql:12`. `~/.config/miu/cr/config.toml` and `home/deploy/app.toml` stay plain.",
+		Rationale: "The filter on `env_tag` does not cover `pkg/report.sql`.\n\nSee `pkg/report.sql:12`. `old/gone.sql`, `~/.config/miu/cr/config.toml`, and `home/deploy/app.toml` stay plain.",
 	}
 	body, _ := commentBody(info, f, "", PostReviewOptions{}, false)
 	if !strings.Contains(body, "**Filter misses the child rows**") {
@@ -763,8 +768,8 @@ func TestCommentBodyLinksCitedFile(t *testing.T) {
 	if strings.Contains(body, "`pkg/report.sql`") {
 		t.Fatalf("raw path remained:\n%s", body)
 	}
-	if strings.Contains(body, "[`config.toml`]") || strings.Contains(body, "[`app.toml`]") {
-		t.Fatalf("path outside the pull request must stay plain:\n%s", body)
+	if strings.Contains(body, "[`config.toml`]") || strings.Contains(body, "[`app.toml`]") || strings.Contains(body, "[`gone.sql`]") {
+		t.Fatalf("path outside the live pull request files must stay plain:\n%s", body)
 	}
 }
 

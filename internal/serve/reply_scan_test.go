@@ -28,7 +28,7 @@ func TestScanThreadRepliesQueuesAuthorizedReply(t *testing.T) {
 	}
 	r := &HostRunner{disp: disp, log: slog.New(slog.NewTextHandler(io.Discard, nil))}
 	info := &mgithub.PRInfo{Owner: "acme", Repo: "app", Number: 7, HeadSHA: "abc", AuthorLogin: "dev"}
-	r.scanThreadReplies(stdctx.Background(), client, HostRepoConfig{Slug: "acme/app"}, info, "token")
+	r.scanThreadReplies(stdctx.Background(), client, HostRepoConfig{Slug: "acme/app"}, info, "token", "")
 	jobs := disp.submitted()
 	if len(jobs) != 1 || jobs[0].Kind != JobKindThreadReply || jobs[0].Reply == nil || jobs[0].Reply.CommentID != 11 {
 		t.Fatalf("jobs = %+v", jobs)
@@ -46,7 +46,7 @@ func TestScanThreadRepliesSkipsWithoutTokenOrDuringCooldown(t *testing.T) {
 	client := &replyScanClient{login: "miucr"}
 	r := &HostRunner{disp: disp, log: slog.New(slog.NewTextHandler(io.Discard, nil))}
 	info := &mgithub.PRInfo{Owner: "acme", Repo: "app", Number: 7, AuthorLogin: "dev"}
-	r.scanThreadReplies(stdctx.Background(), client, HostRepoConfig{Slug: "acme/app"}, info, "")
+	r.scanThreadReplies(stdctx.Background(), client, HostRepoConfig{Slug: "acme/app"}, info, "", "")
 	if len(disp.submitted()) != 0 {
 		t.Fatal("empty token queued a reply")
 	}
@@ -59,7 +59,7 @@ func TestScanThreadRepliesSkipsWithoutTokenOrDuringCooldown(t *testing.T) {
 			User: &gh.User{Login: gh.Ptr("dev")},
 		},
 	}
-	r.scanThreadReplies(stdctx.Background(), client, HostRepoConfig{Slug: "acme/app"}, info, "token")
+	r.scanThreadReplies(stdctx.Background(), client, HostRepoConfig{Slug: "acme/app"}, info, "token", "")
 	if len(disp.submitted()) != 0 {
 		t.Fatal("cooled-down reply was queued")
 	}
@@ -121,8 +121,8 @@ func TestScanRepliesOnPollListsEveryPoll(t *testing.T) {
 	r := &HostRunner{disp: &fakeDispatcher{accept: true}, log: slog.New(slog.NewTextHandler(io.Discard, nil))}
 	repo := HostRepoConfig{Slug: "acme/app", Owner: "acme", Repo: "app"}
 	pr := &gh.PullRequest{Number: gh.Ptr(7), User: &gh.User{Login: gh.Ptr("dev")}}
-	r.scanRepliesOnPoll(stdctx.Background(), client, repo, pr, "token")
-	r.scanRepliesOnPoll(stdctx.Background(), client, repo, pr, "token")
+	r.scanRepliesOnPoll(stdctx.Background(), client, repo, pr, "token", "miucr")
+	r.scanRepliesOnPoll(stdctx.Background(), client, repo, pr, "token", "miucr")
 	if client.lists != 2 {
 		t.Fatalf("lists = %d, want 2", client.lists)
 	}

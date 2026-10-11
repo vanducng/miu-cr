@@ -580,8 +580,10 @@ func replyLine(info *PRInfo, parsed ParsedReply, d replyDecision) string {
 	switch {
 	case d.skip || d.verdict.reason == replyAlready:
 		return file + " is already handled."
-	case d.verdict.reason == replyReopened:
+	case d.verdict.reason == replyReopened && parsed.Intent == ReplyFix:
 		return "Fix is not correct. " + file + " is open again."
+	case d.verdict.reason == replyReopened:
+		return file + " is open again."
 	case parsed.Intent == ReplyFix && d.verdict.Accept:
 		return withExtra("Fix is correct. "+joinCommit(sha, "fixes", file)+".", d.verdict.Explanation)
 	case parsed.Intent == ReplyFix:
@@ -982,11 +984,14 @@ func loadReviewThreads(ctx stdctx.Context, client Client, info *PRInfo) ([]Revie
 // ListActionableReplies returns human verdict replies that do not yet have a
 // miu-cr answer. The host poll uses this so a reply is handled without waiting
 // for the next full review.
-func ListActionableReplies(ctx stdctx.Context, client Client, info *PRInfo) ([]ThreadReplyRequest, error) {
+func ListActionableReplies(ctx stdctx.Context, client Client, info *PRInfo, botLogin string) ([]ThreadReplyRequest, error) {
 	if info == nil {
 		return nil, nil
 	}
-	login, _ := client.CurrentLogin(ctx)
+	login := botLogin
+	if login == "" {
+		login, _ = client.CurrentLogin(ctx)
+	}
 	reviewComments, err := listAllReviewComments(ctx, client, info)
 	if err != nil {
 		return nil, err

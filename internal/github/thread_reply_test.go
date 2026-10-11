@@ -259,7 +259,7 @@ func TestListActionableRepliesFiltersAndCaps(t *testing.T) {
 		Body: gh.Ptr("<!-- miu-cr-reply:5 -->\nok"),
 	})
 	client := &replyClient{recordClient: recordClient{login: "reviewer", reviewComments: [][]*gh.PullRequestComment{comments}}}
-	got, err := ListActionableReplies(stdctx.Background(), client, info)
+	got, err := ListActionableReplies(stdctx.Background(), client, info, "")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -550,5 +550,12 @@ func TestRenderThreadReplyLinksFileAndSaysWhetherFixIsCorrect(t *testing.T) {
 	}})
 	if !strings.Contains(accept, "Fix is correct. "+wantSHA+" fixes "+wantFile+".") || !strings.Contains(accept, "the bound is fixed") {
 		t.Fatalf("accept = %s", accept)
+	}
+	reopened := renderThreadReply(info, 11, ParsedReply{Intent: ReplyDefer}, []replyDecision{{
+		target:  replyTarget{Entry: entry},
+		verdict: ThreadReplyVerdict{Accept: false, reason: replyReopened},
+	}})
+	if strings.Contains(reopened, "Fix is not correct") || !strings.Contains(reopened, "is open again") {
+		t.Fatalf("deferral reopen = %s", reopened)
 	}
 }
