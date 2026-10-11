@@ -880,16 +880,16 @@ func (h *HostRunner) scanRepliesOnPoll(ctx stdctx.Context, client mgithub.Client
 	h.scanThreadReplies(ctx, client, repo, hostPRInfo(repo, pr), token, botLogin)
 }
 
-func (h *HostRunner) scanThreadReplies(ctx stdctx.Context, client mgithub.Client, repo HostRepoConfig, info *mgithub.PRInfo, token, botLogin string) bool {
+func (h *HostRunner) scanThreadReplies(ctx stdctx.Context, client mgithub.Client, repo HostRepoConfig, info *mgithub.PRInfo, token, botLogin string) {
 	if h.disp == nil || client == nil || info == nil || strings.TrimSpace(token) == "" {
-		return false
+		return
 	}
 	replies, err := mgithub.ListActionableReplies(ctx, client, info, botLogin)
 	if err != nil {
 		h.log.Warn("host: thread reply scan failed",
 			"repo", repo.Slug, "pr", info.Number, "head_sha", ShortSHA(info.HeadSHA),
 			"reason", "list_failed", "error", config.RedactString(err.Error()))
-		return false
+		return
 	}
 	timeout := repo.ReviewTimeout
 	if timeout <= 0 {
@@ -900,10 +900,8 @@ func (h *HostRunner) scanThreadReplies(ctx stdctx.Context, client mgithub.Client
 	if h.now != nil {
 		now = h.now()
 	}
-	pending := false
 	for _, reply := range replies {
 		if !ReplyRetryReady(ReplyRetryKey(ref, reply.CommentID), now) {
-			pending = true
 			h.log.Debug("host: thread reply cooling down",
 				"repo", repo.Slug, "pr", info.Number, "head_sha", ShortSHA(info.HeadSHA),
 				"comment_id", reply.CommentID, "reason", "retry_deferred")
@@ -931,7 +929,6 @@ func (h *HostRunner) scanThreadReplies(ctx stdctx.Context, client mgithub.Client
 			},
 		}
 		if h.disp.Submit(job) != SubmitQueued {
-			pending = true
 			h.log.Warn("host: thread reply not queued",
 				"repo", repo.Slug, "pr", info.Number, "head_sha", ShortSHA(info.HeadSHA),
 				"comment_id", reply.CommentID, "reason", "dispatch_rejected")
@@ -941,7 +938,6 @@ func (h *HostRunner) scanThreadReplies(ctx stdctx.Context, client mgithub.Client
 			"repo", repo.Slug, "pr", info.Number, "head_sha", ShortSHA(info.HeadSHA),
 			"comment_id", reply.CommentID)
 	}
-	return !pending
 }
 
 func (h *HostRunner) syncConversationResolution(ctx stdctx.Context, client mgithub.Client, repo HostRepoConfig, info *mgithub.PRInfo, now time.Time) {
