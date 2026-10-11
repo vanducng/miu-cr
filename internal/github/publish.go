@@ -785,7 +785,7 @@ func commentBody(info *PRInfo, f engine.Finding, newFileContent string, opts Pos
 	if t := mdInline(f.Title); t != "" {
 		fmt.Fprintf(&b, "**%s**\n\n", t)
 	}
-	b.WriteString(mdProse(f.Rationale))
+	b.WriteString(linkifyRepoPaths(info, mdProse(f.Rationale), f.File))
 
 	patch := cleanSuggestedPatch(f.SuggestedPatch)
 	if strings.TrimSpace(patch) == "" {
@@ -804,6 +804,97 @@ func commentBody(info *PRInfo, f engine.Finding, newFileContent string, opts Pos
 
 	fmt.Fprintf(&b, "\n\n%s\n%s\n%s", fenceFor(patch), patch, fenceFor(patch))
 	return b.String(), false
+}
+
+// repoPathSpan matches one backtick span. linkifyRepoPaths only rewrites spans
+// that are a repo-relative file path.
+var repoPathSpan = regexp.MustCompile("`([^`\n]+)`")
+
+// linkifyRepoPaths turns a backtick-wrapped path into a short blob link when
+// that path is a file on this pull request. Other spans stay as code.
+func linkifyRepoPaths(info *PRInfo, prose, findingFile string) string {
+	if info == nil || info.HTMLBase == "" || info.HeadSHA == "" || prose == "" {
+		return prose
+	}
+	matches := repoPathSpan.FindAllStringIndex(prose, -1)
+	if len(matches) == 0 {
+		return prose
+	}
+	var b strings.Builder
+	last := 0
+	for _, m := range matches {
+		start, end := m[0], m[1]
+		if (start > 0 && prose[start-1] == '`') || (end < len(prose) && prose[end] == '`') {
+			continue
+		}
+		path, line, ok := repoPathFromSpan(prose[start+1 : end-1])
+		repl := prose[start:end]
+		if ok && knownRepoFile(info, findingFile, path) {
+			if u := blobURL(info, path, line, 0); u != "" {
+				repl = fmt.Sprintf("[`%s`](<%s>)", shortPathLabel(path, line), u)
+			}
+		}
+		b.WriteString(prose[last:start])
+		b.WriteString(repl)
+		last = end
+	}
+	b.WriteString(prose[last:])
+	return b.String()
+}
+
+func knownRepoFile(info *PRInfo, findingFile, path string) bool {
+	if path == "" || strings.Contains(path, "~") {
+		return false
+	}
+	if info != nil && info.LinkFiles != nil {
+		for _, f := range info.LinkFiles {
+			if f == path {
+				return true
+			}
+		}
+		return false
+	}
+	if findingFile != "" && path == findingFile {
+		return true
+	}
+	if info == nil {
+		return false
+	}
+	for _, f := range info.Files {
+		if f == path {
+			return true
+		}
+	}
+	return false
+}
+
+func repoPathFromSpan(inner string) (string, int, bool) {
+	inner = strings.TrimSpace(inner)
+	if inner == "" || strings.ContainsAny(inner, " \t()[]<>~") || strings.Contains(inner, "://") || strings.Contains(inner, "..") {
+		return "", 0, false
+	}
+	path := inner
+	line := 0
+	if i := strings.LastIndex(path, ":"); i > 0 {
+		n, err := strconv.Atoi(path[i+1:])
+		if err == nil && n > 0 {
+			path = path[:i]
+			line = n
+		}
+	}
+	if !strings.Contains(path, "/") || strings.HasPrefix(path, "/") || strings.Contains(path, ":") {
+		return "", 0, false
+	}
+	base := pathBase(path)
+	if base == "" || !strings.Contains(base, ".") {
+		return "", 0, false
+	}
+	for _, seg := range strings.Split(path, "/") {
+		if seg == "" || seg == "." || seg == ".." {
+			return "", 0, false
+		}
+	}
+	return path, line, true
 }
 
 // fenceFor grows a code fence past any backtick run in s so an embedded ``` can't

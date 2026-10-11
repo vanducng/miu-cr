@@ -556,6 +556,14 @@ func (h *HostRunner) pollRepo(ctx stdctx.Context, snap hostRunnerSnapshot, repo 
 		}
 		return ghClient
 	}
+	var botLogin string
+	var loginOnce sync.Once
+	lookupLogin := func() string {
+		loginOnce.Do(func() {
+			botLogin, _ = getGitHubClient().CurrentLogin(ctx)
+		})
+		return botLogin
+	}
 	now := h.now().UTC()
 	if err := h.store.UpsertHostPollCursor(ctx, store.HostPollCursorInput{RepoID: repoID, Source: string(sourcePulls), Cursor: now.Format(time.RFC3339Nano), LastPolledAt: now}); err != nil {
 		return pollFloor, err
@@ -573,6 +581,7 @@ func (h *HostRunner) pollRepo(ctx stdctx.Context, snap hostRunnerSnapshot, repo 
 			h.log.Debug("host: PR ignored by filter", hostPRFilterLogAttrs(repo, pr, decision)...)
 			continue
 		}
+		h.scanRepliesOnPoll(ctx, getGitHubClient(), repo, pr, token, lookupLogin())
 		if head == "" {
 			openNumbers = append(openNumbers, number)
 			continue
@@ -619,7 +628,7 @@ func (h *HostRunner) pollRepo(ctx stdctx.Context, snap hostRunnerSnapshot, repo 
 			h.updateQueuedSummaryStatus(ctx, getGitHubClient(), repo, pr, job.AvailableAt, repo.Debounce)
 		}
 		if repo.ThreadResolutionSync.Enabled() || deferredApprovalEnabled(repo.Review.Approval) {
-			h.enqueueThreadResolutionSync(ctx, getGitHubClient(), repo, pr, now, token)
+			h.enqueueThreadResolutionSync(ctx, getGitHubClient(), repo, pr, now)
 		}
 	}
 	superseded, supersededErr := h.store.ReconcileHostSupersededPRHeads(ctx, store.HostSupersededPRHeadsInput{RepoID: repoID, Heads: openHeads, Now: now})
@@ -754,7 +763,7 @@ func (h *HostRunner) pruneThreadResolutionSync(slug string, openNumbers []int64)
 	}
 }
 
-func (h *HostRunner) enqueueThreadResolutionSync(ctx stdctx.Context, client mgithub.Client, repo HostRepoConfig, pr *github.PullRequest, now time.Time, token string) {
+func (h *HostRunner) enqueueThreadResolutionSync(ctx stdctx.Context, client mgithub.Client, repo HostRepoConfig, pr *github.PullRequest, now time.Time) {
 	info := hostPRInfo(repo, pr)
 	ok, reason := h.reserveThreadResolutionSync(repo.Slug, int64(info.Number), repo.ThreadResolutionSync.Interval, now)
 	if !ok {
@@ -772,7 +781,7 @@ func (h *HostRunner) enqueueThreadResolutionSync(ctx stdctx.Context, client mgit
 		defer h.finishThreadResolutionSync()
 		defer h.untrackSyncCancel(tracked)
 		defer cancel()
-		h.syncThreadResolution(syncCtx, client, repo, info, now, token)
+		h.syncThreadResolution(syncCtx, client, repo, info, now)
 	}()
 }
 
@@ -826,7 +835,7 @@ func deferredApprovalEnabled(policy config.ApprovalPolicy) bool {
 	return policy.Mode == "clean" || policy.Mode == "threshold"
 }
 
-func (h *HostRunner) syncThreadResolution(ctx stdctx.Context, client mgithub.Client, repo HostRepoConfig, info *mgithub.PRInfo, now time.Time, token string) {
+func (h *HostRunner) syncThreadResolution(ctx stdctx.Context, client mgithub.Client, repo HostRepoConfig, info *mgithub.PRInfo, now time.Time) {
 	key := fmt.Sprintf("%s/%s#%d", info.Owner, info.Repo, info.Number)
 	_ = WithPRFlight(key, func() error {
 		if repo.ThreadResolutionSync.Enabled() {
@@ -835,7 +844,6 @@ func (h *HostRunner) syncThreadResolution(ctx stdctx.Context, client mgithub.Cli
 		if deferredApprovalEnabled(repo.Review.Approval) {
 			h.retryDeferredApproval(ctx, client, repo, info)
 		}
-		h.scanThreadReplies(ctx, client, repo, info, token)
 		return nil
 	})
 }
@@ -863,11 +871,20 @@ func (h *HostRunner) retryDeferredApproval(ctx stdctx.Context, client mgithub.Cl
 	h.log.Debug("host: deferred approval retry skipped", attrs...)
 }
 
-func (h *HostRunner) scanThreadReplies(ctx stdctx.Context, client mgithub.Client, repo HostRepoConfig, info *mgithub.PRInfo, token string) {
+func (h *HostRunner) scanRepliesOnPoll(ctx stdctx.Context, client mgithub.Client, repo HostRepoConfig, pr *github.PullRequest, token, botLogin string) {
+	if pr == nil || pr.GetNumber() <= 0 {
+		return
+	}
+	h.log.Debug("host: scanning thread replies",
+		"repo", repo.Slug, "pr", pr.GetNumber(), "reason", "poll")
+	h.scanThreadReplies(ctx, client, repo, hostPRInfo(repo, pr), token, botLogin)
+}
+
+func (h *HostRunner) scanThreadReplies(ctx stdctx.Context, client mgithub.Client, repo HostRepoConfig, info *mgithub.PRInfo, token, botLogin string) {
 	if h.disp == nil || client == nil || info == nil || strings.TrimSpace(token) == "" {
 		return
 	}
-	replies, err := mgithub.ListActionableReplies(ctx, client, info)
+	replies, err := mgithub.ListActionableReplies(ctx, client, info, botLogin)
 	if err != nil {
 		h.log.Warn("host: thread reply scan failed",
 			"repo", repo.Slug, "pr", info.Number, "head_sha", ShortSHA(info.HeadSHA),

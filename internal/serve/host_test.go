@@ -74,6 +74,52 @@ func TestHostRunnerPollsWithStoreCursorAndNoFileCursor(t *testing.T) {
 	}
 }
 
+func TestHostRunnerPollQueuesThreadReplyWithoutSyncOrApproval(t *testing.T) {
+	cfg := hostRunnerConfig(t)
+	cfg.Repos[0].ThreadResolutionSync = HostThreadResolutionSync{Mode: "off"}
+	cfg.Repos[0].Review.Approval.Mode = "off"
+	body := "finding\n<!-- miucr:fp=aaaaaaaaaaaaaaaa -->\n<!-- miu-cr-bot -->"
+	client := &replyScanClient{
+		login: "miucr",
+		review: []*github.PullRequestComment{
+			{ID: github.Ptr(int64(10)), Body: github.Ptr(body), User: &github.User{Login: github.Ptr("miucr")}},
+			{
+				ID: github.Ptr(int64(11)), InReplyTo: github.Ptr(int64(10)),
+				Body: github.Ptr("Deferred: tracked in #42 because this helper is unused and safe to ship later"),
+				User: &github.User{Login: github.Ptr("dev")}, AuthorAssociation: github.Ptr("NONE"),
+			},
+		},
+	}
+	cfg.NewGitHubClient = func(string) mgithub.Client { return client }
+	cfg.NewNotifGetter = func(string) notifGetter {
+		return &fakeNotifGetter{prs: map[string][]*github.PullRequest{"octo/hello": {
+			prWithMeta(7, "sha-A", "fix: ready", "dev", "User", nil, nil, false),
+		}}}
+	}
+	disp := cfg.Dispatcher.(*pollDispatcher)
+	r, err := NewHostRunner(cfg)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := r.Tick(stdctx.Background()); err != nil {
+		t.Fatal(err)
+	}
+	if err := r.Tick(stdctx.Background()); err != nil {
+		t.Fatal(err)
+	}
+	var replies int
+	disp.mu.Lock()
+	for _, job := range disp.jobs {
+		if job.Kind == JobKindThreadReply && job.Reply != nil && job.Reply.CommentID == 11 {
+			replies++
+		}
+	}
+	disp.mu.Unlock()
+	if replies != 2 {
+		t.Fatalf("thread reply jobs = %d, want 2", replies)
+	}
+}
+
 func TestHostRunnerPollsAllPRPages(t *testing.T) {
 	cfg := hostRunnerConfig(t)
 	gh := &fakeNotifGetter{
@@ -232,7 +278,7 @@ func TestHostRunnerThreadResolutionSyncDropClearsThrottle(t *testing.T) {
 		log:              slog.New(slog.NewTextHandler(io.Discard, nil)),
 	}
 
-	r.enqueueThreadResolutionSync(stdctx.Background(), nil, HostRepoConfig{Slug: "octo/hello"}, prWithHead(1, "sha-A"), now, "")
+	r.enqueueThreadResolutionSync(stdctx.Background(), nil, HostRepoConfig{Slug: "octo/hello"}, prWithHead(1, "sha-A"), now)
 
 	if _, ok := r.threadSyncLast["octo/hello#1"]; ok {
 		t.Fatal("dropped sync kept throttle reservation")
@@ -257,7 +303,7 @@ func TestHostRunnerThreadResolutionSyncDetachesFromPollContext(t *testing.T) {
 			Mode:     "poll",
 			Interval: time.Minute,
 		},
-	}, prWithHead(1, "sha-A"), now, "")
+	}, prWithHead(1, "sha-A"), now)
 
 	if !r.waitThreadResolutionSync(time.Second) {
 		t.Fatal("sync worker did not finish")
@@ -1095,7 +1141,7 @@ func TestRunHostDrainWaitsForSyncBudget(t *testing.T) {
 			Mode:     "poll",
 			Interval: time.Minute,
 		},
-	}, prWithHead(1, "sha-A"), time.Now(), "")
+	}, prWithHead(1, "sha-A"), time.Now())
 
 	ctx, cancel := stdctx.WithCancel(stdctx.Background())
 	cancel()
@@ -1127,7 +1173,7 @@ func TestHostRunnerCancelsSyncWhenDrainTimesOut(t *testing.T) {
 			Mode:     "poll",
 			Interval: time.Minute,
 		},
-	}, prWithHead(1, "sha-A"), now, "")
+	}, prWithHead(1, "sha-A"), now)
 	if r.waitThreadResolutionSync(30 * time.Millisecond) {
 		t.Fatal("wait returned while sync was still blocked")
 	}

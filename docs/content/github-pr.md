@@ -295,12 +295,12 @@ without a local PR-thread store:
 
 Developers answer a finding on its thread:
 
-- `Fixed in <sha>: ...` checks that the commit is on the pull request and changes the finding's file, then resolves the thread or explains why it is still open. Only the pull request author, or an owner, member, or collaborator, is judged.
+- `Fixed in <sha>: ...` checks that the commit is on the pull request and changes the finding's file. The reply says whether the fix is correct and links the file. It then resolves the thread or leaves the finding open. Only the pull request author, or an owner, member, or collaborator, is judged.
 - `Deferred: ...` or `Not applicable: ...` is judged from that reason. An accepted deferral moves to **⏸️ Deferred** and does not block approval. A vague reason stays open.
 - Findings outside the changed lines share one thread on the nearest changed line, or one pull request comment when no line can hold it. Info-level notes in files the pull request does not change are marked irrelevant and are not blocking.
 - One notice comment per review mentions the pull request author while findings are open and is edited in place.
 
-`serve --host` mirrors manual GitHub "Resolve conversation" into that same summary table when `thread_resolution_sync.mode: poll`. That mirror does not start a model review. Reply judgment is separate: it calls the model only for the changed thread, on the webhook path and on the same host poll that syncs threads or retries approval. Accepted deferrals count as clear for approval.
+`serve --host` mirrors manual GitHub "Resolve conversation" into that same summary table when `thread_resolution_sync.mode: poll`. That mirror does not start a model review. Reply judgment is separate: it calls the model only for the changed thread. A webhook delivers the reply immediately. A polled host notices it on each poll, including a repo with no webhook. Accepted deferrals count as clear for approval.
 
 For `miucr review --pr --post` outside the Action path, `MIUCR_PR_STORE=1` also
 opens the optional PR-thread store. That store layers prior posted/resolved

@@ -146,8 +146,11 @@ func TestApplyThreadReplyRejectsMissingCommitWithoutJudge(t *testing.T) {
 	if res.Accepted != 0 || res.Rejected != 1 {
 		t.Fatalf("result = %+v", res)
 	}
-	if len(client.replies) != 1 || !strings.Contains(client.replies[0], "Still open") {
+	if len(client.replies) != 1 || !strings.Contains(client.replies[0], "Fix is not correct") || !strings.Contains(client.replies[0], "a.go:5") {
 		t.Fatalf("reply = %v", client.replies)
+	}
+	if strings.Contains(client.replies[0], "Still open") {
+		t.Fatalf("reply still uses the old label: %s", client.replies[0])
 	}
 }
 
@@ -172,7 +175,7 @@ func TestApplyThreadReplyAcceptsFixAndResolves(t *testing.T) {
 	if len(client.resolved) != 1 || client.resolved[0] != "THR_1" {
 		t.Fatalf("resolved = %v", client.resolved)
 	}
-	if !strings.Contains(client.replies[0], "<!-- miu-cr-reply:11 -->") {
+	if !strings.Contains(client.replies[0], "<!-- miu-cr-reply:11 -->") || !strings.Contains(client.replies[0], "Fix is correct") {
 		t.Fatalf("reply missing idempotency marker: %s", client.replies[0])
 	}
 }
@@ -256,7 +259,7 @@ func TestListActionableRepliesFiltersAndCaps(t *testing.T) {
 		Body: gh.Ptr("<!-- miu-cr-reply:5 -->\nok"),
 	})
 	client := &replyClient{recordClient: recordClient{login: "reviewer", reviewComments: [][]*gh.PullRequestComment{comments}}}
-	got, err := ListActionableReplies(stdctx.Background(), client, info)
+	got, err := ListActionableReplies(stdctx.Background(), client, info, "")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -515,5 +518,63 @@ func TestNoSummaryWaitsInsteadOfLooping(t *testing.T) {
 	}
 	if len(client.replies) != 0 {
 		t.Fatal("a missing summary must not post a marker")
+	}
+}
+
+func TestRenderThreadReplyLinksFileAndSaysWhetherFixIsCorrect(t *testing.T) {
+	info := &PRInfo{
+		HTMLBase: "https://github.com/acme/app",
+		HeadSHA:  strings.Repeat("a", 40),
+	}
+	entry := LedgerEntry{Path: "models/prep/report.sql", Line: 217}
+	full := strings.Repeat("b", 40)
+	parsed := ParsedReply{Intent: ReplyFix, SHA: "bbbbbbb"}
+	reject := renderThreadReply(info, 11, parsed, []replyDecision{{
+		target:  replyTarget{Entry: entry},
+		fullSHA: full,
+		verdict: ThreadReplyVerdict{Accept: false, reason: replyFixUnchanged},
+	}})
+	wantFile := "[`report.sql:217`](<https://github.com/acme/app/blob/" + info.HeadSHA + "/models/prep/report.sql#L217>)"
+	wantSHA := "[`bbbbbbb`](<https://github.com/acme/app/commit/" + full + ">)"
+	if !strings.Contains(reject, "Fix is not correct. "+wantSHA+" does not change "+wantFile+".") {
+		t.Fatalf("reject = %s", reject)
+	}
+	if strings.Contains(reject, "`models/prep/report.sql:") || strings.Contains(reject, "`models/prep/report.sql`") {
+		t.Fatalf("visible label still uses the full path: %s", reject)
+	}
+
+	accept := renderThreadReply(info, 11, parsed, []replyDecision{{
+		target:  replyTarget{Entry: entry},
+		fullSHA: full,
+		verdict: ThreadReplyVerdict{Accept: true, reason: replyFixChanged, Explanation: "the bound is fixed"},
+	}})
+	if !strings.Contains(accept, "Fix is correct. "+wantSHA+" fixes "+wantFile+".") || !strings.Contains(accept, "the bound is fixed") {
+		t.Fatalf("accept = %s", accept)
+	}
+	reopened := renderThreadReply(info, 11, ParsedReply{Intent: ReplyDefer}, []replyDecision{{
+		target:  replyTarget{Entry: entry},
+		verdict: ThreadReplyVerdict{Accept: false, reason: replyReopened},
+	}})
+	if strings.Contains(reopened, "Fix is not correct") || !strings.Contains(reopened, "is open again") {
+		t.Fatalf("deferral reopen = %s", reopened)
+	}
+	kept := renderThreadReply(info, 11, parsed, []replyDecision{{
+		target:  replyTarget{Entry: entry},
+		fullSHA: full,
+		verdict: ThreadReplyVerdict{Accept: false, Explanation: "The fix is not correct: the guard checks the wrong variable"},
+	}})
+	if !strings.Contains(kept, "Fix is not correct.") || !strings.Contains(kept, "the guard checks the wrong variable") {
+		t.Fatalf("reason dropped: %s", kept)
+	}
+	removed := *info
+	removed.Files = []string{"models/prep/report.sql", "old/gone.sql"}
+	removed.LinkFiles = []string{"models/prep/report.sql"}
+	gone := renderThreadReply(&removed, 11, parsed, []replyDecision{{
+		target:  replyTarget{Entry: LedgerEntry{Path: "old/gone.sql", Line: 4}},
+		fullSHA: full,
+		verdict: ThreadReplyVerdict{Accept: false, reason: replyFixUnchanged},
+	}})
+	if strings.Contains(gone, "old/gone.sql") || !strings.Contains(gone, "`gone.sql:4`") {
+		t.Fatalf("removed file should stay a short code span: %s", gone)
 	}
 }
