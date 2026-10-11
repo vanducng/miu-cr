@@ -258,8 +258,12 @@ func (a *anthropicAgent) Review(ctx stdctx.Context, rc Context) (engine.ReviewOu
 			params.Messages[last].Content = append(params.Messages[last].Content, anthropic.NewTextBlock(forceFinalizeNudge))
 		}
 
+		send := params
+		if len(params.Tools) == 0 {
+			send.Messages = fitAnthropicPrompt(system, params.Messages, flattenedPromptRunes)
+		}
 		msg, err := retryProviderCall(ctx, rc.ProviderRetry, rc.Progress, "anthropic.messages", func() (*anthropic.Message, error) {
-			return a.client.newMessage(ctx, params)
+			return a.client.newMessage(ctx, send)
 		}, classifyAnthropicErr, anthropicProviderRetryable)
 		if err != nil {
 			return engine.ReviewOutput{}, err

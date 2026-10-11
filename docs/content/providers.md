@@ -155,6 +155,12 @@ sets the agent tool-loop budget and retries transient tool execution failures
 such as temporary filesystem/process errors, but does not retry malformed tool
 calls, unknown tools, missing files, or context cancellation.
 
+A tools-less turn (the forced final answer, or a JSON repair round) is sent as the
+whole transcript. Some agent gateways flatten that transcript into one prompt and
+reject it past about 80k characters. Before those sends, miu-cr drops the oldest
+tool output, then shortens the oldest text, until the turn fits. Tool-using turns
+are left intact.
+
 `symbol_context` is part of the core read-only reviewer toolset, alongside
 `file_read` and `grep`. `[review.tools.symbol_context]` tunes its bounds. The
 internal revision-pinned scanner can fetch bounded `document_symbols`,
