@@ -816,17 +816,30 @@ func linkifyRepoPaths(info *PRInfo, prose, findingFile string) string {
 	if info == nil || info.HTMLBase == "" || info.HeadSHA == "" || prose == "" {
 		return prose
 	}
-	return repoPathSpan.ReplaceAllStringFunc(prose, func(span string) string {
-		path, line, ok := repoPathFromSpan(span[1 : len(span)-1])
-		if !ok || !knownRepoFile(info, findingFile, path) {
-			return span
+	matches := repoPathSpan.FindAllStringIndex(prose, -1)
+	if len(matches) == 0 {
+		return prose
+	}
+	var b strings.Builder
+	last := 0
+	for _, m := range matches {
+		start, end := m[0], m[1]
+		if (start > 0 && prose[start-1] == '`') || (end < len(prose) && prose[end] == '`') {
+			continue
 		}
-		u := blobURL(info, path, line, 0)
-		if u == "" {
-			return span
+		path, line, ok := repoPathFromSpan(prose[start+1 : end-1])
+		repl := prose[start:end]
+		if ok && knownRepoFile(info, findingFile, path) {
+			if u := blobURL(info, path, line, 0); u != "" {
+				repl = fmt.Sprintf("[`%s`](<%s>)", shortPathLabel(path, line), u)
+			}
 		}
-		return fmt.Sprintf("[`%s`](<%s>)", shortPathLabel(path, line), u)
-	})
+		b.WriteString(prose[last:start])
+		b.WriteString(repl)
+		last = end
+	}
+	b.WriteString(prose[last:])
+	return b.String()
 }
 
 func knownRepoFile(info *PRInfo, findingFile, path string) bool {

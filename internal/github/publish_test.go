@@ -771,6 +771,15 @@ func TestCommentBodyLinksCitedFile(t *testing.T) {
 	if strings.Contains(body, "[`config.toml`]") || strings.Contains(body, "[`app.toml`]") || strings.Contains(body, "[`gone.sql`]") {
 		t.Fatalf("path outside the live pull request files must stay plain:\n%s", body)
 	}
+	doubled := f
+	doubled.Rationale = "Covered in ``pkg/report.sql``."
+	dbl, _ := commentBody(info, doubled, "", PostReviewOptions{}, false)
+	if strings.Contains(dbl, "](<https://") {
+		t.Fatalf("double-backtick path must stay code, not a broken link:\n%s", dbl)
+	}
+	if !strings.Contains(dbl, "``pkg/report.sql``") {
+		t.Fatalf("double-backtick path was rewritten:\n%s", dbl)
+	}
 }
 
 // suggestDiff carries a 3-line new-file body anchored by a hunk so findings on
