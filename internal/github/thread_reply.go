@@ -20,7 +20,7 @@ const (
 	botMarker       = "<!-- miu-cr-bot -->"
 	offDiffMarker   = "<!-- miu-cr-offdiff -->"
 	noticeMarker    = "<!-- miu-cr-notice -->"
-	threadReplyHint = "Reply on this thread with `Fixed in <sha>: ...`, `Deferred: ...`, or `Not applicable: ...`."
+	threadReplyHint = "Reply `Fixed in <sha>: ...`, `Deferred: ...`, or `Not applicable: ...`."
 
 	replyNotReadyWait = 15 * time.Minute
 	replyFailureWait  = time.Hour

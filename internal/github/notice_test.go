@@ -20,6 +20,13 @@ func TestRenderResponseNoticeMentionsAuthor(t *testing.T) {
 	if strings.Contains(clear, "@") || !strings.Contains(clear, "No open findings") {
 		t.Fatalf("clear notice = %s", clear)
 	}
+	if !strings.Contains(body, "1 finding needs an answer") {
+		t.Fatalf("singular notice = %s", body)
+	}
+	many := RenderResponseNotice("dev", []NoticeItem{{Path: "a.go", Line: 1}, {Path: "b.go", Line: 2}})
+	if !strings.Contains(many, "2 findings need an answer") {
+		t.Fatalf("plural notice = %s", many)
+	}
 }
 
 func TestUpsertResponseNoticeEditsInPlace(t *testing.T) {

@@ -127,5 +127,20 @@ The result is a `miucr.cli/v1` envelope with per-tool and per-case scores:
 - Per-case `stats`: optional reviewer runtime/context stats, when the tool output
   is a `miucr review` envelope.
 
+## RSI
+
+The finding-recall suite above does not score comment wording. RSI (recurring
+review iteration) is the other loop: every 20 minutes, read recent pull-request
+reviews and check three things.
+
+- The author is @mentioned once, on the notice, when a finding needs an answer.
+  An inline question does not @mention them again.
+- A rationale is two sentences: what breaks, then why. A question is a separate
+  line, and only when the code cannot answer it.
+- A fix reply says whether the fix is correct and uses a short file link.
+
+Open findings from that pass go back into a fix. The suite here stays for
+recall. Grow it when a miss or a noisy finding shows up, not for wording.
+
 Start with a tiny synthetic suite that covers the bug classes you care about,
 then grow it only when a real miss or noisy finding appears.
