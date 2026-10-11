@@ -661,10 +661,25 @@ func replySHA(info *PRInfo, d replyDecision, parsed ParsedReply) string {
 
 func replyFileLink(info *PRInfo, path string, line int) string {
 	label := shortPathLabel(path, line)
+	if !replyFileLinkable(info, path) {
+		return "`" + label + "`"
+	}
 	if u := blobURL(info, path, line, 0); u != "" {
 		return fmt.Sprintf("[`%s`](<%s>)", label, u)
 	}
 	return "`" + label + "`"
+}
+
+func replyFileLinkable(info *PRInfo, path string) bool {
+	if info == nil || info.LinkFiles == nil {
+		return true
+	}
+	for _, f := range info.LinkFiles {
+		if f == path {
+			return true
+		}
+	}
+	return false
 }
 
 func shortPathLabel(path string, line int) string {

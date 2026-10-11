@@ -566,4 +566,15 @@ func TestRenderThreadReplyLinksFileAndSaysWhetherFixIsCorrect(t *testing.T) {
 	if !strings.Contains(kept, "Fix is not correct.") || !strings.Contains(kept, "the guard checks the wrong variable") {
 		t.Fatalf("reason dropped: %s", kept)
 	}
+	removed := *info
+	removed.Files = []string{"models/prep/report.sql", "old/gone.sql"}
+	removed.LinkFiles = []string{"models/prep/report.sql"}
+	gone := renderThreadReply(&removed, 11, parsed, []replyDecision{{
+		target:  replyTarget{Entry: LedgerEntry{Path: "old/gone.sql", Line: 4}},
+		fullSHA: full,
+		verdict: ThreadReplyVerdict{Accept: false, reason: replyFixUnchanged},
+	}})
+	if strings.Contains(gone, "old/gone.sql") || !strings.Contains(gone, "`gone.sql:4`") {
+		t.Fatalf("removed file should stay a short code span: %s", gone)
+	}
 }
