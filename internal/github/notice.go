@@ -41,13 +41,17 @@ func RenderResponseNotice(author string, items []NoticeItem) string {
 	b.WriteString(noticeMarker + "\n")
 	b.WriteString(botMarker + "\n\n")
 	if len(items) == 0 {
-		b.WriteString("No open findings need a response.\n")
+		b.WriteString("No open findings.\n")
 		return b.String()
 	}
 	if githubLogin(author) {
 		fmt.Fprintf(&b, "@%s ", author)
 	}
-	fmt.Fprintf(&b, "%d open finding%s need a response:\n\n", len(items), plural(len(items)))
+	noun, verb := "findings", "need"
+	if len(items) == 1 {
+		noun, verb = "finding", "needs"
+	}
+	fmt.Fprintf(&b, "%d %s %s an answer:\n\n", len(items), noun, verb)
 	for _, item := range items {
 		loc := mdPathLabel(item.Path)
 		if item.Line > 0 {
