@@ -785,7 +785,7 @@ func commentBody(info *PRInfo, f engine.Finding, newFileContent string, opts Pos
 	if t := mdInline(f.Title); t != "" {
 		fmt.Fprintf(&b, "**%s**\n\n", t)
 	}
-	b.WriteString(linkifyRepoPaths(info, mdProse(f.Rationale)))
+	b.WriteString(linkifyRepoPaths(info, mdProse(f.Rationale), f.File))
 
 	patch := cleanSuggestedPatch(f.SuggestedPatch)
 	if strings.TrimSpace(patch) == "" {
@@ -810,15 +810,15 @@ func commentBody(info *PRInfo, f engine.Finding, newFileContent string, opts Pos
 // that are a repo-relative file path.
 var repoPathSpan = regexp.MustCompile("`([^`\n]+)`")
 
-// linkifyRepoPaths turns a backtick-wrapped repo path in a finding rationale
-// into a short blob link. Identifiers without a slash stay as code spans.
-func linkifyRepoPaths(info *PRInfo, prose string) string {
+// linkifyRepoPaths turns a backtick-wrapped path into a short blob link when
+// that path is a file on this pull request. Other spans stay as code.
+func linkifyRepoPaths(info *PRInfo, prose, findingFile string) string {
 	if info == nil || info.HTMLBase == "" || info.HeadSHA == "" || prose == "" {
 		return prose
 	}
 	return repoPathSpan.ReplaceAllStringFunc(prose, func(span string) string {
 		path, line, ok := repoPathFromSpan(span[1 : len(span)-1])
-		if !ok {
+		if !ok || !knownRepoFile(info, findingFile, path) {
 			return span
 		}
 		u := blobURL(info, path, line, 0)
@@ -829,9 +829,27 @@ func linkifyRepoPaths(info *PRInfo, prose string) string {
 	})
 }
 
+func knownRepoFile(info *PRInfo, findingFile, path string) bool {
+	if path == "" || strings.Contains(path, "~") {
+		return false
+	}
+	if findingFile != "" && path == findingFile {
+		return true
+	}
+	if info == nil {
+		return false
+	}
+	for _, f := range info.Files {
+		if f == path {
+			return true
+		}
+	}
+	return false
+}
+
 func repoPathFromSpan(inner string) (string, int, bool) {
 	inner = strings.TrimSpace(inner)
-	if inner == "" || strings.ContainsAny(inner, " \t()[]<>") || strings.Contains(inner, "://") || strings.Contains(inner, "..") {
+	if inner == "" || strings.ContainsAny(inner, " \t()[]<>~") || strings.Contains(inner, "://") || strings.Contains(inner, "..") {
 		return "", 0, false
 	}
 	path := inner

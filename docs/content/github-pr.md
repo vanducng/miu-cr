@@ -300,7 +300,7 @@ Developers answer a finding on its thread:
 - Findings outside the changed lines share one thread on the nearest changed line, or one pull request comment when no line can hold it. Info-level notes in files the pull request does not change are marked irrelevant and are not blocking.
 - One notice comment per review mentions the pull request author while findings are open and is edited in place.
 
-`serve --host` mirrors manual GitHub "Resolve conversation" into that same summary table when `thread_resolution_sync.mode: poll`. That mirror does not start a model review. Reply judgment is separate: it calls the model only for the changed thread. A webhook delivers the reply immediately. A polled host notices it on the next poll after the pull request's updated time moves, including a repo with no webhook. Accepted deferrals count as clear for approval.
+`serve --host` mirrors manual GitHub "Resolve conversation" into that same summary table when `thread_resolution_sync.mode: poll`. That mirror does not start a model review. Reply judgment is separate: it calls the model only for the changed thread. A webhook delivers the reply immediately. A polled host notices it on each poll, including a repo with no webhook. Accepted deferrals count as clear for approval.
 
 For `miucr review --pr --post` outside the Action path, `MIUCR_PR_STORE=1` also
 opens the optional PR-thread store. That store layers prior posted/resolved

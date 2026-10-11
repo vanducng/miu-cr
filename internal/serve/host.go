@@ -123,7 +123,6 @@ type HostRunner struct {
 	janitorInterval   time.Duration
 	now               func() time.Time
 	threadSyncLast    map[string]time.Time
-	replyScanAt       map[string]time.Time
 	threadSyncActive  int
 	threadSyncDone    chan struct{}
 	threadSyncStop    bool
@@ -208,7 +207,6 @@ func NewHostRunner(cfg HostRunnerConfig) (*HostRunner, error) {
 		janitorInterval: cfg.JanitorInterval,
 		now:             cfg.Now,
 		threadSyncLast:  map[string]time.Time{},
-		replyScanAt:     map[string]time.Time{},
 		activeJobs:      map[prKey]activeHostJob{},
 	}, nil
 }
@@ -742,23 +740,19 @@ func (h *HostRunner) pruneThreadResolutionSync(slug string, openNumbers []int64)
 	prefix := slug + "#"
 	h.mu.Lock()
 	defer h.mu.Unlock()
-	pruneClosed := func(keys map[string]time.Time) {
-		for key := range keys {
-			if !strings.HasPrefix(key, prefix) {
-				continue
-			}
-			number, err := strconv.ParseInt(strings.TrimPrefix(key, prefix), 10, 64)
-			if err != nil {
-				delete(keys, key)
-				continue
-			}
-			if _, ok := open[number]; !ok {
-				delete(keys, key)
-			}
+	for key := range h.threadSyncLast {
+		if !strings.HasPrefix(key, prefix) {
+			continue
+		}
+		number, err := strconv.ParseInt(strings.TrimPrefix(key, prefix), 10, 64)
+		if err != nil {
+			delete(h.threadSyncLast, key)
+			continue
+		}
+		if _, ok := open[number]; !ok {
+			delete(h.threadSyncLast, key)
 		}
 	}
-	pruneClosed(h.threadSyncLast)
-	pruneClosed(h.replyScanAt)
 }
 
 func (h *HostRunner) enqueueThreadResolutionSync(ctx stdctx.Context, client mgithub.Client, repo HostRepoConfig, pr *github.PullRequest, now time.Time) {
@@ -869,51 +863,13 @@ func (h *HostRunner) retryDeferredApproval(ctx stdctx.Context, client mgithub.Cl
 	h.log.Debug("host: deferred approval retry skipped", attrs...)
 }
 
-// replyScanDue is true until a scan has seen this updated_at. GitHub bumps it when a comment lands, so a quiet pull request is not listed on every poll.
-func replyScanDue(last, updated time.Time) bool {
-	if last.IsZero() {
-		return true
-	}
-	return !updated.IsZero() && updated.After(last)
-}
-
 func (h *HostRunner) scanRepliesOnPoll(ctx stdctx.Context, client mgithub.Client, repo HostRepoConfig, pr *github.PullRequest, token string) {
 	if pr == nil || pr.GetNumber() <= 0 {
 		return
 	}
-	key := fmt.Sprintf("%s#%d", repo.Slug, pr.GetNumber())
-	updated := pr.GetUpdatedAt().Time
-	h.mu.Lock()
-	if h.replyScanAt == nil {
-		h.replyScanAt = map[string]time.Time{}
-	}
-	last, seen := h.replyScanAt[key]
-	h.mu.Unlock()
-	if seen && !replyScanDue(last, updated) {
-		return
-	}
-	reason := "pr_updated"
-	if !seen {
-		reason = "unseen"
-	}
 	h.log.Debug("host: scanning thread replies",
-		"repo", repo.Slug, "pr", pr.GetNumber(), "reason", reason)
-	if !h.scanThreadReplies(ctx, client, repo, hostPRInfo(repo, pr), token) {
-		return
-	}
-	mark := updated
-	if mark.IsZero() {
-		mark = time.Now()
-		if h.now != nil {
-			mark = h.now()
-		}
-	}
-	h.mu.Lock()
-	if h.replyScanAt == nil {
-		h.replyScanAt = map[string]time.Time{}
-	}
-	h.replyScanAt[key] = mark
-	h.mu.Unlock()
+		"repo", repo.Slug, "pr", pr.GetNumber(), "reason", "poll")
+	h.scanThreadReplies(ctx, client, repo, hostPRInfo(repo, pr), token)
 }
 
 func (h *HostRunner) scanThreadReplies(ctx stdctx.Context, client mgithub.Client, repo HostRepoConfig, info *mgithub.PRInfo, token string) bool {
