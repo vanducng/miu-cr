@@ -68,10 +68,12 @@ func TestScanThreadRepliesSkipsWithoutTokenOrDuringCooldown(t *testing.T) {
 type replyScanClient struct {
 	login  string
 	review []*gh.PullRequestComment
+	lists  int
 }
 
 func (c *replyScanClient) CurrentLogin(stdctx.Context) (string, error) { return c.login, nil }
 func (c *replyScanClient) ListReviewComments(stdctx.Context, string, string, int, *gh.PullRequestListCommentsOptions) ([]*gh.PullRequestComment, *gh.Response, error) {
+	c.lists++
 	return c.review, &gh.Response{}, nil
 }
 func (c *replyScanClient) ListIssueComments(stdctx.Context, string, string, int, *gh.IssueListCommentsOptions) ([]*gh.IssueComment, *gh.Response, error) {
@@ -112,4 +114,16 @@ func (c *replyScanClient) ListCheckRunsForRef(stdctx.Context, string, string, st
 }
 func (c *replyScanClient) GetCombinedStatus(stdctx.Context, string, string, string, *gh.ListOptions) (*gh.CombinedStatus, *gh.Response, error) {
 	return nil, nil, nil
+}
+
+func TestScanRepliesOnPollListsEveryPoll(t *testing.T) {
+	client := &replyScanClient{login: "miucr"}
+	r := &HostRunner{disp: &fakeDispatcher{accept: true}, log: slog.New(slog.NewTextHandler(io.Discard, nil))}
+	repo := HostRepoConfig{Slug: "acme/app", Owner: "acme", Repo: "app"}
+	pr := &gh.PullRequest{Number: gh.Ptr(7), User: &gh.User{Login: gh.Ptr("dev")}}
+	r.scanRepliesOnPoll(stdctx.Background(), client, repo, pr, "token")
+	r.scanRepliesOnPoll(stdctx.Background(), client, repo, pr, "token")
+	if client.lists != 2 {
+		t.Fatalf("lists = %d, want 2", client.lists)
+	}
 }

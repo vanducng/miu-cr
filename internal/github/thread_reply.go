@@ -24,6 +24,13 @@ const (
 
 	replyNotReadyWait = 15 * time.Minute
 	replyFailureWait  = time.Hour
+
+	replyFixNotOnPR   = "fix_not_on_pr"
+	replyFixUnchanged = "fix_file_unchanged"
+	replyFixLine      = "fix_line_untouched"
+	replyFixChanged   = "fix_changed"
+	replyAlready      = "already_handled"
+	replyReopened     = "reopened"
 )
 
 // ErrUnparseableVerdict means the reply judge did not return a verdict object.
@@ -132,9 +139,11 @@ type ThreadReplyJudgeInput struct {
 }
 
 // ThreadReplyVerdict is the judge's accept/reject plus a one-line explanation.
+// reason is a renderer hint for deterministic checks. The model leaves it empty.
 type ThreadReplyVerdict struct {
 	Accept      bool
 	Explanation string
+	reason      string
 }
 
 // ThreadReplyResult is the outcome of handling one comment.
@@ -247,7 +256,7 @@ func ApplyThreadReply(ctx stdctx.Context, client Client, info *PRInfo, req Threa
 	decisions := make([]replyDecision, 0, len(targets))
 	for _, target := range targets {
 		if !ledgerBlocksApproval(ledger[target.Index].Status) {
-			decisions = append(decisions, replyDecision{target: target, skip: true, verdict: ThreadReplyVerdict{Accept: true, Explanation: "already handled"}})
+			decisions = append(decisions, replyDecision{target: target, skip: true, verdict: ThreadReplyVerdict{Accept: true, Explanation: "already handled", reason: replyAlready}})
 			continue
 		}
 		verdict, fullSHA, err := decideReply(ctx, client, info, parsed, target, judge)
@@ -296,7 +305,7 @@ func ApplyThreadReply(ctx stdctx.Context, client Client, info *PRInfo, req Threa
 			applyAcceptedVerdict(&next[d.target.Index], parsed, d.fullSHA, d.verdict.Explanation, now)
 		}
 		if accepted == 0 && rejected == 0 {
-			replyBody := renderThreadReply(req.CommentID, parsed, decisions)
+			replyBody := renderThreadReply(info, req.CommentID, parsed, decisions)
 			if perr := postThreadReply(ctx, client, info, req, replyBody); perr != nil {
 				result = ThreadReplyResult{Reason: "reply_post_failed"}
 				return mapWriteError("github.thread_reply_failed", "posting reply", perr)
@@ -323,7 +332,7 @@ func ApplyThreadReply(ctx stdctx.Context, client Client, info *PRInfo, req Threa
 			return mapWriteError("github.thread_reply_failed", "editing summary", eerr)
 		}
 
-		replyBody := renderThreadReply(req.CommentID, parsed, decisions)
+		replyBody := renderThreadReply(info, req.CommentID, parsed, decisions)
 		if perr := postThreadReply(ctx, client, info, req, replyBody); perr != nil {
 			result = ThreadReplyResult{Accepted: accepted, Rejected: rejected, Reason: "reply_post_failed"}
 			return mapWriteError("github.thread_reply_failed", "posting reply", perr)
@@ -391,10 +400,10 @@ func remapDecisions(decisions []replyDecision, ledger []LedgerEntry) []replyDeci
 		d.target.Entry = ledger[idx]
 		if !ledgerBlocksApproval(ledger[idx].Status) {
 			d.skip = true
-			d.verdict = ThreadReplyVerdict{Accept: true, Explanation: "already handled"}
+			d.verdict = ThreadReplyVerdict{Accept: true, Explanation: "already handled", reason: replyAlready}
 		} else if d.skip {
 			d.skip = false
-			d.verdict = ThreadReplyVerdict{Accept: false, Explanation: "this finding is open again"}
+			d.verdict = ThreadReplyVerdict{Accept: false, Explanation: "this finding is open again", reason: replyReopened}
 		}
 		out = append(out, d)
 	}
@@ -416,6 +425,9 @@ func decideReply(ctx stdctx.Context, client Client, info *PRInfo, parsed ParsedR
 		}
 		if explain != "" {
 			return ThreadReplyVerdict{Accept: false, Explanation: explain}, "", nil
+		}
+		if check.reason != "" {
+			return ThreadReplyVerdict{Accept: false, reason: check.reason}, check.fullSHA, nil
 		}
 		if judge == nil {
 			return deterministicFixVerdict(check, target.Entry), check.fullSHA, nil
@@ -445,6 +457,7 @@ type fixCheck struct {
 	patch       string
 	lineInPatch bool
 	fileChanged bool
+	reason      string
 }
 
 func inspectFixCommit(ctx stdctx.Context, client Client, info *PRInfo, sha string, entry LedgerEntry) (fixCheck, string, error) {
@@ -458,14 +471,14 @@ func inspectFixCommit(ctx stdctx.Context, client Client, info *PRInfo, sha strin
 	}
 	full, matched := matchCommitSHA(sha, shas)
 	if !matched {
-		return fixCheck{}, fmt.Sprintf("commit `%s` is not on this pull request", shortSHA(sha)), nil
+		return fixCheck{reason: replyFixNotOnPR}, "", nil
 	}
 	found, patch, err := inspector.CommitFilePatch(ctx, info.Owner, info.Repo, full, entry.Path)
 	if err != nil {
 		return fixCheck{}, "", err
 	}
 	if !found {
-		return fixCheck{}, fmt.Sprintf("commit `%s` does not change `%s`", shortSHA(full), entry.Path), nil
+		return fixCheck{fullSHA: full, reason: replyFixUnchanged}, "", nil
 	}
 	lineInPatch := entry.Line <= 0 || strings.TrimSpace(patch) == "" || patchTouchesLine(patch, entry.Line)
 	return fixCheck{fullSHA: full, patch: patch, lineInPatch: lineInPatch, fileChanged: true}, "", nil
@@ -473,9 +486,9 @@ func inspectFixCommit(ctx stdctx.Context, client Client, info *PRInfo, sha strin
 
 func deterministicFixVerdict(check fixCheck, entry LedgerEntry) ThreadReplyVerdict {
 	if entry.Line > 0 && strings.TrimSpace(check.patch) != "" && !check.lineInPatch {
-		return ThreadReplyVerdict{Accept: false, Explanation: fmt.Sprintf("commit `%s` changes `%s` but not around line %d", shortSHA(check.fullSHA), entry.Path, entry.Line)}
+		return ThreadReplyVerdict{Accept: false, reason: replyFixLine}
 	}
-	return ThreadReplyVerdict{Accept: true, Explanation: fmt.Sprintf("commit `%s` changes `%s`", shortSHA(check.fullSHA), entry.Path)}
+	return ThreadReplyVerdict{Accept: true, reason: replyFixChanged}
 }
 
 func precheckReason(parsed ParsedReply) (string, bool) {
@@ -551,28 +564,127 @@ func applyAcceptedVerdict(e *LedgerEntry, parsed ParsedReply, fullSHA, explanati
 	}
 }
 
-func renderThreadReply(commentID int64, parsed ParsedReply, decisions []replyDecision) string {
+func renderThreadReply(info *PRInfo, commentID int64, parsed ParsedReply, decisions []replyDecision) string {
 	var b strings.Builder
 	b.WriteString(botMarker + "\n")
 	b.WriteString(replyToMarker(commentID) + "\n\n")
 	for _, d := range decisions {
-		loc := d.target.Entry.Path
-		if d.target.Entry.Line > 0 {
-			loc = fmt.Sprintf("%s:%d", loc, d.target.Entry.Line)
-		}
-		explain := safeExplain(d.verdict.Explanation)
-		switch {
-		case d.skip:
-			fmt.Fprintf(&b, "- `%s` is already handled.\n", mdPathLabel(loc))
-		case d.verdict.Accept && parsed.Intent == ReplyDefer:
-			fmt.Fprintf(&b, "- Deferred `%s`: %s\n", mdPathLabel(loc), explain)
-		case d.verdict.Accept:
-			fmt.Fprintf(&b, "- Resolved `%s`: %s\n", mdPathLabel(loc), explain)
-		default:
-			fmt.Fprintf(&b, "- Still open `%s`: %s\n", mdPathLabel(loc), explain)
-		}
+		fmt.Fprintf(&b, "%s\n", replyLine(info, parsed, d))
 	}
 	return strings.TrimRight(b.String(), "\n") + "\n"
+}
+
+func replyLine(info *PRInfo, parsed ParsedReply, d replyDecision) string {
+	file := replyFileLink(info, d.target.Entry.Path, d.target.Entry.Line)
+	sha := replySHA(info, d, parsed)
+	switch {
+	case d.skip || d.verdict.reason == replyAlready:
+		return file + " is already handled."
+	case d.verdict.reason == replyReopened:
+		return "Fix is not correct. " + file + " is open again."
+	case parsed.Intent == ReplyFix && d.verdict.Accept:
+		return withExtra("Fix is correct. "+joinCommit(sha, "fixes", file)+".", d.verdict.Explanation)
+	case parsed.Intent == ReplyFix:
+		return fixRejectLine(sha, file, d.verdict)
+	case parsed.Intent == ReplyDefer && d.verdict.Accept:
+		return "Deferral accepted for " + file + "."
+	case parsed.Intent == ReplyDefer:
+		return withExtra("Deferral not accepted for "+file+".", d.verdict.Explanation)
+	case d.verdict.Accept:
+		return "Not applicable for " + file + "."
+	default:
+		return withExtra("This finding still applies to "+file+".", d.verdict.Explanation)
+	}
+}
+
+func fixRejectLine(sha, file string, v ThreadReplyVerdict) string {
+	switch v.reason {
+	case replyFixNotOnPR:
+		if sha == "" {
+			return "Fix is not correct for " + file + ". That commit is not on this pull request."
+		}
+		return "Fix is not correct for " + file + ". " + sha + " is not on this pull request."
+	case replyFixUnchanged, replyFixLine:
+		return "Fix is not correct. " + joinCommit(sha, "does not change", file) + "."
+	default:
+		if strings.TrimSpace(v.Explanation) != "" && sha == "" {
+			return withExtra("Fix is not correct for "+file+".", v.Explanation)
+		}
+		return withExtra("Fix is not correct. "+joinCommit(sha, "does not fix", file)+".", v.Explanation)
+	}
+}
+
+func joinCommit(sha, verb, file string) string {
+	if sha == "" {
+		return "The commit " + verb + " " + file
+	}
+	return sha + " " + verb + " " + file
+}
+
+func withExtra(lead, explanation string) string {
+	extra := replyExtra(explanation)
+	if extra == "" {
+		return lead
+	}
+	return lead + " " + extra
+}
+
+func replyExtra(s string) string {
+	s = strings.TrimSpace(s)
+	if s == "" {
+		return ""
+	}
+	s = safeExplain(s)
+	if s == "no further detail" {
+		return ""
+	}
+	low := strings.ToLower(s)
+	switch {
+	case strings.HasPrefix(low, "fix is correct"), strings.HasPrefix(low, "fix is not correct"),
+		strings.HasPrefix(low, "the fix is correct"), strings.HasPrefix(low, "the fix is not correct"),
+		strings.HasPrefix(low, "deferral accepted"), strings.HasPrefix(low, "not applicable accepted"):
+		return ""
+	default:
+		return s
+	}
+}
+
+func replySHA(info *PRInfo, d replyDecision, parsed ParsedReply) string {
+	if d.fullSHA != "" {
+		return shaLink(info, d.fullSHA)
+	}
+	if parsed.SHA == "" {
+		return ""
+	}
+	return "`" + mdPathLabel(shortSHA(parsed.SHA)) + "`"
+}
+
+func replyFileLink(info *PRInfo, path string, line int) string {
+	label := shortPathLabel(path, line)
+	if u := blobURL(info, path, line, 0); u != "" {
+		return fmt.Sprintf("[`%s`](<%s>)", label, u)
+	}
+	return "`" + label + "`"
+}
+
+func shortPathLabel(path string, line int) string {
+	label := path
+	if strings.Contains(path, "/") {
+		label = pathBase(path)
+	}
+	label = mdPathLabel(label)
+	if line > 0 {
+		label = fmt.Sprintf("%s:%d", label, line)
+	}
+	return label
+}
+
+func pathBase(p string) string {
+	p = strings.TrimRight(p, "/")
+	if i := strings.LastIndex(p, "/"); i >= 0 && i < len(p)-1 {
+		return p[i+1:]
+	}
+	return p
 }
 
 func safeExplain(s string) string {
