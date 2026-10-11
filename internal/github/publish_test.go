@@ -740,6 +740,31 @@ func TestCommentBodyRationaleEscaped(t *testing.T) {
 	}
 }
 
+func TestCommentBodyLinksCitedFile(t *testing.T) {
+	info := &PRInfo{HTMLBase: "https://github.com/acme/app", HeadSHA: strings.Repeat("a", 40)}
+	f := engine.Finding{
+		Severity:  "low",
+		Category:  "bug",
+		Title:     "Filter misses the child rows",
+		Rationale: "The filter on `env_tag` does not cover `pkg/report.sql`.\n\nSee `pkg/report.sql:12`.",
+	}
+	body, _ := commentBody(info, f, "", PostReviewOptions{}, false)
+	if !strings.Contains(body, "**Filter misses the child rows**") {
+		t.Fatalf("title missing:\n%s", body)
+	}
+	if !strings.Contains(body, "`env_tag`") || strings.Contains(body, "[`env_tag`]") {
+		t.Fatalf("identifier must stay plain code:\n%s", body)
+	}
+	want := "[`report.sql`](<https://github.com/acme/app/blob/" + info.HeadSHA + "/pkg/report.sql>)"
+	wantLine := "[`report.sql:12`](<https://github.com/acme/app/blob/" + info.HeadSHA + "/pkg/report.sql#L12>)"
+	if !strings.Contains(body, want) || !strings.Contains(body, wantLine) {
+		t.Fatalf("file links missing:\n%s", body)
+	}
+	if strings.Contains(body, "`pkg/report.sql`") {
+		t.Fatalf("raw path remained:\n%s", body)
+	}
+}
+
 // suggestDiff carries a 3-line new-file body anchored by a hunk so findings on
 // lines 1..3 survive filterToDiffHunks; line 2 is the candidate for replacement.
 func suggestDiff() []diff.Diff {
