@@ -599,7 +599,6 @@ func TestApplyThreadReplyIgnoresAnotherReviewersFinding(t *testing.T) {
 	head := strings.Repeat("a", 40)
 	info, _, _, client := replyFixture(t, head)
 	client.reviewComments[0][0].User = &gh.User{Login: gh.Ptr("other-bot")}
-	client.reviewComments[0][0].Body = gh.Ptr("<!-- miucr:fp=bbbbbbbbbbbbbbbb -->\n" + botMarker)
 	res, err := ApplyThreadReply(stdctx.Background(), client, info, ThreadReplyRequest{
 		CommentID: 11, Body: "Fixed in bbbbbbb: tightened the bound", UserLogin: "dev", InReplyTo: 10, Kind: "review_comment",
 	}, nil, config.ApprovalPolicy{}, time.Now())
@@ -607,6 +606,21 @@ func TestApplyThreadReplyIgnoresAnotherReviewersFinding(t *testing.T) {
 		t.Fatal(err)
 	}
 	if res.Reason != "other_reviewer" || len(client.replies) != 0 {
+		t.Fatalf("result=%+v replies=%v", res, client.replies)
+	}
+}
+
+func TestApplyThreadReplyNotesFindingMissingFromLedger(t *testing.T) {
+	head := strings.Repeat("a", 40)
+	info, _, _, client := replyFixture(t, head)
+	client.reviewComments[0][0].Body = gh.Ptr("<!-- miucr:fp=bbbbbbbbbbbbbbbb -->\n" + botMarker)
+	res, err := ApplyThreadReply(stdctx.Background(), client, info, ThreadReplyRequest{
+		CommentID: 11, Body: "Fixed in bbbbbbb: tightened the bound", UserLogin: "dev", InReplyTo: 10, Kind: "review_comment",
+	}, nil, config.ApprovalPolicy{}, time.Now())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if res.Reason != "not_in_ledger" || len(client.replies) != 1 || !strings.Contains(client.replies[0], "not in the current review summary") {
 		t.Fatalf("result=%+v replies=%v", res, client.replies)
 	}
 }

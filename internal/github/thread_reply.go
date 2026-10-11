@@ -237,9 +237,16 @@ func ApplyThreadReply(ctx stdctx.Context, client Client, info *PRInfo, req Threa
 	}
 
 	threads, _ := loadReviewThreads(ctx, client, info)
+	if req.Kind != "issue_comment" && threadHasFingerprint(reviewComments, req) && !threadOwnedBy(reviewComments, req, login) {
+		return ThreadReplyResult{Action: "ignored", Reason: "other_reviewer"}, nil
+	}
 	targets, clarify, foreign := selectReplyTargets(req, reviewComments, issueComments, ledger, threads)
 	if foreign {
-		return ThreadReplyResult{Action: "ignored", Reason: "other_reviewer"}, nil
+		body := botMarker + "\n" + replyToMarker(req.CommentID) + "\n\nThis finding is not in the current review summary.\n"
+		if err := postThreadReply(ctx, client, info, req, body); err != nil {
+			return ThreadReplyResult{Reason: "reply_post_failed"}, mapWriteError("github.thread_reply_failed", "posting reply", err)
+		}
+		return ThreadReplyResult{Action: "replied", Reason: "not_in_ledger"}, nil
 	}
 	if clarify {
 		body := botMarker + "\n" + replyToMarker(req.CommentID) + "\n\nName the finding as `path:line`, or reply on its thread. A pull request comment is used only when one finding is still open.\n"
