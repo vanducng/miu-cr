@@ -578,3 +578,49 @@ func TestRenderThreadReplyLinksFileAndSaysWhetherFixIsCorrect(t *testing.T) {
 		t.Fatalf("removed file should stay a short code span: %s", gone)
 	}
 }
+
+func TestListActionableRepliesSkipsAnotherReviewer(t *testing.T) {
+	info := &PRInfo{Owner: "acme", Repo: "app", Number: 1, AuthorLogin: "dev"}
+	comments := []*gh.PullRequestComment{
+		{ID: gh.Ptr(int64(1)), User: &gh.User{Login: gh.Ptr("other-bot")}, Body: gh.Ptr("<!-- miucr:fp=bbbbbbbbbbbbbbbb -->\n" + botMarker)},
+		{ID: gh.Ptr(int64(2)), InReplyTo: gh.Ptr(int64(1)), User: &gh.User{Login: gh.Ptr("dev")}, Body: gh.Ptr("Fixed in abcdef1: tightened the bound")},
+	}
+	client := &replyClient{recordClient: recordClient{login: "miucr", reviewComments: [][]*gh.PullRequestComment{comments}}}
+	got, err := ListActionableReplies(stdctx.Background(), client, info, "miucr")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(got) != 0 {
+		t.Fatalf("queued another reviewer's thread: %+v", got)
+	}
+}
+
+func TestApplyThreadReplyIgnoresAnotherReviewersFinding(t *testing.T) {
+	head := strings.Repeat("a", 40)
+	info, _, _, client := replyFixture(t, head)
+	client.reviewComments[0][0].User = &gh.User{Login: gh.Ptr("other-bot")}
+	res, err := ApplyThreadReply(stdctx.Background(), client, info, ThreadReplyRequest{
+		CommentID: 11, Body: "Fixed in bbbbbbb: tightened the bound", UserLogin: "dev", InReplyTo: 10, Kind: "review_comment",
+	}, nil, config.ApprovalPolicy{}, time.Now())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if res.Reason != "other_reviewer" || len(client.replies) != 0 {
+		t.Fatalf("result=%+v replies=%v", res, client.replies)
+	}
+}
+
+func TestApplyThreadReplyNotesFindingMissingFromLedger(t *testing.T) {
+	head := strings.Repeat("a", 40)
+	info, _, _, client := replyFixture(t, head)
+	client.reviewComments[0][0].Body = gh.Ptr("<!-- miucr:fp=bbbbbbbbbbbbbbbb -->\n" + botMarker)
+	res, err := ApplyThreadReply(stdctx.Background(), client, info, ThreadReplyRequest{
+		CommentID: 11, Body: "Fixed in bbbbbbb: tightened the bound", UserLogin: "dev", InReplyTo: 10, Kind: "review_comment",
+	}, nil, config.ApprovalPolicy{}, time.Now())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if res.Reason != "not_in_ledger" || len(client.replies) != 1 || !strings.Contains(client.replies[0], "not in the current review summary") {
+		t.Fatalf("result=%+v replies=%v", res, client.replies)
+	}
+}

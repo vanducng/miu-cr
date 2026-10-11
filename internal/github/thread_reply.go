@@ -237,7 +237,17 @@ func ApplyThreadReply(ctx stdctx.Context, client Client, info *PRInfo, req Threa
 	}
 
 	threads, _ := loadReviewThreads(ctx, client, info)
-	targets, clarify := selectReplyTargets(req, reviewComments, issueComments, ledger, threads)
+	if req.Kind != "issue_comment" && threadHasFingerprint(reviewComments, req) && !threadOwnedBy(reviewComments, req, login) {
+		return ThreadReplyResult{Action: "ignored", Reason: "other_reviewer"}, nil
+	}
+	targets, clarify, foreign := selectReplyTargets(req, reviewComments, issueComments, ledger, threads)
+	if foreign {
+		body := botMarker + "\n" + replyToMarker(req.CommentID) + "\n\nThis finding is not in the current review summary.\n"
+		if err := postThreadReply(ctx, client, info, req, body); err != nil {
+			return ThreadReplyResult{Reason: "reply_post_failed"}, mapWriteError("github.thread_reply_failed", "posting reply", err)
+		}
+		return ThreadReplyResult{Action: "replied", Reason: "not_in_ledger"}, nil
+	}
 	if clarify {
 		body := botMarker + "\n" + replyToMarker(req.CommentID) + "\n\nName the finding as `path:line`, or reply on its thread. A pull request comment is used only when one finding is still open.\n"
 		if err := postThreadReply(ctx, client, info, req, body); err != nil {
@@ -771,9 +781,10 @@ func threadClear(root int64, comments []*gh.PullRequestComment, ledger []LedgerE
 	return true
 }
 
-func selectReplyTargets(req ThreadReplyRequest, reviewComments []*gh.PullRequestComment, issueComments []*gh.IssueComment, ledger []LedgerEntry, threads []ReviewThread) ([]replyTarget, bool) {
+func selectReplyTargets(req ThreadReplyRequest, reviewComments []*gh.PullRequestComment, issueComments []*gh.IssueComment, ledger []LedgerEntry, threads []ReviewThread) ([]replyTarget, bool, bool) {
 	if req.Kind == "issue_comment" {
-		return selectIssueReplyTargets(req.Body, reviewComments, issueComments, ledger)
+		targets, clarify := selectIssueReplyTargets(req.Body, reviewComments, issueComments, ledger)
+		return targets, clarify, false
 	}
 	byFP := map[string]int{}
 	for i, e := range ledger {
@@ -783,7 +794,7 @@ func selectReplyTargets(req ThreadReplyRequest, reviewComments []*gh.PullRequest
 	bodies, threadID := threadBodies(reviewComments, threads, root, req.CommentID)
 	fps := fpsInBodies(bodies)
 	if len(fps) == 0 {
-		return nil, false
+		return nil, false, false
 	}
 	var targets []replyTarget
 	for _, fp := range fps {
@@ -793,7 +804,10 @@ func selectReplyTargets(req ThreadReplyRequest, reviewComments []*gh.PullRequest
 		}
 		targets = append(targets, replyTarget{Index: idx, Entry: ledger[idx], Body: findingBody(bodies, fp), Thread: threadID, RootID: root})
 	}
-	return filterTargetsByReply(req.Body, targets), false
+	if len(targets) == 0 {
+		return nil, false, true
+	}
+	return filterTargetsByReply(req.Body, targets), false, false
 }
 
 func selectIssueReplyTargets(body string, reviewComments []*gh.PullRequestComment, issueComments []*gh.IssueComment, ledger []LedgerEntry) ([]replyTarget, bool) {
@@ -1025,6 +1039,9 @@ func ListActionableReplies(ctx stdctx.Context, client Client, info *PRInfo, botL
 		if !threadHasFingerprint(reviewComments, req) {
 			continue
 		}
+		if !threadOwnedBy(reviewComments, req, login) {
+			continue
+		}
 		out = append(out, req)
 	}
 	for _, c := range issueComments {
@@ -1060,6 +1077,24 @@ func threadHasFingerprint(comments []*gh.PullRequestComment, req ThreadReplyRequ
 	root := threadRootID(comments, req.CommentID, req.InReplyTo)
 	bodies, _ := threadBodies(comments, nil, root, req.CommentID)
 	return len(fpsInBodies(bodies)) > 0
+}
+
+func threadOwnedBy(comments []*gh.PullRequestComment, req ThreadReplyRequest, login string) bool {
+	if strings.TrimSpace(login) == "" {
+		return true
+	}
+	root := threadRootID(comments, req.CommentID, req.InReplyTo)
+	for _, c := range comments {
+		if c.GetID() != root {
+			continue
+		}
+		author := c.GetUser().GetLogin()
+		if author == "" {
+			return true
+		}
+		return strings.EqualFold(author, login)
+	}
+	return true
 }
 
 func listAllReviewComments(ctx stdctx.Context, client Client, info *PRInfo) ([]*gh.PullRequestComment, error) {
