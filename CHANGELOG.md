@@ -55,6 +55,13 @@ comment with a new marker); subsequent re-runs dedupe normally. On a
 first M5 review **manually** (or off-hours) to absorb the one-time re-post before
 the next scheduled run.
 
+## [0.90.4](https://github.com/vanducng/miu-cr/compare/v0.90.3...v0.90.4) (2026-10-11)
+
+
+### Bug Fixes
+
+* **agent:** fit tools-less prompts under gateway send budgets ([#322](https://github.com/vanducng/miu-cr/issues/322)) ([c3f6fb2](https://github.com/vanducng/miu-cr/commit/c3f6fb2f0bdc50118fdb5492f15aa5fe918dde61))
+
 ## [0.90.3](https://github.com/vanducng/miu-cr/compare/v0.90.2...v0.90.3) (2026-10-11)
 
 
