@@ -332,9 +332,12 @@ repo alongside `timeout`.
 `debounce` (default off / `0s`) delays a review until the PR head has been
 stable for that long, so a burst of pushes coalesces into one review on the
 settled head instead of each push superseding the prior in-flight review. It
-follows the same review/`repos[].review` layering — raise it for repos whose
-PRs are pushed rapidly. It changes only *when* a review runs, never the review
-itself, so tuning it does not re-review already-reviewed heads. When a debounced
+follows the same review/`repos[].review` layering. Raise it for repos whose
+PRs are pushed rapidly. When the configured wait is longer than 2m and the
+head has no failed checks, the job becomes claimable after 2m. A failed check
+keeps the full wait. A later poll can move a queued job earlier, and it does
+not push the start later. Debounce changes only *when* a review runs, never the
+review itself, so tuning it does not re-review already-reviewed heads. When a debounced
 host job is first queued, miucr upserts the summary with a queued-until timestamp;
 once the review starts, the same comment switches to a reviewing status while the
 previous completed result remains visible.

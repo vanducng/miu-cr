@@ -575,6 +575,107 @@ func TestHostRunnerDebounceDelaysJobAvailability(t *testing.T) {
 	}
 }
 
+func TestHostRunnerLongDebounceShortensWhenChecksAreNotFailed(t *testing.T) {
+	cfg := hostRunnerConfig(t)
+	base := time.Date(2026, 7, 3, 12, 0, 0, 0, time.UTC)
+	now := base
+	cfg.Now = func() time.Time { return now }
+	cfg.Repos[0].Debounce = 10 * time.Minute
+	st := cfg.Store.(*fakeHostStore)
+	client := &threadSyncContextClient{}
+	cfg.NewGitHubClient = func(string) mgithub.Client { return client }
+	r, err := NewHostRunner(cfg)
+	if err != nil {
+		t.Fatalf("NewHostRunner: %v", err)
+	}
+	if err := r.Tick(stdctx.Background()); err != nil {
+		t.Fatalf("tick: %v", err)
+	}
+	st.mu.Lock()
+	if !st.lastEnqueue.AvailableAt.Equal(base.Add(2 * time.Minute)) {
+		t.Fatalf("clean head available_at = %s, want %s", st.lastEnqueue.AvailableAt, base.Add(2*time.Minute))
+	}
+	st.mu.Unlock()
+
+	client.mu.Lock()
+	client.checks = []*github.CheckRun{{Name: github.Ptr("build"), Status: github.Ptr("completed"), Conclusion: github.Ptr("failure")}}
+	client.mu.Unlock()
+	now = base.Add(time.Minute)
+	if err := r.Tick(stdctx.Background()); err != nil {
+		t.Fatalf("failed-check tick: %v", err)
+	}
+	st.mu.Lock()
+	var job store.HostJob
+	for _, j := range st.jobs {
+		job = j
+	}
+	if !job.AvailableAt.Equal(base.Add(2 * time.Minute)) {
+		t.Fatalf("failed check must not push a queued job later, available_at = %s", job.AvailableAt)
+	}
+	st.mu.Unlock()
+}
+
+func TestHostRunnerFailedChecksKeepLongDebounce(t *testing.T) {
+	cfg := hostRunnerConfig(t)
+	base := time.Date(2026, 7, 3, 12, 0, 0, 0, time.UTC)
+	cfg.Now = func() time.Time { return base }
+	cfg.Repos[0].Debounce = 10 * time.Minute
+	st := cfg.Store.(*fakeHostStore)
+	client := &threadSyncContextClient{checks: []*github.CheckRun{{
+		Name: github.Ptr("build"), Status: github.Ptr("completed"), Conclusion: github.Ptr("failure"),
+	}}}
+	cfg.NewGitHubClient = func(string) mgithub.Client { return client }
+	r, err := NewHostRunner(cfg)
+	if err != nil {
+		t.Fatalf("NewHostRunner: %v", err)
+	}
+	if err := r.Tick(stdctx.Background()); err != nil {
+		t.Fatalf("tick: %v", err)
+	}
+	st.mu.Lock()
+	defer st.mu.Unlock()
+	if !st.lastEnqueue.AvailableAt.Equal(base.Add(10 * time.Minute)) {
+		t.Fatalf("failed checks available_at = %s, want %s", st.lastEnqueue.AvailableAt, base.Add(10*time.Minute))
+	}
+}
+
+func TestHostRunnerPullsQueuedDebounceForwardWhenChecksRecover(t *testing.T) {
+	cfg := hostRunnerConfig(t)
+	base := time.Date(2026, 7, 3, 12, 0, 0, 0, time.UTC)
+	now := base
+	cfg.Now = func() time.Time { return now }
+	cfg.Repos[0].Debounce = 10 * time.Minute
+	st := cfg.Store.(*fakeHostStore)
+	client := &threadSyncContextClient{checks: []*github.CheckRun{{
+		Name: github.Ptr("build"), Status: github.Ptr("completed"), Conclusion: github.Ptr("failure"),
+	}}}
+	cfg.NewGitHubClient = func(string) mgithub.Client { return client }
+	r, err := NewHostRunner(cfg)
+	if err != nil {
+		t.Fatalf("NewHostRunner: %v", err)
+	}
+	if err := r.Tick(stdctx.Background()); err != nil {
+		t.Fatalf("first tick: %v", err)
+	}
+	client.mu.Lock()
+	client.checks = nil
+	client.mu.Unlock()
+	now = base.Add(4 * time.Minute)
+	if err := r.Tick(stdctx.Background()); err != nil {
+		t.Fatalf("second tick: %v", err)
+	}
+	st.mu.Lock()
+	defer st.mu.Unlock()
+	want := now.Add(2 * time.Minute)
+	var job store.HostJob
+	for _, j := range st.jobs {
+		job = j
+	}
+	if !job.AvailableAt.Equal(want) {
+		t.Fatalf("recovered checks available_at = %s, want %s", job.AvailableAt, want)
+	}
+}
+
 func TestHostRunnerPollCancelsQueuedJobsForClosedPRs(t *testing.T) {
 	cfg := hostRunnerConfig(t)
 	gh := &fakeNotifGetter{prs: map[string][]*github.PullRequest{
@@ -1217,6 +1318,7 @@ type threadSyncContextClient struct {
 	issueComments []*github.IssueComment
 	nextIssueID   int64
 	hold          <-chan struct{}
+	checks        []*github.CheckRun
 }
 
 func (c *threadSyncContextClient) issueContextErr() error {
@@ -1304,7 +1406,9 @@ func (c *threadSyncContextClient) UpdateCheckRun(stdctx.Context, string, string,
 }
 
 func (c *threadSyncContextClient) ListCheckRunsForRef(stdctx.Context, string, string, string, *github.ListCheckRunsOptions) (*github.ListCheckRunsResults, *github.Response, error) {
-	return nil, nil, nil
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	return &github.ListCheckRunsResults{CheckRuns: c.checks}, &github.Response{}, nil
 }
 
 func (c *threadSyncContextClient) GetCombinedStatus(stdctx.Context, string, string, string, *github.ListOptions) (*github.CombinedStatus, *github.Response, error) {
@@ -1559,6 +1663,11 @@ func (s *fakeHostStore) EnqueueHostJob(_ stdctx.Context, in store.HostJobInput) 
 	in.DedupeKey = store.HostJobDedupeKey(in)
 	s.lastEnqueue = in
 	if j, ok := s.jobs[in.DedupeKey]; ok {
+		if j.Status == "queued" && in.AvailableAt.Before(j.AvailableAt) {
+			j.AvailableAt = in.AvailableAt
+			s.jobs[in.DedupeKey] = j
+			return j, true, nil
+		}
 		if j.Status == "failed" && j.AvailableAt.After(in.Now) {
 			return j, false, nil
 		}
@@ -1588,9 +1697,24 @@ func (s *fakeHostStore) ClaimHostJob(_ stdctx.Context, in store.HostJobClaimInpu
 	if len(s.queued) == 0 {
 		return store.HostJobClaim{}, false, nil
 	}
-	key := s.queued[0]
-	s.queued = s.queued[1:]
-	job := s.jobs[key]
+	var deferred []string
+	var key string
+	var job store.HostJob
+	found := false
+	for len(s.queued) > 0 {
+		key = s.queued[0]
+		s.queued = s.queued[1:]
+		job = s.jobs[key]
+		if job.Status == "queued" && !job.AvailableAt.After(in.Now) {
+			found = true
+			break
+		}
+		deferred = append(deferred, key)
+	}
+	s.queued = append(deferred, s.queued...)
+	if !found {
+		return store.HostJobClaim{}, false, nil
+	}
 	job.Status = "running"
 	job.LeaseOwner = in.WorkerID
 	leaseUntil := in.Now.Add(in.LeaseDuration)

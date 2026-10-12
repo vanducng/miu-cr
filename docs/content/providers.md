@@ -249,7 +249,7 @@ Set `model` (or `--model` / `ANTHROPIC_MODEL`) to a GLM model; the pinned defaul
 :::
 
 :::note[Thinking on GLM]
-GLM 4.5+ (e.g. `glm-5.2`) returns extended-thinking blocks over the z.ai Anthropic-compatible endpoint, so it honors `[review].thinking` like Claude (default `auto` = on). Set `thinking = "off"` to disable, or `MIUCR_TRACE_REASONING=true` to capture the thinking into the review trace.
+GLM 4.5+ (e.g. `glm-5.2`) and xAI Grok (e.g. `grok-4.7`) return extended-thinking blocks over an Anthropic-compatible endpoint, so they honor `[review].thinking` like Claude (default `auto` = on). Set `thinking = "off"` to disable, or `MIUCR_TRACE_REASONING=true` to capture the thinking into the review trace.
 :::
 
 :::note[Migrating from `ZAI_API_KEY`]

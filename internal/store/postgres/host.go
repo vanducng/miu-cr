@@ -94,6 +94,20 @@ FOR UPDATE`, in.DedupeKey))
 		return store.HostJob{}, false, err
 	}
 	expiredRunning := job.Status == "running" && job.LeaseUntil != nil && !job.LeaseUntil.After(now)
+	if job.Status == "queued" && in.AvailableAt.Before(job.AvailableAt) {
+		job, err = scanHostJob(tx.QueryRowContext(ctx, `
+UPDATE host_jobs
+SET available_at=$2,
+    updated_at=$3
+WHERE id=$1
+  AND status='queued'
+  AND available_at>$2
+RETURNING id, repo_id, session_id, number, head_sha, base_sha, policy_hash, prompt_hash, rules_hash, dedupe_key, priority, available_at, status, attempts, lease_owner, lease_until, review_id, error, created_at, updated_at, completed_at`, job.ID, in.AvailableAt, now))
+		if err != nil {
+			return store.HostJob{}, false, err
+		}
+		return job, true, tx.Commit()
+	}
 	if job.Status == "failed" && job.AvailableAt.After(now) {
 		return job, false, tx.Commit()
 	}

@@ -166,6 +166,29 @@ func TestHostConcurrentEnqueueDedupe(t *testing.T) {
 	}
 }
 
+func TestHostEnqueuePullsQueuedJobEarlier(t *testing.T) {
+	s := openHost(t)
+	ctx := context.Background()
+	repo := mustHostRepo(t, s)
+	session := mustHostSession(t, s, repo.ID, 17, "open")
+	now := time.Now().UTC().Truncate(time.Second)
+	in := hostJobInput(repo.ID, session.ID, 17, uniqueName(t, "head"))
+	in.Now = now
+	in.AvailableAt = now.Add(10 * time.Minute)
+	if _, ok, err := s.EnqueueHostJob(ctx, in); err != nil || !ok {
+		t.Fatalf("enqueue ok=%v err=%v", ok, err)
+	}
+	in.Now = now.Add(time.Minute)
+	in.AvailableAt = in.Now.Add(2 * time.Minute)
+	pulled, ok, err := s.EnqueueHostJob(ctx, in)
+	if err != nil || !ok {
+		t.Fatalf("pull forward ok=%v err=%v", ok, err)
+	}
+	if !pulled.AvailableAt.Equal(in.AvailableAt) {
+		t.Fatalf("available_at = %s, want %s", pulled.AvailableAt, in.AvailableAt)
+	}
+}
+
 func TestHostEnqueueRequeuesExpiredRunningJob(t *testing.T) {
 	s := openHost(t)
 	ctx := context.Background()

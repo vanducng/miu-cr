@@ -58,6 +58,58 @@ func trustedAuthor(info PRInfo) bool {
 	return trustedAssociations[info.AuthorAssociation]
 }
 
+// HeadChecksFailing reports whether ref has a completed unsuccessful check or
+// commit status. Pending and empty sets are not failing. The miu-cr check is ignored.
+func HeadChecksFailing(ctx stdctx.Context, client Client, owner, repo, ref string) (bool, error) {
+	opts := &gh.ListCheckRunsOptions{Filter: gh.Ptr("latest"), ListOptions: gh.ListOptions{PerPage: 100}}
+	for {
+		runs, resp, err := client.ListCheckRunsForRef(ctx, owner, repo, ref, opts)
+		if err != nil {
+			return false, err
+		}
+		if runs != nil {
+			for _, run := range runs.CheckRuns {
+				if run.GetName() == checkRunName || run.GetStatus() != "completed" {
+					continue
+				}
+				switch run.GetConclusion() {
+				case "success", "neutral", "skipped":
+				default:
+					return true, nil
+				}
+			}
+		}
+		if resp == nil || resp.NextPage == 0 {
+			break
+		}
+		opts.Page = resp.NextPage
+	}
+	statusOpts := &gh.ListOptions{PerPage: 100}
+	for {
+		statuses, resp, err := client.GetCombinedStatus(ctx, owner, repo, ref, statusOpts)
+		if err != nil {
+			return false, err
+		}
+		if statuses != nil {
+			for _, status := range statuses.Statuses {
+				if status.GetContext() == checkRunName {
+					continue
+				}
+				switch status.GetState() {
+				case "success", "pending":
+				default:
+					return true, nil
+				}
+			}
+		}
+		if resp == nil || resp.NextPage == 0 {
+			break
+		}
+		statusOpts.Page = resp.NextPage
+	}
+	return false, nil
+}
+
 func approvalChecksGreen(ctx stdctx.Context, client Client, info *PRInfo) (bool, error) {
 	opts := &gh.ListCheckRunsOptions{Filter: gh.Ptr("latest"), ListOptions: gh.ListOptions{PerPage: 100}}
 	for {
