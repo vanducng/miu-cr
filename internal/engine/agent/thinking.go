@@ -31,12 +31,12 @@ func anthropicThinkingBudget(effort string) int64 {
 
 // supportsAnthropicThinking reports whether a model reached over the anthropic
 // kind supports extended thinking. Conservative allow-list: a known
-// thinking-capable Claude family, plus z.ai GLM 4.5+ (smoke-verified that
-// glm-5.2 over the anthropic-compat endpoint returns thinking blocks when sent
-// thinking:{type:enabled}). Anything else never gets a thinking block it rejects.
+// thinking-capable Claude family, z.ai GLM 4.5+, and xAI Grok. Grok honors the
+// same thinking block through an Anthropic-compatible gateway. Anything else
+// never gets a thinking block it rejects.
 func supportsAnthropicThinking(model string) bool {
 	m := strings.ToLower(model)
-	for _, fam := range []string{"glm-4.5", "glm-4.6", "glm-5"} {
+	for _, fam := range []string{"glm-4.5", "glm-4.6", "glm-5", "grok-"} {
 		if strings.Contains(m, fam) {
 			return true
 		}

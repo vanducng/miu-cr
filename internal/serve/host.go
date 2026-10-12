@@ -24,6 +24,10 @@ import (
 
 const maxHostClaimsPerTick = 32
 const defaultHostJobLeaseDuration = 2 * time.Minute
+
+// quietHeadDebounce is the short wait used when a longer debounce is configured
+// and the head has no failed checks. A failed check keeps the full debounce.
+const quietHeadDebounce = 2 * time.Minute
 const hostJobHeartbeatInterval = 30 * time.Second
 const hostFailedRetryBase = 5 * time.Minute
 const hostFailedRetryCap = time.Hour
@@ -604,6 +608,7 @@ func (h *HostRunner) pollRepo(ctx stdctx.Context, snap hostRunnerSnapshot, repo 
 			h.log.Warn("host: failed to upsert PR session", "repo", repo.Slug, "pr", number, "error", config.RedactString(err.Error()))
 			continue
 		}
+		delay := reviewDebounce(repo.Debounce, headChecksFailing(ctx, h, getGitHubClient(), repo, head))
 		job, queued, err := h.store.EnqueueHostJob(ctx, store.HostJobInput{
 			RepoID:     repoID,
 			SessionID:  session.ID,
@@ -614,18 +619,18 @@ func (h *HostRunner) pollRepo(ctx stdctx.Context, snap hostRunnerSnapshot, repo 
 			PromptHash: repo.PromptHash,
 			RulesHash:  repo.RulesHash,
 			// Debounce: not claimable until the head has been stable this long. ON
-			// CONFLICT(dedupe_key) DO NOTHING anchors this to the head's first enqueue
-			// (no forward slide on later polls); a newer head supersedes this queued
-			// job before it becomes claimable. 0 => now (review immediately).
-			AvailableAt: now.Add(repo.Debounce),
+			// CONFLICT the first enqueue wins, except a later poll may move a queued
+			// job earlier. A newer head supersedes this job before it is claimable.
+			// 0 => now (review immediately).
+			AvailableAt: now.Add(delay),
 			Now:         now,
 		})
 		if err != nil {
 			h.log.Warn("host: failed to enqueue PR review", "repo", repo.Slug, "pr", number, "error", config.RedactString(err.Error()))
 			continue
 		}
-		if queued && repo.Debounce > 0 && job.AvailableAt.After(now) {
-			h.updateQueuedSummaryStatus(ctx, getGitHubClient(), repo, pr, job.AvailableAt, repo.Debounce)
+		if queued && delay > 0 && job.AvailableAt.After(now) {
+			h.updateQueuedSummaryStatus(ctx, getGitHubClient(), repo, pr, job.AvailableAt, delay)
 		}
 		if repo.ThreadResolutionSync.Enabled() || deferredApprovalEnabled(repo.Review.Approval) {
 			h.enqueueThreadResolutionSync(ctx, getGitHubClient(), repo, pr, now)
@@ -647,6 +652,27 @@ func (h *HostRunner) pollRepo(ctx stdctx.Context, snap hostRunnerSnapshot, repo 
 	}
 	h.pruneThreadResolutionSync(repo.Slug, openNumbers)
 	return pollFloor, nil
+}
+
+func reviewDebounce(configured time.Duration, checksFailing bool) time.Duration {
+	if checksFailing || configured <= quietHeadDebounce {
+		return configured
+	}
+	return quietHeadDebounce
+}
+
+func headChecksFailing(ctx stdctx.Context, h *HostRunner, client mgithub.Client, repo HostRepoConfig, head string) bool {
+	if repo.Debounce <= quietHeadDebounce || client == nil || head == "" {
+		return false
+	}
+	failing, err := mgithub.HeadChecksFailing(ctx, client, repo.Owner, repo.Repo, head)
+	if err != nil {
+		h.log.Warn("host: check status unavailable, keeping full debounce",
+			"repo", repo.Slug, "head_sha", ShortSHA(head), "reason", "checks_unverified",
+			"error", config.RedactString(err.Error()))
+		return true
+	}
+	return failing
 }
 
 func (h *HostRunner) updateQueuedSummaryStatus(ctx stdctx.Context, client mgithub.Client, repo HostRepoConfig, pr *github.PullRequest, availableAt time.Time, debounce time.Duration) {

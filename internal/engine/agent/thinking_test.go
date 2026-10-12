@@ -34,7 +34,7 @@ func TestThinkingSettingParse(t *testing.T) {
 }
 
 func TestSupportsAnthropicThinking(t *testing.T) {
-	for _, m := range []string{"claude-sonnet-4-5", "claude-opus-4-1", "claude-3-7-sonnet-latest", "glm-5.2", "glm-4.6", "glm-4.5"} {
+	for _, m := range []string{"claude-sonnet-4-5", "claude-opus-4-1", "claude-3-7-sonnet-latest", "glm-5.2", "glm-4.6", "glm-4.5", "grok-4.7", "grok-4"} {
 		if !supportsAnthropicThinking(m) {
 			t.Fatalf("want thinking-capable: %s", m)
 		}

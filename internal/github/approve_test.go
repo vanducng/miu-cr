@@ -201,6 +201,21 @@ func TestPostReviewDoesNotApproveUnknownMergeability(t *testing.T) {
 	}
 }
 
+func TestHeadChecksFailing(t *testing.T) {
+	failed := &recordClient{existingCheckRuns: []*gh.CheckRun{{Name: gh.Ptr("build"), Status: gh.Ptr("completed"), Conclusion: gh.Ptr("failure")}}}
+	if failing, err := HeadChecksFailing(stdctx.Background(), failed, "acme", "app", "head"); err != nil || !failing {
+		t.Fatalf("failed check failing=%v err=%v", failing, err)
+	}
+	pending := &recordClient{existingCheckRuns: []*gh.CheckRun{{Name: gh.Ptr("build"), Status: gh.Ptr("in_progress")}}}
+	if failing, err := HeadChecksFailing(stdctx.Background(), pending, "acme", "app", "head"); err != nil || failing {
+		t.Fatalf("pending check failing=%v err=%v", failing, err)
+	}
+	ok := &recordClient{existingCheckRuns: []*gh.CheckRun{{Name: gh.Ptr("build"), Status: gh.Ptr("completed"), Conclusion: gh.Ptr("success")}}}
+	if failing, err := HeadChecksFailing(stdctx.Background(), ok, "acme", "app", "head"); err != nil || failing {
+		t.Fatalf("green check failing=%v err=%v", failing, err)
+	}
+}
+
 func TestApproveResolvedLedgerDoesNotBypassReadiness(t *testing.T) {
 	c := &recordClient{conflicted: true}
 	approved, reason := ApproveResolvedLedger(stdctx.Background(), c, approveInfo(), config.ApprovalPolicy{Mode: "clean"}, "")
