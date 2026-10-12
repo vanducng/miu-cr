@@ -82,7 +82,7 @@ The day-1 provider/auth/timeout failures classify into a **stable taxonomy** (sa
 | `agent.auth_failed` | bad/invalid API key (401/403, api-key backends) | `false` | `miucr login …` / set a valid key |
 | `agent.auth_expired` | expired OAuth (401/403; codex incl. still-401-after-refresh) | `false` | `miucr login --provider openai` |
 | `provider.rate_limited` | 429 | `true` | wait for the reset window and retry |
-| `agent.unavailable` | 5xx / 529 | `true` | retry shortly |
+| `agent.unavailable` | 5xx / 529, or a 400 that says the model provider is not registered yet | `true` | retry shortly |
 | `review.timeout` | the review exceeded `--timeout` | `true` | raise `--timeout` (e.g. `1800s`) or narrow the diff |
 | `review.canceled` | ctx canceled (Ctrl-C / SIGINT), exit `130` | `false` | - |
 | `config.invalid` | malformed `config.toml` / bad enum or `auth` value / an `openai`-kind gateway profile with a key but no `base_url` (exit `2`; same code across review/history/serve) | `false` | fix the named field / set `base_url` for the gateway profile |

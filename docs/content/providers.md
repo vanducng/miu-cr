@@ -148,9 +148,10 @@ system_prompt = "Focus on correctness, concurrency, error handling, and API comp
 `timeout` caps total review wall clock. `stalled_timeout` cancels a run that
 stops emitting progress, which catches stuck provider/tool turns sooner in host
 mode; set it to `"0s"` only when debugging. `[review.provider_retry]` retries
-transient provider failures (`429`, `5xx`, `529`, and temporary transport
-errors) with bounded jittered exponential backoff. It does not retry auth,
-invalid request, content-policy, or context cancellation errors. `[review.tools]`
+transient provider failures (`429`, `5xx`, `529`, temporary transport
+errors, and a `400` that says the model provider is not registered yet) with
+bounded jittered exponential backoff. It does not retry auth, a real invalid
+request, content-policy, or context cancellation errors. `[review.tools]`
 sets the agent tool-loop budget and retries transient tool execution failures
 such as temporary filesystem/process errors, but does not retry malformed tool
 calls, unknown tools, missing files, or context cancellation.
