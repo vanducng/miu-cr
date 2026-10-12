@@ -3,6 +3,7 @@ package github
 import (
 	stdctx "context"
 	"errors"
+	"log/slog"
 	"regexp"
 	"strings"
 
@@ -77,6 +78,75 @@ func RetryDeferredApproval(ctx stdctx.Context, client Client, info *PRInfo, poli
 		return DeferredApprovalResult{Approved: true, Cleared: true, Reason: approveReasonApproved}, nil
 	}
 	return DeferredApprovalResult{Cleared: true, Reason: approveReasonAlreadyDone}, nil
+}
+
+// approveClearedPublishedHead approves when the summary's published commit is
+// still the current head and the ledger has nothing open. A wait on CI or
+// mergeability is written onto that summary so a later poll can approve it.
+func approveClearedPublishedHead(ctx stdctx.Context, client Client, info *PRInfo, policy config.ApprovalPolicy, summaryID int64, body string) (bool, string) {
+	if info == nil || summaryID == 0 || strings.TrimSpace(body) == "" {
+		return false, ""
+	}
+	reviewed := parsePublishedCommit(body)
+	if reviewed == "" || !strings.EqualFold(reviewed, info.HeadSHA) || !LedgerClearForApproval(ParseLedger(body)) {
+		return false, ""
+	}
+	approved, reason := ApproveResolvedLedger(ctx, client, info, policy, summaryCommentURL(info, summaryID, ""))
+	if approved || !approvalRetryReason(reason) {
+		return approved, reason
+	}
+	if err := stampDeferredApproval(ctx, client, info, summaryID, body, reason); err != nil {
+		slog.Warn("deferred approval notice failed",
+			"repo", info.Owner+"/"+info.Repo, "pr", info.Number, "head_sha", shortSHA(info.HeadSHA),
+			"reason", reason, "error", config.RedactString(err.Error()))
+		return false, "summary_edit_failed"
+	}
+	return false, reason
+}
+
+func approvalRetryReason(reason string) bool {
+	switch reason {
+	case approveReasonChecksNotGreen, approveReasonReadinessUnverified:
+		return true
+	default:
+		return false
+	}
+}
+
+func stampDeferredApproval(ctx stdctx.Context, client Client, info *PRInfo, summaryID int64, body, reason string) error {
+	if deferredApprovalReason(body) != "" {
+		return nil
+	}
+	next := insertApprovalBlocker(body, reason)
+	if next == body {
+		return nil
+	}
+	if _, err := client.EditIssueComment(ctx, info.Owner, info.Repo, summaryID, &gh.IssueComment{Body: gh.Ptr(next)}); err != nil {
+		return mapWriteError("github.deferred_approval_failed", "editing summary comment", err)
+	}
+	return nil
+}
+
+func insertApprovalBlocker(body, reason string) string {
+	var block strings.Builder
+	renderApprovalBlocker(&block, reason)
+	insertion := strings.TrimRight(block.String(), "\n")
+	if insertion == "" {
+		return body
+	}
+	idx := strings.Index(body, "**Result:**")
+	if idx < 0 {
+		return body
+	}
+	rel := strings.IndexByte(body[idx:], '\n')
+	if rel < 0 {
+		return body + "\n\n" + insertion + "\n"
+	}
+	insertAt := idx + rel + 1
+	if insertAt < len(body) && body[insertAt] == '\n' {
+		insertAt++
+	}
+	return body[:insertAt] + insertion + "\n\n" + body[insertAt:]
 }
 
 // DeferredApprovalNeedsAttention reports retry reasons that are operational

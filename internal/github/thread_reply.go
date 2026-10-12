@@ -321,6 +321,9 @@ func ApplyThreadReply(ctx stdctx.Context, client Client, info *PRInfo, req Threa
 				return mapWriteError("github.thread_reply_failed", "posting reply", perr)
 			}
 			result = ThreadReplyResult{Action: "replied", Reason: "already_handled"}
+			if LedgerClearForApproval(ledger) {
+				result.Approved, result.ApproveReason = approveClearedPublishedHead(ctx, client, info, policy, summaryID, summaryBody)
+			}
 			return nil
 		}
 
@@ -351,9 +354,7 @@ func ApplyThreadReply(ctx stdctx.Context, client Client, info *PRInfo, req Threa
 
 		result = ThreadReplyResult{Action: "replied", Reason: "replied", Accepted: accepted, Rejected: rejected}
 		if rejected == 0 && LedgerClearForApproval(next) {
-			if reviewedHead := parsePublishedCommit(summaryBody); reviewedHead != "" && strings.EqualFold(reviewedHead, info.HeadSHA) {
-				result.Approved, result.ApproveReason = ApproveResolvedLedger(ctx, client, info, policy, summaryCommentURL(info, summaryID, ""))
-			}
+			result.Approved, result.ApproveReason = approveClearedPublishedHead(ctx, client, info, policy, summaryID, nextBody)
 		}
 		if _, nerr := UpsertResponseNotice(ctx, client, info, login, OpenNoticeItems(next, inlineURLs, nil)); nerr != nil {
 			result.Reason = "notice_failed"
@@ -591,11 +592,11 @@ func replyLine(info *PRInfo, parsed ParsedReply, d replyDecision) string {
 	case d.skip || d.verdict.reason == replyAlready:
 		return file + " is already handled."
 	case d.verdict.reason == replyReopened && parsed.Intent == ReplyFix:
-		return "Fix is not correct. " + file + " is open again."
+		return "**Fix is not correct.** " + file + " is open again."
 	case d.verdict.reason == replyReopened:
 		return file + " is open again."
 	case parsed.Intent == ReplyFix && d.verdict.Accept:
-		return withExtra("Fix is correct. "+joinCommit(sha, "fixes", file)+".", d.verdict.Explanation)
+		return fixAcceptLine(sha, file)
 	case parsed.Intent == ReplyFix:
 		return fixRejectLine(sha, file, d.verdict)
 	case parsed.Intent == ReplyDefer && d.verdict.Accept:
@@ -609,20 +610,27 @@ func replyLine(info *PRInfo, parsed ParsedReply, d replyDecision) string {
 	}
 }
 
+func fixAcceptLine(sha, file string) string {
+	if sha == "" {
+		return "**Fix is correct.** " + file + "."
+	}
+	return "**Fix is correct.** " + file + " in " + sha + "."
+}
+
 func fixRejectLine(sha, file string, v ThreadReplyVerdict) string {
 	switch v.reason {
 	case replyFixNotOnPR:
 		if sha == "" {
-			return "Fix is not correct for " + file + ". That commit is not on this pull request."
+			return "**Fix is not correct.** " + file + ". That commit is not on this pull request."
 		}
-		return "Fix is not correct for " + file + ". " + sha + " is not on this pull request."
+		return "**Fix is not correct.** " + file + ". " + sha + " is not on this pull request."
 	case replyFixUnchanged, replyFixLine:
-		return "Fix is not correct. " + joinCommit(sha, "does not change", file) + "."
+		return "**Fix is not correct.** " + joinCommit(sha, "does not change", file) + "."
 	default:
 		if strings.TrimSpace(v.Explanation) != "" && sha == "" {
-			return withExtra("Fix is not correct for "+file+".", v.Explanation)
+			return withExtra("**Fix is not correct.** "+file+".", v.Explanation)
 		}
-		return withExtra("Fix is not correct. "+joinCommit(sha, "does not fix", file)+".", v.Explanation)
+		return withExtra("**Fix is not correct.** "+joinCommit(sha, "does not fix", file)+".", v.Explanation)
 	}
 }
 

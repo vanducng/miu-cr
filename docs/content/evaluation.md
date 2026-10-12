@@ -137,7 +137,10 @@ reviews and check three things.
   An inline question does not @mention them again.
 - A rationale is two sentences: what breaks, then why. A question is a separate
   line, and only when the code cannot answer it.
-- A fix reply says whether the fix is correct and uses a short file link.
+- A correct fix reply is one sentence: the verdict, a short file link, and the commit. It does not restate the author's reply.
+- A clear ledger on the reviewed head approves. A later reply that finds the
+  finding already handled still approves. If CI is still running, the summary
+  says approval is waiting.
 
 Open findings from that pass go back into a fix. The suite here stays for
 recall. Grow it when a miss or a noisy finding shows up, not for wording.

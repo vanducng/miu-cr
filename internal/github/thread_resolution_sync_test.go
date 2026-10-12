@@ -292,6 +292,41 @@ func TestSyncSummaryConversationResolvedApprovesClearedLedger(t *testing.T) {
 	}
 }
 
+func TestSyncSummaryConversationResolvedStampsChecksWait(t *testing.T) {
+	now := time.Date(2026, 6, 28, 10, 0, 0, 0, time.UTC)
+	headSHA := "bbbbbb2222222222222222222222222222222222"
+	info := &PRInfo{Owner: "o", Repo: "r", Number: 1, HeadSHA: headSHA, HTMLBase: "https://github.com/o/r", ReviewCount: 1, AuthorAssociation: "MEMBER"}
+	f := engine.Finding{File: "a.go", Line: 5, Severity: "low", Category: "bug", Title: "thing", QuotedCode: "x"}
+	fp := Fingerprint(f)
+	body := RenderSummaryFull(info, []engine.Finding{f}, nil, 0, nil, nil, SummaryOptions{
+		Ledger:    MergeLedger(nil, []engine.Finding{f}, "aaaaaa1", map[string]bool{"a.go": true}, now),
+		Published: true,
+	})
+	client := &syncRecordClient{
+		recordClient: recordClient{
+			headSHA: headSHA,
+			issueStore: []*gh.IssueComment{{
+				ID: gh.Ptr(int64(7)), User: &gh.User{Login: gh.Ptr("reviewer")}, Body: gh.Ptr(body),
+			}},
+			existingCheckRuns: []*gh.CheckRun{{
+				Name: gh.Ptr("build"), Status: gh.Ptr("completed"), Conclusion: gh.Ptr("failure"),
+			}},
+		},
+		threads: []ReviewThread{{Resolved: true, Comments: []ReviewThreadComment{{Body: fpMarker(fp)}}}},
+	}
+
+	res, err := SyncSummaryConversationResolved(stdctx.Background(), client, info, config.ApprovalPolicy{Mode: "clean"}, now.Add(time.Hour))
+	if err != nil {
+		t.Fatalf("sync: %v", err)
+	}
+	if res.Approved || res.ApproveReason != approveReasonChecksNotGreen || client.createReviewN != 0 {
+		t.Fatalf("result=%+v reviews=%d", res, client.createReviewN)
+	}
+	if !strings.Contains(client.editedBody, approvalReasonToken(approveReasonChecksNotGreen)) {
+		t.Fatalf("summary missing checks wait:\n%s", client.editedBody)
+	}
+}
+
 // If the current head moved past the reviewed head, resolving does NOT approve —
 // approving a commit we never reviewed would be unsafe; a fresh review handles it.
 func TestSyncSummaryConversationResolvedSkipsApproveOnMovedHead(t *testing.T) {
