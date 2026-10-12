@@ -2,6 +2,7 @@ package agent
 
 import (
 	stdctx "context"
+	"encoding/json"
 	"errors"
 	"net/http"
 	"net/url"
@@ -89,6 +90,38 @@ func TestClassifyStatusRedactsSecret(t *testing.T) {
 	}
 	if strings.Contains(got.Message, secret) {
 		t.Fatalf("secret leaked into classified message: %q", got.Message)
+	}
+}
+
+func TestClassifyAnthropicErrRetriesUnregisteredModel(t *testing.T) {
+	body := `{"type":"error","error":{"type":"invalid_request_error","message":"unknown provider for model default"}}`
+	apiErr := &anthropic.Error{}
+	if err := json.Unmarshal([]byte(body), apiErr); err != nil {
+		t.Fatal(err)
+	}
+	req, resp := fakeReqResp(400)
+	apiErr.StatusCode = 400
+	apiErr.Request = req
+	apiErr.Response = resp
+	if !strings.Contains(apiErr.Error(), "unknown provider for model") {
+		t.Fatalf("sdk error dropped the response body: %s", apiErr.Error())
+	}
+	ce := asCLIErr(t, classifyAnthropicErr(apiErr))
+	if ce.Code != "agent.unavailable" || !ce.Retry {
+		t.Fatalf("got %+v, want unavailable+retry", ce)
+	}
+	reason, ok := anthropicProviderRetryable(apiErr)
+	if !ok || reason.status != 400 {
+		t.Fatalf("catalog 400 must be retried, ok=%v reason=%s", ok, reason)
+	}
+
+	req, resp = fakeReqResp(400)
+	plain := &anthropic.Error{StatusCode: 400, Request: req, Response: resp}
+	if classifyStatus(400, plain.Error(), hintLoginAnthropic, codeAuthFailed) != nil {
+		t.Fatal("a 400 without the catalog phrase must stay unclassified")
+	}
+	if _, ok := anthropicProviderRetryable(plain); ok {
+		t.Fatal("a plain 400 must not be retried")
 	}
 }
 

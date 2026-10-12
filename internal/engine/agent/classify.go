@@ -1,6 +1,8 @@
 package agent
 
 import (
+	"strings"
+
 	"github.com/vanducng/miu-cr/internal/cli/clierr"
 	"github.com/vanducng/miu-cr/internal/config"
 )
@@ -31,6 +33,16 @@ func classifyStatus(status int, msg, loginHint, authCode string) *clierr.CLIErro
 			Hint:    loginHint,
 			Exit:    1,
 		}
+	case status == 400 && modelCatalogNotReadyMsg(msg):
+		// A proxy can unregister its model list for a few seconds while it reloads.
+		// That 400 is the same outage as a 503, not a bad prompt.
+		return &clierr.CLIError{
+			Code:    codeUnavailable,
+			Message: config.RedactString(msg),
+			Hint:    "model catalog was not ready; retry shortly",
+			Exit:    1,
+			Retry:   true,
+		}
 	case status == 429:
 		return &clierr.CLIError{
 			Code:    codeRateLimited,
@@ -50,4 +62,15 @@ func classifyStatus(status int, msg, loginHint, authCode string) *clierr.CLIErro
 	default:
 		return nil
 	}
+}
+
+func modelCatalogNotReady(err error) bool {
+	if err == nil {
+		return false
+	}
+	return modelCatalogNotReadyMsg(err.Error())
+}
+
+func modelCatalogNotReadyMsg(msg string) bool {
+	return strings.Contains(strings.ToLower(msg), "unknown provider for model")
 }

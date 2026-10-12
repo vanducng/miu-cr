@@ -340,7 +340,8 @@ once the review starts, the same comment switches to a reviewing status while th
 previous completed result remains visible.
 
 `provider_retry` is the provider API retry policy. The default retries `429`,
-`5xx`/`529`, and temporary transport failures 10 times with jittered exponential
+`5xx`/`529`, temporary transport failures, and a `400` that says the model
+provider is not registered yet, 10 times with jittered exponential
 backoff (`5s` initial, `2m` max, `10m` elapsed) inside the same review timeout.
 Tune it per critical or flaky-provider repos; set `max_retries: 0` only when you
 need fail-fast debugging.
