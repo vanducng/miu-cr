@@ -326,6 +326,88 @@ func TestApplyThreadReplyMarksAlreadyHandled(t *testing.T) {
 	}
 }
 
+func TestApplyThreadReplyAlreadyHandledApprovesClearHead(t *testing.T) {
+	head := "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+	info, _, _, client := replyFixture(t, head)
+	first, err := ApplyThreadReply(stdctx.Background(), client, info, ThreadReplyRequest{
+		CommentID: 11,
+		Body:      "Deferred: tracked in #42 because this helper is unused on the request path and safe to ship later",
+		UserLogin: "dev", InReplyTo: 10, Kind: "review_comment",
+	}, nil, config.ApprovalPolicy{}, time.Now())
+	if err != nil || first.Accepted != 1 || first.Approved {
+		t.Fatalf("first = %+v err=%v", first, err)
+	}
+	second, err := ApplyThreadReply(stdctx.Background(), client, info, ThreadReplyRequest{
+		CommentID: 12,
+		Body:      "Deferred: tracked in #42 because this helper is unused on the request path and safe to ship later",
+		UserLogin: "dev", InReplyTo: 10, Kind: "review_comment",
+	}, nil, config.ApprovalPolicy{Mode: "clean"}, time.Now())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if second.Reason != "already_handled" || !second.Approved || second.ApproveReason != approveReasonApproved {
+		t.Fatalf("second=%+v", second)
+	}
+	if client.createReviewN != 1 || client.gotReview.GetEvent() != "APPROVE" || client.gotReview.GetCommitID() != head {
+		t.Fatalf("approve n=%d event=%q commit=%q", client.createReviewN, client.gotReview.GetEvent(), client.gotReview.GetCommitID())
+	}
+}
+
+func TestApplyThreadReplyAlreadyHandledSkipsMovedHead(t *testing.T) {
+	head := "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+	info, _, _, client := replyFixture(t, head)
+	first, err := ApplyThreadReply(stdctx.Background(), client, info, ThreadReplyRequest{
+		CommentID: 11,
+		Body:      "Deferred: tracked in #42 because this helper is unused on the request path and safe to ship later",
+		UserLogin: "dev", InReplyTo: 10, Kind: "review_comment",
+	}, nil, config.ApprovalPolicy{Mode: "clean"}, time.Now())
+	if err != nil || !first.Approved {
+		t.Fatalf("first = %+v err=%v", first, err)
+	}
+	info.HeadSHA = "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
+	second, err := ApplyThreadReply(stdctx.Background(), client, info, ThreadReplyRequest{
+		CommentID: 12,
+		Body:      "Deferred: tracked in #42 because this helper is unused on the request path and safe to ship later",
+		UserLogin: "dev", InReplyTo: 10, Kind: "review_comment",
+	}, nil, config.ApprovalPolicy{Mode: "clean"}, time.Now())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if second.Reason != "already_handled" || second.Approved || second.ApproveReason != "" || client.createReviewN != 1 {
+		t.Fatalf("second=%+v reviews=%d", second, client.createReviewN)
+	}
+}
+
+func TestApplyThreadReplyStampsChecksWaitForLaterPoll(t *testing.T) {
+	head := "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+	info, _, _, client := replyFixture(t, head)
+	client.existingCheckRuns = []*gh.CheckRun{{
+		Name: gh.Ptr("build"), Status: gh.Ptr("completed"), Conclusion: gh.Ptr("failure"),
+	}}
+	res, err := ApplyThreadReply(stdctx.Background(), client, info, ThreadReplyRequest{
+		CommentID: 11,
+		Body:      "Deferred: tracked in #42 because this helper is unused on the request path and safe to ship later",
+		UserLogin: "dev", InReplyTo: 10, Kind: "review_comment",
+	}, nil, config.ApprovalPolicy{Mode: "clean"}, time.Now())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if res.Approved || res.ApproveReason != approveReasonChecksNotGreen || client.createReviewN != 0 {
+		t.Fatalf("result=%+v reviews=%d", res, client.createReviewN)
+	}
+	if !strings.Contains(client.editedBody, approvalReasonToken(approveReasonChecksNotGreen)) || !strings.Contains(client.editedBody, approvalChecksPrefix) {
+		t.Fatalf("summary missing checks wait:\n%s", client.editedBody)
+	}
+	client.existingCheckRuns = nil
+	retry, err := RetryDeferredApproval(stdctx.Background(), client, info, config.ApprovalPolicy{Mode: "clean"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !retry.Approved || !retry.Cleared || client.createReviewN != 1 {
+		t.Fatalf("retry=%+v reviews=%d", retry, client.createReviewN)
+	}
+}
+
 func TestApplyThreadReplyIgnoresUntrustedCommenter(t *testing.T) {
 	head := "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
 	info, _, _, client := replyFixture(t, head)
@@ -536,7 +618,7 @@ func TestRenderThreadReplyLinksFileAndSaysWhetherFixIsCorrect(t *testing.T) {
 	}})
 	wantFile := "[`report.sql:217`](<https://github.com/acme/app/blob/" + info.HeadSHA + "/models/prep/report.sql#L217>)"
 	wantSHA := "[`bbbbbbb`](<https://github.com/acme/app/commit/" + full + ">)"
-	if !strings.Contains(reject, "Fix is not correct. "+wantSHA+" does not change "+wantFile+".") {
+	if !strings.Contains(reject, "**Fix is not correct.** "+wantSHA+" does not change "+wantFile+".") {
 		t.Fatalf("reject = %s", reject)
 	}
 	if strings.Contains(reject, "`models/prep/report.sql:") || strings.Contains(reject, "`models/prep/report.sql`") {
@@ -548,7 +630,7 @@ func TestRenderThreadReplyLinksFileAndSaysWhetherFixIsCorrect(t *testing.T) {
 		fullSHA: full,
 		verdict: ThreadReplyVerdict{Accept: true, reason: replyFixChanged, Explanation: "the bound is fixed"},
 	}})
-	if !strings.Contains(accept, "Fix is correct. "+wantSHA+" fixes "+wantFile+".") || !strings.Contains(accept, "the bound is fixed") {
+	if !strings.Contains(accept, "**Fix is correct.** "+wantFile+" in "+wantSHA+".") || strings.Contains(accept, "the bound is fixed") {
 		t.Fatalf("accept = %s", accept)
 	}
 	reopened := renderThreadReply(info, 11, ParsedReply{Intent: ReplyDefer}, []replyDecision{{
@@ -563,7 +645,7 @@ func TestRenderThreadReplyLinksFileAndSaysWhetherFixIsCorrect(t *testing.T) {
 		fullSHA: full,
 		verdict: ThreadReplyVerdict{Accept: false, Explanation: "The fix is not correct: the guard checks the wrong variable"},
 	}})
-	if !strings.Contains(kept, "Fix is not correct.") || !strings.Contains(kept, "the guard checks the wrong variable") {
+	if !strings.Contains(kept, "**Fix is not correct.**") || !strings.Contains(kept, "the guard checks the wrong variable") {
 		t.Fatalf("reason dropped: %s", kept)
 	}
 	removed := *info

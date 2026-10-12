@@ -295,7 +295,7 @@ without a local PR-thread store:
 
 Developers answer a finding on its thread:
 
-- `Fixed in <sha>: ...` checks that the commit is on the pull request and changes the finding's file. The reply says whether the fix is correct and links the file. It then resolves the thread or leaves the finding open. Only the pull request author, or an owner, member, or collaborator, is judged.
+- `Fixed in <sha>: ...` checks that the commit is on the pull request and changes the finding's file. A correct fix is one sentence: the verdict, a short file link, and the commit. It does not restate the author's reply. A rejected fix says what is still wrong. The thread is resolved only when the reply holds. Only the pull request author, or an owner, member, or collaborator, is judged.
 - `Deferred: ...` or `Not applicable: ...` is judged from that reason. An accepted deferral moves to **⏸️ Deferred** and does not block approval. A vague reason stays open.
 - Findings outside the changed lines share one thread on the nearest changed line, or one pull request comment when no line can hold it. Info-level notes in files the pull request does not change are marked irrelevant and are not blocking.
 - One notice comment per review mentions the pull request author while findings are open and is edited in place.
@@ -446,9 +446,12 @@ non-success commit statuses wait), and no `APPROVED` review already exists at
 that SHA. Re-runs at the same head SHA post **no second APPROVE**.
 
 When the review itself passed policy but CI was still running, or GitHub had
-not reported mergeability yet, the summary says approval is waiting. The host
-retries that decision on a later poll of the **same head**, without another
-model review, and approves once the head is mergeable and its checks succeeded.
+not reported mergeability yet, the summary says approval is waiting. The same
+line is written when a reply or a resolved thread clears the ledger before CI
+is green. A later reply that finds the finding already handled still approves,
+when that reviewed commit is still the head. The host retries the waiting
+decision on a later poll of the **same head**, without another model review,
+and approves once the head is mergeable and its checks succeeded.
 The retry reads only a summary comment written by the authenticated user.
 Summary upsert, thread sync, and an authenticated fetch read that same comment,
 so a comment that copies the marker cannot approve a head that was never reviewed,

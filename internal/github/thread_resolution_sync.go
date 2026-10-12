@@ -96,12 +96,10 @@ func SyncSummaryConversationResolved(ctx stdctx.Context, client Client, info *PR
 	}
 	result.Action = UpsertEdited
 	result.Reason = updateReason
-	// Approve-on-resolution: the ledger is now clean by resolution. Approve only when
-	// the current head IS the published head (non-empty and equal),
-	// so we never approve a commit we did not review; ApproveResolvedLedger applies the
-	// policy + trusted-author + already-approved guards and degrades silently on reject.
-	if reviewedHead := parsePublishedCommit(body); LedgerClearForApproval(next) && reviewedHead != "" && reviewedHead == info.HeadSHA {
-		result.Approved, result.ApproveReason = ApproveResolvedLedger(ctx, client, info, policy, summaryCommentURL(info, targetID, ""))
+	// Approve only the published head. A wait on CI is written onto the summary
+	// so the host poll can approve once checks are green.
+	if LedgerClearForApproval(next) {
+		result.Approved, result.ApproveReason = approveClearedPublishedHead(ctx, client, info, policy, targetID, nextBody)
 	}
 	return result, nil
 }
