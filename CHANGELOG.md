@@ -55,6 +55,13 @@ comment with a new marker); subsequent re-runs dedupe normally. On a
 first M5 review **manually** (or off-hours) to absorb the one-time re-post before
 the next scheduled run.
 
+## [0.90.6](https://github.com/vanducng/miu-cr/compare/v0.90.5...v0.90.6) (2026-10-12)
+
+
+### Bug Fixes
+
+* **agent:** retry a model-catalog 400 ([#326](https://github.com/vanducng/miu-cr/issues/326)) ([37d1736](https://github.com/vanducng/miu-cr/commit/37d1736392685032dc44600fda37f67a8663848e))
+
 ## [0.90.5](https://github.com/vanducng/miu-cr/compare/v0.90.4...v0.90.5) (2026-10-12)
 
 
