@@ -225,6 +225,38 @@ func TestHostEnqueueRequeuesExpiredRunningJob(t *testing.T) {
 	}
 }
 
+func TestHostClaimPrefersExpiredRunningOverReadyQueue(t *testing.T) {
+	s := openHost(t)
+	ctx := context.Background()
+	repo := mustHostRepo(t, s)
+	session := mustHostSession(t, s, repo.ID, 21, "open")
+	now := time.Now().UTC()
+	staleIn := hostJobInput(repo.ID, session.ID, 21, uniqueName(t, "stale"))
+	staleIn.Now = now
+	staleIn.AvailableAt = now
+	stale, ok, err := s.EnqueueHostJob(ctx, staleIn)
+	if err != nil || !ok {
+		t.Fatalf("enqueue stale ok=%v err=%v", ok, err)
+	}
+	if _, ok, err := s.ClaimHostJob(ctx, store.HostJobClaimInput{WorkerID: "worker-1", Now: now, LeaseDuration: time.Second}); err != nil || !ok {
+		t.Fatalf("claim stale ok=%v err=%v", ok, err)
+	}
+	freshIn := hostJobInput(repo.ID, session.ID, 22, uniqueName(t, "fresh"))
+	freshIn.Now = now.Add(2 * time.Second)
+	freshIn.AvailableAt = freshIn.Now
+	fresh, ok, err := s.EnqueueHostJob(ctx, freshIn)
+	if err != nil || !ok {
+		t.Fatalf("enqueue fresh ok=%v err=%v", ok, err)
+	}
+	got, ok, err := s.ClaimHostJob(ctx, store.HostJobClaimInput{WorkerID: "worker-2", Now: now.Add(3 * time.Second), LeaseDuration: time.Hour})
+	if err != nil || !ok {
+		t.Fatalf("reclaim ok=%v err=%v", ok, err)
+	}
+	if got.Job.ID != stale.ID {
+		t.Fatalf("claimed job %d, want expired running %d (queued fresh was %d)", got.Job.ID, stale.ID, fresh.ID)
+	}
+}
+
 func TestHostHeartbeatExtendsRunningLease(t *testing.T) {
 	s := openHost(t)
 	ctx := context.Background()

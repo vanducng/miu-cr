@@ -158,27 +158,29 @@ func (s *Store) ClaimHostJob(ctx context.Context, in store.HostJobClaimInput) (s
 	}
 	leaseUntil := now.Add(in.LeaseDuration)
 	row := s.db.QueryRowContext(ctx, `
-WITH picked_queued AS (
-	SELECT id
-	FROM host_jobs
-	WHERE status = 'queued'
-	  AND available_at <= $1
-	ORDER BY priority DESC, created_at ASC
-	FOR UPDATE SKIP LOCKED
-	LIMIT 1
-), picked_expired AS (
+-- Resume a dead worker before starting a new queued review. Otherwise a pod
+-- restart leaves that PR on "Reviewing" for as long as the queue stays busy.
+WITH picked_expired AS (
 	SELECT id
 	FROM host_jobs
 	WHERE status = 'running'
 	  AND lease_until <= $1
-	  AND NOT EXISTS (SELECT 1 FROM picked_queued)
+	ORDER BY lease_until ASC
+	FOR UPDATE SKIP LOCKED
+	LIMIT 1
+), picked_queued AS (
+	SELECT id
+	FROM host_jobs
+	WHERE status = 'queued'
+	  AND available_at <= $1
+	  AND NOT EXISTS (SELECT 1 FROM picked_expired)
 	ORDER BY priority DESC, created_at ASC
 	FOR UPDATE SKIP LOCKED
 	LIMIT 1
 ), picked AS (
-	SELECT id FROM picked_queued
-	UNION ALL
 	SELECT id FROM picked_expired
+	UNION ALL
+	SELECT id FROM picked_queued
 ), updated AS (
 	UPDATE host_jobs j
 	SET status='running',
