@@ -55,6 +55,13 @@ comment with a new marker); subsequent re-runs dedupe normally. On a
 first M5 review **manually** (or off-hours) to absorb the one-time re-post before
 the next scheduled run.
 
+## [0.90.7](https://github.com/vanducng/miu-cr/compare/v0.90.6...v0.90.7) (2026-10-12)
+
+
+### Bug Fixes
+
+* **agent:** think with Grok and shorten a clean debounce ([#328](https://github.com/vanducng/miu-cr/issues/328)) ([012d8e6](https://github.com/vanducng/miu-cr/commit/012d8e61fcd5668c0638c0c3d1a02bd9e23c8bec))
+
 ## [0.90.6](https://github.com/vanducng/miu-cr/compare/v0.90.5...v0.90.6) (2026-10-12)
 
 
