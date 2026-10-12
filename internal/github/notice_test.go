@@ -23,6 +23,15 @@ func TestRenderResponseNoticeMentionsAuthor(t *testing.T) {
 	if !strings.Contains(body, "1 finding needs an answer") {
 		t.Fatalf("singular notice = %s", body)
 	}
+	nested := RenderResponseNotice("dev", []NoticeItem{{
+		Path:  "dags/analytics/configs/metrics.yaml",
+		Line:  182,
+		Title: "history splits",
+		URL:   "https://github.com/acme/app/pull/1#discussion_r9",
+	}})
+	if !strings.Contains(nested, "[`metrics.yaml:182`](<https://github.com/acme/app/pull/1#discussion_r9>)") || strings.Contains(nested, "dags/analytics") {
+		t.Fatalf("notice label should be the file name:\n%s", nested)
+	}
 	many := RenderResponseNotice("dev", []NoticeItem{{Path: "a.go", Line: 1}, {Path: "b.go", Line: 2}})
 	if !strings.Contains(many, "2 findings need an answer") {
 		t.Fatalf("plural notice = %s", many)

@@ -298,7 +298,7 @@ Developers answer a finding on its thread:
 - `Fixed in <sha>: ...` checks that the commit is on the pull request and changes the finding's file. A correct fix is one sentence: the verdict, a short file link, and the commit. It does not restate the author's reply. A rejected fix says what is still wrong. The thread is resolved only when the reply holds. Only the pull request author, or an owner, member, or collaborator, is judged.
 - `Deferred: ...` or `Not applicable: ...` is judged from that reason. An accepted deferral moves to **⏸️ Deferred** and does not block approval. A vague reason stays open.
 - Findings outside the changed lines share one thread on the nearest changed line, or one pull request comment when no line can hold it. Info-level notes in files the pull request does not change are marked irrelevant and are not blocking.
-- One notice comment per review mentions the pull request author while findings are open and is edited in place.
+- One notice comment per review mentions the pull request author while findings are open and is edited in place. Each open finding links to its thread with the file name, not the full path.
 
 `serve --host` mirrors manual GitHub "Resolve conversation" into that same summary table when `thread_resolution_sync.mode: poll`. That mirror does not start a model review. Reply judgment is separate: it calls the model only for the changed thread. A webhook delivers the reply immediately. A polled host notices it on each poll, including a repo with no webhook. A reply on a finding posted by a different miu-cr identity is left alone. Accepted deferrals count as clear for approval.
 

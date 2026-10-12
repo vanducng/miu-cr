@@ -53,10 +53,7 @@ func RenderResponseNotice(author string, items []NoticeItem) string {
 	}
 	fmt.Fprintf(&b, "%d %s %s an answer:\n\n", len(items), noun, verb)
 	for _, item := range items {
-		loc := mdPathLabel(item.Path)
-		if item.Line > 0 {
-			loc = fmt.Sprintf("%s:%d", loc, item.Line)
-		}
+		loc := shortPathLabel(item.Path, item.Line)
 		title := mdInline(item.Title)
 		if item.URL != "" {
 			fmt.Fprintf(&b, "- [`%s`](<%s>)", loc, item.URL)
