@@ -55,6 +55,13 @@ comment with a new marker); subsequent re-runs dedupe normally. On a
 first M5 review **manually** (or off-hours) to absorb the one-time re-post before
 the next scheduled run.
 
+## [0.90.10](https://github.com/vanducng/miu-cr/compare/v0.90.9...v0.90.10) (2026-10-13)
+
+
+### Bug Fixes
+
+* **agent:** retry an opaque provider internal error ([#334](https://github.com/vanducng/miu-cr/issues/334)) ([65350f7](https://github.com/vanducng/miu-cr/commit/65350f705b5d843250703677601caafa943f8e68))
+
 ## [0.90.9](https://github.com/vanducng/miu-cr/compare/v0.90.8...v0.90.9) (2026-10-12)
 
 
