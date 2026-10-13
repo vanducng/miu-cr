@@ -149,7 +149,8 @@ system_prompt = "Focus on correctness, concurrency, error handling, and API comp
 stops emitting progress, which catches stuck provider/tool turns sooner in host
 mode; set it to `"0s"` only when debugging. `[review.provider_retry]` retries
 transient provider failures (`429`, `5xx`, `529`, temporary transport
-errors, and a `400` that says the model provider is not registered yet) with
+errors, a `400` that says the model provider is not registered yet, and a `400`
+whose message is an opaque internal run failure) with
 bounded jittered exponential backoff. It does not retry auth, a real invalid
 request, content-policy, or context cancellation errors. `[review.tools]`
 sets the agent tool-loop budget and retries transient tool execution failures

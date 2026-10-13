@@ -125,6 +125,25 @@ func TestClassifyAnthropicErrRetriesUnregisteredModel(t *testing.T) {
 	}
 }
 
+func TestClassifyAnthropicErrRetriesOpaqueInternalRun(t *testing.T) {
+	body := `{"type":"error","error":{"type":"invalid_request_error","message":"[internal] Error"}}`
+	apiErr := &anthropic.Error{}
+	if err := json.Unmarshal([]byte(body), apiErr); err != nil {
+		t.Fatal(err)
+	}
+	req, resp := fakeReqResp(400)
+	apiErr.StatusCode = 400
+	apiErr.Request = req
+	apiErr.Response = resp
+	ce := asCLIErr(t, classifyAnthropicErr(apiErr))
+	if ce.Code != "agent.unavailable" || !ce.Retry {
+		t.Fatalf("got %+v, want unavailable+retry", ce)
+	}
+	if reason, ok := anthropicProviderRetryable(apiErr); !ok || reason.status != 400 {
+		t.Fatalf("opaque internal 400 must be retried, ok=%v reason=%s", ok, reason)
+	}
+}
+
 func TestClassifyAnthropicErr(t *testing.T) {
 	req, resp := fakeReqResp(429)
 	apiErr := &anthropic.Error{StatusCode: 429, Request: req, Response: resp}
