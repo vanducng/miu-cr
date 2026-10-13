@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"regexp"
+	"sort"
 	"strings"
 	"time"
 	"unicode/utf8"
@@ -29,8 +30,12 @@ const (
 	replyFixUnchanged = "fix_file_unchanged"
 	replyFixLine      = "fix_line_untouched"
 	replyFixChanged   = "fix_changed"
-	replyAlready      = "already_handled"
-	replyReopened     = "reopened"
+
+	// fixPatchOtherCap stays reserved so a long deletion cannot hide a moved check.
+	fixPatchCap      = 6000
+	fixPatchOtherCap = 2500
+	replyAlready     = "already_handled"
+	replyReopened    = "reopened"
 )
 
 // ErrUnparseableVerdict means the reply judge did not return a verdict object.
@@ -159,9 +164,16 @@ type ThreadReplyResult struct {
 	CoolDown time.Duration
 }
 
+type fixCommitFile struct {
+	Path     string
+	Previous string
+	Status   string
+	Patch    string
+}
+
 type commitInspector interface {
 	PullRequestCommitSHAs(ctx stdctx.Context, owner, repo string, number int) ([]string, error)
-	CommitFilePatch(ctx stdctx.Context, owner, repo, sha, path string) (found bool, patch string, err error)
+	CommitFiles(ctx stdctx.Context, owner, repo, sha string) ([]fixCommitFile, error)
 }
 
 type reviewThreadWriter interface {
@@ -430,7 +442,7 @@ type replyDecision struct {
 
 func decideReply(ctx stdctx.Context, client Client, info *PRInfo, parsed ParsedReply, target replyTarget, judge ThreadReplyJudge) (ThreadReplyVerdict, string, error) {
 	if parsed.Intent == ReplyFix {
-		check, explain, err := inspectFixCommit(ctx, client, info, parsed.SHA, target.Entry)
+		check, explain, err := inspectFixCommit(ctx, client, info, parsed.SHA, parsed.Reason, target.Entry)
 		if err != nil {
 			return ThreadReplyVerdict{}, "", err
 		}
@@ -446,7 +458,7 @@ func decideReply(ctx stdctx.Context, client Client, info *PRInfo, parsed ParsedR
 		verdict, err := judge.JudgeThreadReply(ctx, ThreadReplyJudgeInput{
 			Intent: parsed.Intent, Path: target.Entry.Path, Line: target.Entry.Line, Title: target.Entry.Title,
 			Severity: target.Entry.Sev, FindingBody: clipText(target.Body, 2000), Reply: parsed.Reason,
-			Reason: parsed.Reason, CommitSHA: check.fullSHA, CommitPatch: clipText(check.patch, 6000), LineInPatch: check.lineInPatch,
+			Reason: parsed.Reason, CommitSHA: check.fullSHA, CommitPatch: clipText(check.patch, fixPatchCap), LineInPatch: check.lineInPatch,
 		})
 		return verdict, check.fullSHA, err
 	}
@@ -471,7 +483,7 @@ type fixCheck struct {
 	reason      string
 }
 
-func inspectFixCommit(ctx stdctx.Context, client Client, info *PRInfo, sha string, entry LedgerEntry) (fixCheck, string, error) {
+func inspectFixCommit(ctx stdctx.Context, client Client, info *PRInfo, sha, reason string, entry LedgerEntry) (fixCheck, string, error) {
 	inspector, ok := client.(commitInspector)
 	if !ok {
 		return fixCheck{}, "this install cannot read commits, so the fix SHA cannot be checked", nil
@@ -484,15 +496,143 @@ func inspectFixCommit(ctx stdctx.Context, client Client, info *PRInfo, sha strin
 	if !matched {
 		return fixCheck{reason: replyFixNotOnPR}, "", nil
 	}
-	found, patch, err := inspector.CommitFilePatch(ctx, info.Owner, info.Repo, full, entry.Path)
+	files, err := inspector.CommitFiles(ctx, info.Owner, info.Repo, full)
 	if err != nil {
 		return fixCheck{}, "", err
 	}
+	finding, rest, found := splitFindingFile(files, entry.Path)
 	if !found {
 		return fixCheck{fullSHA: full, reason: replyFixUnchanged}, "", nil
 	}
-	lineInPatch := entry.Line <= 0 || strings.TrimSpace(patch) == "" || patchTouchesLine(patch, entry.Line)
-	return fixCheck{fullSHA: full, patch: patch, lineInPatch: lineInPatch, fileChanged: true}, "", nil
+	lineInPatch := entry.Line <= 0 || strings.TrimSpace(finding.Patch) == "" || patchTouchesLine(finding.Patch, entry.Line)
+	return fixCheck{
+		fullSHA: full, patch: renderFixPatch(finding, rest, reason), lineInPatch: lineInPatch, fileChanged: true,
+	}, "", nil
+}
+
+func splitFindingFile(files []fixCommitFile, path string) (fixCommitFile, []fixCommitFile, bool) {
+	exact, previous := -1, -1
+	for i := range files {
+		if files[i].Path == path {
+			exact = i
+			break
+		}
+		if previous < 0 && files[i].Previous == path {
+			previous = i
+		}
+	}
+	idx := exact
+	if idx < 0 {
+		idx = previous
+	}
+	if idx < 0 {
+		return fixCommitFile{}, nil, false
+	}
+	rest := make([]fixCommitFile, 0, len(files)-1)
+	for i := range files {
+		if i != idx {
+			rest = append(rest, files[i])
+		}
+	}
+	return files[idx], rest, true
+}
+
+func renderFixPatch(finding fixCommitFile, rest []fixCommitFile, reason string) string {
+	sort.Slice(rest, func(i, j int) bool {
+		im := reasonNamesPath(reason, rest[i].Path)
+		jm := reasonNamesPath(reason, rest[j].Path)
+		if im != jm {
+			return im
+		}
+		return rest[i].Path < rest[j].Path
+	})
+	otherBudget := 0
+	if len(rest) > 0 {
+		otherBudget = fixPatchOtherCap
+	}
+	var b strings.Builder
+	writeFilePatch(&b, finding, fixPatchCap-otherBudget)
+	remaining := fixPatchCap - b.Len()
+	omitted := false
+	for _, f := range rest {
+		if remaining < 40 {
+			omitted = true
+			break
+		}
+		before := b.Len()
+		writeFilePatch(&b, f, remaining)
+		used := b.Len() - before
+		if used == 0 {
+			omitted = true
+			break
+		}
+		remaining -= used
+	}
+	if omitted {
+		const note = "... other files omitted\n"
+		if b.Len()+len(note) <= fixPatchCap {
+			b.WriteString(note)
+		}
+	}
+	return b.String()
+}
+
+func writeFilePatch(b *strings.Builder, f fixCommitFile, budget int) {
+	header := "=== " + f.Path + " (" + fileStatusLabel(f) + ") ===\n"
+	body := f.Patch
+	if strings.TrimSpace(body) == "" {
+		body = "(no text patch)\n"
+	} else if !strings.HasSuffix(body, "\n") {
+		body += "\n"
+	}
+	if len(header) >= budget {
+		return
+	}
+	room := budget - len(header)
+	if len(body) > room {
+		body = clipText(body, room)
+		if body == "" {
+			return
+		}
+		if !strings.HasSuffix(body, "\n") && len(body)+1 <= room {
+			body += "\n"
+		}
+	}
+	b.WriteString(header)
+	b.WriteString(body)
+}
+
+func fileStatusLabel(f fixCommitFile) string {
+	status := f.Status
+	if status == "" {
+		status = "modified"
+	}
+	if f.Previous != "" && f.Previous != f.Path {
+		return status + " from " + f.Previous
+	}
+	return status
+}
+
+func reasonNamesPath(reason, path string) bool {
+	if reason == "" || path == "" {
+		return false
+	}
+	reason = strings.ToLower(reason)
+	path = strings.ToLower(path)
+	rest := reason
+	for {
+		i := strings.Index(rest, path)
+		if i < 0 {
+			return false
+		}
+		before := i == 0 || !isPathByte(rest[i-1])
+		end := i + len(path)
+		after := end == len(rest) || !isPathByte(rest[end])
+		if before && after {
+			return true
+		}
+		rest = rest[i+1:]
+	}
 }
 
 func deterministicFixVerdict(check fixCheck, entry LedgerEntry) ThreadReplyVerdict {

@@ -97,24 +97,25 @@ func (g ghClient) PullRequestCommitSHAs(ctx stdctx.Context, owner, repo string, 
 	return nil, fmt.Errorf("github: pull request commit list truncated")
 }
 
-func (g ghClient) CommitFilePatch(ctx stdctx.Context, owner, repo, sha, path string) (bool, string, error) {
+func (g ghClient) CommitFiles(ctx stdctx.Context, owner, repo, sha string) ([]fixCommitFile, error) {
 	opts := &gh.ListOptions{PerPage: 100}
+	var out []fixCommitFile
 	for page := 0; page < 30; page++ {
 		commit, resp, err := g.c.Repositories.GetCommit(ctx, owner, repo, sha, opts)
 		if err != nil {
-			return false, "", err
+			return nil, err
 		}
 		if commit != nil {
 			for _, f := range commit.Files {
-				if f.GetFilename() == path {
-					return true, f.GetPatch(), nil
-				}
+				out = append(out, fixCommitFile{
+					Path: f.GetFilename(), Previous: f.GetPreviousFilename(), Status: f.GetStatus(), Patch: f.GetPatch(),
+				})
 			}
 		}
 		if resp == nil || resp.NextPage == 0 {
-			return false, "", nil
+			return out, nil
 		}
 		opts.Page = resp.NextPage
 	}
-	return false, "", fmt.Errorf("github: commit file list truncated")
+	return nil, fmt.Errorf("github: commit file list truncated")
 }
