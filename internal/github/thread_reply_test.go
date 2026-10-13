@@ -51,6 +51,7 @@ type replyClient struct {
 	recordClient
 	shas     []string
 	patches  map[string]string
+	previous map[string]string
 	statuses map[string]string
 	replies  []string
 	resolved []string
@@ -70,7 +71,7 @@ func (c *replyClient) CommitFiles(stdctx.Context, string, string, string) ([]fix
 	sort.Strings(paths)
 	out := make([]fixCommitFile, 0, len(paths))
 	for _, path := range paths {
-		out = append(out, fixCommitFile{Path: path, Status: c.statuses[path], Patch: c.patches[path]})
+		out = append(out, fixCommitFile{Path: path, Previous: c.previous[path], Status: c.statuses[path], Patch: c.patches[path]})
 	}
 	return out, nil
 }
@@ -170,6 +171,58 @@ func TestInspectFixCommitIncludesMovedCheck(t *testing.T) {
 	}
 	if check.lineInPatch {
 		t.Fatal("a removed file has no new line")
+	}
+}
+
+func TestInspectFixCommitAcceptsRename(t *testing.T) {
+	sha := "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
+	client := &replyClient{
+		shas:     []string{sha},
+		patches:  map[string]string{"tests/ci_suite.py": "@@ -1,2 +1,4 @@\n+def test_guard():\n"},
+		previous: map[string]string{"tests/ci_suite.py": "tests/check.py"},
+		statuses: map[string]string{"tests/ci_suite.py": "renamed"},
+	}
+	info := &PRInfo{Owner: "acme", Repo: "app", Number: 1}
+	check, explain, err := inspectFixCommit(stdctx.Background(), client, info, "bbbbbbb", "renamed", LedgerEntry{Path: "tests/check.py", Line: 2})
+	if err != nil || explain != "" || check.reason != "" {
+		t.Fatalf("check=%+v explain=%q err=%v", check, explain, err)
+	}
+	if !strings.Contains(check.patch, "=== tests/ci_suite.py (renamed from tests/check.py) ===") {
+		t.Fatalf("renamed file missing:\n%s", check.patch)
+	}
+}
+
+func TestRenderFixPatchSkipsLongHeaderAndKeepsLaterFile(t *testing.T) {
+	longPath := strings.Repeat("p", fixPatchCap) + ".py"
+	patch := renderFixPatch(fixCommitFile{Path: "tests/check.py", Status: "removed", Patch: "@@ -1 +0,0 @@\n-old\n"}, []fixCommitFile{
+		{Path: longPath, Patch: "+skipped\n"},
+		{Path: "tests/ci_suite.py", Patch: "+def test_guard():\n"},
+	}, "")
+	if !strings.Contains(patch, "=== tests/ci_suite.py (modified) ===") || !strings.Contains(patch, "+def test_guard():") {
+		t.Fatalf("later file dropped after a header that did not fit:\n%s", patch)
+	}
+	if !strings.Contains(patch, "... other files omitted") {
+		t.Fatalf("omission note missing:\n%s", patch)
+	}
+	if len(patch) > fixPatchCap {
+		t.Fatalf("patch len = %d, cap %d", len(patch), fixPatchCap)
+	}
+}
+
+func TestRenderFixPatchKeepsOmissionNoteWhenFull(t *testing.T) {
+	patch := renderFixPatch(fixCommitFile{Path: "tests/check.py", Status: "removed", Patch: "-old\n"}, []fixCommitFile{
+		{Path: "docs/notes.md", Patch: strings.Repeat("x", fixPatchCap)},
+		{Path: "tests/ci_suite.py", Patch: "+def test_guard():\n"},
+		{Path: "z-extra.py", Patch: "+more\n"},
+	}, "moved into tests/ci_suite.py")
+	if !strings.HasSuffix(patch, "... other files omitted\n") {
+		t.Fatalf("full patch dropped the omission note:\n%s", patch[len(patch)-80:])
+	}
+	if len(patch) > fixPatchCap {
+		t.Fatalf("patch len = %d, cap %d", len(patch), fixPatchCap)
+	}
+	if !strings.Contains(patch, "tests/ci_suite.py") {
+		t.Fatalf("named file missing:\n%s", patch)
 	}
 }
 

@@ -564,15 +564,25 @@ func renderFixPatch(finding fixCommitFile, rest []fixCommitFile, reason string) 
 		used := b.Len() - before
 		if used == 0 {
 			omitted = true
-			break
+			continue
 		}
 		remaining -= used
 	}
 	if omitted {
 		const note = "... other files omitted\n"
-		if b.Len()+len(note) <= fixPatchCap {
-			b.WriteString(note)
+		if b.Len()+len(note) > fixPatchCap {
+			s := b.String()
+			keep := fixPatchCap - len(note)
+			if keep < 0 {
+				keep = 0
+			}
+			for keep > 0 && !utf8.ValidString(s[:keep]) {
+				keep--
+			}
+			b.Reset()
+			b.WriteString(s[:keep])
 		}
+		b.WriteString(note)
 	}
 	return b.String()
 }
