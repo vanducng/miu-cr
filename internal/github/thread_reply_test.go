@@ -215,8 +215,13 @@ func TestRenderFixPatchKeepsOmissionNoteWhenFull(t *testing.T) {
 		{Path: "tests/ci_suite.py", Patch: "+def test_guard():\n"},
 		{Path: "z-extra.py", Patch: "+more\n"},
 	}, "moved into tests/ci_suite.py")
-	if !strings.HasSuffix(patch, "... other files omitted\n") {
+	const note = "... other files omitted\n"
+	idx := strings.LastIndex(patch, note)
+	if idx < 0 {
 		t.Fatalf("full patch dropped the omission note:\n%s", patch[len(patch)-80:])
+	}
+	if idx > 0 && patch[idx-1] != '\n' {
+		t.Fatalf("omission note continues a cut line: %q", patch[max(0, idx-24):])
 	}
 	if len(patch) > fixPatchCap {
 		t.Fatalf("patch len = %d, cap %d", len(patch), fixPatchCap)

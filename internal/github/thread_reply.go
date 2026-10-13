@@ -576,11 +576,19 @@ func renderFixPatch(finding fixCommitFile, rest []fixCommitFile, reason string) 
 			if keep < 0 {
 				keep = 0
 			}
+			needNL := false
+			if keep > 0 && s[keep-1] != '\n' {
+				needNL = true
+				keep--
+			}
 			for keep > 0 && !utf8.ValidString(s[:keep]) {
 				keep--
 			}
 			b.Reset()
 			b.WriteString(s[:keep])
+			if needNL {
+				b.WriteByte('\n')
+			}
 		}
 		b.WriteString(note)
 	}
