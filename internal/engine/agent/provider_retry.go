@@ -165,7 +165,7 @@ func providerBackoff(policy providerRetryPolicy, retryNumber int, suggested time
 func anthropicProviderRetryable(err error) (providerRetryReason, bool) {
 	var apiErr *anthropic.Error
 	if errors.As(err, &apiErr) {
-		if apiErr.StatusCode == 429 || (apiErr.StatusCode >= 500 && apiErr.StatusCode <= 599) || modelCatalogNotReady(err) {
+		if apiErr.StatusCode == 429 || (apiErr.StatusCode >= 500 && apiErr.StatusCode <= 599) || modelCatalogNotReady(err) || providerRunFailed(err) {
 			return providerRetryReason{code: providerRetryCode(apiErr.StatusCode), status: apiErr.StatusCode}, true
 		}
 		return providerRetryReason{}, false
@@ -176,7 +176,7 @@ func anthropicProviderRetryable(err error) (providerRetryReason, bool) {
 func openAIProviderRetryable(err error) (providerRetryReason, bool) {
 	var apiErr *openai.Error
 	if errors.As(err, &apiErr) {
-		if apiErr.StatusCode == 429 || (apiErr.StatusCode >= 500 && apiErr.StatusCode <= 599) || modelCatalogNotReady(err) {
+		if apiErr.StatusCode == 429 || (apiErr.StatusCode >= 500 && apiErr.StatusCode <= 599) || modelCatalogNotReady(err) || providerRunFailed(err) {
 			return providerRetryReason{code: providerRetryCode(apiErr.StatusCode), status: apiErr.StatusCode}, true
 		}
 		return providerRetryReason{}, false

@@ -33,13 +33,14 @@ func classifyStatus(status int, msg, loginHint, authCode string) *clierr.CLIErro
 			Hint:    loginHint,
 			Exit:    1,
 		}
-	case status == 400 && modelCatalogNotReadyMsg(msg):
-		// A proxy can unregister its model list for a few seconds while it reloads.
-		// That 400 is the same outage as a 503, not a bad prompt.
+	case status == 400 && (modelCatalogNotReadyMsg(msg) || providerRunFailedMsg(msg)):
+		// A 400 here is an upstream run that failed before it produced a review:
+		// the model list was not registered yet, or the agent run died with an
+		// opaque internal error. Both clear on retry. A real invalid request does not.
 		return &clierr.CLIError{
 			Code:    codeUnavailable,
 			Message: config.RedactString(msg),
-			Hint:    "model catalog was not ready; retry shortly",
+			Hint:    "provider run failed; retry shortly",
 			Exit:    1,
 			Retry:   true,
 		}
@@ -73,4 +74,16 @@ func modelCatalogNotReady(err error) bool {
 
 func modelCatalogNotReadyMsg(msg string) bool {
 	return strings.Contains(strings.ToLower(msg), "unknown provider for model")
+}
+
+func providerRunFailed(err error) bool {
+	if err == nil {
+		return false
+	}
+	return providerRunFailedMsg(err.Error())
+}
+
+func providerRunFailedMsg(msg string) bool {
+	s := strings.ToLower(msg)
+	return strings.Contains(s, "[internal] error") || strings.Contains(s, "run_failed")
 }
