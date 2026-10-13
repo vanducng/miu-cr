@@ -131,6 +131,9 @@ func TestHostConcurrentEnqueueDedupe(t *testing.T) {
 	repo := mustHostRepo(t, s)
 	session := mustHostSession(t, s, repo.ID, 11, "open")
 	in := hostJobInput(repo.ID, session.ID, 11, uniqueName(t, "head"))
+	// One clock: a later commit must not pull available_at forward and count as another create.
+	in.Now = time.Date(2026, 10, 13, 12, 0, 0, 0, time.UTC)
+	in.AvailableAt = in.Now
 	const workers = 8
 	var wg sync.WaitGroup
 	var mu sync.Mutex
