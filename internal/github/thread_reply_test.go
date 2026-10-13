@@ -4,6 +4,7 @@ import (
 	stdctx "context"
 	"errors"
 	"fmt"
+	"sort"
 	"strings"
 	"testing"
 	"time"
@@ -50,6 +51,7 @@ type replyClient struct {
 	recordClient
 	shas     []string
 	patches  map[string]string
+	statuses map[string]string
 	replies  []string
 	resolved []string
 	threads  []ReviewThread
@@ -60,9 +62,17 @@ func (c *replyClient) PullRequestCommitSHAs(stdctx.Context, string, string, int)
 	return c.shas, nil
 }
 
-func (c *replyClient) CommitFilePatch(_ stdctx.Context, _, _, _, path string) (bool, string, error) {
-	patch, ok := c.patches[path]
-	return ok, patch, nil
+func (c *replyClient) CommitFiles(stdctx.Context, string, string, string) ([]fixCommitFile, error) {
+	paths := make([]string, 0, len(c.patches))
+	for path := range c.patches {
+		paths = append(paths, path)
+	}
+	sort.Strings(paths)
+	out := make([]fixCommitFile, 0, len(paths))
+	for _, path := range paths {
+		out = append(out, fixCommitFile{Path: path, Status: c.statuses[path], Patch: c.patches[path]})
+	}
+	return out, nil
 }
 
 func (c *replyClient) ReplyToReviewComment(_ stdctx.Context, _, _ string, _ int, _ int64, body string) (string, error) {
@@ -128,6 +138,39 @@ func replyFixture(t *testing.T, head string) (*PRInfo, engine.Finding, string, *
 		threads: []ReviewThread{{ID: "THR_1", Comments: []ReviewThreadComment{{ID: 10, Body: root.GetBody()}}}},
 	}
 	return info, f, fp, client
+}
+
+func TestInspectFixCommitIncludesMovedCheck(t *testing.T) {
+	sha := "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
+	client := &replyClient{
+		shas: []string{sha},
+		patches: map[string]string{
+			"tests/check.py":    "@@ -1,4 +0,0 @@\n-def test_guard():\n-    assert flag\n",
+			"tests/ci_suite.py": "@@ -10,2 +10,6 @@\n+def test_guard():\n+    assert flag\n",
+			"docs/notes.md":     strings.Repeat("x", 8000),
+		},
+		statuses: map[string]string{"tests/check.py": "removed"},
+	}
+	info := &PRInfo{Owner: "acme", Repo: "app", Number: 1}
+	check, explain, err := inspectFixCommit(stdctx.Background(), client, info, "bbbbbbb", "moved into tests/ci_suite.py", LedgerEntry{Path: "tests/check.py", Line: 2})
+	if err != nil || explain != "" || check.reason != "" {
+		t.Fatalf("check=%+v explain=%q err=%v", check, explain, err)
+	}
+	if !strings.Contains(check.patch, "=== tests/check.py (removed) ===") {
+		t.Fatalf("finding file missing:\n%s", check.patch)
+	}
+	if !strings.Contains(check.patch, "=== tests/ci_suite.py (modified) ===") || !strings.Contains(check.patch, "+def test_guard():") {
+		t.Fatalf("moved check missing:\n%s", check.patch)
+	}
+	if notes := strings.Index(check.patch, "docs/notes.md"); notes >= 0 && notes < strings.Index(check.patch, "tests/ci_suite.py") {
+		t.Fatalf("unnamed file sorted ahead of the moved check:\n%s", check.patch)
+	}
+	if len(check.patch) > fixPatchCap {
+		t.Fatalf("patch len = %d, cap %d", len(check.patch), fixPatchCap)
+	}
+	if check.lineInPatch {
+		t.Fatal("a removed file has no new line")
+	}
 }
 
 func TestApplyThreadReplyRejectsMissingCommitWithoutJudge(t *testing.T) {
