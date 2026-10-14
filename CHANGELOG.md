@@ -55,6 +55,13 @@ comment with a new marker); subsequent re-runs dedupe normally. On a
 first M5 review **manually** (or off-hours) to absorb the one-time re-post before
 the next scheduled run.
 
+## [0.90.13](https://github.com/vanducng/miu-cr/compare/v0.90.12...v0.90.13) (2026-10-14)
+
+
+### Bug Fixes
+
+* **serve:** sync more open PRs and stop warning on an in-flight reply ([#340](https://github.com/vanducng/miu-cr/issues/340)) ([eb67805](https://github.com/vanducng/miu-cr/commit/eb6780562e1f1e7536396710c1e0481799df8ee4))
+
 ## [0.90.12](https://github.com/vanducng/miu-cr/compare/v0.90.11...v0.90.12) (2026-10-13)
 
 
