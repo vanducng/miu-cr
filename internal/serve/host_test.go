@@ -269,6 +269,28 @@ func TestHostRunnerPrunesThreadResolutionSyncAfterReconcileError(t *testing.T) {
 	}
 }
 
+func TestReplyDispatchSkip(t *testing.T) {
+	cases := []struct {
+		result SubmitResult
+		reason string
+		warn   bool
+		skip   bool
+	}{
+		{SubmitQueued, "", false, false},
+		{SubmitCoalesced, "already_inflight", false, true},
+		{SubmitDuplicate, "already_inflight", false, true},
+		{SubmitFull, "queue_full", true, true},
+		{SubmitClosed, "dispatcher_closed", true, true},
+		{SubmitResult(99), "dispatch_rejected", true, true},
+	}
+	for _, tc := range cases {
+		reason, warn, skip := replyDispatchSkip(tc.result)
+		if reason != tc.reason || warn != tc.warn || skip != tc.skip {
+			t.Fatalf("%s: got %q warn=%v skip=%v", tc.result, reason, warn, skip)
+		}
+	}
+}
+
 func TestHostRunnerThreadResolutionSyncDropClearsThrottle(t *testing.T) {
 	now := time.Date(2026, 6, 28, 10, 0, 0, 0, time.UTC)
 	r := &HostRunner{
