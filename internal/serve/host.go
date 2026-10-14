@@ -36,7 +36,8 @@ const defaultThreadResolutionSyncInterval = 5 * time.Minute
 // Shared by the sync worker and RunHost drain so shutdown waits out an in-flight approval retry.
 var threadResolutionSyncTimeout = 30 * time.Second
 
-const maxThreadResolutionSyncWorkers = 2
+// Eight so one poll can sync more than the two already running.
+const maxThreadResolutionSyncWorkers = 8
 
 var runHostDrainGrace = 10 * time.Second
 var hostPRFilterRegexCache sync.Map
@@ -954,15 +955,39 @@ func (h *HostRunner) scanThreadReplies(ctx stdctx.Context, client mgithub.Client
 				HostRetry:         true,
 			},
 		}
-		if h.disp.Submit(job) != SubmitQueued {
-			h.log.Warn("host: thread reply not queued",
+		result := h.disp.Submit(job)
+		reason, warn, skip := replyDispatchSkip(result)
+		if skip {
+			attrs := []any{
 				"repo", repo.Slug, "pr", info.Number, "head_sha", ShortSHA(info.HeadSHA),
-				"comment_id", reply.CommentID, "reason", "dispatch_rejected")
+				"comment_id", reply.CommentID, "reason", reason, "submit", result.String(),
+			}
+			if warn {
+				h.log.Warn("host: thread reply not queued", attrs...)
+			} else {
+				h.log.Debug("host: thread reply not queued", attrs...)
+			}
 			continue
 		}
 		h.log.Info("host: thread reply queued",
 			"repo", repo.Slug, "pr", info.Number, "head_sha", ShortSHA(info.HeadSHA),
 			"comment_id", reply.CommentID)
+	}
+}
+
+// replyDispatchSkip reports why a thread reply was not queued. Already in flight is not a drop.
+func replyDispatchSkip(result SubmitResult) (reason string, warn, skip bool) {
+	switch result {
+	case SubmitQueued:
+		return "", false, false
+	case SubmitCoalesced, SubmitDuplicate:
+		return "already_inflight", false, true
+	case SubmitFull:
+		return "queue_full", true, true
+	case SubmitClosed:
+		return "dispatcher_closed", true, true
+	default:
+		return "dispatch_rejected", true, true
 	}
 }
 
