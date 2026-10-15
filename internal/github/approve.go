@@ -59,7 +59,8 @@ func trustedAuthor(info PRInfo) bool {
 }
 
 // HeadChecksFailing reports whether ref has a completed unsuccessful check or
-// commit status. Pending and empty sets are not failing. The miu-cr check is ignored.
+// commit status. Pending, empty, skipped, and cancelled runs are not failing.
+// The miu-cr check is ignored.
 func HeadChecksFailing(ctx stdctx.Context, client Client, owner, repo, ref string) (bool, error) {
 	opts := &gh.ListCheckRunsOptions{Filter: gh.Ptr("latest"), ListOptions: gh.ListOptions{PerPage: 100}}
 	for {
@@ -73,7 +74,7 @@ func HeadChecksFailing(ctx stdctx.Context, client Client, owner, repo, ref strin
 					continue
 				}
 				switch run.GetConclusion() {
-				case "success", "neutral", "skipped":
+				case "success", "neutral", "skipped", "cancelled":
 				default:
 					return true, nil
 				}

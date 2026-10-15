@@ -214,6 +214,10 @@ func TestHeadChecksFailing(t *testing.T) {
 	if failing, err := HeadChecksFailing(stdctx.Background(), ok, "acme", "app", "head"); err != nil || failing {
 		t.Fatalf("green check failing=%v err=%v", failing, err)
 	}
+	cancelled := &recordClient{existingCheckRuns: []*gh.CheckRun{{Name: gh.Ptr("review"), Status: gh.Ptr("completed"), Conclusion: gh.Ptr("cancelled")}}}
+	if failing, err := HeadChecksFailing(stdctx.Background(), cancelled, "acme", "app", "head"); err != nil || failing {
+		t.Fatalf("cancelled check failing=%v err=%v", failing, err)
+	}
 }
 
 func TestApproveResolvedLedgerDoesNotBypassReadiness(t *testing.T) {
