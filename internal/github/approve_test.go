@@ -160,6 +160,35 @@ func TestPostReviewDoesNotApproveUntilChecksPass(t *testing.T) {
 	}
 }
 
+func TestPostReviewApprovesSkippedAndSupersededChecks(t *testing.T) {
+	c := &recordClient{existingCheckRuns: []*gh.CheckRun{
+		{Name: gh.Ptr("Tests"), Status: gh.Ptr("completed"), Conclusion: gh.Ptr("success")},
+		{Name: gh.Ptr("Report push failure"), Status: gh.Ptr("completed"), Conclusion: gh.Ptr("skipped")},
+		{Name: gh.Ptr("Code Review Agent / review"), Status: gh.Ptr("completed"), Conclusion: gh.Ptr("success")},
+		{Name: gh.Ptr("Code Review Agent / review"), Status: gh.Ptr("completed"), Conclusion: gh.Ptr("cancelled")},
+	}}
+	res, err := PostReview(stdctx.Background(), c, approveInfo(), nil, nil, staticSummary("review"), nil, approveOpts())
+	if err != nil {
+		t.Fatalf("PostReview: %v", err)
+	}
+	if res.Event != "APPROVE" || res.Reason != approveReasonApproved {
+		t.Fatalf("a skipped job and a cancelled earlier run must not block approval, got (%q,%q)", res.Event, res.Reason)
+	}
+}
+
+func TestPostReviewDoesNotApproveCancelledOnlyCheck(t *testing.T) {
+	c := &recordClient{existingCheckRuns: []*gh.CheckRun{
+		{Name: gh.Ptr("Tests"), Status: gh.Ptr("completed"), Conclusion: gh.Ptr("cancelled")},
+	}}
+	res, err := PostReview(stdctx.Background(), c, approveInfo(), nil, nil, staticSummary("review"), nil, approveOpts())
+	if err != nil {
+		t.Fatalf("PostReview: %v", err)
+	}
+	if res.Event != "COMMENT" || res.Reason != approveReasonChecksNotGreen {
+		t.Fatalf("a check that only cancelled must wait, got (%q,%q)", res.Event, res.Reason)
+	}
+}
+
 func TestPostReviewDoesNotApproveFailedCommitStatus(t *testing.T) {
 	c := &recordClient{combinedStatuses: []*gh.RepoStatus{{Context: gh.Ptr("continuous-integration"), State: gh.Ptr("failure")}}}
 	res, err := PostReview(stdctx.Background(), c, approveInfo(), nil, nil, staticSummary("review"), nil, approveOpts())
@@ -213,6 +242,10 @@ func TestHeadChecksFailing(t *testing.T) {
 	ok := &recordClient{existingCheckRuns: []*gh.CheckRun{{Name: gh.Ptr("build"), Status: gh.Ptr("completed"), Conclusion: gh.Ptr("success")}}}
 	if failing, err := HeadChecksFailing(stdctx.Background(), ok, "acme", "app", "head"); err != nil || failing {
 		t.Fatalf("green check failing=%v err=%v", failing, err)
+	}
+	cancelled := &recordClient{existingCheckRuns: []*gh.CheckRun{{Name: gh.Ptr("review"), Status: gh.Ptr("completed"), Conclusion: gh.Ptr("cancelled")}}}
+	if failing, err := HeadChecksFailing(stdctx.Background(), cancelled, "acme", "app", "head"); err != nil || failing {
+		t.Fatalf("cancelled check failing=%v err=%v", failing, err)
 	}
 }
 
