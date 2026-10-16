@@ -160,10 +160,11 @@ func TestPostReviewDoesNotApproveUntilChecksPass(t *testing.T) {
 	}
 }
 
-func TestPostReviewApprovesSkippedAndCancelledChecks(t *testing.T) {
+func TestPostReviewApprovesSkippedAndSupersededChecks(t *testing.T) {
 	c := &recordClient{existingCheckRuns: []*gh.CheckRun{
 		{Name: gh.Ptr("Tests"), Status: gh.Ptr("completed"), Conclusion: gh.Ptr("success")},
 		{Name: gh.Ptr("Report push failure"), Status: gh.Ptr("completed"), Conclusion: gh.Ptr("skipped")},
+		{Name: gh.Ptr("Code Review Agent / review"), Status: gh.Ptr("completed"), Conclusion: gh.Ptr("success")},
 		{Name: gh.Ptr("Code Review Agent / review"), Status: gh.Ptr("completed"), Conclusion: gh.Ptr("cancelled")},
 	}}
 	res, err := PostReview(stdctx.Background(), c, approveInfo(), nil, nil, staticSummary("review"), nil, approveOpts())
@@ -171,7 +172,20 @@ func TestPostReviewApprovesSkippedAndCancelledChecks(t *testing.T) {
 		t.Fatalf("PostReview: %v", err)
 	}
 	if res.Event != "APPROVE" || res.Reason != approveReasonApproved {
-		t.Fatalf("skipped and cancelled checks must not block approval, got (%q,%q)", res.Event, res.Reason)
+		t.Fatalf("a skipped job and a cancelled earlier run must not block approval, got (%q,%q)", res.Event, res.Reason)
+	}
+}
+
+func TestPostReviewDoesNotApproveCancelledOnlyCheck(t *testing.T) {
+	c := &recordClient{existingCheckRuns: []*gh.CheckRun{
+		{Name: gh.Ptr("Tests"), Status: gh.Ptr("completed"), Conclusion: gh.Ptr("cancelled")},
+	}}
+	res, err := PostReview(stdctx.Background(), c, approveInfo(), nil, nil, staticSummary("review"), nil, approveOpts())
+	if err != nil {
+		t.Fatalf("PostReview: %v", err)
+	}
+	if res.Event != "COMMENT" || res.Reason != approveReasonChecksNotGreen {
+		t.Fatalf("a check that only cancelled must wait, got (%q,%q)", res.Event, res.Reason)
 	}
 }
 

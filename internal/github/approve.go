@@ -111,6 +111,7 @@ func HeadChecksFailing(ctx stdctx.Context, client Client, owner, repo, ref strin
 
 func approvalChecksGreen(ctx stdctx.Context, client Client, info *PRInfo) (bool, error) {
 	opts := &gh.ListCheckRunsOptions{Filter: gh.Ptr("latest"), ListOptions: gh.ListOptions{PerPage: 100}}
+	byName := map[string]*checkNameState{}
 	for {
 		runs, resp, err := client.ListCheckRunsForRef(ctx, info.Owner, info.Repo, info.HeadSHA, opts)
 		if err != nil {
@@ -121,18 +122,18 @@ func approvalChecksGreen(ctx stdctx.Context, client Client, info *PRInfo) (bool,
 				if run.GetName() == checkRunName {
 					continue
 				}
-				if run.GetStatus() != "completed" {
-					return false, nil
-				}
-				if !checkConclusionClear(run.GetConclusion()) {
-					return false, nil
-				}
+				noteCheckRun(byName, run)
 			}
 		}
 		if resp == nil || resp.NextPage == 0 {
 			break
 		}
 		opts.Page = resp.NextPage
+	}
+	for _, st := range byName {
+		if st.failed || st.pending || !st.passed {
+			return false, nil
+		}
 	}
 
 	statusOpts := &gh.ListOptions{PerPage: 100}
@@ -165,6 +166,32 @@ func checkConclusionClear(conclusion string) bool {
 		return true
 	default:
 		return false
+	}
+}
+
+type checkNameState struct {
+	pending bool
+	passed  bool
+	failed  bool
+}
+
+func noteCheckRun(byName map[string]*checkNameState, run *gh.CheckRun) {
+	st := byName[run.GetName()]
+	if st == nil {
+		st = &checkNameState{}
+		byName[run.GetName()] = st
+	}
+	if run.GetStatus() != "completed" {
+		st.pending = true
+		return
+	}
+	switch run.GetConclusion() {
+	case "success", "neutral", "skipped":
+		st.passed = true
+	case "cancelled":
+		// A superseded run is not a pass. A name with no passing run still waits.
+	default:
+		st.failed = true
 	}
 }
 
