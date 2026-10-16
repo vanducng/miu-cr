@@ -441,8 +441,7 @@ All approval modes still require: no finding reaches the gate, the PR is **not a
 fork**, the author is **trusted** (`AuthorAssociation` not `NONE` /
 `FIRST_TIME_CONTRIBUTOR` / `FIRST_TIMER`), **at least one file was actually
 reviewed**, the **head SHA is unchanged** (re-fetched right before submitting),
-the head is **mergeable**, **CI checks succeeded** (pending, failing, and
-non-success commit statuses wait), and no `APPROVED` review already exists at
+the head is **mergeable**, **CI checks succeeded** (pending and failing wait; a skipped or cancelled run does not), and no `APPROVED` review already exists at
 that SHA. Re-runs at the same head SHA post **no second APPROVE**.
 
 When the review itself passed policy but CI was still running, or GitHub had

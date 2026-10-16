@@ -73,9 +73,7 @@ func HeadChecksFailing(ctx stdctx.Context, client Client, owner, repo, ref strin
 				if run.GetName() == checkRunName || run.GetStatus() != "completed" {
 					continue
 				}
-				switch run.GetConclusion() {
-				case "success", "neutral", "skipped", "cancelled":
-				default:
+				if !checkConclusionClear(run.GetConclusion()) {
 					return true, nil
 				}
 			}
@@ -126,9 +124,7 @@ func approvalChecksGreen(ctx stdctx.Context, client Client, info *PRInfo) (bool,
 				if run.GetStatus() != "completed" {
 					return false, nil
 				}
-				switch run.GetConclusion() {
-				case "success", "neutral", "skipped":
-				default:
+				if !checkConclusionClear(run.GetConclusion()) {
 					return false, nil
 				}
 			}
@@ -161,6 +157,15 @@ func approvalChecksGreen(ctx stdctx.Context, client Client, info *PRInfo) (bool,
 		statusOpts.Page = resp.NextPage
 	}
 	return true, nil
+}
+
+func checkConclusionClear(conclusion string) bool {
+	switch conclusion {
+	case "success", "neutral", "skipped", "cancelled":
+		return true
+	default:
+		return false
+	}
 }
 
 func approvalReadiness(ctx stdctx.Context, client Client, info *PRInfo) string {

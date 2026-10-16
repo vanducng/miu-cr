@@ -160,6 +160,21 @@ func TestPostReviewDoesNotApproveUntilChecksPass(t *testing.T) {
 	}
 }
 
+func TestPostReviewApprovesSkippedAndCancelledChecks(t *testing.T) {
+	c := &recordClient{existingCheckRuns: []*gh.CheckRun{
+		{Name: gh.Ptr("Tests"), Status: gh.Ptr("completed"), Conclusion: gh.Ptr("success")},
+		{Name: gh.Ptr("Report push failure"), Status: gh.Ptr("completed"), Conclusion: gh.Ptr("skipped")},
+		{Name: gh.Ptr("Code Review Agent / review"), Status: gh.Ptr("completed"), Conclusion: gh.Ptr("cancelled")},
+	}}
+	res, err := PostReview(stdctx.Background(), c, approveInfo(), nil, nil, staticSummary("review"), nil, approveOpts())
+	if err != nil {
+		t.Fatalf("PostReview: %v", err)
+	}
+	if res.Event != "APPROVE" || res.Reason != approveReasonApproved {
+		t.Fatalf("skipped and cancelled checks must not block approval, got (%q,%q)", res.Event, res.Reason)
+	}
+}
+
 func TestPostReviewDoesNotApproveFailedCommitStatus(t *testing.T) {
 	c := &recordClient{combinedStatuses: []*gh.RepoStatus{{Context: gh.Ptr("continuous-integration"), State: gh.Ptr("failure")}}}
 	res, err := PostReview(stdctx.Background(), c, approveInfo(), nil, nil, staticSummary("review"), nil, approveOpts())
