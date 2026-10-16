@@ -185,14 +185,14 @@ func noteCheckRun(byName map[string]*checkNameState, run *gh.CheckRun) {
 		st.pending = true
 		return
 	}
-	switch run.GetConclusion() {
-	case "success", "neutral", "skipped":
-		st.passed = true
-	case "cancelled":
-		// A superseded run is not a pass. A name with no passing run still waits.
-	default:
-		st.failed = true
+	if run.GetConclusion() == "cancelled" {
+		return
 	}
+	if checkConclusionClear(run.GetConclusion()) {
+		st.passed = true
+		return
+	}
+	st.failed = true
 }
 
 func approvalReadiness(ctx stdctx.Context, client Client, info *PRInfo) string {
