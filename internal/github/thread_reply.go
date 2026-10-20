@@ -962,20 +962,6 @@ func unclaimReplyPost(key string) {
 	replyPostMu.Unlock()
 }
 
-func resetReplyPosts() {
-	replyPostMu.Lock()
-	replyPosted = map[string]time.Time{}
-	replyPostMu.Unlock()
-}
-
-func expireReplyPost(key string) {
-	replyPostMu.Lock()
-	defer replyPostMu.Unlock()
-	if _, ok := replyPosted[key]; ok {
-		replyPosted[key] = time.Now().Add(-time.Second)
-	}
-}
-
 func postThreadReply(ctx stdctx.Context, client Client, info *PRInfo, req ThreadReplyRequest, body string) error {
 	if info == nil || req.CommentID <= 0 {
 		return fmt.Errorf("github: missing reply target")

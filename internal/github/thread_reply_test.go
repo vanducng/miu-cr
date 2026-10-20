@@ -126,6 +126,20 @@ func (j *fakeJudge) JudgeThreadReply(stdctx.Context, ThreadReplyJudgeInput) (Thr
 	return ThreadReplyVerdict{Accept: j.accept, Explanation: j.explain}, nil
 }
 
+func resetReplyPosts() {
+	replyPostMu.Lock()
+	replyPosted = map[string]time.Time{}
+	replyPostMu.Unlock()
+}
+
+func expireReplyPost(key string) {
+	replyPostMu.Lock()
+	defer replyPostMu.Unlock()
+	if _, ok := replyPosted[key]; ok {
+		replyPosted[key] = time.Now().Add(-time.Second)
+	}
+}
+
 func replyFixture(t *testing.T, head string) (*PRInfo, engine.Finding, string, *replyClient) {
 	t.Helper()
 	resetReplyPosts()
