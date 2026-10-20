@@ -487,6 +487,22 @@ func TestPostThreadReplyExpiredClaimAllowsRepost(t *testing.T) {
 	}
 }
 
+func TestPostThreadReplyIssueCommentOnce(t *testing.T) {
+	head := "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+	info, _, _, client := replyFixture(t, head)
+	body := botMarker + "\n" + replyToMarker(21) + "\n\nDeferral accepted.\n"
+	req := ThreadReplyRequest{CommentID: 21, Kind: "issue_comment"}
+	if err := PostThreadReply(stdctx.Background(), client, info, req, body); err != nil {
+		t.Fatal(err)
+	}
+	if err := PostThreadReply(stdctx.Background(), client, info, req, body); err != nil {
+		t.Fatal(err)
+	}
+	if client.createIssueN != 1 {
+		t.Fatalf("issue comments = %d", client.createIssueN)
+	}
+}
+
 func TestPostThreadReplyClaimBlocksStaleList(t *testing.T) {
 	head := "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
 	info, _, _, base := replyFixture(t, head)

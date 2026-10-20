@@ -257,22 +257,34 @@ func ApplyThreadReply(ctx stdctx.Context, client Client, info *PRInfo, req Threa
 	targets, clarify, foreign := selectReplyTargets(req, reviewComments, issueComments, ledger, threads)
 	if foreign {
 		body := botMarker + "\n" + replyToMarker(req.CommentID) + "\n\nThis finding is not in the current review summary.\n"
-		if err := postThreadReply(ctx, client, info, req, body); err != nil {
+		posted, err := postedThreadReply(ctx, client, info, req, body)
+		if err != nil {
 			return ThreadReplyResult{Reason: "reply_post_failed"}, mapWriteError("github.thread_reply_failed", "posting reply", err)
+		}
+		if !posted {
+			return ThreadReplyResult{Action: "ignored", Reason: "duplicate"}, nil
 		}
 		return ThreadReplyResult{Action: "replied", Reason: "not_in_ledger"}, nil
 	}
 	if clarify {
 		body := botMarker + "\n" + replyToMarker(req.CommentID) + "\n\nName the finding as `path:line`, or reply on its thread. A pull request comment is used only when one finding is still open.\n"
-		if err := postThreadReply(ctx, client, info, req, body); err != nil {
+		posted, err := postedThreadReply(ctx, client, info, req, body)
+		if err != nil {
 			return ThreadReplyResult{Reason: "reply_post_failed"}, mapWriteError("github.thread_reply_failed", "posting clarification", err)
+		}
+		if !posted {
+			return ThreadReplyResult{Action: "ignored", Reason: "duplicate"}, nil
 		}
 		return ThreadReplyResult{Action: "replied", Reason: "clarification"}, nil
 	}
 	if len(targets) == 0 {
 		body := botMarker + "\n" + replyToMarker(req.CommentID) + "\n\nThis comment is not on a miu-cr finding thread.\n"
-		if err := postThreadReply(ctx, client, info, req, body); err != nil {
+		posted, err := postedThreadReply(ctx, client, info, req, body)
+		if err != nil {
 			return ThreadReplyResult{Reason: "reply_post_failed"}, mapWriteError("github.thread_reply_failed", "posting reply", err)
+		}
+		if !posted {
+			return ThreadReplyResult{Action: "ignored", Reason: "duplicate"}, nil
 		}
 		return ThreadReplyResult{Action: "replied", Reason: "not_our_thread"}, nil
 	}
@@ -287,8 +299,12 @@ func ApplyThreadReply(ctx stdctx.Context, client Client, info *PRInfo, req Threa
 		if err != nil {
 			if errors.Is(err, ErrUnparseableVerdict) {
 				body := botMarker + "\n" + replyToMarker(req.CommentID) + "\n\nThis reply could not be judged. Reply again with a clearer reason.\n"
-				if perr := postThreadReply(ctx, client, info, req, body); perr != nil {
+				posted, perr := postedThreadReply(ctx, client, info, req, body)
+				if perr != nil {
 					return ThreadReplyResult{Reason: "reply_post_failed"}, mapWriteError("github.thread_reply_failed", "posting reply", perr)
+				}
+				if !posted {
+					return ThreadReplyResult{Action: "ignored", Reason: "duplicate"}, nil
 				}
 				return ThreadReplyResult{Action: "replied", Reason: "judge_unparseable"}, nil
 			}
@@ -299,6 +315,15 @@ func ApplyThreadReply(ctx stdctx.Context, client Client, info *PRInfo, req Threa
 
 	var result ThreadReplyResult
 	err = req.aroundWrite(func() error {
+		visible, verr := replyMarkerVisible(ctx, client, info, req)
+		if verr != nil {
+			result = ThreadReplyResult{Reason: "reply_post_failed"}
+			return mapWriteError("github.thread_reply_failed", "listing reply", verr)
+		}
+		if visible {
+			result = ThreadReplyResult{Action: "ignored", Reason: "duplicate"}
+			return nil
+		}
 		var werr error
 		summaryID, _, summaryBody, werr = lowestMarkedComment(ctx, client, info, login)
 		if werr != nil {
@@ -330,9 +355,14 @@ func ApplyThreadReply(ctx stdctx.Context, client Client, info *PRInfo, req Threa
 		}
 		if accepted == 0 && rejected == 0 {
 			replyBody := renderThreadReply(info, req.CommentID, parsed, decisions)
-			if perr := postThreadReply(ctx, client, info, req, replyBody); perr != nil {
+			posted, perr := postedThreadReply(ctx, client, info, req, replyBody)
+			if perr != nil {
 				result = ThreadReplyResult{Reason: "reply_post_failed"}
 				return mapWriteError("github.thread_reply_failed", "posting reply", perr)
+			}
+			if !posted {
+				result = ThreadReplyResult{Action: "ignored", Reason: "duplicate"}
+				return nil
 			}
 			result = ThreadReplyResult{Action: "replied", Reason: "already_handled"}
 			if LedgerClearForApproval(ledger) {
@@ -360,9 +390,14 @@ func ApplyThreadReply(ctx stdctx.Context, client Client, info *PRInfo, req Threa
 		}
 
 		replyBody := renderThreadReply(info, req.CommentID, parsed, decisions)
-		if perr := postThreadReply(ctx, client, info, req, replyBody); perr != nil {
+		posted, perr := postedThreadReply(ctx, client, info, req, replyBody)
+		if perr != nil {
 			result = ThreadReplyResult{Accepted: accepted, Rejected: rejected, Reason: "reply_post_failed"}
 			return mapWriteError("github.thread_reply_failed", "posting reply", perr)
+		}
+		if !posted {
+			result = ThreadReplyResult{Action: "ignored", Reason: "duplicate", Accepted: accepted, Rejected: rejected}
+			return nil
 		}
 		resolveAcceptedThreads(ctx, client, decisions, next, reviewComments)
 
@@ -895,9 +930,20 @@ func ReplyFailureNote(commentID int64) string {
 	return botMarker + "\n" + replyToMarker(commentID) + "\n\nThis reply could not be judged. Reply again in a little while.\n"
 }
 
+var errReplyDuplicate = errors.New("github: thread reply already posted")
+
 // PostThreadReply posts one answer on the same thread as the developer comment.
 func PostThreadReply(ctx stdctx.Context, client Client, info *PRInfo, req ThreadReplyRequest, body string) error {
-	return postThreadReply(ctx, client, info, req, body)
+	_, err := postedThreadReply(ctx, client, info, req, body)
+	return err
+}
+
+func postedThreadReply(ctx stdctx.Context, client Client, info *PRInfo, req ThreadReplyRequest, body string) (bool, error) {
+	err := postThreadReply(ctx, client, info, req, body)
+	if errors.Is(err, errReplyDuplicate) {
+		return false, nil
+	}
+	return err == nil, err
 }
 
 type replySlot struct {
@@ -970,20 +1016,19 @@ func postThreadReply(ctx stdctx.Context, client Client, info *PRInfo, req Thread
 	return withReplySlot(key, func() error {
 		visible, err := replyMarkerVisible(ctx, client, info, req)
 		if err != nil {
-			return err
+			slog.Warn("thread reply list failed",
+				"repo", info.Owner+"/"+info.Repo, "pr", info.Number,
+				"comment_id", req.CommentID, "reason", "list_failed")
+			visible = false
 		}
-		if visible {
-			claimReplyPost(key)
+		if visible || !claimReplyPost(key) {
+			if visible {
+				claimReplyPost(key)
+			}
 			slog.Info("thread reply already posted",
 				"repo", info.Owner+"/"+info.Repo, "pr", info.Number,
 				"comment_id", req.CommentID, "reason", "duplicate")
-			return nil
-		}
-		if !claimReplyPost(key) {
-			slog.Info("thread reply already posted",
-				"repo", info.Owner+"/"+info.Repo, "pr", info.Number,
-				"comment_id", req.CommentID, "reason", "duplicate")
-			return nil
+			return errReplyDuplicate
 		}
 		if req.Kind == "issue_comment" {
 			_, err = client.CreateIssueComment(ctx, info.Owner, info.Repo, info.Number, &gh.IssueComment{Body: gh.Ptr(body)})
