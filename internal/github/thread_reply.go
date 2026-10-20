@@ -910,8 +910,11 @@ var (
 	replySlots   = map[string]*replySlot{}
 
 	replyPostMu sync.Mutex
-	replyPosted = map[string]struct{}{}
+	replyPosted = map[string]time.Time{}
 )
+
+// replyClaimTTL keeps a fresh post from being repeated while a comment list is still stale.
+const replyClaimTTL = 2 * time.Minute
 
 // withReplySlot serializes the GitHub write for one human comment so a second judgment posts once.
 func withReplySlot(key string, fn func() error) error {
@@ -938,12 +941,18 @@ func withReplySlot(key string, fn func() error) error {
 }
 
 func claimReplyPost(key string) bool {
+	now := time.Now()
 	replyPostMu.Lock()
 	defer replyPostMu.Unlock()
-	if _, ok := replyPosted[key]; ok {
+	for k, until := range replyPosted {
+		if !now.Before(until) {
+			delete(replyPosted, k)
+		}
+	}
+	if until, ok := replyPosted[key]; ok && now.Before(until) {
 		return false
 	}
-	replyPosted[key] = struct{}{}
+	replyPosted[key] = now.Add(replyClaimTTL)
 	return true
 }
 
@@ -955,8 +964,16 @@ func unclaimReplyPost(key string) {
 
 func resetReplyPosts() {
 	replyPostMu.Lock()
-	replyPosted = map[string]struct{}{}
+	replyPosted = map[string]time.Time{}
 	replyPostMu.Unlock()
+}
+
+func expireReplyPost(key string) {
+	replyPostMu.Lock()
+	defer replyPostMu.Unlock()
+	if _, ok := replyPosted[key]; ok {
+		replyPosted[key] = time.Now().Add(-time.Second)
+	}
 }
 
 func postThreadReply(ctx stdctx.Context, client Client, info *PRInfo, req ThreadReplyRequest, body string) error {
