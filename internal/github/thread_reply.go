@@ -4,9 +4,11 @@ import (
 	stdctx "context"
 	"errors"
 	"fmt"
+	"log/slog"
 	"regexp"
 	"sort"
 	"strings"
+	"sync"
 	"time"
 	"unicode/utf8"
 
@@ -898,17 +900,128 @@ func PostThreadReply(ctx stdctx.Context, client Client, info *PRInfo, req Thread
 	return postThreadReply(ctx, client, info, req, body)
 }
 
+type replySlot struct {
+	mu sync.Mutex
+	n  int
+}
+
+var (
+	replySlotsMu sync.Mutex
+	replySlots   = map[string]*replySlot{}
+
+	replyPostMu sync.Mutex
+	replyPosted = map[string]struct{}{}
+)
+
+// withReplySlot serializes the GitHub write for one human comment so a second judgment posts once.
+func withReplySlot(key string, fn func() error) error {
+	replySlotsMu.Lock()
+	slot := replySlots[key]
+	if slot == nil {
+		slot = &replySlot{}
+		replySlots[key] = slot
+	}
+	slot.n++
+	replySlotsMu.Unlock()
+
+	slot.mu.Lock()
+	defer func() {
+		slot.mu.Unlock()
+		replySlotsMu.Lock()
+		slot.n--
+		if slot.n == 0 && replySlots[key] == slot {
+			delete(replySlots, key)
+		}
+		replySlotsMu.Unlock()
+	}()
+	return fn()
+}
+
+func claimReplyPost(key string) bool {
+	replyPostMu.Lock()
+	defer replyPostMu.Unlock()
+	if _, ok := replyPosted[key]; ok {
+		return false
+	}
+	replyPosted[key] = struct{}{}
+	return true
+}
+
+func unclaimReplyPost(key string) {
+	replyPostMu.Lock()
+	delete(replyPosted, key)
+	replyPostMu.Unlock()
+}
+
+func resetReplyPosts() {
+	replyPostMu.Lock()
+	replyPosted = map[string]struct{}{}
+	replyPostMu.Unlock()
+}
+
 func postThreadReply(ctx stdctx.Context, client Client, info *PRInfo, req ThreadReplyRequest, body string) error {
-	if req.Kind == "issue_comment" {
-		_, err := client.CreateIssueComment(ctx, info.Owner, info.Repo, info.Number, &gh.IssueComment{Body: gh.Ptr(body)})
+	if info == nil || req.CommentID <= 0 {
+		return fmt.Errorf("github: missing reply target")
+	}
+	key := fmt.Sprintf("%s/%s#%d:%d", info.Owner, info.Repo, info.Number, req.CommentID)
+	return withReplySlot(key, func() error {
+		visible, err := replyMarkerVisible(ctx, client, info, req)
+		if err != nil {
+			return err
+		}
+		if visible {
+			claimReplyPost(key)
+			slog.Info("thread reply already posted",
+				"repo", info.Owner+"/"+info.Repo, "pr", info.Number,
+				"comment_id", req.CommentID, "reason", "duplicate")
+			return nil
+		}
+		if !claimReplyPost(key) {
+			slog.Info("thread reply already posted",
+				"repo", info.Owner+"/"+info.Repo, "pr", info.Number,
+				"comment_id", req.CommentID, "reason", "duplicate")
+			return nil
+		}
+		if req.Kind == "issue_comment" {
+			_, err = client.CreateIssueComment(ctx, info.Owner, info.Repo, info.Number, &gh.IssueComment{Body: gh.Ptr(body)})
+		} else {
+			writer, ok := client.(reviewThreadWriter)
+			if !ok {
+				err = fmt.Errorf("github: client cannot reply on review threads")
+			} else {
+				_, err = writer.ReplyToReviewComment(ctx, info.Owner, info.Repo, info.Number, req.CommentID, body)
+			}
+		}
+		if err != nil {
+			unclaimReplyPost(key)
+		}
 		return err
+	})
+}
+
+func replyMarkerVisible(ctx stdctx.Context, client Client, info *PRInfo, req ThreadReplyRequest) (bool, error) {
+	if req.Kind == "issue_comment" {
+		var comments []*gh.IssueComment
+		err := withReadRetry(ctx, func() error {
+			var e error
+			comments, e = listAllIssueComments(ctx, client, info)
+			return e
+		})
+		if err != nil {
+			return false, err
+		}
+		return replyAlreadyPosted(nil, comments, req.CommentID), nil
 	}
-	writer, ok := client.(reviewThreadWriter)
-	if !ok {
-		return fmt.Errorf("github: client cannot reply on review threads")
+	var comments []*gh.PullRequestComment
+	err := withReadRetry(ctx, func() error {
+		var e error
+		comments, e = listAllReviewComments(ctx, client, info)
+		return e
+	})
+	if err != nil {
+		return false, err
 	}
-	_, err := writer.ReplyToReviewComment(ctx, info.Owner, info.Repo, info.Number, req.CommentID, body)
-	return err
+	return replyAlreadyPosted(comments, nil, req.CommentID), nil
 }
 
 func resolveAcceptedThreads(ctx stdctx.Context, client Client, decisions []replyDecision, ledger []LedgerEntry, reviewComments []*gh.PullRequestComment) {
