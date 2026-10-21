@@ -707,10 +707,10 @@ func RenderErrorNotice(info *PRInfo, notice ErrorNotice, version string) string 
 	if code := mdInline(notice.Code); code != "" {
 		b.WriteString(">\n> Code: " + code + "\n")
 	}
-	if m := mdInline(notice.Message); m != "" {
+	if m := mdInline(stripRequestURLs(notice.Message)); m != "" {
 		b.WriteString(">\n> " + m + "\n")
 	}
-	if h := mdInline(notice.Hint); h != "" {
+	if h := mdInline(stripRequestURLs(notice.Hint)); h != "" {
 		b.WriteString(">\n> Hint: " + h + "\n")
 	}
 	b.WriteString("\n")
@@ -723,6 +723,13 @@ func RenderErrorNotice(info *PRInfo, notice ErrorNotice, version string) string 
 		b.WriteString("\n\n<sub>miucr " + mdInline(version) + "</sub>")
 	}
 	return b.String()
+}
+
+// stripRequestURLs drops absolute request URLs before an error is posted on a pull request.
+var requestURLRe = regexp.MustCompile(`https?://[^\s"'<>]+`)
+
+func stripRequestURLs(s string) string {
+	return requestURLRe.ReplaceAllString(s, "[redacted]")
 }
 
 func errorNoticeLevel(level string) string {

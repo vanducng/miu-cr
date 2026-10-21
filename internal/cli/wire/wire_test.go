@@ -627,6 +627,9 @@ func TestReviewErrorSummaryAlertLevels(t *testing.T) {
 	if strings.Contains(warn, "[!CAUTION]") {
 		t.Fatalf("provider issue must not render caution:\n%s", warn)
 	}
+	if strings.Contains(warn, "api.example.invalid") {
+		t.Fatalf("request URL leaked into the warning notice:\n%s", warn)
+	}
 
 	cautionGitHub := &fakeGitHub{}
 	if err := upsertReviewErrorSummary(stdctx.Background(), cautionGitHub, info, errors.New("panic <script>")); err != nil {
