@@ -50,6 +50,22 @@ func TestRenderErrorNoticeCaution(t *testing.T) {
 	}
 }
 
+func TestRenderErrorNoticeStripsRequestURL(t *testing.T) {
+	info := &PRInfo{Owner: "o", Repo: "r", Number: 3, ReviewCount: 1}
+	const host = "proxy.example.test"
+	out := RenderErrorNotice(info, ErrorNotice{
+		Level:   "caution",
+		Title:   "miucr hit an internal error",
+		Message: `agent: messages.new: POST "https://` + host + `/v1/messages": 400 Bad Request {"message":"prompt is too long: 12 tokens > 10 maximum"}`,
+	}, "v1.2.3")
+	if strings.Contains(out, host) || strings.Contains(out, "https://") {
+		t.Fatalf("request URL leaked into the summary:\n%s", out)
+	}
+	if !strings.Contains(out, "redacted") || !strings.Contains(out, "prompt is too long") {
+		t.Fatalf("status detail missing after URL strip:\n%s", out)
+	}
+}
+
 func TestBlobURL(t *testing.T) {
 	info := &PRInfo{HTMLBase: "https://github.com/o/r", HeadSHA: "abc123"}
 	tests := []struct {
