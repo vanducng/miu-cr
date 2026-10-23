@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"sort"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -49,6 +50,7 @@ func TestIsBotBodyOnlyAtPrefix(t *testing.T) {
 
 type replyClient struct {
 	recordClient
+	mu       sync.Mutex
 	shas     []string
 	patches  map[string]string
 	previous map[string]string
@@ -76,9 +78,24 @@ func (c *replyClient) CommitFiles(stdctx.Context, string, string, string) ([]fix
 	return out, nil
 }
 
-func (c *replyClient) ReplyToReviewComment(_ stdctx.Context, _, _ string, _ int, _ int64, body string) (string, error) {
+func (c *replyClient) ReplyToReviewComment(_ stdctx.Context, _, _ string, _ int, inReplyTo int64, body string) (string, error) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
 	c.replies = append(c.replies, body)
+	if len(c.reviewComments) == 0 {
+		c.reviewComments = [][]*gh.PullRequestComment{{}}
+	}
+	c.reviewComments[0] = append(c.reviewComments[0], &gh.PullRequestComment{
+		ID: gh.Ptr(int64(1000 + len(c.replies))), InReplyTo: gh.Ptr(inReplyTo),
+		Body: gh.Ptr(body), User: &gh.User{Login: gh.Ptr("reviewer")},
+	})
 	return "https://github.com/acme/app/pull/1#discussion_r99", nil
+}
+
+func (c *replyClient) ListReviewComments(ctx stdctx.Context, owner, repo string, number int, opts *gh.PullRequestListCommentsOptions) ([]*gh.PullRequestComment, *gh.Response, error) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	return c.recordClient.ListReviewComments(ctx, owner, repo, number, opts)
 }
 
 func (c *replyClient) ResolveReviewThread(_ stdctx.Context, threadID string) error {
@@ -109,8 +126,24 @@ func (j *fakeJudge) JudgeThreadReply(stdctx.Context, ThreadReplyJudgeInput) (Thr
 	return ThreadReplyVerdict{Accept: j.accept, Explanation: j.explain}, nil
 }
 
+func resetReplyPosts() {
+	replyPostMu.Lock()
+	replyPosted = map[string]time.Time{}
+	replyPostMu.Unlock()
+}
+
+func expireReplyPost(key string) {
+	replyPostMu.Lock()
+	defer replyPostMu.Unlock()
+	if _, ok := replyPosted[key]; ok {
+		replyPosted[key] = time.Now().Add(-time.Second)
+	}
+}
+
 func replyFixture(t *testing.T, head string) (*PRInfo, engine.Finding, string, *replyClient) {
 	t.Helper()
+	resetReplyPosts()
+	t.Cleanup(resetReplyPosts)
 	now := time.Date(2026, 6, 28, 10, 0, 0, 0, time.UTC)
 	info := &PRInfo{Owner: "acme", Repo: "app", Number: 1, HeadSHA: head, HTMLBase: "https://github.com/acme/app", ReviewCount: 1, AuthorAssociation: "MEMBER", AuthorLogin: "dev"}
 	f := engine.Finding{File: "a.go", Line: 5, Severity: "low", Category: "bug", Title: "bounds", QuotedCode: "i <= n"}
@@ -330,6 +363,163 @@ func TestApplyThreadReplyIgnoresBotAndDuplicate(t *testing.T) {
 	}
 }
 
+func TestApplyThreadReplyPostsOnceWhenTwoJudgmentsPassTheFirstList(t *testing.T) {
+	head := "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+	info, _, _, client := replyFixture(t, head)
+	req := ThreadReplyRequest{
+		CommentID: 11,
+		Body:      "Deferred: tracked in #42 because this helper is unused on the request path and safe to ship later",
+		UserLogin: "dev", InReplyTo: 10, Kind: "review_comment",
+	}
+	var arrived sync.WaitGroup
+	arrived.Add(2)
+	var write sync.Mutex
+	req.AroundWrite = func(fn func() error) error {
+		arrived.Done()
+		arrived.Wait()
+		write.Lock()
+		defer write.Unlock()
+		return fn()
+	}
+	var wg sync.WaitGroup
+	errs := make([]error, 2)
+	wg.Add(2)
+	for i := 0; i < 2; i++ {
+		go func() {
+			defer wg.Done()
+			_, errs[i] = ApplyThreadReply(stdctx.Background(), client, info, req, nil, config.ApprovalPolicy{}, time.Now())
+		}()
+	}
+	wg.Wait()
+	for i, err := range errs {
+		if err != nil {
+			t.Fatalf("call %d: %v", i, err)
+		}
+	}
+	if len(client.replies) != 1 || strings.Contains(client.replies[0], "already handled") || !strings.Contains(client.replies[0], "Deferral accepted") {
+		t.Fatalf("replies=%v", client.replies)
+	}
+}
+
+func TestApplyThreadReplySecondCallSeesStoredMarker(t *testing.T) {
+	head := "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+	info, _, _, client := replyFixture(t, head)
+	req := ThreadReplyRequest{
+		CommentID: 11,
+		Body:      "Deferred: tracked in #42 because this helper is unused on the request path and safe to ship later",
+		UserLogin: "dev", InReplyTo: 10, Kind: "review_comment",
+	}
+	first, err := ApplyThreadReply(stdctx.Background(), client, info, req, nil, config.ApprovalPolicy{}, time.Now())
+	if err != nil || first.Reason != "replied" || len(client.replies) != 1 {
+		t.Fatalf("first=%+v err=%v replies=%d", first, err, len(client.replies))
+	}
+	resetReplyPosts()
+	second, err := ApplyThreadReply(stdctx.Background(), client, info, req, nil, config.ApprovalPolicy{}, time.Now())
+	if err != nil || second.Reason != "duplicate" || len(client.replies) != 1 {
+		t.Fatalf("second=%+v err=%v replies=%d", second, err, len(client.replies))
+	}
+}
+
+type staleReplyList struct {
+	*replyClient
+}
+
+func (c *staleReplyList) ListReviewComments(ctx stdctx.Context, owner, repo string, number int, opts *gh.PullRequestListCommentsOptions) ([]*gh.PullRequestComment, *gh.Response, error) {
+	comments, resp, err := c.replyClient.ListReviewComments(ctx, owner, repo, number, opts)
+	if err != nil {
+		return nil, resp, err
+	}
+	kept := make([]*gh.PullRequestComment, 0, len(comments))
+	for _, com := range comments {
+		if strings.Contains(com.GetBody(), "miu-cr-reply:") {
+			continue
+		}
+		kept = append(kept, com)
+	}
+	return kept, resp, nil
+}
+
+type failOnceReply struct {
+	*replyClient
+	fail bool
+}
+
+func (c *failOnceReply) ReplyToReviewComment(ctx stdctx.Context, owner, repo string, number int, inReplyTo int64, body string) (string, error) {
+	if c.fail {
+		c.fail = false
+		return "", errors.New("post failed")
+	}
+	return c.replyClient.ReplyToReviewComment(ctx, owner, repo, number, inReplyTo, body)
+}
+
+func TestPostThreadReplyUnclaimsFailedPost(t *testing.T) {
+	head := "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+	info, _, _, base := replyFixture(t, head)
+	client := &failOnceReply{replyClient: base, fail: true}
+	body := botMarker + "\n" + replyToMarker(11) + "\n\nDeferral accepted.\n"
+	req := ThreadReplyRequest{CommentID: 11, Kind: "review_comment"}
+	if err := PostThreadReply(stdctx.Background(), client, info, req, body); err == nil {
+		t.Fatal("expected post error")
+	}
+	if err := PostThreadReply(stdctx.Background(), client, info, req, body); err != nil {
+		t.Fatal(err)
+	}
+	if len(base.replies) != 1 {
+		t.Fatalf("replies=%d", len(base.replies))
+	}
+}
+
+func TestPostThreadReplyExpiredClaimAllowsRepost(t *testing.T) {
+	head := "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+	info, _, _, base := replyFixture(t, head)
+	client := &staleReplyList{replyClient: base}
+	body := botMarker + "\n" + replyToMarker(11) + "\n\nDeferral accepted.\n"
+	req := ThreadReplyRequest{CommentID: 11, Kind: "review_comment"}
+	if err := PostThreadReply(stdctx.Background(), client, info, req, body); err != nil {
+		t.Fatal(err)
+	}
+	expireReplyPost(fmt.Sprintf("%s/%s#%d:%d", info.Owner, info.Repo, info.Number, req.CommentID))
+	if err := PostThreadReply(stdctx.Background(), client, info, req, body); err != nil {
+		t.Fatal(err)
+	}
+	if len(base.replies) != 2 {
+		t.Fatalf("replies=%d", len(base.replies))
+	}
+}
+
+func TestPostThreadReplyIssueCommentOnce(t *testing.T) {
+	head := "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+	info, _, _, client := replyFixture(t, head)
+	body := botMarker + "\n" + replyToMarker(21) + "\n\nDeferral accepted.\n"
+	req := ThreadReplyRequest{CommentID: 21, Kind: "issue_comment"}
+	if err := PostThreadReply(stdctx.Background(), client, info, req, body); err != nil {
+		t.Fatal(err)
+	}
+	if err := PostThreadReply(stdctx.Background(), client, info, req, body); err != nil {
+		t.Fatal(err)
+	}
+	if client.createIssueN != 1 {
+		t.Fatalf("issue comments = %d", client.createIssueN)
+	}
+}
+
+func TestPostThreadReplyClaimBlocksStaleList(t *testing.T) {
+	head := "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+	info, _, _, base := replyFixture(t, head)
+	client := &staleReplyList{replyClient: base}
+	body := botMarker + "\n" + replyToMarker(11) + "\n\nDeferral accepted.\n"
+	req := ThreadReplyRequest{CommentID: 11, Kind: "review_comment"}
+	if err := PostThreadReply(stdctx.Background(), client, info, req, body); err != nil {
+		t.Fatal(err)
+	}
+	if err := PostThreadReply(stdctx.Background(), client, info, req, body); err != nil {
+		t.Fatal(err)
+	}
+	if len(base.replies) != 1 {
+		t.Fatalf("replies=%d", len(base.replies))
+	}
+}
+
 func TestListActionableRepliesFiltersAndCaps(t *testing.T) {
 	info := &PRInfo{Owner: "acme", Repo: "app", Number: 1, AuthorLogin: "dev"}
 	root := &gh.PullRequestComment{
@@ -526,6 +716,8 @@ func TestApplyThreadReplyIgnoresUntrustedCommenter(t *testing.T) {
 }
 
 func TestApplyThreadReplyKeepsSharedThreadOpen(t *testing.T) {
+	resetReplyPosts()
+	t.Cleanup(resetReplyPosts)
 	head := "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
 	now := time.Date(2026, 6, 28, 10, 0, 0, 0, time.UTC)
 	info := &PRInfo{Owner: "acme", Repo: "app", Number: 1, HeadSHA: head, HTMLBase: "https://github.com/acme/app", ReviewCount: 1, AuthorAssociation: "MEMBER", AuthorLogin: "dev"}
