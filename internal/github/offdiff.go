@@ -94,6 +94,16 @@ func ActionableOffDiffFindings(findings []engine.Finding, diffs []diff.Diff, led
 	return out
 }
 
+func nearestOffDiffAnchor(findings []engine.Finding, carried []LedgerEntry, diffs []diff.Diff) (string, int, bool) {
+	if len(findings) > 0 {
+		return NearestAnchor(findings[0], diffs)
+	}
+	if len(carried) > 0 {
+		return NearestAnchor(engine.Finding{File: carried[0].Path, Line: carried[0].Line}, diffs)
+	}
+	return "", 0, false
+}
+
 // NearestAnchor picks a RIGHT-side line that can hold one review comment for
 // findings outside the hunks. It prefers the finding's own file.
 func NearestAnchor(f engine.Finding, diffs []diff.Diff) (string, int, bool) {
@@ -211,8 +221,10 @@ type reviewCommentEditor interface {
 }
 
 // UpsertOffDiffComment posts or edits the single off-diff thread. An empty
-// finding list clears an existing thread and does not create one.
-func UpsertOffDiffComment(ctx stdctx.Context, client Client, info *PRInfo, findings []engine.Finding, diffs []diff.Diff) (string, error) {
+// finding list clears an existing thread and does not create one, unless carried
+// still-open rows remain. Those rows keep the existing thread, or open one when
+// none exists.
+func UpsertOffDiffComment(ctx stdctx.Context, client Client, info *PRInfo, findings []engine.Finding, diffs []diff.Diff, carried []LedgerEntry) (string, error) {
 	if info == nil {
 		return "", nil
 	}
@@ -230,7 +242,7 @@ func UpsertOffDiffComment(ctx stdctx.Context, client Client, info *PRInfo, findi
 	}
 	existing := findOffDiffComment(comments, login)
 	issues := findOffDiffIssueComments(issueComments, login)
-	if len(findings) == 0 {
+	if len(findings) == 0 && len(carried) == 0 {
 		if existing == nil && len(issues) == 0 {
 			return "", nil
 		}
@@ -245,7 +257,7 @@ func UpsertOffDiffComment(ctx stdctx.Context, client Client, info *PRInfo, findi
 		}
 		return offDiffExistingURL(existing, issues), nil
 	}
-	body := RenderOffDiffComment(findings)
+	body := AppendCarriedOffDiff(RenderOffDiffComment(findings), carried)
 	if existing != nil || len(issues) > 0 {
 		if existing != nil {
 			if err := editOffDiffComment(ctx, client, info, existing, body); err != nil {
@@ -256,7 +268,9 @@ func UpsertOffDiffComment(ctx stdctx.Context, client Client, info *PRInfo, findi
 			return "", err
 		}
 		return offDiffExistingURL(existing, issues), nil
-	} else if path, line, ok := NearestAnchor(findings[0], diffs); ok {
+	}
+	path, line, ok := nearestOffDiffAnchor(findings, carried, diffs)
+	if ok {
 		review := &gh.PullRequestReviewRequest{
 			CommitID: gh.Ptr(info.HeadSHA),
 			Event:    gh.Ptr("COMMENT"),

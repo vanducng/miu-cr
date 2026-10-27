@@ -85,23 +85,43 @@ func TestUpsertOffDiffIssueCommentEditsInPlace(t *testing.T) {
 	info := &PRInfo{Owner: "acme", Repo: "app", Number: 1, HeadSHA: "abc"}
 	f := engine.Finding{File: "other.go", Line: 3, Severity: "high", Title: "bug", Rationale: "breaks the bound"}
 	client := &recordClient{login: "reviewer", issueStore: []*gh.IssueComment{}}
-	if _, err := UpsertOffDiffComment(stdctx.Background(), client, info, []engine.Finding{f}, nil); err != nil {
+	if _, err := UpsertOffDiffComment(stdctx.Background(), client, info, []engine.Finding{f}, nil, nil); err != nil {
 		t.Fatal(err)
 	}
 	if client.createIssueN != 1 {
 		t.Fatalf("creates = %d", client.createIssueN)
 	}
-	if _, err := UpsertOffDiffComment(stdctx.Background(), client, info, []engine.Finding{f}, nil); err != nil {
+	if _, err := UpsertOffDiffComment(stdctx.Background(), client, info, []engine.Finding{f}, nil, nil); err != nil {
 		t.Fatal(err)
 	}
 	if client.createIssueN != 1 {
 		t.Fatalf("second pass created another comment: %d", client.createIssueN)
 	}
-	if _, err := UpsertOffDiffComment(stdctx.Background(), client, info, nil, nil); err != nil {
+	if _, err := UpsertOffDiffComment(stdctx.Background(), client, info, nil, nil, nil); err != nil {
 		t.Fatal(err)
 	}
 	if !strings.Contains(client.issueStore[0].GetBody(), "No off-diff findings remain.") {
 		t.Fatalf("body = %s", client.issueStore[0].GetBody())
+	}
+}
+
+func TestUpsertOffDiffCarriedRewritesExistingThread(t *testing.T) {
+	info := &PRInfo{Owner: "acme", Repo: "app", Number: 1, HeadSHA: "abc"}
+	f := engine.Finding{File: "other.go", Line: 3, Severity: "high", Title: "bug", Rationale: "breaks the bound"}
+	client := &recordClient{login: "reviewer", issueStore: []*gh.IssueComment{}}
+	if _, err := UpsertOffDiffComment(stdctx.Background(), client, info, []engine.Finding{f}, nil, nil); err != nil {
+		t.Fatal(err)
+	}
+	carried := []LedgerEntry{{FP: "abc123", Path: "other.go", Line: 3, Title: "bug", Sev: "high", Status: statusOpen}}
+	if _, err := UpsertOffDiffComment(stdctx.Background(), client, info, nil, nil, carried); err != nil {
+		t.Fatal(err)
+	}
+	if client.createIssueN != 1 {
+		t.Fatalf("creates = %d, want the existing thread edited", client.createIssueN)
+	}
+	body := client.issueStore[0].GetBody()
+	if !strings.Contains(body, fpMarker("abc123")) || strings.Contains(body, "No off-diff findings remain.") {
+		t.Fatalf("body = %s", body)
 	}
 }
 

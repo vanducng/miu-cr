@@ -576,6 +576,37 @@ func TestParsePublishedKey(t *testing.T) {
 	}
 }
 
+func TestApplyReloadedSummaryClearsStaleScope(t *testing.T) {
+	info := &PRInfo{
+		PriorPublishedHeadSHA: "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+		StableFPs:             map[string]bool{"aa": true},
+		StableLines:           map[string]AnchorShift{"aa": {Path: "a.go", Line: 4}},
+		StablePaths:           map[string]bool{"a.go": true},
+	}
+	body := "<!-- miu-cr-published:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb -->"
+	applyReloadedSummary(info, body)
+	if info.StableFPs != nil || info.StableLines != nil || info.StablePaths != nil {
+		t.Fatal("stale maps kept")
+	}
+	if info.PriorPublishedHeadSHA != "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb" {
+		t.Fatalf("published sha = %q", info.PriorPublishedHeadSHA)
+	}
+
+	info.StableFPs = map[string]bool{"aa": true}
+	info.PriorPublishedHeadSHA = "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
+	applyReloadedSummary(info, body)
+	if info.StableFPs == nil {
+		t.Fatal("same commit cleared the maps")
+	}
+
+	info.PriorPublishedHeadSHA = "bbbbbbb"
+	info.StableFPs = map[string]bool{"aa": true}
+	applyReloadedSummary(info, body)
+	if info.StableFPs == nil {
+		t.Fatal("short prefix of the same commit cleared the maps")
+	}
+}
+
 func TestPriorRunsCount(t *testing.T) {
 	marked := func(id int64, body string) *gh.IssueComment {
 		return &gh.IssueComment{ID: gh.Ptr(id), User: &gh.User{Login: gh.Ptr("reviewer")}, Body: gh.Ptr(body)}

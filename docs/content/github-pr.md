@@ -148,9 +148,11 @@ fingerprint with a **Priority** column (P0–P4 + emoji), its **priority before�
 finding's **inline review thread** — the `#discussion_r…` anchor — when a comment exists for it,
 else to the file blob), and the linked **origin commit** (plus, for resolved rows, the linked
 **resolved commit**). This is what lets a re-run show how each issue *progressed* instead of only
-the latest snapshot. A finding flips to resolved only when
-it is absent from a run AND its file is still in the diff (absence off-diff is not treated as a
-fix). The collapsible **Important Files Changed** table
+the latest snapshot. The first review is asked to report every concrete defect in that pass.
+On a later commit the filter is the diff: a new finding is kept only when every non-empty
+line of its quoted code is a line that commit added or deleted and that text is not also unchanged context, or the finding is already open. An open finding stays
+open unless that commit deleted its line or its file. Absence outside the pull request diff
+is not treated as a fix. The collapsible **Important Files Changed** table
 (File · Δ · Findings · Overview, the Overview from the per-file digests), sorted
 most-important-first (files with findings, then biggest churn), the omitted-inline note, and
 the `<details>` overflow block follow. The agent handoff (a copy-paste local re-run command +
@@ -287,11 +289,15 @@ The PR summary carries a storeless lifecycle ledger in the hidden
 `<!-- miu-cr-ledger:... -->` marker, so resolution state survives ephemeral CI
 without a local PR-thread store:
 
-- A finding posted on a prior run that is **absent** from the current run, when
-  its file is **still in the diff**, is marked **resolved** and is not re-raised.
-- Resolution is **reversible**: a resolved finding that **recurs** in a later run
-  is **reopened** and re-posted, so LLM non-determinism can never permanently
-  suppress a real finding.
+- A finding posted on a prior run that is **absent** from the current run stays
+  **open** unless the commits since the last review deleted that line or the file.
+  A new finding is kept only when every non-empty line of its quoted code is a line those
+  commits added or deleted and that text is not also unchanged context, or the finding is already open. Absence outside the pull request diff
+  is not a fix.
+- Resolution is **reversible**: a resolved finding that **recurs** with quoted code
+  on a line the new commits added or deleted is **reopened** and re-posted.
+  Repeating a resolved finding whose quoted code those commits left unchanged does
+  not reopen it.
 
 Developers answer a finding on its thread:
 

@@ -106,6 +106,21 @@ func GetDiff(ctx context.Context, mode Mode, repoDir, from, to, commit string, r
 	return ParseDiffText(ctx, diffText, repoDir, ref, runner)
 }
 
+// Between is the two-dot diff from..to. The old side is from, so its line
+// numbers stay from's even when from is not an ancestor of to.
+func Between(ctx context.Context, repoDir, from, to string, runner *gitcmd.Runner) ([]Diff, error) {
+	if runner == nil {
+		runner = gitcmd.New()
+	}
+	args := append([]string{"diff"}, diffFlags...)
+	args = append(args, from, to, "--")
+	out, err := runner.Output(ctx, repoDir, args...)
+	if err != nil {
+		return nil, gitError("git.diff_failed", "git diff range failed", err)
+	}
+	return ParseDiffText(ctx, string(out), repoDir, to, runner)
+}
+
 func gitError(code, msg string, err error) error {
 	return &clierr.CLIError{
 		Code:    code,
