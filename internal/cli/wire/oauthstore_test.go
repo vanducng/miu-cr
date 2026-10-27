@@ -127,21 +127,37 @@ func TestOpenOAuthStoreCollapsesConcurrentFailedOpens(t *testing.T) {
 	}
 }
 
-func TestOpenOAuthStoreIgnoresBrokenConfigOnFileBackend(t *testing.T) {
-	oauthStoreEnv(t, "", "", "")
-	dir := filepath.Join(os.Getenv("HOME"), ".config", "miu", "cr")
-	if err := os.MkdirAll(dir, 0o700); err != nil {
-		t.Fatal(err)
+func TestOpenOAuthStoreBrokenConfigFailsUnlessEnvDecides(t *testing.T) {
+	cases := []struct {
+		name, backend, dsn, wantCode string
+		wantFile                     bool
+	}{
+		{"no env fails loud", "", "", "config.invalid", false},
+		{"env sqlite uses file", "sqlite", "", "", true},
+		{"env postgres stays postgres", "postgres", badPGDSN, "oauth.key_missing", false},
 	}
-	if err := os.WriteFile(filepath.Join(dir, "config.toml"), []byte("[store\nbackend = "), 0o600); err != nil {
-		t.Fatal(err)
-	}
-	st, err := openOAuthStore(stdctx.Background())
-	if err != nil {
-		t.Fatalf("broken config.toml must not block the file store: %v", err)
-	}
-	if _, ok := st.(config.FileOAuthStore); !ok {
-		t.Fatalf("got %T, want config.FileOAuthStore", st)
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			oauthStoreEnv(t, tc.backend, tc.dsn, "")
+			dir := filepath.Join(os.Getenv("HOME"), ".config", "miu", "cr")
+			if err := os.MkdirAll(dir, 0o700); err != nil {
+				t.Fatal(err)
+			}
+			if err := os.WriteFile(filepath.Join(dir, "config.toml"), []byte("[store\nbackend = "), 0o600); err != nil {
+				t.Fatal(err)
+			}
+			st, err := openOAuthStore(stdctx.Background())
+			if tc.wantFile {
+				if _, ok := st.(config.FileOAuthStore); !ok || err != nil {
+					t.Fatalf("got %T err=%v, want config.FileOAuthStore", st, err)
+				}
+				return
+			}
+			var ce *cli.CLIError
+			if st != nil || !errors.As(err, &ce) || ce.Code != tc.wantCode {
+				t.Fatalf("got %T err=%v, want %s", st, err, tc.wantCode)
+			}
+		})
 	}
 }
 

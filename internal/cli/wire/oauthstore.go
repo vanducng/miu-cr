@@ -3,6 +3,7 @@ package wire
 import (
 	stdctx "context"
 	"log/slog"
+	"os"
 	"sync"
 	"time"
 
@@ -21,11 +22,14 @@ var pgOAuthStores = struct {
 }{byConn: map[string]*postgres.OAuthStore{}}
 
 func openOAuthStore(ctx stdctx.Context) (config.OAuthStore, error) {
-	// Load returns defaults on a broken config.toml, which must not block login or init (it rewrites it).
 	cfg, lerr := config.Load()
 	if lerr != nil {
-		slog.Warn("oauth store: config load failed, selecting the backend from MIUCR_STORE_BACKEND or the file default",
-			"reason_code", "oauth.store_config_fallback", "reason", config.RedactString(lerr.Error()))
+		// A broken config.toml may hide backend = "postgres", so only the env var can still decide.
+		if os.Getenv("MIUCR_STORE_BACKEND") == "" {
+			return nil, lerr
+		}
+		slog.Warn("oauth store: config load failed, using MIUCR_STORE_BACKEND",
+			"reason_code", "oauth.store_config_env_only", "reason", config.RedactString(lerr.Error()))
 	}
 	backend, err := validateBackend(cfg)
 	if err != nil {
