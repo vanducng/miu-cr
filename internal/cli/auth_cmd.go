@@ -1,8 +1,9 @@
 package cli
 
 import (
+	stdctx "context"
+	"errors"
 	"io"
-	"os"
 	"time"
 
 	"github.com/spf13/cobra"
@@ -19,32 +20,36 @@ func whoamiCommand(_ *options) *cobra.Command {
 		Use:   "whoami",
 		Short: "Show the cached OAuth identity (provider/account/expiry — never the token)",
 		RunE: func(cmd *cobra.Command, args []string) error {
-			return runWhoami(cmd.OutOrStdout())
+			return runWhoami(cmd.Context(), cmd.OutOrStdout())
 		},
 	}
 }
 
-func runWhoami(stdout io.Writer) error {
-	rec, ok, err := config.LoadOAuth()
+func runWhoami(ctx stdctx.Context, stdout io.Writer) error {
+	st, err := openOAuthStore(ctx)
+	if err != nil {
+		return err
+	}
+	rec, ok, err := st.Load(ctx)
 	if err != nil {
 		return err
 	}
 	if !ok {
-		return writeSuccess(stdout, "whoami", "whoami", map[string]any{
+		return writeSuccess(stdout, "whoami", "whoami", oauthStoreFields(st, map[string]any{
 			"logged_in": false,
-		}, map[string]any{"logged_in": false})
+		}), map[string]any{"logged_in": false})
 	}
 	expiresAt := ""
 	if !rec.ExpiresAt.IsZero() {
 		expiresAt = rec.ExpiresAt.UTC().Format(time.RFC3339)
 	}
-	return writeSuccess(stdout, "whoami", "whoami", map[string]any{
+	return writeSuccess(stdout, "whoami", "whoami", oauthStoreFields(st, map[string]any{
 		"logged_in":  true,
 		"provider":   rec.Provider,
 		"account_id": rec.AccountID,
 		"expires_at": expiresAt,
 		"expired":    rec.Expired(time.Now()),
-	}, map[string]any{"provider": rec.Provider})
+	}), map[string]any{"provider": rec.Provider})
 }
 
 // logoutCommand deletes the cached OAuth record. Idempotent: a missing record
@@ -54,24 +59,25 @@ func logoutCommand(_ *options) *cobra.Command {
 		Use:   "logout",
 		Short: "Delete the cached OAuth record",
 		RunE: func(cmd *cobra.Command, args []string) error {
-			return runLogout(cmd.OutOrStdout())
+			return runLogout(cmd.Context(), cmd.OutOrStdout())
 		},
 	}
 }
 
-func runLogout(stdout io.Writer) error {
-	path, err := config.OAuthPath()
+func runLogout(ctx stdctx.Context, stdout io.Writer) error {
+	st, err := openOAuthStore(ctx)
 	if err != nil {
 		return err
 	}
-	removed := true
-	if err := os.Remove(path); err != nil {
-		if !os.IsNotExist(err) {
-			return &CLIError{Code: "logout.remove_failed", Message: config.RedactString(err.Error()), Exit: 1}
+	removed, err := st.Delete(ctx)
+	if err != nil {
+		var ce *CLIError
+		if errors.As(err, &ce) {
+			return err
 		}
-		removed = false
+		return &CLIError{Code: "logout.remove_failed", Message: config.RedactString(err.Error()), Exit: 1}
 	}
-	return writeSuccess(stdout, "logout", "logout", map[string]any{
+	return writeSuccess(stdout, "logout", "logout", oauthStoreFields(st, map[string]any{
 		"removed": removed,
-	}, map[string]any{"removed": removed})
+	}), map[string]any{"removed": removed})
 }

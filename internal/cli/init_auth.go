@@ -85,14 +85,18 @@ func nonInteractiveAuth(in authInput, provider string, prof *config.Provider) (a
 	}
 }
 
-// authOAuth runs the shared browser-OAuth flow; the token lands in oauth.json and
-// the profile stays the default openai profile so reviews resolve via oauth.json.
+// authOAuth runs the shared browser-OAuth flow; the token lands in the OAuth
+// store and the profile stays the default openai profile so reviews resolve it.
 func authOAuth(ctx stdctx.Context, out io.Writer, prof *config.Provider) (authMethod, error) {
 	prov, err := lookupOAuthProvider("openai")
 	if err != nil {
 		return "", err
 	}
-	if _, err := initOAuthLogin(ctx, out, prov, "", 0, false); err != nil {
+	st, err := openOAuthStore(ctx)
+	if err != nil {
+		return "", err
+	}
+	if _, err := initOAuthLogin(ctx, out, st, prov, "", 0, false); err != nil {
 		return "", err
 	}
 	prof.AuthEnv = ""

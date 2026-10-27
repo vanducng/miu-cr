@@ -7,8 +7,6 @@ import (
 	"time"
 
 	"github.com/spf13/cobra"
-
-	"github.com/vanducng/miu-cr/internal/config"
 )
 
 // loginCallbackTimeout bounds the wait for the browser callback. cmd.Context() is
@@ -54,20 +52,22 @@ type loginOpts struct {
 // runLogin wraps the shared OAuth flow with the login.result envelope. The flow
 // itself (runOAuthLogin) is shared with `miucr init`'s browser-login path.
 func runLogin(ctx stdctx.Context, stdout, stderr io.Writer, prov oauthProvider, opts loginOpts) error {
-	rec, err := runOAuthLogin(ctx, stderr, prov, opts.baseURL, opts.port, opts.noBrowser)
+	st, err := openOAuthStore(ctx)
 	if err != nil {
 		return err
 	}
-	oauthPath, _ := config.OAuthPath()
+	rec, err := runOAuthLogin(ctx, stderr, st, prov, opts.baseURL, opts.port, opts.noBrowser)
+	if err != nil {
+		return err
+	}
 	expiresAt := ""
 	if !rec.ExpiresAt.IsZero() {
 		expiresAt = rec.ExpiresAt.UTC().Format(time.RFC3339)
 	}
-	return writeSuccess(stdout, "login", "login.result", map[string]any{
+	return writeSuccess(stdout, "login", "login.result", oauthStoreFields(st, map[string]any{
 		"provider":    rec.Provider,
-		"oauth_path":  oauthPath,
 		"expires_at":  expiresAt,
 		"account_id":  rec.AccountID,
 		"has_api_key": rec.APIKey != "",
-	}, map[string]any{"provider": rec.Provider})
+	}), map[string]any{"provider": rec.Provider})
 }

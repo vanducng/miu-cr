@@ -2,6 +2,7 @@ package agent
 
 import (
 	stdctx "context"
+	"errors"
 	"fmt"
 	"net/http"
 	"os"
@@ -377,10 +378,15 @@ func resolveOAuthCodex(in ResolveInput, prof config.Provider) (Credentials, bool
 	}
 	cred, ok, err := in.OAuthResolver(ctx)
 	if err != nil {
+		hint := "run `miucr login` again, or set OPENAI_API_KEY / --api-key"
+		var inner *clierr.CLIError
+		if errors.As(err, &inner) && inner.Hint != "" {
+			hint = inner.Hint
+		}
 		return Credentials{}, false, &clierr.CLIError{
 			Code:    "agent.oauth_unavailable",
 			Message: "cached login credential could not be resolved: " + config.RedactString(err.Error()),
-			Hint:    "run `miucr login` again, or set OPENAI_API_KEY / --api-key",
+			Hint:    hint,
 			Exit:    1,
 			Cause:   err,
 		}

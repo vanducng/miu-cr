@@ -94,6 +94,7 @@ func init() {
 	cli.SetReviewStoreFactory(openReviewStore)
 	cli.SetHostStoreFactory(openHostStore)
 	cli.SetHistoryStoreFactory(openHistoryStoreForCmd)
+	cli.SetOAuthStoreFactory(openOAuthStore)
 }
 
 // openHistoryStoreForCmd opens the configured backend store for the `history`
@@ -146,17 +147,22 @@ func openHostStore(ctx stdctx.Context, cfg config.HostConfig) (store.HostStore, 
 	return s, func() { _ = s.Close() }, nil
 }
 
-// oauthResolver bridges the cli OAuth provider registry + the FS-backed oauth
-// package into the agent's resolver hook, keeping the engine/agent resolution
-// free of any direct filesystem read. The default OAuth provider is openai (the
-// only registered one). Returns nil when no provider is registered.
+// oauthResolver bridges the cli OAuth provider registry + the configured
+// OAuthStore (oauth.json or Postgres) into the agent's resolver hook, keeping the
+// engine/agent resolution free of any direct storage read. The default OAuth
+// provider is openai (the only registered one). Returns nil when no provider is
+// registered.
 func oauthResolver() func(stdctx.Context) (agent.OAuthCredential, bool, error) {
 	meta, ok := cli.OAuthBackend("openai")
 	if !ok {
 		return nil
 	}
 	return func(ctx stdctx.Context) (agent.OAuthCredential, bool, error) {
-		res, ok, err := oauth.Credential(ctx, oauth.Meta{
+		st, err := openOAuthStore(ctx)
+		if err != nil {
+			return agent.OAuthCredential{}, false, err
+		}
+		res, ok, err := oauth.Credential(ctx, st, oauth.Meta{
 			Provider:       meta.Provider,
 			TokenURL:       meta.TokenURL,
 			ClientID:       meta.ClientID,

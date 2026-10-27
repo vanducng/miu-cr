@@ -147,6 +147,22 @@ func TestResolveOAuthErrorWrapsCause(t *testing.T) {
 	}
 }
 
+func TestResolveOAuthErrorKeepsStoreHint(t *testing.T) {
+	clearProviderEnv(t)
+	keyErr := config.OAuthKeyError("oauth.key_missing", "MIUCR_OAUTH_KEY is not set")
+	boom := func(stdctx.Context) (OAuthCredential, bool, error) {
+		return OAuthCredential{}, false, keyErr
+	}
+	_, err := resolveWith(config.Defaults(), ResolveInput{Provider: "openai", OAuthResolver: boom})
+	var cliErr *clierr.CLIError
+	if !errors.As(err, &cliErr) || cliErr.Code != "agent.oauth_unavailable" {
+		t.Fatalf("err = %v, want code agent.oauth_unavailable", err)
+	}
+	if !strings.Contains(cliErr.Hint, config.OAuthKeyEnv) {
+		t.Errorf("hint = %q, want the oauth key hint", cliErr.Hint)
+	}
+}
+
 // TestResolveThreadsContextToResolver verifies the request context (not Background)
 // reaches the OAuth resolver so refresh respects cancellation.
 func TestResolveThreadsContextToResolver(t *testing.T) {

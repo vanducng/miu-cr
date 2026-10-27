@@ -22,11 +22,11 @@ import (
 // fails; login continues either way (the URL is always printed).
 var browserOpen = openBrowser
 
-// runOAuthLogin runs the PKCE loopback flow, caches the token in oauth.json, and
-// prints the authorize URL + the "logged in" line to out. Shared by `miucr
-// login` and `miucr init`'s browser-login path. The returned record is non-secret
-// routing for the caller's envelope; the tokens live ONLY in oauth.json.
-func runOAuthLogin(ctx stdctx.Context, out io.Writer, prov oauthProvider, baseURL string, port int, noBrowser bool) (config.OAuthRecord, error) {
+// runOAuthLogin runs the PKCE loopback flow, saves the token to st, and prints
+// the authorize URL + the "logged in" line to out. Shared by `miucr login` and
+// `miucr init`'s browser-login path. The returned record is non-secret routing
+// for the caller's envelope; the tokens live ONLY in st.
+func runOAuthLogin(ctx stdctx.Context, out io.Writer, st config.OAuthStore, prov oauthProvider, baseURL string, port int, noBrowser bool) (config.OAuthRecord, error) {
 	ln, boundPort, err := bindLoopback(prov, port)
 	if err != nil {
 		return config.OAuthRecord{}, err
@@ -75,12 +75,11 @@ func runOAuthLogin(ctx stdctx.Context, out io.Writer, prov oauthProvider, baseUR
 	}
 	rec.APIKey = bestEffortAPIKey(ctx, conf, prov, tok)
 
-	if err := config.SaveOAuth(rec); err != nil {
-		return config.OAuthRecord{}, &CLIError{Code: "login.write_failed", Message: config.RedactString(err.Error()), Exit: 1}
+	if err := st.Save(ctx, rec); err != nil {
+		return config.OAuthRecord{}, &CLIError{Code: "login.write_failed", Message: config.RedactString(err.Error()), Exit: 1, Cause: err}
 	}
 
-	oauthPath, _ := config.OAuthPath()
-	fmt.Fprintf(out, "miu-cr: logged in (%s); token cached at %s\n", prov.Name, oauthPath)
+	fmt.Fprintf(out, "miu-cr: logged in (%s); token %s\n", prov.Name, oauthStoreLocation(st))
 	return rec, nil
 }
 
