@@ -124,6 +124,7 @@ func MergeReviewLedger(info *PRInfo, findings []engine.Finding, diffs []diff.Dif
 	}
 	if info.StableFPs != nil {
 		ledger = PreserveUntouchedAnchors(ledger, info.PriorLedger, info.StableFPs)
+		ledger = resolveRemovedAnchors(ledger, info.PriorLedger, info.StableFPs, findings, info.HeadSHA, now)
 		return applyShiftedLines(ledger, info.StableLines)
 	}
 	return PreserveStableFindings(ledger, info.PriorLedger, info.StablePaths)

@@ -8,6 +8,39 @@ import (
 	"github.com/vanducng/miu-cr/internal/engine/diff"
 )
 
+func TestMergeReviewLedgerResolvesRevertedFile(t *testing.T) {
+	f := mkFinding("a.go", "high", "bug", "func f() {}", "reverted")
+	now := time.Date(2026, 6, 28, 0, 0, 0, 0, time.UTC)
+	prior := MergeLedger(nil, []engine.Finding{f}, "aaaaaa1", map[string]bool{"a.go": true}, now)
+	deleted := []diff.Diff{{
+		OldPath: "a.go", NewPath: "/dev/null", IsDeleted: true,
+		Diff: "@@ -1,3 +0,0 @@\n-package p\n-\n-func f() {}\n",
+	}}
+	info := &PRInfo{
+		HeadSHA:     "bbbbbb2",
+		PriorLedger: prior,
+		StableFPs:   UntouchedAnchors(prior, deleted),
+	}
+	out := MergeReviewLedger(info, nil, nil, now.Add(time.Hour))
+	if out[0].Status != statusResolved || out[0].ResSHA != "bbbbbb2" {
+		t.Fatalf("reverted file = %+v", out[0])
+	}
+	if len(GateFindings(nil, out)) != 0 {
+		t.Fatal("resolved revert still blocks")
+	}
+	repeated := MergeReviewLedger(info, []engine.Finding{f}, nil, now.Add(time.Hour))
+	if repeated[0].Status != statusOpen {
+		t.Fatalf("repeated finding = %+v", repeated[0])
+	}
+
+	quiet := []diff.Diff{{OldPath: "b.go", NewPath: "b.go", Diff: "@@ -1 +1 @@\n-x\n+y\n"}}
+	info.StableFPs = UntouchedAnchors(prior, quiet)
+	kept := MergeReviewLedger(info, nil, nil, now.Add(2*time.Hour))
+	if kept[0].Status != statusOpen {
+		t.Fatalf("off-diff omission = %+v", kept[0])
+	}
+}
+
 func TestShiftedLineFollowsInsert(t *testing.T) {
 	quiet := engine.Finding{File: "a.go", Line: 5, Severity: "high", Category: "bug", QuotedCode: "keep()", Title: "stays"}
 	now := time.Date(2026, 6, 28, 0, 0, 0, 0, time.UTC)

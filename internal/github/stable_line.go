@@ -1,6 +1,11 @@
 package github
 
-import "github.com/vanducng/miu-cr/internal/engine/diff"
+import (
+	"time"
+
+	"github.com/vanducng/miu-cr/internal/engine"
+	"github.com/vanducng/miu-cr/internal/engine/diff"
+)
 
 // AnchorShift is where a prior anchor sits after the follow-up commits.
 type AnchorShift struct {
@@ -31,6 +36,37 @@ func ShiftedLines(prior []LedgerEntry, delta []diff.Diff) map[string]AnchorShift
 	}
 	if len(out) == 0 {
 		return nil
+	}
+	return out
+}
+
+// resolveRemovedAnchors closes an omitted open row whose follow-up commits deleted the anchor, even after that path left the pull request.
+func resolveRemovedAnchors(ledger, prior []LedgerEntry, untouched map[string]bool, current []engine.Finding, headSHA string, now time.Time) []LedgerEntry {
+	if untouched == nil {
+		return ledger
+	}
+	priorOpen := map[string]bool{}
+	for _, e := range prior {
+		if e.FP != "" && (e.Status == statusOpen || e.Status == statusReopened) {
+			priorOpen[e.FP] = true
+		}
+	}
+	seen := findingFPs(current)
+	nowStr := now.UTC().Format(time.RFC3339)
+	out := append([]LedgerEntry(nil), ledger...)
+	for i := range out {
+		e := &out[i]
+		if seen[e.FP] || untouched[e.FP] || !priorOpen[e.FP] {
+			continue
+		}
+		if e.Status != statusOpen && e.Status != statusReopened {
+			continue
+		}
+		e.Status = statusResolved
+		e.ResSHA = headSHA
+		e.ResKind = ""
+		e.ResAt = nowStr
+		e.Note = ""
 	}
 	return out
 }
