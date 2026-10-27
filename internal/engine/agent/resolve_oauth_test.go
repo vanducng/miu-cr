@@ -240,3 +240,28 @@ func TestResolveOAuthErrorFallsBackToEnvKey(t *testing.T) {
 		t.Errorf("OAuth error should fall back to the ambient env key: %+v", creds)
 	}
 }
+
+func TestResolveInputAuthOverridesProfile(t *testing.T) {
+	clearProviderEnv(t)
+	t.Setenv("OPENAI_API_KEY", "sk-env")
+	t.Setenv("MIUCR_TEST_PROFILE_KEY", "sk-profile")
+	cfg := config.Defaults()
+	p := cfg.Providers["openai"]
+	p.AuthEnv = "MIUCR_TEST_PROFILE_KEY"
+	cfg.Providers["openai"] = p
+
+	creds, err := resolveWith(cfg, ResolveInput{Provider: "openai", Auth: "oauth", OAuthResolver: codexResolver()})
+	if err != nil {
+		t.Fatalf("resolve: %v", err)
+	}
+	if creds.Backend != "codex" || creds.APIKey != "" {
+		t.Errorf("Auth=oauth must use the login session, not the profile or env key: %+v", creds)
+	}
+
+	noCred := func(stdctx.Context) (OAuthCredential, bool, error) { return OAuthCredential{}, false, nil }
+	_, err = resolveWith(cfg, ResolveInput{Provider: "openai", Auth: "oauth", OAuthResolver: noCred})
+	var cerr *clierr.CLIError
+	if !errors.As(err, &cerr) || cerr.Code != "agent.no_credentials" {
+		t.Fatalf("Auth=oauth without a session must fail, not fall back to a key: %v", err)
+	}
+}

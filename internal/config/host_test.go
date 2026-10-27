@@ -274,6 +274,29 @@ repos:
 	}
 }
 
+func TestLoadHostRejectsInvalidOAuthProvider(t *testing.T) {
+	for _, tc := range []struct {
+		name, provider, wantErr string
+	}{
+		{name: "anthropic kind", provider: "    kind: anthropic\n    auth: oauth\n", wantErr: "providers.chatgpt.kind"},
+		{name: "auth_env", provider: "    kind: openai\n    auth: oauth\n    auth_env: OPENAI_API_KEY\n", wantErr: "providers.chatgpt.auth"},
+		{name: "auth_command", provider: "    kind: openai\n    auth: oauth\n    auth_command: [\"secret-helper\"]\n", wantErr: "providers.chatgpt.auth"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			path := writeHostConfig(t, "providers:\n  chatgpt:\n"+tc.provider+minimalHostYAML()+`
+repos:
+  - name: service-api
+    slug: example-org/service-api
+    git_url: https://github.com/example-org/service-api.git
+    provider: chatgpt
+`)
+			if err := loadHostErr(path); !isConfigInvalid(err) || !strings.Contains(err.Error(), tc.wantErr) {
+				t.Fatalf("want %s config.invalid, got %v", tc.wantErr, err)
+			}
+		})
+	}
+}
+
 func TestLoadHostUnknownAccountFails(t *testing.T) {
 	path := writeHostConfig(t, minimalHostYAML()+`
 repos:

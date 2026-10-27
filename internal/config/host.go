@@ -281,6 +281,14 @@ func validateHostProviders(path string, providers map[string]HostProvider) error
 		if field, value, want := quotaProblem(provider.Quota); field != "" {
 			return invalidHost(path, "providers."+name+"."+field, value, want)
 		}
+		if strings.EqualFold(strings.TrimSpace(provider.Auth), "oauth") {
+			if provider.Kind != KindOpenAI {
+				return invalidHost(path, "providers."+name+".kind", string(provider.Kind), "openai when auth is oauth")
+			}
+			if strings.TrimSpace(provider.AuthEnv) != "" || len(provider.AuthCommand) > 0 {
+				return invalidHost(path, "providers."+name+".auth", provider.Auth, "no auth_env or auth_command with oauth (the credential comes from miucr login)")
+			}
+		}
 	}
 	return nil
 }

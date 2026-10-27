@@ -287,6 +287,7 @@ type PRReviewRequest struct {
 	APIKey         string
 	BaseURL        string
 	AuthToken      string
+	Auth           string
 	Model          string
 	Timeout        time.Duration
 	StalledTimeout time.Duration

@@ -337,6 +337,13 @@ resolved once per config load, and only for enabled repos. An unknown `provider`
 or `default_provider` fails the config load with `config.invalid`. Changing a
 repo's provider does not re-review heads that were already reviewed.
 
+A provider's `auth` is authoritative on the host. With `auth: oauth` the repo
+uses only the `miucr login` session in `oauth.json` and never falls back to
+`OPENAI_API_KEY` or a `config.toml` profile key. Such a provider must be
+`kind: openai` and must not set `auth_env` or `auth_command`. Omit `model` or set
+a model the ChatGPT plan accepts, such as `gpt-5.5`. The host refreshes the
+token in place, so mount `oauth.json` writable.
+
 `timeout` follows the same layering. The review default is `900s`; raise
 `repos[].review.timeout` for large or critical repos instead of making every
 host review wait longer. The host uses the resolved timeout for both the review

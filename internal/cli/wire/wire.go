@@ -417,6 +417,7 @@ func (prReviewer) ReviewPR(ctx stdctx.Context, req cli.PRReviewRequest) (cli.Rev
 		APIKey:        req.APIKey,
 		BaseURL:       req.BaseURL,
 		AuthToken:     req.AuthToken,
+		Auth:          req.Auth,
 		Model:         req.Model,
 		OAuthResolver: oauthResolver(),
 	})

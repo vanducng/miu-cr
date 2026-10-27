@@ -75,7 +75,7 @@ func TestBuildServeHostReposResolvesProviderPerRepo(t *testing.T) {
 	if api.QuotaProvider != "gateway" || !reflect.DeepEqual(api.Quota, cfg.Providers["gateway"].Quota) {
 		t.Fatalf("default repo quota = %q %+v, want gateway quota", api.QuotaProvider, api.Quota)
 	}
-	if web.Provider != "openai" || web.APIKey != "" || web.AuthToken != "" || web.BaseURL != "" || web.Model != "gpt-5.5" {
+	if web.Provider != "openai" || web.Auth != "oauth" || web.APIKey != "" || web.AuthToken != "" || web.BaseURL != "" || web.Model != "gpt-5.5" {
 		t.Fatalf("override repo must use chatgpt provider without a static secret: %+v", web)
 	}
 	if web.QuotaProvider != "chatgpt" || !reflect.DeepEqual(web.Quota, cfg.Providers["chatgpt"].Quota) {
@@ -185,6 +185,7 @@ func resolveHostRepoCreds(opts serve.JobReviewOptions, loggedIn bool) (agent.Cre
 		APIKey:    opts.APIKey,
 		BaseURL:   opts.BaseURL,
 		AuthToken: opts.AuthToken,
+		Auth:      opts.Auth,
 		Model:     opts.Model,
 		OAuthResolver: func(stdctx.Context) (agent.OAuthCredential, bool, error) {
 			if !loggedIn {
@@ -229,5 +230,10 @@ func TestMixedHostProvidersResolveDistinctCredentials(t *testing.T) {
 	builtin := resolve(2)
 	if builtin.Backend != "codex" || builtin.Model != config.DefaultCodexModel {
 		t.Fatalf("built-in openai repo with a login session must use the codex default model: backend=%q model=%q", builtin.Backend, builtin.Model)
+	}
+	_, err = resolveHostRepoCreds(repos[1].Review, false)
+	var ce *CLIError
+	if !asCLIError(err, &ce) || ce.Code != "agent.no_credentials" {
+		t.Fatalf("auth oauth without a login session must fail, not use OPENAI_API_KEY: %v", err)
 	}
 }
