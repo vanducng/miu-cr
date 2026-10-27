@@ -1,7 +1,8 @@
 // Package postgres is the opt-in Postgres store backend behind the unchanged M5
 // store interfaces. It uses pgx/v5 via its database/sql stdlib adapter so the
 // *sql.DB/Tx shape is shared with the sqlite backend. It is pure-Go (pgx is
-// pure-Go) so CGO_ENABLED=0 still builds. It never persists credentials.
+// pure-Go) so CGO_ENABLED=0 still builds. The only credential it persists is
+// the `miucr login` record, sealed with AES-256-GCM (see OAuthStore).
 package postgres
 
 import (
@@ -78,6 +79,7 @@ var postgresMigrations = []schemaMigration{
 	{Name: "0004_provider_usage", SQL: ProviderUsageSchemaSQL},
 	{Name: "0005_host_jobs_repo_status_idx", SQL: hostJobsRepoStatusIdxSQL},
 	{Name: "0006_provider_usage_cache", SQL: providerUsageCacheSQL},
+	{Name: "0007_oauth_credentials", SQL: oauthCredentialsSchemaSQL},
 }
 
 // hostJobsRepoStatusIdxSQL backs per-repo unfinished-job reconciliation; the

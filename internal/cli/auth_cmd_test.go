@@ -2,6 +2,7 @@ package cli
 
 import (
 	"bytes"
+	stdctx "context"
 	"strings"
 	"testing"
 	"time"
@@ -40,7 +41,7 @@ func runWhoamiCmd(t *testing.T, pretty bool) string {
 	prettyOutput = pretty
 	t.Cleanup(func() { prettyOutput = false })
 	var so bytes.Buffer
-	if err := runWhoami(&so); err != nil {
+	if err := runWhoami(stdctx.Background(), &so); err != nil {
 		t.Fatalf("whoami: %v", err)
 	}
 	return so.String()
@@ -50,7 +51,7 @@ func runLogoutCmd(t *testing.T) string {
 	t.Helper()
 	prettyOutput = false
 	var so bytes.Buffer
-	if err := runLogout(&so); err != nil {
+	if err := runLogout(stdctx.Background(), &so); err != nil {
 		t.Fatalf("logout: %v", err)
 	}
 	return so.String()

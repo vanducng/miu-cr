@@ -42,11 +42,19 @@ docker compose --env-file examples/review-host/.env \
   -f examples/review-host/docker-compose.yml up --build
 ```
 
-For an OpenAI OAuth/Codex provider, run `miucr login --provider openai` on the
-host, then set `MIUCR_CONFIG_DIR` in `.env` to the directory containing the
-resulting `oauth.json` (usually `~/.config/miu/cr`). The compose service mounts
-that directory at the container user's miucr config path so token refresh can
-write back to the same cache.
+For an OpenAI OAuth/Codex provider, set `MIUCR_OAUTH_KEY` in `.env`
+(`openssl rand -base64 32`). With the Postgres backend the login lives encrypted
+in Postgres, not `oauth.json`, so log in once against the same database and key,
+for example from the host:
+
+```sh
+MIUCR_STORE_BACKEND=postgres MIUCR_OAUTH_KEY=<same key> \
+MIUCR_PG_DSN='postgres://miucr:miucr@localhost:55432/miucr?sslmode=disable' \
+  miucr login --provider openai
+```
+
+The running container picks it up on its next review and writes rotated tokens
+back to the same row.
 
 For local binary dogfood against the compose Postgres:
 

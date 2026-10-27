@@ -240,8 +240,8 @@ func TestInitOpenAIOAuth(t *testing.T) {
 	auth := fakeAuthServer(t)
 
 	origLogin := initOAuthLogin
-	initOAuthLogin = func(ctx stdctx.Context, out io.Writer, prov oauthProvider, _ string, _ int, _ bool) (config.OAuthRecord, error) {
-		return runOAuthLogin(ctx, out, prov, auth.URL, 1455, false)
+	initOAuthLogin = func(ctx stdctx.Context, out io.Writer, st config.OAuthStore, prov oauthProvider, _ string, _ int, _ bool) (config.OAuthRecord, error) {
+		return runOAuthLogin(ctx, out, st, prov, auth.URL, 1455, false)
 	}
 	t.Cleanup(func() { initOAuthLogin = origLogin })
 

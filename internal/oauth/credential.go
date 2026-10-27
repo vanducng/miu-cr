@@ -1,7 +1,7 @@
 // Package oauth resolves the cached `miucr login` credential for review time and
 // refreshes it (hand-rolled JSON-body grant) when it is expiring or rejected.
-// It owns the on-disk oauth.json read/write so the engine stays FS-free; the
-// cli/config layer injects the provider Meta (token endpoint + backend host).
+// The caller injects the config.OAuthStore (oauth.json or Postgres) and the
+// provider Meta (token endpoint + backend host), so this package stays FS-free.
 // Tokens are never logged or returned in any error string.
 package oauth
 
@@ -9,6 +9,7 @@ import (
 	stdctx "context"
 	"encoding/json"
 	"fmt"
+	"log/slog"
 	"net/http"
 	"strings"
 	"sync"
@@ -40,18 +41,29 @@ var refreshGroup singleflight.Group
 // oauth.refresh_unavailable — and re-reads the record inside the closure so the
 // grant uses the current rotating refresh_token, not a snapshot a caller captured
 // before an earlier rotation.
-func dedupedRefresh(ctx stdctx.Context, meta Meta, httpClient *http.Client, now func() time.Time) (config.OAuthRecord, error) {
+func dedupedRefresh(ctx stdctx.Context, st config.OAuthStore, meta Meta, httpClient *http.Client, now func() time.Time) (config.OAuthRecord, error) {
 	v, err, _ := refreshGroup.Do(meta.Provider, func() (any, error) {
 		rctx, cancel := stdctx.WithTimeout(stdctx.WithoutCancel(ctx), refreshTimeout)
 		defer cancel()
-		rec, ok, lerr := config.LoadOAuth()
+		rec, ok, lerr := st.Load(rctx)
 		if lerr != nil {
 			return config.OAuthRecord{}, fmt.Errorf("oauth: reload before refresh: %w", lerr)
 		}
 		if !ok {
 			return config.OAuthRecord{}, fmt.Errorf("oauth: cached credential vanished before refresh")
 		}
-		return refresh(rctx, meta, rec, httpClient, now)
+		next, rerr := refresh(rctx, st, meta, rec, httpClient, now)
+		if rerr != nil {
+			// Another process sharing the store may have rotated the token we just lost the grant race on.
+			if latest, ok, lerr := st.Load(rctx); lerr == nil && ok && latest.Provider == meta.Provider &&
+				latest.RefreshToken != rec.RefreshToken && strings.TrimSpace(latest.AccessToken) != "" {
+				slog.Info("oauth: refresh failed but the store already holds a newer credential; using it",
+					"provider", meta.Provider, "oauth_store", st.Backend(), "reason_code", "oauth.refresh_lost_race")
+				return latest, nil
+			}
+			return config.OAuthRecord{}, rerr
+		}
+		return next, nil
 	})
 	if err != nil {
 		return config.OAuthRecord{}, err
@@ -83,14 +95,14 @@ type Resolved struct {
 // resolved access token + routing. ok=false means no usable cached credential
 // for this provider (caller falls through to other auth). httpClient/now are
 // test seams.
-func Credential(ctx stdctx.Context, meta Meta, httpClient *http.Client, now func() time.Time) (Resolved, bool, error) {
+func Credential(ctx stdctx.Context, st config.OAuthStore, meta Meta, httpClient *http.Client, now func() time.Time) (Resolved, bool, error) {
 	if now == nil {
 		now = time.Now
 	}
 	if httpClient == nil {
 		httpClient = http.DefaultClient
 	}
-	rec, ok, err := config.LoadOAuth()
+	rec, ok, err := st.Load(ctx)
 	if err != nil || !ok {
 		return Resolved{}, false, err
 	}
@@ -98,7 +110,7 @@ func Credential(ctx stdctx.Context, meta Meta, httpClient *http.Client, now func
 		return Resolved{}, false, nil
 	}
 	if rec.ExpiringWithin(refreshSkew, now()) {
-		rec, err = dedupedRefresh(ctx, meta, httpClient, now)
+		rec, err = dedupedRefresh(ctx, st, meta, httpClient, now)
 		if err != nil {
 			return Resolved{}, false, err
 		}
@@ -113,7 +125,7 @@ func Credential(ctx stdctx.Context, meta Meta, httpClient *http.Client, now func
 		Refresh: func(ctx stdctx.Context) (string, error) {
 			mu.Lock()
 			defer mu.Unlock()
-			refreshed, rerr := dedupedRefresh(ctx, meta, httpClient, now)
+			refreshed, rerr := dedupedRefresh(ctx, st, meta, httpClient, now)
 			if rerr != nil {
 				return "", rerr
 			}
@@ -125,8 +137,9 @@ func Credential(ctx stdctx.Context, meta Meta, httpClient *http.Client, now func
 
 // refresh runs the hand-rolled JSON-body refresh-token grant (the provider's
 // token endpoint wants JSON, which x/oauth2's form-encoded refresh can't do),
-// then SaveOAuths the merged record. Errors are redacted so no token leaks.
-func refresh(ctx stdctx.Context, meta Meta, rec config.OAuthRecord, httpClient *http.Client, now func() time.Time) (config.OAuthRecord, error) {
+// then persists the merged record. Errors are redacted so no token leaks.
+func refresh(ctx stdctx.Context, st config.OAuthStore, meta Meta, rec config.OAuthRecord, httpClient *http.Client, now func() time.Time) (config.OAuthRecord, error) {
+	prior := rec
 	if strings.TrimSpace(rec.RefreshToken) == "" {
 		return config.OAuthRecord{}, fmt.Errorf("oauth: token expired and no refresh token cached")
 	}
@@ -189,8 +202,13 @@ func refresh(ctx stdctx.Context, meta Meta, rec config.OAuthRecord, httpClient *
 	if tr.ExpiresIn > 0 {
 		rec.ExpiresAt = now().Add(time.Duration(tr.ExpiresIn) * time.Second)
 	}
-	if err := config.SaveOAuth(rec); err != nil {
+	saved, err := st.SaveRefreshed(ctx, prior, rec)
+	if err != nil {
 		return config.OAuthRecord{}, fmt.Errorf("oauth: persist refreshed token: %s", config.RedactString(err.Error()))
+	}
+	if !saved {
+		slog.Warn("oauth: refreshed credential not persisted; the stored login changed (newer login or logout)",
+			"provider", meta.Provider, "oauth_store", st.Backend(), "reason_code", "oauth.stored_login_changed")
 	}
 	return rec, nil
 }

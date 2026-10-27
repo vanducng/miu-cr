@@ -84,6 +84,11 @@ byte-for-byte row parity across a switch.
 - `pr_findings`: optional PR-thread dedupe/resolution state
   (`owner, repo, number, fingerprint, path, status`).
 
+The Postgres backend also holds the `miucr login` record in a Postgres-only
+`oauth_credentials` table (migration `0007_oauth_credentials`), sealed with
+AES-256-GCM under `MIUCR_OAUTH_KEY`. See
+[Credentials](/credentials/#hosted-login-with-the-postgres-store).
+
 The opt-in semantic-recall layer adds a separate, Postgres-only
 `finding_embeddings` table (a `pgvector` column), created conditionally and only
 when `[embedding].enabled = true`. The core `reviews`/`pr_findings` schema and its

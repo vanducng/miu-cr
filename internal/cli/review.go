@@ -384,7 +384,7 @@ func resolveGitHubToken(flag string) string {
 // when nothing at all provides auth: no config file on disk AND no LLM-credential
 // env var AND no --api-key/--auth-token flag. Soft by design: when a key or flag
 // IS present, this is a no-op and review proceeds (zero-config still works).
-func nudgeIfUnconfigured(apiKey, authToken string) error {
+func nudgeIfUnconfigured(ctx stdctx.Context, apiKey, authToken string) error {
 	if strings.TrimSpace(apiKey) != "" || strings.TrimSpace(authToken) != "" {
 		return nil
 	}
@@ -398,10 +398,12 @@ func nudgeIfUnconfigured(apiKey, authToken string) error {
 			return nil // user has a config file; let resolve emit any specific error
 		}
 	}
-	if p, perr := config.OAuthPath(); perr == nil && p != "" {
-		if _, err := os.Stat(p); err == nil {
-			return nil // user has a cached `miucr login` credential; let resolve use it
-		}
+	st, err := openOAuthStore(ctx)
+	if err != nil {
+		return nil // let resolve surface the oauth store error
+	}
+	if _, ok, err := st.Load(ctx); err != nil || ok {
+		return nil // user has a cached `miucr login` credential; let resolve use it
 	}
 	return &CLIError{
 		Code:    "provider.unconfigured",
@@ -592,7 +594,7 @@ func reviewCommand(opts *options) *cobra.Command {
 					captureReasoning:  captureReasoning,
 				})
 			}
-			if err := nudgeIfUnconfigured(apiKey, authToken); err != nil {
+			if err := nudgeIfUnconfigured(cmd.Context(), apiKey, authToken); err != nil {
 				return err
 			}
 			if reviewer == nil {

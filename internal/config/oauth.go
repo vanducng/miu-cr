@@ -1,6 +1,7 @@
 package config
 
 import (
+	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -11,8 +12,8 @@ import (
 )
 
 // OAuthRecord is the cached credential `miucr login` writes and review-time
-// reads. It lives ONLY in oauth.json (0600); tokens never appear in the
-// envelope, logs, or any error string.
+// reads. It lives ONLY in its OAuthStore (oauth.json 0600, or sealed in
+// Postgres); tokens never appear in the envelope, logs, or any error string.
 type OAuthRecord struct {
 	Provider     string    `json:"provider"`
 	AccessToken  string    `json:"access_token"`
@@ -39,6 +40,50 @@ func (r OAuthRecord) ExpiringWithin(d time.Duration, now time.Time) bool {
 		return false
 	}
 	return now.Add(d).After(r.ExpiresAt)
+}
+
+const (
+	OAuthStoreFile     = "file"
+	OAuthStorePostgres = "postgres"
+)
+
+// OAuthStore is chosen once from the store backend so login, whoami, and review share one record.
+type OAuthStore interface {
+	Backend() string
+	Load(ctx context.Context) (OAuthRecord, bool, error)
+	Save(ctx context.Context, rec OAuthRecord) error
+	// SaveRefreshed may skip the write and return false once a newer login or logout replaced prior.
+	SaveRefreshed(ctx context.Context, prior, next OAuthRecord) (bool, error)
+	Delete(ctx context.Context) (bool, error)
+}
+
+type FileOAuthStore struct{}
+
+func (FileOAuthStore) Backend() string { return OAuthStoreFile }
+
+func (FileOAuthStore) Load(context.Context) (OAuthRecord, bool, error) { return LoadOAuth() }
+
+func (FileOAuthStore) Save(_ context.Context, rec OAuthRecord) error { return SaveOAuth(rec) }
+
+func (FileOAuthStore) SaveRefreshed(_ context.Context, _, next OAuthRecord) (bool, error) {
+	if err := SaveOAuth(next); err != nil {
+		return false, err
+	}
+	return true, nil
+}
+
+func (FileOAuthStore) Delete(context.Context) (bool, error) {
+	path, err := OAuthPath()
+	if err != nil {
+		return false, err
+	}
+	if err := os.Remove(path); err != nil {
+		if errors.Is(err, fs.ErrNotExist) {
+			return false, nil
+		}
+		return false, err
+	}
+	return true, nil
 }
 
 // OAuthPath returns the cached-token file location (Dir()/oauth.json).

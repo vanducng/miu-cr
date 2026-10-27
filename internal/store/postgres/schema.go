@@ -63,6 +63,17 @@ ALTER TABLE provider_usage ADD COLUMN IF NOT EXISTS cache_read_tokens BIGINT NOT
 ALTER TABLE provider_usage ADD COLUMN IF NOT EXISTS cache_creation_tokens BIGINT NOT NULL DEFAULT 0;
 `
 
+const oauthCredentialsSchemaSQL = `
+CREATE TABLE IF NOT EXISTS oauth_credentials (
+	id         TEXT PRIMARY KEY,
+	provider   TEXT NOT NULL,
+	account_id TEXT NOT NULL DEFAULT '',
+	expires_at TIMESTAMPTZ,
+	refresh_fp BYTEA NOT NULL,
+	sealed     BYTEA NOT NULL,
+	updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
+);`
+
 const HostSchemaSQL = `
 CREATE TABLE IF NOT EXISTS host_repos (
 	id             BIGSERIAL PRIMARY KEY,

@@ -5,7 +5,7 @@ description: Bring your own API key, passed in memory, never persisted to disk o
 
 miu-cr is **bring-your-own-key**. You supply an LLM API key via an environment variable or a flag; it lives in memory only for the duration of the call. It is **never** written to disk, the SQLite history, or anywhere else.
 
-The one exception is the opt-in OAuth flow below: `miucr login` deliberately caches a subscription token at `~/.config/miu/cr/oauth.json` (`0600`, gitignored) so you can review on your ChatGPT plan. API keys are still never persisted.
+The one exception is the opt-in OAuth flow below: `miucr login` deliberately caches a subscription token at `~/.config/miu/cr/oauth.json` (`0600`, gitignored), or encrypted in Postgres when that is your store backend, so you can review on your ChatGPT plan. API keys are still never persisted.
 
 ## Supplying a key
 
@@ -64,20 +64,43 @@ miucr login --no-browser           # prints the authorize URL to open elsewhere
 ```
 
 The `login.result` envelope is **secret-free**: it emits only
-`{provider, oauth_path, expires_at, account_id, has_api_key}`; no tokens.
+`{provider, oauth_store, oauth_path, expires_at, account_id, has_api_key}`; no tokens.
+`oauth_store` is `file` or `postgres`; `oauth_path` appears only for `file`.
+
+### Hosted login with the Postgres store
+
+With the postgres store backend (`MIUCR_STORE_BACKEND=postgres` or `[store]
+backend`), `login`, `whoami`, `logout`, and review-time refresh use the `oauth_credentials` table instead of `oauth.json`, so a login
+survives restarts with no volume. Tokens are sealed with AES-256-GCM under
+`MIUCR_OAUTH_KEY` (base64 of 32 bytes, `openssl rand -base64 32`), which every
+process sharing the store must set; a missing, wrong-size, or mismatched key
+fails `login`/`whoami` with `oauth.key_missing`, `oauth.key_invalid`, or
+`oauth.decrypt_failed` (a review reports `agent.oauth_unavailable` with the same
+hint). Rotated refresh tokens are written back only while the row still holds the
+token they replaced, so a newer login always wins, and a running server picks it
+up on its next review. In `serve --host`, set `MIUCR_STORE_BACKEND` and
+`MIUCR_PG_DSN` in the environment: a separate `miucr login` process cannot see the
+host YAML `store` block. An existing `oauth.json` is not read on this backend, so
+after upgrading set the key and log in once:
+
+```sh
+kubectl port-forward pod/<pod> 1455:1455                       # terminal 1: loopback callback
+kubectl exec -it <pod> -- miucr login --no-browser --port 1455  # terminal 2: open the printed URL
+kubectl exec <pod> -- miucr whoami                             # oauth_store: postgres
+```
 
 ### Inspect and clear the cached login (`whoami` / `logout`)
 
 ```sh
-miucr whoami     # who am I authed as? {logged_in, provider, account_id, expires_at, expired}
-miucr logout     # delete oauth.json; idempotent ({removed: bool})
+miucr whoami     # who am I authed as? {logged_in, oauth_store, oauth_path?, provider, account_id, expires_at, expired}
+miucr logout     # delete the cached record; idempotent ({removed, oauth_store, oauth_path?})
 ```
 
 `whoami` reports only the **non-secret** fields from the cached record (provider,
 account id, expiry); the access/refresh/id token and api key are never read into
 the envelope, so no token can leak via `whoami` (in either `json` or `pretty`
 output). With no cached record it returns `{logged_in: false}` (a clean result,
-not an error). `logout` deletes `oauth.json`; running it again on an
+not an error). `logout` deletes the cached record; running it again on an
 already-cleared record is a no-op (`{removed: false}`), so it is safe to repeat.
 
 **Precedence**: the cached login credential sits **below** an explicit key. An
@@ -121,11 +144,12 @@ jobs:
 
 ### Security note
 
-- The token lives **only** in `oauth.json` (`0600`, dir `0700`, atomic write),
-  is **gitignored**, and is **never** logged, never put in the CLI envelope, and
-  redacted from any error string.
-- `miucr logout` deletes `oauth.json` to revoke locally; `miucr whoami` shows the
-  cached identity without ever exposing the token.
+- The token lives **only** in `oauth.json` (`0600`, dir `0700`, atomic write,
+  **gitignored**) or, on the Postgres backend, in one AES-256-GCM sealed row. It
+  is **never** logged, never put in the CLI envelope, and redacted from any error
+  string.
+- `miucr logout` deletes the cached record to revoke locally; `miucr whoami`
+  shows the cached identity without ever exposing the token.
 - **Anthropic OAuth is unsupported by design** (Anthropic ToS). Use an API key
   or an Anthropic-compatible gateway for Anthropic providers.
 

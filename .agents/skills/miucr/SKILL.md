@@ -574,25 +574,33 @@ Precedence: `--model` > `MIUCR_CODEX_MODEL` > the config `model` (if not `gpt-4o
 `--provider` is an explicit flag backed by a registry; `openai` is the only entry
 (`--provider anthropic`/unknown → `login.provider_unsupported`; Anthropic OAuth is ToS-prohibited).
 Loopback binds an allow-listed port (`1455`, then `1457`). Envelope `kind: init.result`-style
-**secret-free** payload: `{provider, oauth_path, expires_at, account_id, has_api_key}` (**no tokens**).
-Errors: `login.provider_unsupported`, `login.port_unavailable`, `login.timeout`, `login.exchange_failed`, `login.write_failed`.
+**secret-free** payload: `{provider, oauth_store, oauth_path?, expires_at, account_id, has_api_key}` (**no tokens**).
+`oauth_store` is `file` (default; `oauth_path` set) or `postgres` (no `oauth_path`).
+Errors: `login.provider_unsupported`, `login.port_unavailable`, `login.timeout`, `login.exchange_failed`, `login.write_failed`,
+`oauth.key_missing`, `oauth.key_invalid`, `oauth.decrypt_failed`.
+
+**Postgres store backend** (`MIUCR_STORE_BACKEND=postgres`): login/whoami/logout and review-time refresh
+use an AES-256-GCM sealed row in Postgres (`oauth_credentials`) instead of `oauth.json`, keyed by
+`MIUCR_OAUTH_KEY` (base64 of 32 bytes, required). A login from another process is picked up on the
+next review without a restart. Selection reads env or `config.toml` only, so `serve --host` needs
+`MIUCR_STORE_BACKEND=postgres` + `MIUCR_PG_DSN` in env (host YAML `store` is not consulted).
 
 **Precedence**: the cached OAuth credential sits **below** an explicit `--api-key` / `OPENAI_API_KEY`
 in OpenAI resolution: an explicit key always wins; OAuth is consulted only when no OpenAI key is set.
-`oauth.json` is gitignored, `0600`, never logged/in-envelope.
+`oauth.json` is gitignored, `0600`, never logged/in-envelope (the postgres row is sealed the same way).
 **CI uses an `OPENAI_API_KEY` secret, not OAuth** (browser-interactive): `miucr review --provider openai`.
 
 ### `whoami` / `logout`: inspect and clear the cached OAuth identity
 
 ```sh
-miucr whoami     # {logged_in, provider, account_id, expires_at, expired} (NEVER the token)
-miucr logout     # delete oauth.json; idempotent ({removed: bool})
+miucr whoami     # {logged_in, oauth_store, oauth_path?, provider, account_id, expires_at, expired} (NEVER the token)
+miucr logout     # delete the cached record (oauth.json or postgres row); idempotent ({removed, oauth_store, oauth_path?})
 ```
 
 `whoami` whitelists only the non-secret fields from the cached record: the four secret fields
 (access/refresh/id token, api key) are never read into the envelope, so no token can leak (json or
 pretty). No cached record → `kind: whoami` with `{logged_in: false}` (clean exit, not an error).
-`logout` removes `oauth.json`; a missing record reports `{removed: false}` rather than erroring, so
+`logout` removes the cached record; a missing record reports `{removed: false}` rather than erroring, so
 it is safe to run twice. Both emit the `miucr.cli/v1` envelope (`kind: whoami` / `kind: logout`).
 
 ### `upgrade` (alias `update`): self-update from GitHub Releases

@@ -42,6 +42,8 @@ func tokenServer(t *testing.T, body string, status int, hits *int) *httptest.Ser
 	}))
 }
 
+var fileStore = config.FileOAuthStore{}
+
 func metaFor(srv *httptest.Server) Meta {
 	return Meta{Provider: "openai", TokenURL: srv.URL, ClientID: "app_test", BackendBaseURL: "https://backend.example/codex"}
 }
@@ -58,7 +60,7 @@ func TestCredentialFreshNoRefresh(t *testing.T) {
 	srv := tokenServer(t, "", 200, &hits)
 	defer srv.Close()
 
-	res, ok, err := Credential(stdctx.Background(), metaFor(srv), srv.Client(), nil)
+	res, ok, err := Credential(stdctx.Background(), fileStore, metaFor(srv), srv.Client(), nil)
 	if err != nil || !ok {
 		t.Fatalf("Credential: ok=%v err=%v", ok, err)
 	}
@@ -91,7 +93,7 @@ func TestCredentialRefreshDetachesFromCallerCancel(t *testing.T) {
 
 	ctx, cancel := stdctx.WithCancel(stdctx.Background())
 	cancel() // cancelled before the refresh runs
-	res, ok, err := Credential(ctx, metaFor(srv), srv.Client(), nil)
+	res, ok, err := Credential(ctx, fileStore, metaFor(srv), srv.Client(), nil)
 	if err != nil || !ok {
 		t.Fatalf("refresh must survive a cancelled caller ctx: ok=%v err=%v", ok, err)
 	}
@@ -113,7 +115,7 @@ func TestCredentialRefreshesWhenExpiring(t *testing.T) {
 	srv := tokenServer(t, string(body), 200, &hits)
 	defer srv.Close()
 
-	res, ok, err := Credential(stdctx.Background(), metaFor(srv), srv.Client(), nil)
+	res, ok, err := Credential(stdctx.Background(), fileStore, metaFor(srv), srv.Client(), nil)
 	if err != nil || !ok {
 		t.Fatalf("Credential: ok=%v err=%v", ok, err)
 	}
@@ -141,7 +143,7 @@ func TestCredentialRefreshClosureRotates(t *testing.T) {
 	srv := tokenServer(t, string(body), 200, &hits)
 	defer srv.Close()
 
-	res, ok, err := Credential(stdctx.Background(), metaFor(srv), srv.Client(), nil)
+	res, ok, err := Credential(stdctx.Background(), fileStore, metaFor(srv), srv.Client(), nil)
 	if err != nil || !ok {
 		t.Fatalf("Credential: %v", err)
 	}
@@ -167,7 +169,7 @@ func TestCredentialConcurrentRefreshNoRace(t *testing.T) {
 	srv := tokenServer(t, string(body), 200, &hits)
 	defer srv.Close()
 
-	res, ok, err := Credential(stdctx.Background(), metaFor(srv), srv.Client(), nil)
+	res, ok, err := Credential(stdctx.Background(), fileStore, metaFor(srv), srv.Client(), nil)
 	if err != nil || !ok {
 		t.Fatalf("Credential: %v", err)
 	}
@@ -199,7 +201,7 @@ func TestRefreshUsesInjectedNow(t *testing.T) {
 	defer srv.Close()
 
 	fixed := time.Date(2030, 1, 2, 3, 4, 5, 0, time.UTC)
-	_, ok, err := Credential(stdctx.Background(), metaFor(srv), srv.Client(), func() time.Time { return fixed })
+	_, ok, err := Credential(stdctx.Background(), fileStore, metaFor(srv), srv.Client(), func() time.Time { return fixed })
 	if err != nil || !ok {
 		t.Fatalf("Credential: %v", err)
 	}
@@ -215,7 +217,7 @@ func TestCredentialNoFileNotOK(t *testing.T) {
 	hits := 0
 	srv := tokenServer(t, "", 200, &hits)
 	defer srv.Close()
-	_, ok, err := Credential(stdctx.Background(), metaFor(srv), srv.Client(), nil)
+	_, ok, err := Credential(stdctx.Background(), fileStore, metaFor(srv), srv.Client(), nil)
 	if err != nil {
 		t.Fatalf("err = %v", err)
 	}
@@ -230,7 +232,7 @@ func TestCredentialWrongProviderNotOK(t *testing.T) {
 	hits := 0
 	srv := tokenServer(t, "", 200, &hits)
 	defer srv.Close()
-	_, ok, _ := Credential(stdctx.Background(), metaFor(srv), srv.Client(), nil)
+	_, ok, _ := Credential(stdctx.Background(), fileStore, metaFor(srv), srv.Client(), nil)
 	if ok {
 		t.Error("expected ok=false for a different provider's record")
 	}
@@ -245,7 +247,7 @@ func TestRefreshErrorRedactsAndNoLeak(t *testing.T) {
 	hits := 0
 	srv := tokenServer(t, "nope", http.StatusForbidden, &hits)
 	defer srv.Close()
-	_, _, err := Credential(stdctx.Background(), metaFor(srv), srv.Client(), nil)
+	_, _, err := Credential(stdctx.Background(), fileStore, metaFor(srv), srv.Client(), nil)
 	if err == nil {
 		t.Fatal("expected refresh failure")
 	}
