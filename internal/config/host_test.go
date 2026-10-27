@@ -274,11 +274,13 @@ repos:
 	}
 }
 
-func TestLoadHostRejectsInvalidOAuthProvider(t *testing.T) {
+func TestLoadHostRejectsInvalidProviderAuth(t *testing.T) {
 	for _, tc := range []struct {
 		name, provider, wantErr string
 	}{
-		{name: "anthropic kind", provider: "    kind: anthropic\n    auth: oauth\n", wantErr: "providers.chatgpt.kind"},
+		{name: "oauth on anthropic", provider: "    kind: anthropic\n    auth: oauth\n", wantErr: "providers.chatgpt.auth"},
+		{name: "bearer on openai", provider: "    kind: openai\n    auth: bearer\n", wantErr: "providers.chatgpt.auth"},
+		{name: "typo", provider: "    kind: anthropic\n    auth: bearr\n", wantErr: "providers.chatgpt.auth"},
 		{name: "auth_env", provider: "    kind: openai\n    auth: oauth\n    auth_env: OPENAI_API_KEY\n", wantErr: "providers.chatgpt.auth"},
 		{name: "auth_command", provider: "    kind: openai\n    auth: oauth\n    auth_command: [\"secret-helper\"]\n", wantErr: "providers.chatgpt.auth"},
 	} {

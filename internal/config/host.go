@@ -281,13 +281,33 @@ func validateHostProviders(path string, providers map[string]HostProvider) error
 		if field, value, want := quotaProblem(provider.Quota); field != "" {
 			return invalidHost(path, "providers."+name+"."+field, value, want)
 		}
-		if strings.EqualFold(strings.TrimSpace(provider.Auth), "oauth") {
-			if provider.Kind != KindOpenAI {
-				return invalidHost(path, "providers."+name+".kind", string(provider.Kind), "openai when auth is oauth")
-			}
+		if err := validateHostProviderAuth(path, name, provider); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+// validateHostProviderAuth mirrors the auth modes agent.Resolve accepts per kind.
+func validateHostProviderAuth(path, name string, provider HostProvider) error {
+	field := "providers." + name + ".auth"
+	auth := strings.ToLower(strings.TrimSpace(provider.Auth))
+	switch provider.Kind {
+	case KindOpenAI:
+		switch auth {
+		case "", "api_key", "apikey", "key":
+		case "oauth":
 			if strings.TrimSpace(provider.AuthEnv) != "" || len(provider.AuthCommand) > 0 {
-				return invalidHost(path, "providers."+name+".auth", provider.Auth, "no auth_env or auth_command with oauth (the credential comes from miucr login)")
+				return invalidHost(path, field, provider.Auth, "no auth_env or auth_command with oauth (the credential comes from miucr login)")
 			}
+		default:
+			return invalidHost(path, field, provider.Auth, "oauth|api_key for kind openai")
+		}
+	case KindAnthropic, "":
+		switch auth {
+		case "", "api_key", "bearer":
+		default:
+			return invalidHost(path, field, provider.Auth, "api_key|bearer for kind anthropic")
 		}
 	}
 	return nil
