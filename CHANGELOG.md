@@ -55,6 +55,14 @@ comment with a new marker); subsequent re-runs dedupe normally. On a
 first M5 review **manually** (or off-hours) to absorb the one-time re-post before
 the next scheduled run.
 
+## [0.91.0](https://github.com/vanducng/miu-cr/compare/v0.90.17...v0.91.0) (2026-10-27)
+
+
+### Features
+
+* **host:** per-repo provider override ([#348](https://github.com/vanducng/miu-cr/issues/348)) ([e07f323](https://github.com/vanducng/miu-cr/commit/e07f323e01f7f3408bae0e3ccc0eb3f201269ccd))
+* **oauth:** persist login in the postgres store ([#349](https://github.com/vanducng/miu-cr/issues/349)) ([c311667](https://github.com/vanducng/miu-cr/commit/c31166774379279bc1c57cd83965f43f82d27438))
+
 ## [0.90.17](https://github.com/vanducng/miu-cr/compare/v0.90.16...v0.90.17) (2026-10-27)
 
 
