@@ -225,6 +225,10 @@ providers:
   anthropic:
     kind: anthropic
     auth_env: ANTHROPIC_API_KEY
+  chatgpt:
+    kind: openai
+    auth: oauth             # credential comes from `miucr login` (oauth.json)
+    model: gpt-5.5
 
 store:
   backend: postgres
@@ -307,6 +311,10 @@ repos:
       min_severity: medium
       timeout: 1800s
       stalled_timeout: 8m
+  - name: service-web
+    slug: example-org/service-web
+    git_url: https://github.com/example-org/service-web.git
+    provider: chatgpt       # omit to use default_provider
 ```
 
 Layering is intentionally simple: built-in defaults -> top-level `review` and
@@ -316,6 +324,18 @@ settings are where risky write behavior belongs (`post`, `force`, `suggest`,
 the host may do for that repository. `review.tools` follows the same
 layering, but it is read-only and only controls scan/output limits plus bounded
 tool retry behavior.
+
+`repos[].provider` picks the model provider for one repo. It names an entry
+under `providers` (or a built-in `anthropic`/`openai`); empty means
+`default_provider`. One host process can mix providers, for example most repos
+on an Anthropic-compatible gateway and a few on a ChatGPT-plan `kind: openai`,
+`auth: oauth` provider. Everything that calls the model for that repo uses its
+provider: the review pass, subagents, anchor recovery, patch repair, and thread
+reply judging. Quota counters are per provider instance, so repos that share a
+provider share its quota. Each distinct provider's `auth_env`/`auth_command` is
+resolved once per config load, and only for enabled repos. An unknown `provider`
+or `default_provider` fails the config load with `config.invalid`. Changing a
+repo's provider does not re-review heads that were already reviewed.
 
 `timeout` follows the same layering. The review default is `900s`; raise
 `repos[].review.timeout` for large or critical repos instead of making every

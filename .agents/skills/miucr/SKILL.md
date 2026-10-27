@@ -349,7 +349,10 @@ summary counts (`repos`, `accounts`). Host YAML uses `providers`, `store`,
 layering is defaults -> `review`/`agent` -> `host.review` -> repo overrides.
 PAT accounts support `auth_env`/`auth_file`/`auth_command`; App accounts support
 App/installation ids from literal/env plus private keys from path/env/command.
-Provider credentials also support `auth_env` and `auth_command`.
+Provider credentials also support `auth_env` and `auth_command`. `repos[].provider`
+names a `providers` entry (or built-in `anthropic`/`openai`) for that repo; empty
+means `default_provider`, so one host can mix an Anthropic gateway with a
+ChatGPT-plan `kind: openai`, `auth: oauth` provider. An unknown name is `config.invalid`.
 
 Repo prompts override the global prompt (`system_prompt` or
 `system_prompt_file`, mutually exclusive). `repos[].rules` can point to markdown

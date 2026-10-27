@@ -622,7 +622,7 @@ func TestHostReviewAnalysisShapeClassifiesEveryField(t *testing.T) {
 }
 
 func TestHostProviderDefaultFallbackDoesNotCopyAuthToken(t *testing.T) {
-	provider, err := hostProvider(config.HostConfig{DefaultProvider: string(config.KindAnthropic)})
+	provider, err := hostProvider(config.HostConfig{DefaultProvider: string(config.KindAnthropic)}, string(config.KindAnthropic))
 	if err != nil {
 		t.Fatalf("hostProvider: %v", err)
 	}

@@ -220,6 +220,60 @@ repos:
 	}
 }
 
+func TestLoadHostRepoProvider(t *testing.T) {
+	providers := `default_provider: gateway
+providers:
+  gateway:
+    kind: anthropic
+    base_url: https://gateway.example.test/anthropic
+    auth_env: MIUCR_TEST_GATEWAY_TOKEN
+  chatgpt:
+    kind: openai
+    auth: oauth
+    model: gpt-5.5
+`
+	repos := func(provider string) string {
+		return `
+repos:
+  - name: service-api
+    slug: example-org/service-api
+    git_url: https://github.com/example-org/service-api.git
+  - name: service-web
+    slug: example-org/service-web
+    git_url: https://github.com/example-org/service-web.git
+    provider: ` + provider + `
+`
+	}
+	for _, tc := range []struct {
+		name, prelude, provider, wantErr string
+	}{
+		{name: "override", prelude: providers, provider: "chatgpt"},
+		{name: "built-in", prelude: providers, provider: "openai"},
+		{name: "unknown", prelude: providers, provider: "missing", wantErr: "repos[1].provider"},
+		{name: "unknown default", prelude: "default_provider: missing\n", provider: "openai", wantErr: "default_provider"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			path := writeHostConfig(t, tc.prelude+minimalHostYAML()+repos(tc.provider))
+			cfg, err := LoadHost(path)
+			if tc.wantErr != "" {
+				if !isConfigInvalid(err) || !strings.Contains(err.Error(), tc.wantErr) {
+					t.Fatalf("want %s config.invalid, got %v", tc.wantErr, err)
+				}
+				if tc.name == "unknown" && !strings.Contains(err.Error(), "service-web") {
+					t.Fatalf("error must name the repo: %v", err)
+				}
+				return
+			}
+			if err != nil {
+				t.Fatalf("LoadHost: %v", err)
+			}
+			if cfg.Repos[0].Provider != "" || cfg.Repos[1].Provider != tc.provider {
+				t.Fatalf("repo providers = %q, %q; want empty, %q", cfg.Repos[0].Provider, cfg.Repos[1].Provider, tc.provider)
+			}
+		})
+	}
+}
+
 func TestLoadHostUnknownAccountFails(t *testing.T) {
 	path := writeHostConfig(t, minimalHostYAML()+`
 repos:
