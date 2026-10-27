@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"log/slog"
 	"net"
 	"net/url"
 	"os"
@@ -211,10 +212,62 @@ func ReloadPriorLedger(ctx stdctx.Context, client Client, info *PRInfo) error {
 	if !trusted || body == "" {
 		return nil
 	}
+	applyReloadedSummary(info, body)
+	return nil
+}
+
+// applyReloadedSummary updates the ledger. A different reviewed commit clears stable maps built from the previous SHA.
+func applyReloadedSummary(info *PRInfo, body string) {
+	if info == nil {
+		return
+	}
+	prev := priorKnownSHA(info)
 	if led := ParseLedger(body); led != nil {
 		info.PriorLedger = led
 	}
-	return nil
+	if sha := parsePublishedCommit(body); sha != "" {
+		info.PriorPublishedHeadSHA = sha
+	}
+	if sha := parseReviewedCommit(body); sha != "" {
+		info.PriorSummaryHeadSHA = sha
+	}
+	next := priorKnownSHA(info)
+	if prev == "" || next == "" || commitSHANames(prev, next) {
+		return
+	}
+	info.StableFPs = nil
+	info.StableLines = nil
+	info.StablePaths = nil
+	slog.Info("review: stable scope cleared",
+		"repo", info.Owner+"/"+info.Repo, "pr", info.Number,
+		"head_sha", shortRef(info.HeadSHA), "prior_sha", shortRef(prev), "next_sha", shortRef(next),
+		"reason_code", "stable_scope_stale")
+}
+
+func priorKnownSHA(info *PRInfo) string {
+	if info == nil {
+		return ""
+	}
+	if s := strings.TrimSpace(info.PriorPublishedHeadSHA); s != "" {
+		return s
+	}
+	return strings.TrimSpace(info.PriorSummaryHeadSHA)
+}
+
+func commitSHANames(prior, head string) bool {
+	prior = strings.ToLower(strings.TrimSpace(prior))
+	head = strings.ToLower(strings.TrimSpace(head))
+	if len(prior) < 7 || len(head) < 7 {
+		return false
+	}
+	return strings.HasPrefix(head, prior) || strings.HasPrefix(prior, head)
+}
+
+func shortRef(s string) string {
+	if len(s) <= 7 {
+		return s
+	}
+	return s[:7]
 }
 
 // priorRunsCount reads the runs token from the lowest-id miucr summary issue

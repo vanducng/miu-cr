@@ -29,11 +29,10 @@ func findingOnChangedCode(f engine.Finding, diffs []diff.Diff) bool {
 	return findingOnAddedLine(f, diffs)
 }
 
-// quoteHitsChanged reports whether every non-empty trimmed quote line equals a
-// trimmed added or deleted line in the finding's file. One shared token such as
-// a brace is not enough to keep the rest of an unchanged quote.
+// quoteHitsChanged is true when every quote line is added or deleted text that is not also unchanged context.
 func quoteHitsChanged(f engine.Finding, diffs []diff.Diff) bool {
 	changed := map[string]bool{}
+	context := map[string]bool{}
 	for i := range diffs {
 		d := &diffs[i]
 		if d.NewPath != f.File && d.OldPath != f.File {
@@ -41,12 +40,15 @@ func quoteHitsChanged(f engine.Finding, diffs []diff.Diff) bool {
 		}
 		for _, h := range diff.ParseHunks(d.Diff) {
 			for _, l := range h.Lines {
-				if l.Type == diff.HunkContext {
+				t := strings.TrimSpace(l.Content)
+				if t == "" {
 					continue
 				}
-				if t := strings.TrimSpace(l.Content); t != "" {
-					changed[t] = true
+				if l.Type == diff.HunkContext {
+					context[t] = true
+					continue
 				}
+				changed[t] = true
 			}
 		}
 	}
@@ -59,7 +61,7 @@ func quoteHitsChanged(f engine.Finding, diffs []diff.Diff) bool {
 		if t == "" {
 			continue
 		}
-		if !changed[t] {
+		if !changed[t] || context[t] {
 			return false
 		}
 		matched = true

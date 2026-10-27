@@ -42,6 +42,19 @@ func TestSelectStableFindings(t *testing.T) {
 	}
 }
 
+func TestQuoteCommonContextLineDoesNotAdmit(t *testing.T) {
+	ambiguous := []diff.Diff{{
+		OldPath: "a.go", NewPath: "a.go",
+		Diff: "@@ -1,4 +1,4 @@\n func f() error {\n \treturn err\n-\treturn err\n+\treturn nil\n }\n",
+	}}
+	common := engine.Finding{File: "a.go", Severity: "high", Category: "bug", QuotedCode: "return err", Title: "common"}
+	unique := engine.Finding{File: "a.go", Severity: "high", Category: "bug", QuotedCode: "return nil", Title: "unique"}
+	kept, dropped := SelectStableFindings([]engine.Finding{common, unique}, nil, ambiguous)
+	if dropped != 1 || len(kept) != 1 || kept[0].Title != "unique" {
+		t.Fatalf("kept %+v dropped %d", kept, dropped)
+	}
+}
+
 func TestQuoteRequiresEveryLineChanged(t *testing.T) {
 	mixed := engine.Finding{File: "a.go", Severity: "high", Category: "bug", QuotedCode: "func g() {\n\told()", Title: "mixed"}
 	only := engine.Finding{File: "a.go", Severity: "high", Category: "bug", QuotedCode: "old()", Title: "deleted"}
