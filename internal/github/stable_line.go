@@ -2,12 +2,18 @@ package github
 
 import "github.com/vanducng/miu-cr/internal/engine/diff"
 
-// ShiftedLines is the new-side line of a prior anchor so the next review's old side still matches it.
-func ShiftedLines(prior []LedgerEntry, delta []diff.Diff) map[string]int {
+// AnchorShift is where a prior anchor sits after the follow-up commits.
+type AnchorShift struct {
+	Path string
+	Line int
+}
+
+// ShiftedLines is the new path and line of a prior anchor so the next review's old side still matches it.
+func ShiftedLines(prior []LedgerEntry, delta []diff.Diff) map[string]AnchorShift {
 	if delta == nil {
 		return nil
 	}
-	out := map[string]int{}
+	out := map[string]AnchorShift{}
 	for _, e := range prior {
 		switch e.Status {
 		case statusOpen, statusReopened, statusDeferred:
@@ -17,11 +23,11 @@ func ShiftedLines(prior []LedgerEntry, delta []diff.Diff) map[string]int {
 		if e.FP == "" {
 			continue
 		}
-		line, removed := remapAnchor(e, delta)
-		if removed || line <= 0 || line == e.Line {
+		path, line, removed := remapAnchor(e, delta)
+		if removed || line <= 0 || (line == e.Line && path == e.Path) {
 			continue
 		}
-		out[e.FP] = line
+		out[e.FP] = AnchorShift{Path: path, Line: line}
 	}
 	if len(out) == 0 {
 		return nil
@@ -29,25 +35,32 @@ func ShiftedLines(prior []LedgerEntry, delta []diff.Diff) map[string]int {
 	return out
 }
 
-func applyShiftedLines(entries []LedgerEntry, lines map[string]int) []LedgerEntry {
-	if len(lines) == 0 {
+func applyShiftedLines(entries []LedgerEntry, shifted map[string]AnchorShift) []LedgerEntry {
+	if len(shifted) == 0 {
 		return entries
 	}
 	out := append([]LedgerEntry(nil), entries...)
 	for i := range out {
-		n, ok := lines[out[i].FP]
-		if !ok || n <= 0 {
+		s, ok := shifted[out[i].FP]
+		if !ok {
 			continue
 		}
 		switch out[i].Status {
 		case statusOpen, statusReopened, statusDeferred:
-			out[i].Line = n
+		default:
+			continue
+		}
+		if s.Line > 0 {
+			out[i].Line = s.Line
+		}
+		if s.Path != "" && s.Path != "/dev/null" {
+			out[i].Path = s.Path
 		}
 	}
 	return out
 }
 
-func remapAnchor(e LedgerEntry, delta []diff.Diff) (line int, removed bool) {
+func remapAnchor(e LedgerEntry, delta []diff.Diff) (path string, line int, removed bool) {
 	var match *diff.Diff
 	for i := range delta {
 		d := &delta[i]
@@ -57,15 +70,20 @@ func remapAnchor(e LedgerEntry, delta []diff.Diff) (line int, removed bool) {
 		}
 	}
 	if match == nil {
-		return e.Line, false
+		return e.Path, e.Line, false
 	}
 	if match.IsDeleted || match.NewPath == "/dev/null" || match.IsNew {
-		return 0, true
+		return "", 0, true
 	}
 	if e.Line <= 0 {
-		return e.Line, true
+		return e.Path, e.Line, true
 	}
-	return shiftLine(e.Line, diff.ParseHunks(match.Diff))
+	line, removed = shiftLine(e.Line, diff.ParseHunks(match.Diff))
+	path = match.NewPath
+	if path == "" || path == "/dev/null" {
+		path = e.Path
+	}
+	return path, line, removed
 }
 
 func shiftLine(line int, hunks []diff.Hunk) (int, bool) {

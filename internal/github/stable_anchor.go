@@ -89,7 +89,7 @@ func UntouchedAnchors(prior []LedgerEntry, delta []diff.Diff) map[string]bool {
 }
 
 func anchorRemoved(e LedgerEntry, delta []diff.Diff) bool {
-	_, removed := remapAnchor(e, delta)
+	_, _, removed := remapAnchor(e, delta)
 	return removed
 }
 

@@ -91,6 +91,16 @@ func TestApplyStableScope(t *testing.T) {
 	}
 }
 
+func TestLedgerDiffNeeded(t *testing.T) {
+	info := &mgithub.PRInfo{LedgerTrusted: true, PriorLedger: []mgithub.LedgerEntry{{FP: "aa"}}}
+	if !ledgerDiffNeeded(info, false) {
+		t.Fatal("a trusted ledger on a dry run needs the pull request diff")
+	}
+	if ledgerDiffNeeded(info, true) || ledgerDiffNeeded(&mgithub.PRInfo{PriorLedger: info.PriorLedger}, false) {
+		t.Fatal("captured diffs and an untrusted ledger do not need another fetch")
+	}
+}
+
 func TestSyncFilteredReviewReplacesFindings(t *testing.T) {
 	ctx := stdctx.Background()
 	st := tempHistoryStore(t)

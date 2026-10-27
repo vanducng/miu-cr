@@ -542,7 +542,7 @@ func (prReviewer) ReviewPR(ctx stdctx.Context, req cli.PRReviewRequest) (cli.Rev
 	if info.StablePaths != nil {
 		syncFilteredReview(ctx, hist, res.ID, res.Findings, res.Stats)
 	}
-	if info.StablePaths != nil && !publishDiffsCaptured {
+	if ledgerDiffNeeded(info, publishDiffsCaptured) {
 		if ds, derr := mgithub.DiffsForPR(ctx, runner, dir, info.BaseSHA, info.HeadSHA); derr != nil {
 			slog.Warn("review: stable-scope diff snapshot failed",
 				"repo", info.Owner+"/"+info.Repo, "pr", info.Number, "head_sha", shortSHA(info.HeadSHA),

@@ -73,9 +73,9 @@ type PRInfo struct {
 	// commits did not delete. Those rows stay open when a later run omits them.
 	// Nil keeps the StablePaths rule. An empty map preserves nothing.
 	StableFPs map[string]bool
-	// StableLines is the new-side line of a shifted StableFPs anchor. The
-	// preserved row stores it so the next review compares that line.
-	StableLines map[string]int
+	// StableLines is the new path and line of a shifted StableFPs anchor. The
+	// preserved row stores them so the next review compares that anchor.
+	StableLines map[string]AnchorShift
 }
 
 // blobURL builds a repo-relative blob permalink at info.HeadSHA for path/line.

@@ -45,7 +45,7 @@ func applyStableScope(ctx stdctx.Context, runner *gitcmd.Runner, dir string, inf
 	if prior == "" || sameReviewedCommit(prior, info.HeadSHA) {
 		return findings, nil
 	}
-	delta, err := diff.GetDiff(ctx, diff.ModeRange, dir, prior, info.HeadSHA, "", runner)
+	delta, err := diff.Between(ctx, dir, prior, info.HeadSHA, runner)
 	if err != nil {
 		slog.Warn("review: stable scope unavailable",
 			"repo", info.Owner+"/"+info.Repo, "pr", info.Number,
@@ -72,6 +72,12 @@ func applyStableScope(ctx stdctx.Context, runner *gitcmd.Runner, dir string, inf
 		"head_sha", shortSHA(info.HeadSHA), "prior_sha", shortSHA(prior),
 		"reason_code", "stable_scope", "dropped", dropped, "kept", len(kept))
 	return kept, mgithub.StablePaths(info.Files, info.PriorLedger, delta)
+}
+
+// ledgerDiffNeeded is true when a trusted prior ledger still has to see the
+// pull request diff. Without it a dry run cannot resolve rows the post path would.
+func ledgerDiffNeeded(info *mgithub.PRInfo, captured bool) bool {
+	return info != nil && info.LedgerTrusted && len(info.PriorLedger) > 0 && !captured
 }
 
 // syncFilteredReview writes the post-filter findings over the engine's pre-filter save.
