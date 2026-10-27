@@ -579,7 +579,8 @@ Errors: `login.provider_unsupported`, `login.port_unavailable`, `login.timeout`,
 **Postgres store backend** (`MIUCR_STORE_BACKEND=postgres`): login/whoami/logout and review-time refresh
 use an AES-256-GCM sealed row in Postgres (`oauth_credentials`) instead of `oauth.json`, keyed by
 `MIUCR_OAUTH_KEY` (base64 of 32 bytes, required). A login from another process is picked up on the
-next review without a restart.
+next review without a restart. Selection reads env or `config.toml` only, so `serve --host` needs
+`MIUCR_STORE_BACKEND=postgres` + `MIUCR_PG_DSN` in env (host YAML `store` is not consulted).
 
 **Precedence**: the cached OAuth credential sits **below** an explicit `--api-key` / `OPENAI_API_KEY`
 in OpenAI resolution: an explicit key always wins; OAuth is consulted only when no OpenAI key is set.
@@ -589,8 +590,8 @@ in OpenAI resolution: an explicit key always wins; OAuth is consulted only when 
 ### `whoami` / `logout`: inspect and clear the cached OAuth identity
 
 ```sh
-miucr whoami     # {logged_in, oauth_store, provider, account_id, expires_at, expired} (NEVER the token)
-miucr logout     # delete the cached record (oauth.json or postgres row); idempotent ({removed: bool})
+miucr whoami     # {logged_in, oauth_store, oauth_path?, provider, account_id, expires_at, expired} (NEVER the token)
+miucr logout     # delete the cached record (oauth.json or postgres row); idempotent ({removed, oauth_store, oauth_path?})
 ```
 
 `whoami` whitelists only the non-secret fields from the cached record: the four secret fields

@@ -78,7 +78,9 @@ fails `login`/`whoami` with `oauth.key_missing`, `oauth.key_invalid`, or
 `oauth.decrypt_failed` (a review reports `agent.oauth_unavailable` with the same
 hint). Rotated refresh tokens are written back only while the row still holds the
 token they replaced, so a newer login always wins, and a running server picks it
-up on its next review. An existing `oauth.json` is not read on this backend, so
+up on its next review. In `serve --host`, set `MIUCR_STORE_BACKEND` and
+`MIUCR_PG_DSN` in the environment: a separate `miucr login` process cannot see the
+host YAML `store` block. An existing `oauth.json` is not read on this backend, so
 after upgrading set the key and log in once:
 
 ```sh
@@ -90,8 +92,8 @@ kubectl exec <pod> -- miucr whoami                             # oauth_store: po
 ### Inspect and clear the cached login (`whoami` / `logout`)
 
 ```sh
-miucr whoami     # who am I authed as? {logged_in, oauth_store, provider, account_id, expires_at, expired}
-miucr logout     # delete the cached record; idempotent ({removed: bool})
+miucr whoami     # who am I authed as? {logged_in, oauth_store, oauth_path?, provider, account_id, expires_at, expired}
+miucr logout     # delete the cached record; idempotent ({removed, oauth_store, oauth_path?})
 ```
 
 `whoami` reports only the **non-secret** fields from the cached record (provider,

@@ -5,6 +5,8 @@ import (
 	"log/slog"
 	"sync"
 
+	"golang.org/x/sync/singleflight"
+
 	"github.com/vanducng/miu-cr/internal/config"
 	"github.com/vanducng/miu-cr/internal/store/postgres"
 )
@@ -12,6 +14,7 @@ import (
 var pgOAuthStores = struct {
 	sync.Mutex
 	byConn map[string]*postgres.OAuthStore
+	opens  singleflight.Group
 }{byConn: map[string]*postgres.OAuthStore{}}
 
 func openOAuthStore(ctx stdctx.Context) (config.OAuthStore, error) {
@@ -36,26 +39,45 @@ func openOAuthStore(ctx stdctx.Context) (config.OAuthStore, error) {
 	if err != nil {
 		return nil, err
 	}
-	return cachedPGOAuthStore(ctx, dsn, key)
+	st, err := cachedPGOAuthStore(ctx, dsn, key)
+	if err != nil {
+		return nil, err
+	}
+	return st, nil
 }
 
 // Process-lifetime pool: a resolved credential's Refresh closure keeps using the store after resolve returns.
 func cachedPGOAuthStore(ctx stdctx.Context, dsn string, key []byte) (*postgres.OAuthStore, error) {
 	conn := dsn + "\x00" + string(key)
-	pgOAuthStores.Lock()
-	defer pgOAuthStores.Unlock()
-	if st, ok := pgOAuthStores.byConn[conn]; ok {
+	if st := cachedOAuthStore(conn); st != nil {
 		return st, nil
 	}
-	s, err := postgres.Open(ctx, dsn)
+	v, err, _ := pgOAuthStores.opens.Do(conn, func() (any, error) {
+		if st := cachedOAuthStore(conn); st != nil {
+			return st, nil
+		}
+		s, err := postgres.Open(ctx, dsn)
+		if err != nil {
+			return nil, err
+		}
+		st, err := s.OAuthStore(key)
+		if err != nil {
+			_ = s.Close()
+			return nil, err
+		}
+		pgOAuthStores.Lock()
+		pgOAuthStores.byConn[conn] = st
+		pgOAuthStores.Unlock()
+		return st, nil
+	})
 	if err != nil {
 		return nil, err
 	}
-	st, err := s.OAuthStore(key)
-	if err != nil {
-		_ = s.Close()
-		return nil, err
-	}
-	pgOAuthStores.byConn[conn] = st
-	return st, nil
+	return v.(*postgres.OAuthStore), nil
+}
+
+func cachedOAuthStore(conn string) *postgres.OAuthStore {
+	pgOAuthStores.Lock()
+	defer pgOAuthStores.Unlock()
+	return pgOAuthStores.byConn[conn]
 }

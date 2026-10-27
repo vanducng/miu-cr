@@ -7,7 +7,9 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"sync"
 	"testing"
+	"time"
 
 	"github.com/vanducng/miu-cr/internal/cli"
 	"github.com/vanducng/miu-cr/internal/config"
@@ -64,16 +66,49 @@ func TestOpenOAuthStorePostgresIsSharedPerProcess(t *testing.T) {
 		t.Skip("MIUCR_TEST_PG_DSN not set")
 	}
 	oauthStoreEnv(t, "postgres", dsn, base64.StdEncoding.EncodeToString(make([]byte, config.OAuthKeySize)))
-	a, err := openOAuthStore(stdctx.Background())
-	if err != nil {
-		t.Fatal(err)
+	stores := make([]config.OAuthStore, 8)
+	var wg sync.WaitGroup
+	for i := range stores {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			st, err := openOAuthStore(stdctx.Background())
+			if err != nil {
+				t.Errorf("open %d: %v", i, err)
+			}
+			stores[i] = st
+		}()
 	}
-	b, err := openOAuthStore(stdctx.Background())
-	if err != nil {
-		t.Fatal(err)
+	wg.Wait()
+	for i, st := range stores {
+		if st != stores[0] || st == nil || st.Backend() != config.OAuthStorePostgres {
+			t.Fatalf("store %d = %p, want the one shared postgres store %p", i, st, stores[0])
+		}
 	}
-	if a != b || a.Backend() != config.OAuthStorePostgres {
-		t.Fatalf("want one shared postgres store, got %p (%s) and %p", a, a.Backend(), b)
+}
+
+func TestOpenOAuthStoreCollapsesConcurrentFailedOpens(t *testing.T) {
+	oauthStoreEnv(t, "postgres", badPGDSN, base64.StdEncoding.EncodeToString(make([]byte, config.OAuthKeySize)))
+	start := time.Now()
+	single, _ := openOAuthStore(stdctx.Background())
+	one := time.Since(start)
+	if single != nil {
+		t.Fatal("unroutable DSN must not open")
+	}
+	start = time.Now()
+	var wg sync.WaitGroup
+	for range 4 {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			if _, err := openOAuthStore(stdctx.Background()); err == nil {
+				t.Error("unroutable DSN must fail")
+			}
+		}()
+	}
+	wg.Wait()
+	if four := time.Since(start); four > 2*one+time.Second {
+		t.Fatalf("4 concurrent failed opens took %v vs %v for one; they must share one attempt", four, one)
 	}
 }
 
