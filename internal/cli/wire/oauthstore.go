@@ -4,12 +4,15 @@ import (
 	stdctx "context"
 	"log/slog"
 	"sync"
+	"time"
 
 	"golang.org/x/sync/singleflight"
 
 	"github.com/vanducng/miu-cr/internal/config"
 	"github.com/vanducng/miu-cr/internal/store/postgres"
 )
+
+const oauthStoreOpenTimeout = 30 * time.Second
 
 var pgOAuthStores = struct {
 	sync.Mutex
@@ -56,7 +59,10 @@ func cachedPGOAuthStore(ctx stdctx.Context, dsn string, key []byte) (*postgres.O
 		if st := cachedOAuthStore(conn); st != nil {
 			return st, nil
 		}
-		s, err := postgres.Open(ctx, dsn)
+		// Detached so one caller's cancel cannot fail every collapsed waiter.
+		octx, cancel := stdctx.WithTimeout(stdctx.WithoutCancel(ctx), oauthStoreOpenTimeout)
+		defer cancel()
+		s, err := postgres.Open(octx, dsn)
 		if err != nil {
 			return nil, err
 		}

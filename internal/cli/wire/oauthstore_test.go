@@ -1,6 +1,7 @@
 package wire
 
 import (
+	"bytes"
 	stdctx "context"
 	"encoding/base64"
 	"errors"
@@ -84,6 +85,20 @@ func TestOpenOAuthStorePostgresIsSharedPerProcess(t *testing.T) {
 		if st != stores[0] || st == nil || st.Backend() != config.OAuthStorePostgres {
 			t.Fatalf("store %d = %p, want the one shared postgres store %p", i, st, stores[0])
 		}
+	}
+}
+
+func TestOpenOAuthStoreSharedOpenIgnoresCallerCancel(t *testing.T) {
+	dsn := os.Getenv("MIUCR_TEST_PG_DSN")
+	if dsn == "" {
+		t.Skip("MIUCR_TEST_PG_DSN not set")
+	}
+	oauthStoreEnv(t, "postgres", dsn, base64.StdEncoding.EncodeToString(bytes.Repeat([]byte{5}, config.OAuthKeySize)))
+	ctx, cancel := stdctx.WithCancel(stdctx.Background())
+	cancel()
+	st, err := openOAuthStore(ctx)
+	if err != nil || st == nil {
+		t.Fatalf("a cancelled first caller must not fail the shared open: %v", err)
 	}
 }
 
