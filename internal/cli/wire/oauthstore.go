@@ -2,6 +2,7 @@ package wire
 
 import (
 	stdctx "context"
+	"log/slog"
 	"sync"
 
 	"github.com/vanducng/miu-cr/internal/config"
@@ -15,7 +16,11 @@ var pgOAuthStores = struct {
 
 func openOAuthStore(ctx stdctx.Context) (config.OAuthStore, error) {
 	// Load returns defaults on a broken config.toml, which must not block login or init (it rewrites it).
-	cfg, _ := config.Load()
+	cfg, lerr := config.Load()
+	if lerr != nil {
+		slog.Warn("oauth store: config load failed, selecting the backend from MIUCR_STORE_BACKEND or the file default",
+			"reason_code", "oauth.store_config_fallback", "reason", config.RedactString(lerr.Error()))
+	}
 	backend, err := validateBackend(cfg)
 	if err != nil {
 		return nil, err

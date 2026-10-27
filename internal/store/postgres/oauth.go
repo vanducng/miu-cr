@@ -12,7 +12,10 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"strings"
 	"time"
+
+	"github.com/jackc/pgx/v5/pgconn"
 
 	"github.com/vanducng/miu-cr/internal/cli/clierr"
 	"github.com/vanducng/miu-cr/internal/config"
@@ -120,6 +123,9 @@ func (o *OAuthStore) SaveRefreshed(ctx context.Context, prior, next config.OAuth
 		if err == nil {
 			return n > 0, nil
 		}
+		if !retryableSaveErr(err) {
+			return false, unavailable("save refreshed oauth credential", err)
+		}
 		select {
 		case <-ctx.Done():
 			return false, unavailable(fmt.Sprintf("save refreshed oauth credential (%d attempts)", attempt), err)
@@ -127,6 +133,14 @@ func (o *OAuthStore) SaveRefreshed(ctx context.Context, prior, next config.OAuth
 		}
 		backoff = min(backoff*2, saveRefreshedMaxBackoff)
 	}
+}
+
+func retryableSaveErr(err error) bool {
+	var pgErr *pgconn.PgError
+	if !errors.As(err, &pgErr) {
+		return true
+	}
+	return strings.HasPrefix(pgErr.Code, "08") || strings.HasPrefix(pgErr.Code, "57P") || pgErr.Code == "40001" || pgErr.Code == "40P01"
 }
 
 func (o *OAuthStore) Delete(ctx context.Context) (bool, error) {

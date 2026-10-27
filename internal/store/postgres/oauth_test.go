@@ -6,12 +6,15 @@ import (
 	"database/sql"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"os"
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/jackc/pgx/v5/pgconn"
 
 	"github.com/vanducng/miu-cr/internal/cli/clierr"
 	"github.com/vanducng/miu-cr/internal/config"
@@ -268,5 +271,24 @@ func TestOAuthStorePostgresRotationSurvivesRestart(t *testing.T) {
 	res, ok, err = oauth.Credential(ctx, server, meta, srv.Client(), nil)
 	if err != nil || !ok || res.AccessToken != "relogin-access" {
 		t.Fatalf("running server must pick up a login from another process: tok=%q ok=%v err=%v", res.AccessToken, ok, err)
+	}
+}
+
+func TestRetryableSaveErr(t *testing.T) {
+	cases := []struct {
+		err  error
+		want bool
+	}{
+		{errors.New("conn reset"), true},
+		{&pgconn.PgError{Code: "08006"}, true},
+		{&pgconn.PgError{Code: "57P01"}, true},
+		{&pgconn.PgError{Code: "40001"}, true},
+		{fmt.Errorf("wrapped: %w", &pgconn.PgError{Code: "42501"}), false},
+		{&pgconn.PgError{Code: "42P01"}, false},
+	}
+	for _, tc := range cases {
+		if got := retryableSaveErr(tc.err); got != tc.want {
+			t.Errorf("retryableSaveErr(%v) = %v, want %v", tc.err, got, tc.want)
+		}
 	}
 }
