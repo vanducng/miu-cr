@@ -257,9 +257,6 @@ func UpsertOffDiffComment(ctx stdctx.Context, client Client, info *PRInfo, findi
 		}
 		return offDiffExistingURL(existing, issues), nil
 	}
-	if len(findings) == 0 && len(carried) > 0 && (existing != nil || len(issues) > 0) {
-		return offDiffExistingURL(existing, issues), nil
-	}
 	body := AppendCarriedOffDiff(RenderOffDiffComment(findings), carried)
 	if existing != nil || len(issues) > 0 {
 		if existing != nil {

@@ -42,6 +42,15 @@ func TestSelectStableFindings(t *testing.T) {
 	}
 }
 
+func TestQuoteRequiresEveryLineChanged(t *testing.T) {
+	mixed := engine.Finding{File: "a.go", Severity: "high", Category: "bug", QuotedCode: "func g() {\n\told()", Title: "mixed"}
+	only := engine.Finding{File: "a.go", Severity: "high", Category: "bug", QuotedCode: "old()", Title: "deleted"}
+	kept, dropped := SelectStableFindings([]engine.Finding{mixed, only}, nil, replaceDiff())
+	if dropped != 1 || len(kept) != 1 || kept[0].Title != "deleted" {
+		t.Fatalf("kept %+v dropped %d", kept, dropped)
+	}
+}
+
 func TestSelectStableFindingsUsesQuoteNotLineNumber(t *testing.T) {
 	misnumbered := engine.Finding{File: "a.go", Line: 8, Severity: "high", Category: "bug", QuotedCode: "new()", Title: "quote is the new line"}
 	wrongQuote := engine.Finding{File: "a.go", Line: 9, Severity: "high", Category: "bug", QuotedCode: "func g() {", Title: "line number is new, quote is not"}

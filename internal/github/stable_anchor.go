@@ -29,8 +29,9 @@ func findingOnChangedCode(f engine.Finding, diffs []diff.Diff) bool {
 	return findingOnAddedLine(f, diffs)
 }
 
-// quoteHitsChanged reports whether a trimmed quote line equals a trimmed added
-// or deleted line in the finding's file.
+// quoteHitsChanged reports whether every non-empty trimmed quote line equals a
+// trimmed added or deleted line in the finding's file. One shared token such as
+// a brace is not enough to keep the rest of an unchanged quote.
 func quoteHitsChanged(f engine.Finding, diffs []diff.Diff) bool {
 	changed := map[string]bool{}
 	for i := range diffs {
@@ -52,12 +53,18 @@ func quoteHitsChanged(f engine.Finding, diffs []diff.Diff) bool {
 	if len(changed) == 0 {
 		return false
 	}
+	matched := false
 	for _, line := range strings.Split(normalizeForFingerprint(f.QuotedCode), "\n") {
-		if t := strings.TrimSpace(line); t != "" && changed[t] {
-			return true
+		t := strings.TrimSpace(line)
+		if t == "" {
+			continue
 		}
+		if !changed[t] {
+			return false
+		}
+		matched = true
 	}
-	return false
+	return matched
 }
 
 // UntouchedAnchors are prior open, reopened, or deferred fingerprints whose
@@ -82,38 +89,8 @@ func UntouchedAnchors(prior []LedgerEntry, delta []diff.Diff) map[string]bool {
 }
 
 func anchorRemoved(e LedgerEntry, delta []diff.Diff) bool {
-	var match *diff.Diff
-	for i := range delta {
-		d := &delta[i]
-		if d.NewPath == e.Path || d.OldPath == e.Path {
-			match = d
-			break
-		}
-	}
-	if match == nil {
-		return false
-	}
-	if match.IsDeleted || match.NewPath == "/dev/null" {
-		return true
-	}
-	if e.Line <= 0 {
-		return true
-	}
-	for _, h := range diff.ParseHunks(match.Diff) {
-		n := h.OldStart
-		for _, l := range h.Lines {
-			switch l.Type {
-			case diff.HunkDeleted:
-				if n == e.Line {
-					return true
-				}
-				n++
-			case diff.HunkContext:
-				n++
-			}
-		}
-	}
-	return false
+	_, removed := remapAnchor(e, delta)
+	return removed
 }
 
 func findingOnAddedLine(f engine.Finding, diffs []diff.Diff) bool {

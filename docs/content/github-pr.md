@@ -149,8 +149,8 @@ finding's **inline review thread** — the `#discussion_r…` anchor — when a 
 else to the file blob), and the linked **origin commit** (plus, for resolved rows, the linked
 **resolved commit**). This is what lets a re-run show how each issue *progressed* instead of only
 the latest snapshot. The first review is asked to report every concrete defect in that pass.
-On a later commit the filter is the diff: a new finding is kept only when its quoted code is
-a line that commit added or deleted, or the finding is already open. An open finding stays
+On a later commit the filter is the diff: a new finding is kept only when every non-empty
+line of its quoted code is a line that commit added or deleted, or the finding is already open. An open finding stays
 open unless that commit deleted its line or its file. Absence outside the pull request diff
 is not treated as a fix. The collapsible **Important Files Changed** table
 (File · Δ · Findings · Overview, the Overview from the per-file digests), sorted
@@ -291,8 +291,8 @@ without a local PR-thread store:
 
 - A finding posted on a prior run that is **absent** from the current run stays
   **open** unless the commits since the last review deleted that line or the file.
-  A new finding is kept only when its quoted code is a line those commits added or
-  deleted, or the finding is already open. Absence outside the pull request diff
+  A new finding is kept only when every non-empty line of its quoted code is a line those
+  commits added or deleted, or the finding is already open. Absence outside the pull request diff
   is not a fix.
 - Resolution is **reversible**: a resolved finding that **recurs** with quoted code
   on a line the new commits added or deleted is **reopened** and re-posted.

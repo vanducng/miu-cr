@@ -540,6 +540,9 @@ func (prReviewer) ReviewPR(ctx stdctx.Context, req cli.PRReviewRequest) (cli.Rev
 	}
 	pruneHistory(ctx, hist, cfg)
 	res.Findings, info.StablePaths = applyStableScope(ctx, runner, dir, info, res.Findings, &res.Stats)
+	if info.StablePaths != nil {
+		syncFilteredReview(ctx, hist, res.ID, res.Findings, res.Stats)
+	}
 	if info.StablePaths != nil && !publishDiffsCaptured {
 		if ds, derr := mgithub.DiffsForPR(ctx, runner, dir, info.BaseSHA, info.HeadSHA); derr != nil {
 			slog.Warn("review: stable-scope diff snapshot failed",

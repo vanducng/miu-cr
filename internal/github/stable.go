@@ -123,7 +123,8 @@ func MergeReviewLedger(info *PRInfo, findings []engine.Finding, diffs []diff.Dif
 		ledger = ApplyOffDiffDisposition(ledger, findings, diffs)
 	}
 	if info.StableFPs != nil {
-		return PreserveUntouchedAnchors(ledger, info.PriorLedger, info.StableFPs)
+		ledger = PreserveUntouchedAnchors(ledger, info.PriorLedger, info.StableFPs)
+		return applyShiftedLines(ledger, info.StableLines)
 	}
 	return PreserveStableFindings(ledger, info.PriorLedger, info.StablePaths)
 }
