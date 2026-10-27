@@ -484,6 +484,7 @@ func (prReviewer) ReviewPR(ctx stdctx.Context, req cli.PRReviewRequest) (cli.Rev
 	if req.Post && req.Mode == "review" && !info.IsFork {
 		ackPRReviewStarted(ctx, client, info)
 	}
+	instruction := followUpInstruction(req.Instruction, priorReviewSHA(info), info)
 	res, err := eng.Review(ctx, engine.Request{
 		Mode:            diff.ModeRange,
 		From:            info.BaseSHA,
@@ -517,7 +518,7 @@ func (prReviewer) ReviewPR(ctx stdctx.Context, req cli.PRReviewRequest) (cli.Rev
 		RulesTokenBudget: defaultRulesTokenBudget,
 		Retriever:        retr,
 		WantDiagram:      req.WantDiagram,
-		Instruction:      req.Instruction,
+		Instruction:      instruction,
 		PromptFormat:     req.PromptFormat,
 		OperatorPrompt:   req.OperatorPrompt,
 		Conversation:     conversation,
@@ -538,6 +539,17 @@ func (prReviewer) ReviewPR(ctx stdctx.Context, req cli.PRReviewRequest) (cli.Rev
 		return cli.ReviewOutcome{}, err
 	}
 	pruneHistory(ctx, hist, cfg)
+	res.Findings, info.StablePaths = applyStableScope(ctx, runner, dir, info, res.Findings, &res.Stats)
+	if info.StablePaths != nil && !publishDiffsCaptured {
+		if ds, derr := mgithub.DiffsForPR(ctx, runner, dir, info.BaseSHA, info.HeadSHA); derr != nil {
+			slog.Warn("review: stable-scope diff snapshot failed",
+				"repo", info.Owner+"/"+info.Repo, "pr", info.Number, "head_sha", shortSHA(info.HeadSHA),
+				"reason_code", "diff_unavailable", "error", config.RedactString(derr.Error()))
+		} else {
+			publishDiffs = ds
+			publishDiffsCaptured = true
+		}
+	}
 
 	prResult := &cli.PRResult{
 		Owner:         info.Owner,
@@ -896,13 +908,9 @@ func noteLedgerGate(prResult *cli.PRResult, info *mgithub.PRInfo, findings []eng
 	if prResult == nil || prResult.BlockingGateKnown || info == nil || !info.LedgerTrusted {
 		return
 	}
-	ledger := mgithub.MergeLedger(info.PriorLedger, findings, info.HeadSHA, diffPathSet(diffs), time.Now())
-	if len(diffs) > 0 {
-		ledger = mgithub.ApplyOffDiffDisposition(ledger, findings, diffs)
-	}
-	blocking := mgithub.BlockingFindings(findings, ledger)
+	ledger := mgithub.MergeReviewLedger(info, findings, diffs, time.Now())
 	prResult.BlockingGateKnown = true
-	prResult.BlockingGateFailed = engine.GateFailed(blocking, gate)
+	prResult.BlockingGateFailed = engine.GateFailed(mgithub.GateFindings(findings, ledger), gate)
 }
 
 func publishDiffSnapshot(ctx stdctx.Context, runner *gitcmd.Runner, dir string, info *mgithub.PRInfo, captured bool, diffs []diff.Diff) ([]diff.Diff, error) {
@@ -978,19 +986,19 @@ func publishReviewLocked(ctx stdctx.Context, client mgithub.Client, info *mgithu
 	}
 
 	now := time.Now()
-	ledger := mgithub.MergeLedger(info.PriorLedger, publishFindings, info.HeadSHA, diffPathSet(diffs), now)
-	ledger = mgithub.ApplyOffDiffDisposition(ledger, publishFindings, diffs)
+	ledger := mgithub.MergeReviewLedger(info, publishFindings, diffs, now)
 	blocking := mgithub.BlockingFindings(publishFindings, ledger)
+	gateFindings := mgithub.GateFindings(publishFindings, ledger)
 	if prResult != nil {
 		prResult.BlockingGateKnown = true
-		prResult.BlockingGateFailed = engine.GateFailed(blocking, req.Gate)
+		prResult.BlockingGateFailed = engine.GateFailed(gateFindings, req.Gate)
 	}
 
 	opts := mgithub.PostReviewOptions{
 		Suggest:       req.Suggest,
 		Approval:      req.Approval,
 		Gate:          req.Gate,
-		GateClean:     !engine.GateFailed(blocking, req.Gate) && !engine.SubagentsDegraded(res.Stats),
+		GateClean:     !engine.GateFailed(gateFindings, req.Gate) && !engine.SubagentsDegraded(res.Stats),
 		ReviewedFiles: reviewedFilesFromStats(res.Stats),
 		FilterMode:    filterModeOf(req.FilterMode),
 		MinSeverity:   req.MinSeverity,
@@ -1065,7 +1073,8 @@ func publishReviewLocked(ctx stdctx.Context, client mgithub.Client, info *mgithu
 	}
 
 	offDiff := mgithub.MinSeverityFloor(mgithub.ActionableOffDiffFindings(publishFindings, diffs, ledger), opts.MinSeverity)
-	if url, oerr := mgithub.UpsertOffDiffComment(ctx, client, info, offDiff, diffs); oerr != nil {
+	carriedOff := mgithub.CarriedOffDiff(ledger, publishFindings, diffs, opts.MinSeverity)
+	if url, oerr := mgithub.UpsertOffDiffComment(ctx, client, info, offDiff, diffs, carriedOff); oerr != nil {
 		slog.Warn("off-diff comment failed", "repo", info.Owner+"/"+info.Repo, "pr", info.Number, "head_sha", shortSHA(info.HeadSHA), "error", config.RedactString(oerr.Error()))
 	} else if url != "" {
 		if existing == nil {
@@ -1074,6 +1083,11 @@ func publishReviewLocked(ctx stdctx.Context, client mgithub.Client, info *mgithu
 		for _, f := range offDiff {
 			if fp := mgithub.Fingerprint(f); existing[fp] == "" {
 				existing[fp] = url
+			}
+		}
+		for _, e := range carriedOff {
+			if e.FP != "" && existing[e.FP] == "" {
+				existing[e.FP] = url
 			}
 		}
 	}
@@ -1089,7 +1103,7 @@ func publishReviewLocked(ctx stdctx.Context, client mgithub.Client, info *mgithu
 	if prStore != nil {
 		// PostReview already succeeded: the review is live. A store write failure must
 		// not discard that outcome: log (redacted), continue.
-		if terr := trackResolution(ctx, prStore, prKey, prior, publishFindings, diffs, pr.PostedFindings); terr != nil {
+		if terr := trackResolution(ctx, prStore, prKey, prior, publishFindings, diffs, pr.PostedFindings, info.StablePaths, info.StableFPs); terr != nil {
 			slog.Warn("pr-thread store tracking failed: " + config.RedactString(terr.Error()))
 		}
 	}
@@ -1126,11 +1140,8 @@ func publishChecks(ctx stdctx.Context, client mgithub.Client, info *mgithub.PRIn
 			"repo", info.Owner+"/"+info.Repo, "pr", info.Number, "head_sha", shortSHA(info.HeadSHA),
 			"error", config.RedactString(err.Error()))
 	} else {
-		ledger := mgithub.MergeLedger(info.PriorLedger, res.Findings, info.HeadSHA, diffPathSet(diffs), time.Now())
-		if len(diffs) > 0 {
-			ledger = mgithub.ApplyOffDiffDisposition(ledger, res.Findings, diffs)
-		}
-		blocking = mgithub.BlockingFindings(res.Findings, ledger)
+		ledger := mgithub.MergeReviewLedger(info, res.Findings, diffs, time.Now())
+		blocking = mgithub.GateFindings(res.Findings, ledger)
 	}
 	if prResult != nil {
 		prResult.BlockingGateKnown = true
@@ -1170,7 +1181,7 @@ func patchRepairedCount(stats map[string]any) int {
 // trackResolution records the actually-submitted findings as posted, then marks as
 // resolved any prior 'posted' fp absent from THIS run whose stored path is still in
 // the PR diff (a finding off the diff can't be re-posted, so absence isn't a fix).
-func trackResolution(ctx stdctx.Context, prStore store.PRThreadStore, key store.PRKey, prior []store.PRFinding, current []engine.Finding, diffs []diff.Diff, posted []mgithub.PostedFinding) error {
+func trackResolution(ctx stdctx.Context, prStore store.PRThreadStore, key store.PRKey, prior []store.PRFinding, current []engine.Finding, diffs []diff.Diff, posted []mgithub.PostedFinding, stable, untouched map[string]bool) error {
 	upserts := make([]store.PRFinding, 0, len(posted))
 	for _, pf := range posted {
 		upserts = append(upserts, store.PRFinding{Fingerprint: pf.Fingerprint, Path: pf.Path, Status: "posted"})
@@ -1187,7 +1198,7 @@ func trackResolution(ctx stdctx.Context, prStore store.PRThreadStore, key store.
 
 	var resolved []string
 	for _, pf := range prior {
-		if pf.Status == "posted" && !currentFPs[pf.Fingerprint] && pathsInDiff[pf.Path] {
+		if pf.Status == "posted" && !currentFPs[pf.Fingerprint] && pathsInDiff[pf.Path] && !stable[pf.Path] && !untouched[pf.Fingerprint] {
 			resolved = append(resolved, pf.Fingerprint)
 		}
 	}

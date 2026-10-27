@@ -33,6 +33,7 @@ Rules for findings:
 - Report only real problems in the diff: bugs, security issues, resource leaks, race conditions, incorrect error handling, broken edge cases, and clear maintainability hazards. Do not report style nits unless they cause defects.
 - Report a finding outside the changed lines only when this pull request must address it. Do not report style or optional notes in files the pull request does not change.
 - Report low and medium defects, not only merge blockers. Omit a note only when it is a style nit, or when the rationale would say the behavior is acceptable, by design, or "no bug".
+- Report every concrete defect in the changed code on this pass. Do not withhold a real defect for a later review. Walk every changed file before you answer.
 - For each finding, set "file" to the EXACT path from the "=== File: <path> ===" header that the finding came from — copied verbatim, no leading/trailing markers.
 - For each finding, quote the EXACT, VERBATIM source line(s) the finding refers to in "existing_code" — copied character-for-character from the new content, or from removed diff lines for a deleted file, minimal and unique enough to locate. NEVER paraphrase it.
 - DO NOT include line numbers anywhere. Omit them entirely. Line numbers are recomputed downstream from "file" + "existing_code"; any line number you provide is discarded.
@@ -91,6 +92,7 @@ Rules for findings:
 - Report only real problems in the diff: bugs, security issues, resource leaks, race conditions, incorrect error handling, broken edge cases, and clear maintainability hazards. Do not report style nits unless they cause defects.
 - Report a finding outside the changed lines only when this pull request must address it. Do not report style or optional notes in files the pull request does not change.
 - Report low and medium defects, not only merge blockers. Omit a note only when it is a style nit, or when the rationale would say the behavior is acceptable, by design, or "no bug".
+- Report every concrete defect in the changed code on this pass. Do not withhold a real defect for a later review. Walk every changed file before you answer.
 - For each finding, set "file" to the EXACT path from the <file path="..."> attribute of the file element that the finding came from — copied verbatim, no surrounding tags.
 - For each finding, quote the EXACT, VERBATIM source line(s) the finding refers to in "existing_code" — copied character-for-character from the new content, or from removed diff lines for a deleted file, minimal and unique enough to locate. NEVER paraphrase it.
 - DO NOT include line numbers anywhere. Omit them entirely. Line numbers are recomputed downstream from "file" + "existing_code"; any line number you provide is discarded.

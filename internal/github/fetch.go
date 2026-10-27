@@ -65,6 +65,14 @@ type PRInfo struct {
 	PriorPublishedHeadSHA string
 	// PriorPublishedKey is the review-shape hash attached to the completed publish.
 	PriorPublishedKey string
+	// StablePaths, when non-nil, are files the commits since the last review left
+	// unchanged. Open findings there stay open when a later run omits them.
+	// Nil keeps the legacy rule that absence in a still-diffed file resolves.
+	StablePaths map[string]bool
+	// StableFPs, when non-nil, are prior fingerprints whose line the follow-up
+	// commits did not delete. Those rows stay open when a later run omits them.
+	// Nil keeps the StablePaths rule. An empty map preserves nothing.
+	StableFPs map[string]bool
 }
 
 // blobURL builds a repo-relative blob permalink at info.HeadSHA for path/line.
