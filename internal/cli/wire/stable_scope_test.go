@@ -2,7 +2,6 @@ package wire
 
 import (
 	stdctx "context"
-	"strings"
 	"testing"
 
 	"github.com/vanducng/miu-cr/internal/engine"
@@ -10,28 +9,6 @@ import (
 	mgithub "github.com/vanducng/miu-cr/internal/github"
 	"github.com/vanducng/miu-cr/internal/store"
 )
-
-func TestFollowUpInstructionOnlyOnLaterReview(t *testing.T) {
-	info := &mgithub.PRInfo{HeadSHA: "bbbbbbb", LedgerTrusted: true, PriorLedger: []mgithub.LedgerEntry{{FP: "aa"}}}
-	got := followUpInstruction("focus on auth", "aaaaaaa", info)
-	if !strings.Contains(got, "already reviewed at aaaaaaa") || !strings.HasSuffix(got, "focus on auth") {
-		t.Fatalf("follow-up instruction = %q", got)
-	}
-	if got := followUpInstruction("focus on auth", "", info); got != "focus on auth" {
-		t.Fatalf("first review changed instruction: %q", got)
-	}
-	if got := followUpInstruction("focus on auth", "bbbbbbb", info); got != "focus on auth" {
-		t.Fatalf("same head changed instruction: %q", got)
-	}
-	empty := &mgithub.PRInfo{HeadSHA: "bbbbbbb", LedgerTrusted: true}
-	if got := followUpInstruction("focus on auth", "aaaaaaa", empty); got != "focus on auth" {
-		t.Fatalf("no ledger changed instruction: %q", got)
-	}
-	untrusted := &mgithub.PRInfo{HeadSHA: "bbbbbbb", PriorLedger: []mgithub.LedgerEntry{{FP: "aa"}}}
-	if got := followUpInstruction("focus on auth", "aaaaaaa", untrusted); got != "focus on auth" {
-		t.Fatalf("untrusted ledger changed instruction: %q", got)
-	}
-}
 
 func TestApplyStableScope(t *testing.T) {
 	runner := gitcmd.New()
@@ -71,6 +48,33 @@ func TestApplyStableScope(t *testing.T) {
 	got, stable = applyStableScope(ctx, runner, dir, follow, []engine.Finding{context, added}, &stats)
 	if stable == nil || stats["stable_scope_dropped"] != 1 || len(got) != 1 || got[0].Title != "added" {
 		t.Fatalf("follow-up kept %+v dropped %v stable %#v", got, stats["stable_scope_dropped"], stable)
+	}
+
+	shortSHA := &mgithub.PRInfo{
+		Owner: "acme", Repo: "app", Number: 1, HeadSHA: head, LedgerTrusted: true,
+		PriorSummaryHeadSHA: head[:7], PriorLedger: prior,
+	}
+	stats = map[string]any{}
+	got, stable = applyStableScope(ctx, runner, dir, shortSHA, []engine.Finding{context, added}, &stats)
+	if stable != nil || len(got) != 2 {
+		t.Fatalf("short summary SHA must match head, kept %d stable %#v", len(got), stable)
+	}
+
+	if _, err := runner.Output(ctx, dir, "commit", "--quiet", "--allow-empty", "-m", "empty"); err != nil {
+		t.Fatal(err)
+	}
+	empty, err := runner.HeadSHA(ctx, dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	clean := &mgithub.PRInfo{
+		Owner: "acme", Repo: "app", Number: 1, HeadSHA: empty, LedgerTrusted: true,
+		PriorPublishedHeadSHA: head, PriorLedger: prior,
+	}
+	stats = map[string]any{}
+	got, stable = applyStableScope(ctx, runner, dir, clean, []engine.Finding{context, added}, &stats)
+	if stable == nil || len(got) != 0 || stats["stable_scope_dropped"] != 2 {
+		t.Fatalf("empty delta kept %+v dropped %v stable %#v", got, stats["stable_scope_dropped"], stable)
 	}
 
 	broken := &mgithub.PRInfo{

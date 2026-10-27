@@ -484,7 +484,6 @@ func (prReviewer) ReviewPR(ctx stdctx.Context, req cli.PRReviewRequest) (cli.Rev
 	if req.Post && req.Mode == "review" && !info.IsFork {
 		ackPRReviewStarted(ctx, client, info)
 	}
-	instruction := followUpInstruction(req.Instruction, priorReviewSHA(info), info)
 	res, err := eng.Review(ctx, engine.Request{
 		Mode:            diff.ModeRange,
 		From:            info.BaseSHA,
@@ -518,7 +517,7 @@ func (prReviewer) ReviewPR(ctx stdctx.Context, req cli.PRReviewRequest) (cli.Rev
 		RulesTokenBudget: defaultRulesTokenBudget,
 		Retriever:        retr,
 		WantDiagram:      req.WantDiagram,
-		Instruction:      instruction,
+		Instruction:      req.Instruction,
 		PromptFormat:     req.PromptFormat,
 		OperatorPrompt:   req.OperatorPrompt,
 		Conversation:     conversation,

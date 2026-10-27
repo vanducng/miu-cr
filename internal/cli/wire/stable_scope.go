@@ -23,19 +23,15 @@ func priorReviewSHA(info *mgithub.PRInfo) string {
 	return strings.TrimSpace(info.PriorSummaryHeadSHA)
 }
 
-// followUpInstruction tells a later pass to stay on the new commits. The first
-// review, and a review with no ledger yet, keep the caller's instruction.
-func followUpInstruction(base, prior string, info *mgithub.PRInfo) string {
+// sameReviewedCommit reports whether prior names head. The summary footer stores
+// a short SHA, which never equals the full head.
+func sameReviewedCommit(prior, head string) bool {
 	prior = strings.TrimSpace(prior)
-	if info == nil || !info.LedgerTrusted || prior == "" || len(info.PriorLedger) == 0 || strings.EqualFold(prior, info.HeadSHA) {
-		return base
+	head = strings.TrimSpace(head)
+	if len(prior) < 7 || head == "" {
+		return false
 	}
-	note := "This pull request was already reviewed at " + prior + ". Report a new defect only when every non-empty line of its quoted code is a line the commits since that review added or deleted. Repeat an earlier finding only when that quoted code is still present and still wrong."
-	base = strings.TrimSpace(base)
-	if base == "" {
-		return note
-	}
-	return note + "\n" + base
+	return strings.HasPrefix(strings.ToLower(head), strings.ToLower(prior))
 }
 
 // applyStableScope drops findings whose quoted code the commits since the last
@@ -46,7 +42,7 @@ func applyStableScope(ctx stdctx.Context, runner *gitcmd.Runner, dir string, inf
 		return findings, nil
 	}
 	prior := priorReviewSHA(info)
-	if prior == "" || strings.EqualFold(prior, info.HeadSHA) {
+	if prior == "" || sameReviewedCommit(prior, info.HeadSHA) {
 		return findings, nil
 	}
 	delta, err := diff.GetDiff(ctx, diff.ModeRange, dir, prior, info.HeadSHA, "", runner)
@@ -56,6 +52,11 @@ func applyStableScope(ctx stdctx.Context, runner *gitcmd.Runner, dir string, inf
 			"head_sha", shortSHA(info.HeadSHA), "prior_sha", shortSHA(prior),
 			"reason_code", "delta_unavailable", "error", config.RedactString(err.Error()))
 		return findings, nil
+	}
+	// An empty diff parses as nil. Nil means the scope is unknown, so a clean
+	// delta must be an empty slice or omitted findings resolve under the old rule.
+	if delta == nil {
+		delta = []diff.Diff{}
 	}
 	info.StableFPs = mgithub.UntouchedAnchors(info.PriorLedger, delta)
 	info.StableLines = mgithub.ShiftedLines(info.PriorLedger, delta)
