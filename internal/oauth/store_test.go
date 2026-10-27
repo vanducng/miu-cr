@@ -105,3 +105,22 @@ func TestCredentialPicksUpLoginFromAnotherProcess(t *testing.T) {
 		t.Fatalf("resolve must reread the store: first=%q second=%q ok=%v err=%v", first.AccessToken, second.AccessToken, ok, err)
 	}
 }
+
+func TestCredentialRefreshLostRaceUsesStoredRotation(t *testing.T) {
+	st := &casStore{}
+	_ = st.Save(stdctx.Background(), config.OAuthRecord{Provider: "openai", AccessToken: "a0", RefreshToken: "r0", ExpiresAt: time.Now().Add(time.Minute)})
+	other := config.OAuthRecord{Provider: "openai", AccessToken: "other-a1", RefreshToken: "other-r1", ExpiresAt: time.Now().Add(time.Hour)}
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		_, _ = st.SaveRefreshed(stdctx.Background(), config.OAuthRecord{RefreshToken: "r0"}, other)
+		w.WriteHeader(http.StatusBadRequest)
+	}))
+	t.Cleanup(srv.Close)
+
+	res, ok, err := Credential(stdctx.Background(), st, metaFor(srv), srv.Client(), nil)
+	if err != nil || !ok || res.AccessToken != "other-a1" {
+		t.Fatalf("lost grant race must reuse the stored rotation: tok=%q ok=%v err=%v", res.AccessToken, ok, err)
+	}
+	if got, _, _ := st.Load(stdctx.Background()); got != other {
+		t.Fatalf("store must keep the other process's rotation, got %+v", got)
+	}
+}

@@ -52,7 +52,18 @@ func dedupedRefresh(ctx stdctx.Context, st config.OAuthStore, meta Meta, httpCli
 		if !ok {
 			return config.OAuthRecord{}, fmt.Errorf("oauth: cached credential vanished before refresh")
 		}
-		return refresh(rctx, st, meta, rec, httpClient, now)
+		next, rerr := refresh(rctx, st, meta, rec, httpClient, now)
+		if rerr != nil {
+			// Another process sharing the store may have rotated the token we just lost the grant race on.
+			if latest, ok, lerr := st.Load(rctx); lerr == nil && ok && latest.Provider == meta.Provider &&
+				latest.RefreshToken != rec.RefreshToken && strings.TrimSpace(latest.AccessToken) != "" {
+				slog.Info("oauth: refresh failed but the store already holds a newer credential; using it",
+					"provider", meta.Provider, "oauth_store", st.Backend(), "reason_code", "oauth.refresh_lost_race")
+				return latest, nil
+			}
+			return config.OAuthRecord{}, rerr
+		}
+		return next, nil
 	})
 	if err != nil {
 		return config.OAuthRecord{}, err
