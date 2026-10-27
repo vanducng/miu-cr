@@ -61,6 +61,7 @@ func applyServeThreadReply(ctx stdctx.Context, job serve.Job) (err error) {
 		APIKey:        review.APIKey,
 		BaseURL:       review.BaseURL,
 		AuthToken:     review.AuthToken,
+		Auth:          review.Auth,
 		Model:         review.Model,
 		OAuthResolver: oauthResolver(),
 	})

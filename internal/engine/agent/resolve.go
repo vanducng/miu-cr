@@ -64,6 +64,10 @@ type ResolveInput struct {
 	AuthToken string // --auth-token
 	Model     string // --model
 
+	// Auth, when set, replaces the profile's auth mode and drops its credential
+	// sources: the serve host resolves its own provider secret into APIKey/AuthToken.
+	Auth string
+
 	// OAuthResolver, when set, supplies the cached `miucr login` credential for
 	// the OpenAI path. It is injected by the cli/config layer so this package
 	// performs no filesystem access of its own. It is consulted ONLY when no
@@ -104,6 +108,10 @@ func resolveWith(cfg config.Config, in ResolveInput) (Credentials, error) {
 			Hint:    "use a built-in (anthropic, openai) or configure it in " + config.FilePathOrEmpty(),
 			Exit:    1,
 		}
+	}
+	if auth := strings.TrimSpace(in.Auth); auth != "" {
+		prof.Auth = auth
+		prof.AuthToken, prof.AuthEnv, prof.AuthCommand = "", "", nil
 	}
 	var (
 		creds Credentials

@@ -178,6 +178,7 @@ type HostRepo struct {
 	GitURL        string     `yaml:"git_url" json:"git_url"`
 	DefaultBranch string     `yaml:"default_branch" json:"default_branch,omitempty"`
 	GithubAccount string     `yaml:"github_account" json:"github_account,omitempty"`
+	Provider      string     `yaml:"provider" json:"provider,omitempty"`
 	Enabled       *bool      `yaml:"enabled" json:"enabled,omitempty"`
 	Poll          *bool      `yaml:"poll" json:"poll,omitempty"`
 	Agent         HostAgent  `yaml:"agent" json:"agent,omitempty"`
@@ -254,6 +255,9 @@ func ValidateHost(cfg HostConfig, path string) error {
 	if err := validateHostProviders(path, cfg.Providers); err != nil {
 		return err
 	}
+	if name := strings.TrimSpace(cfg.DefaultProvider); name != "" && !hostProviderDefined(cfg, name) {
+		return invalidHost(path, "default_provider", name, "a provider under providers or a built-in (anthropic|openai)")
+	}
 	if err := validateGithubAccounts(path, cfg.Github); err != nil {
 		return err
 	}
@@ -277,8 +281,44 @@ func validateHostProviders(path string, providers map[string]HostProvider) error
 		if field, value, want := quotaProblem(provider.Quota); field != "" {
 			return invalidHost(path, "providers."+name+"."+field, value, want)
 		}
+		if err := validateHostProviderAuth(path, name, provider); err != nil {
+			return err
+		}
 	}
 	return nil
+}
+
+// validateHostProviderAuth mirrors the auth modes agent.Resolve accepts per kind.
+func validateHostProviderAuth(path, name string, provider HostProvider) error {
+	field := "providers." + name + ".auth"
+	auth := strings.ToLower(strings.TrimSpace(provider.Auth))
+	switch provider.Kind {
+	case KindOpenAI:
+		switch auth {
+		case "", "api_key", "apikey", "key":
+		case "oauth":
+			if strings.TrimSpace(provider.AuthEnv) != "" || len(provider.AuthCommand) > 0 {
+				return invalidHost(path, field, provider.Auth, "no auth_env or auth_command with oauth (the credential comes from miucr login)")
+			}
+		default:
+			return invalidHost(path, field, provider.Auth, "oauth|api_key for kind openai")
+		}
+	case KindAnthropic, "":
+		switch auth {
+		case "", "api_key", "bearer":
+		default:
+			return invalidHost(path, field, provider.Auth, "api_key|bearer for kind anthropic")
+		}
+	}
+	return nil
+}
+
+func hostProviderDefined(cfg HostConfig, name string) bool {
+	if _, ok := cfg.Providers[name]; ok {
+		return true
+	}
+	_, ok := Defaults().Providers[name]
+	return ok
 }
 
 func normalizeHost(cfg *HostConfig) {
@@ -376,6 +416,9 @@ func validateHostRepos(path string, cfg HostConfig) error {
 		}
 		if _, ok := cfg.Github.Accounts[account]; !ok {
 			return invalidHost(path, prefix+".github_account", account, "a configured account")
+		}
+		if provider := strings.TrimSpace(repo.Provider); provider != "" && !hostProviderDefined(cfg, provider) {
+			return invalidHost(path, prefix+".provider", provider, "a provider under providers or a built-in (anthropic|openai) for repo "+repo.Name)
 		}
 		if err := validateGitURL(path, prefix+".git_url", repo.GitURL, owner, name); err != nil {
 			return err

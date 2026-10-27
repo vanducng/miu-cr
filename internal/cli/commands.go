@@ -602,11 +602,6 @@ func hostFileFingerprint(ref, path string) (hostReloadFileFingerprint, error) {
 
 func buildServeHostRepos(ctx stdctx.Context, cfg config.HostConfig, path string) ([]serve.HostRepoConfig, time.Duration, error) {
 	baseDir := filepath.Dir(path)
-	provider, err := hostProvider(cfg)
-	if err != nil {
-		return nil, 0, err
-	}
-	providerName := hostProviderName(cfg)
 	baseReview := mergeHostReview(config.HostReview{
 		Gate:                 "high",
 		FilterMode:           "diff_context",
@@ -626,21 +621,26 @@ func buildServeHostRepos(ctx stdctx.Context, cfg config.HostConfig, path string)
 	}, cfg.Review)
 	hostReview := mergeHostReview(baseReview, cfg.Host.Review)
 	reviewTO := durationOrDefault(hostReview.Timeout, 15*time.Minute)
-	if provider.Kind != config.KindOpenAI && provider.Kind != config.KindAnthropic && provider.Kind != "" {
-		return nil, 0, &CLIError{Code: "config.invalid", Message: fmt.Sprintf("unknown host provider kind %q", provider.Kind), Hint: "kind must be anthropic or openai", Exit: 2}
-	}
-	providerSecret, err := hostProviderSecret(ctx, provider)
-	if err != nil {
-		return nil, 0, err
-	}
+	secrets := map[string]string{}
 	out := make([]serve.HostRepoConfig, 0, len(cfg.Repos))
 	hostEnabled := cfg.Host.Enabled == nil || *cfg.Host.Enabled
 	hostPoll := cfg.Host.Poll == nil || *cfg.Host.Poll
 	for _, repo := range cfg.Repos {
 		enabled := hostEnabled && (repo.Enabled == nil || *repo.Enabled)
 		poll := hostPoll && (repo.Poll == nil || *repo.Poll)
+		providerName := hostProviderName(cfg, repo)
+		provider, err := hostProvider(cfg, providerName)
+		if err != nil {
+			return nil, 0, err
+		}
+		var secret string
+		if enabled {
+			if secret, err = cachedHostProviderSecret(ctx, secrets, providerName, provider); err != nil {
+				return nil, 0, err
+			}
+		}
 		review := mergeHostReview(hostReview, repo.Review)
-		opts, err := hostReviewOptions(providerName, provider, providerSecret, review)
+		opts, err := hostReviewOptions(providerName, provider, secret, review)
 		if err != nil {
 			return nil, 0, err
 		}
@@ -742,6 +742,7 @@ func hostReviewOptions(providerName string, provider config.HostProvider, secret
 		PromptFormat:        review.PromptFormat,
 		Mode:                review.Mode,
 		BaseURL:             provider.BaseURL,
+		Auth:                provider.Auth,
 		Model:               provider.Model,
 		StalledTimeout:      durationOrDefaultAllowZero(review.StalledTimeout, defaultReviewStalledTimeout),
 		ProviderRetry:       review.ProviderRetry,
@@ -785,27 +786,51 @@ func hostProviderSecret(ctx stdctx.Context, provider config.HostProvider) (strin
 	return hostSecret(ctx, provider.AuthEnv, "", provider.AuthCommand)
 }
 
-// hostProviderName resolves the configured default provider instance name (the
-// quota counter key), falling back to the built-in default. Single source so the
-// serve dispatch and hostProvider agree on the name.
-func hostProviderName(cfg config.HostConfig) string {
-	name := strings.TrimSpace(cfg.DefaultProvider)
-	if name == "" {
-		name = config.Defaults().DefaultProvider
+func cachedHostProviderSecret(ctx stdctx.Context, cache map[string]string, name string, provider config.HostProvider) (string, error) {
+	if secret, ok := cache[name]; ok {
+		return secret, nil
 	}
-	return name
+	secret, err := hostProviderSecret(ctx, provider)
+	if err != nil {
+		var ce *CLIError
+		if errors.As(err, &ce) {
+			ce.Message = fmt.Sprintf("host provider %q: %s", name, ce.Message)
+		}
+		return "", err
+	}
+	cache[name] = secret
+	return secret, nil
 }
 
-func hostProvider(cfg config.HostConfig) (config.HostProvider, error) {
-	defaults := config.Defaults()
-	name := hostProviderName(cfg)
-	if p, ok := cfg.Providers[name]; ok {
-		return p, nil
+// hostProviderName resolves a repo's provider instance name (also the quota
+// counter key): the repo override, else default_provider, else the built-in default.
+func hostProviderName(cfg config.HostConfig, repo config.HostRepo) string {
+	if name := strings.TrimSpace(repo.Provider); name != "" {
+		return name
 	}
-	if p, ok := defaults.Providers[name]; ok {
-		return config.HostProvider{Kind: p.Kind, BaseURL: p.BaseURL, Model: p.Model, AuthEnv: p.AuthEnv, AuthCommand: p.AuthCommand, Auth: p.Auth, Quota: p.Quota}, nil
+	if name := strings.TrimSpace(cfg.DefaultProvider); name != "" {
+		return name
 	}
-	return config.HostProvider{}, &CLIError{Code: "agent.unknown_provider", Message: fmt.Sprintf("unknown host provider %q", name), Hint: "define it under providers in the host YAML", Exit: 2}
+	return config.Defaults().DefaultProvider
+}
+
+func hostProvider(cfg config.HostConfig, name string) (config.HostProvider, error) {
+	p, ok := cfg.Providers[name]
+	if !ok {
+		d, ok := config.Defaults().Providers[name]
+		if !ok {
+			return config.HostProvider{}, &CLIError{Code: "agent.unknown_provider", Message: fmt.Sprintf("unknown host provider %q", name), Hint: "define it under providers in the host YAML", Exit: 2}
+		}
+		p = config.HostProvider{Kind: d.Kind, BaseURL: d.BaseURL, Model: d.Model, AuthEnv: d.AuthEnv, AuthCommand: d.AuthCommand, Auth: d.Auth, Quota: d.Quota}
+		if d.Kind == config.KindOpenAI {
+			// The pinned API model would win over the codex default when a `miucr login` session is used.
+			p.Model = ""
+		}
+	}
+	if p.Kind != config.KindOpenAI && p.Kind != config.KindAnthropic && p.Kind != "" {
+		return config.HostProvider{}, &CLIError{Code: "config.invalid", Message: fmt.Sprintf("unknown host provider kind %q for provider %q", p.Kind, name), Hint: "kind must be anthropic or openai", Exit: 2}
+	}
+	return p, nil
 }
 
 func hostOperatorPrompt(baseDir string, global, repo config.HostAgent, ruleRefs []string) (string, string, string, error) {
@@ -1410,6 +1435,7 @@ func buildServeReviewFn(log *slog.Logger, gate string, st serve.ReviewStore, tra
 			APIKey:              review.APIKey,
 			BaseURL:             review.BaseURL,
 			AuthToken:           review.AuthToken,
+			Auth:                review.Auth,
 			Model:               review.Model,
 			Quota:               review.Quota,
 			QuotaProvider:       review.QuotaProvider,
@@ -1515,6 +1541,9 @@ func serveJobLogAttrs(j serve.Job, attrs ...any) []any {
 	}
 	if j.HeadSHA != "" {
 		out = append(out, "head_sha", serve.ShortSHA(j.HeadSHA))
+	}
+	if j.Review != nil && j.Review.QuotaProvider != "" {
+		out = append(out, "provider", j.Review.QuotaProvider)
 	}
 	return append(out, attrs...)
 }

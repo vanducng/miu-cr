@@ -77,7 +77,7 @@ window    = "5h"       # a Go duration (1h, 5h, 24h, 168h) OR "monthly" (calenda
 - **State** — usage counters persist in the same store as history (`state.db` for the CLI, Postgres for the host), surviving one-shot CLI invocations. A bad `dimension`/`window`/`limit` is a typed `config.invalid` (exit `2`).
 - **Metering scope** — the counter records **every LLM call** in a review — the main pass, parallel subagents, and the optional `--patch-repair` second pass — summed. Usage is captured **with its cache breakdown**: uncached input, cache-read, and cache-creation are all metered (Anthropic/z.ai report cache as separate buckets; OpenAI reports cached tokens as a sub-count of prompt tokens, normalized so cached input is counted exactly once). Review stats expose `input_tokens`, `output_tokens`, `cache_read_tokens`, `cache_creation_tokens`, `total_input_tokens`, and `cache_hit_ratio` for usage optimization. (Codex/ChatGPT-plan reviews report no usage and meter as zero.)
 
-The host config (`host.yaml`) takes the same block under each `providers.<name>`.
+The host config (`host.yaml`) takes the same block under each `providers.<name>`. A host repo selects its provider with `repos[].provider` (empty means `default_provider`), and the quota counter is keyed by that provider name, so repos on different providers are metered separately. Codex/ChatGPT-plan reviews meter zero tokens, so cap an `auth: oauth` provider with `dimension: requests`.
 
 ### Review defaults: `[review]`
 

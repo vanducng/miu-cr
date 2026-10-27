@@ -7,6 +7,14 @@ providers:
     kind: anthropic
     model: claude-sonnet-4-5-20250929
     auth_env: ANTHROPIC_API_KEY
+  chatgpt:                       # ChatGPT-plan OAuth: credential from `miucr login`
+    kind: openai                 # (oauth.json), so no auth_env/auth_command here
+    auth: oauth
+    model: gpt-5.5
+    quota:
+      dimension: requests        # codex reviews report no token usage; meter requests
+      limit: 200
+      window: 24h
 
 store:
   backend: postgres
@@ -161,6 +169,7 @@ repos:
     slug: example-org/example-dbt-project
     git_url: https://github.com/example-org/example-dbt-project.git
     github_account: personal-pat
+    provider: chatgpt    # names a providers entry; omit to use default_provider
     review:
       thinking: medium   # full extended thinking adds latency/tokens with little
                          # finding delta on focused SQL diffs
