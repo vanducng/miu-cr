@@ -39,3 +39,9 @@ Do not report when:
 - `SELECT *` feeds an ephemeral CTE/subquery whose outer statement immediately names the columns it keeps.
 - The WHERE-less UPDATE/DELETE targets a temp/staging table rebuilt each run.
 - The LEFT JOIN's WHERE filter is `IS NULL`/`IS NOT NULL` on the join key — an intentional anti-join/semi-join.
+
+## Unit of change
+
+Default only. A repository rule that names a unit replaces this.
+
+One intent is one migration or one query behavior, with the constraint and the test or fixture that pins it. The migration and the code that cannot ship without it are one unit. Do not combine two unrelated tables.

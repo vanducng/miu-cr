@@ -39,3 +39,9 @@ Do not report when:
 Do not report when:
 - `pickle`/`shell=True`/formatted SQL touches only trusted literals or config, with no user-controlled input in reach.
 - Interpolated SQL identifiers (table/column names) come from a fixed allowlist — placeholders cannot bind identifiers.
+
+## Unit of change
+
+Default only. A repository rule that names a unit replaces this.
+
+One intent is one module behavior or one task, with the test that pins it. Do not combine two jobs or two services.

@@ -41,3 +41,9 @@ Do not report when:
 - Loop-var capture where go.mod pins Go >= 1.22 and no goroutine is involved — per-iteration semantics already apply.
 - The file is `_test.go` — allocation and perf nits don't matter there.
 - The diff only moves or renames existing code; pre-existing patterns are not new findings.
+
+## Unit of change
+
+Default only. A repository rule that names a unit replaces this.
+
+One intent is one behavior or one package API, together with the test that pins it. A refactor of that same behavior is the same unit when it is the only change. Do not combine two packages' features. A one-line fix that is the whole bug is already one review.

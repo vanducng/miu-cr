@@ -43,3 +43,9 @@ Do not report when:
 Do not report when:
 - `JSON.parse` is already inside a try/catch, or parses data this service serialized itself.
 - `exec`/dynamic code runs only build-time or dev-tooling input (scripts, codegen), never request data.
+
+## Unit of change
+
+Default only. A repository rule that names a unit replaces this.
+
+One intent is one module contract or one user-visible behavior, with the test or the rendered check that pins it. A component and the state it reads are one unit. Do not combine two screens.

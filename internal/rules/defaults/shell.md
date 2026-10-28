@@ -38,3 +38,9 @@ Do not report when:
 Do not report when:
 - `eval` or the interpolation consumes only literals or script-internal values never derived from caller input.
 - the value is validated or allowlisted immediately before use in the visible diff.
+
+## Unit of change
+
+Default only. A repository rule that names a unit replaces this.
+
+One intent is one script behavior, with the check that runs it. Do not fold an application change into a shell-only diff.

@@ -40,3 +40,9 @@ Do not report when:
 Do not report when:
 - the mutation targets a fresh local copy (`[...arr]`, `structuredClone`) made in the same scope before the set.
 - the mutated object is a ref (`useRef().current`) or non-reactive module state, not render state.
+
+## Unit of change
+
+Default only. A repository rule that names a unit replaces this.
+
+One intent is one component behavior. The component, the state it reads, and the markup it renders are one unit. Do not combine two screens.
