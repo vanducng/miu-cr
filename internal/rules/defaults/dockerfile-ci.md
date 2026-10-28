@@ -45,3 +45,9 @@ Do not report when:
 Do not report when:
 - the missing `USER` is in a builder stage of a multi-stage build; only the final stage runs.
 - `COPY . .` is covered by a `.dockerignore` visible in the repo, or the diff only moved the line.
+
+## Unit of change
+
+Default only. A repository rule that names a unit replaces this.
+
+One intent is one image or one workflow. Do not fold an application change into a CI-only diff, and do not fold a workflow change into an unrelated image.
