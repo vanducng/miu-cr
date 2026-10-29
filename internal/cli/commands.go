@@ -1629,10 +1629,19 @@ func mcpCommand(opts *options) *cobra.Command {
 			if mcpServer == nil {
 				return &CLIError{Code: "mcp.not_wired", Message: "MCP server not wired", Exit: 1}
 			}
+			// Each tool call runs a full review, so inherit the review timeout, not the 30s global.
+			timeout := opts.timeout
+			if !cmd.Flags().Changed("timeout") {
+				cfg, err := config.Load()
+				if err != nil {
+					return err
+				}
+				timeout = reviewTimeoutDefault(cfg.Review)
+			}
 			return mcpServer.Serve(cmd.Context(), MCPRequest{
 				Transport: transport,
 				Version:   versionString(),
-				Timeout:   opts.timeout,
+				Timeout:   timeout,
 				In:        cmd.InOrStdin(),
 				Out:       cmd.OutOrStdout(),
 				Err:       cmd.ErrOrStderr(),
