@@ -1,26 +1,26 @@
 ---
 title: Store backends
-description: Choose between the default SQLite store and the opt-in Postgres backend; configure the DSN, sslmode, and the gated integration smoke.
+description: Choose the default SQLite store or opt-in Postgres. DSN, sslmode, failure behavior, and the gated integration smoke.
 ---
 
-miucr persists review history and optional PR-thread resolution state behind
-small interfaces (`store.Store`, `store.PRThreadStore`). The backend is
-selectable; the engine, CLI, publish, and MCP-server layers consume only the
-interfaces and don't change with the backend.
+miucr keeps review history and optional PR-thread resolution state in a store. SQLite is the default. Postgres is opt-in, for shared or multi-instance serve.
 
-## Backends
+```sh
+export MIUCR_STORE_BACKEND=postgres
+export MIUCR_PG_DSN='postgres://user:pass@db.internal:5432/miucr?sslmode=require'
+miucr review --pr 123
+```
 
-| Backend    | When                                  | State location                      |
-| ---------- | ------------------------------------- | ----------------------------------- |
-| `sqlite`   | Default. Single host, local/serve.    | `~/.config/miu/cr/state.db` (WAL)   |
-| `postgres` | Opt-in. Shared/multi-instance serve.  | A Postgres database you provide.    |
+| Backend | When | State location |
+| ------- | ---- | -------------- |
+| `sqlite` | Default. Single host, local or serve. | `~/.config/miu/cr/state.db` (WAL) |
+| `postgres` | Opt-in. Shared or multi-instance serve. | A Postgres database you provide. |
 
-SQLite stays the default; existing setups see no change. Postgres is purely
-opt-in.
+Existing setups see no change.
 
 ## Selecting the backend
 
-Add a `[store]` section to `~/.config/miu/cr/config.toml`:
+In `~/.config/miu/cr/config.toml`:
 
 ```toml
 [store]
@@ -28,86 +28,48 @@ backend = "postgres"   # "sqlite" (default) | "postgres"
 # dsn = "postgres://user@host:5432/miucr?sslmode=require"  # prefer the env var
 ```
 
-Resolution order for the backend is: `MIUCR_STORE_BACKEND` (env) > `[store]
-backend` (config) > `sqlite`. An empty config value falls through to `sqlite`.
+Backend resolution: `MIUCR_STORE_BACKEND` (env) > `[store] backend` (config) > `sqlite`. An empty config value falls through to `sqlite`.
 
 ## Postgres DSN
 
-The DSN is sourced from `MIUCR_PG_DSN` (env, preferred) and falls back to
-`[store] dsn` in config. **Prefer the env var** so the password need not sit in
-plaintext config.
+The DSN comes from `MIUCR_PG_DSN`, falling back to `[store] dsn`. Prefer the env var so the password stays out of plaintext config.
 
-```bash
-export MIUCR_PG_DSN='postgres://user:pass@db.internal:5432/miucr?sslmode=require'
-export MIUCR_STORE_BACKEND=postgres
-miucr review --pr 123
-```
+- Use `sslmode=require` or stricter (`verify-full`) for any non-local Postgres.
+- miucr never writes the DSN to disk or to the `miucr.cli/v1` envelope, and redacts it in every error and log line, so a password cannot leak through a connect failure.
+- Connecting has a bounded timeout of about 10s, applied to the connection ping. It is not a `connect_timeout` DSN parameter. A bad host fails fast instead of hanging.
 
-- **`sslmode=require`** (or stricter, `verify-full`) is recommended for any
-  non-local Postgres.
-- The DSN is **never persisted to disk by miucr**, never written to the
-  `miucr.cli/v1` JSON envelope, and is **always redacted** (`config.RedactString`)
-  in every error and log line, so a password can't leak via a connect failure.
-- A bounded (~10s) connect/ping timeout, a Go-side `context` deadline around the
-  connection ping (**not** a `connect_timeout` DSN parameter), makes a bad host
-  fast-fail instead of hanging.
-
-The core schema is created idempotently on open (`CREATE TABLE IF NOT EXISTS`); no
-manual migration step is required. The core `reviews`/`pr_findings` schema issues
-**no** `CREATE EXTENSION`. Only the opt-in semantic-recall layer (when
-`[embedding].enabled = true`) runs `CREATE EXTENSION IF NOT EXISTS vector` to
-provision pgvector; see [Semantic code-recall](/semantic-recall/).
+The core schema is created on open (`CREATE TABLE IF NOT EXISTS`), so no manual migration is needed. It issues no `CREATE EXTENSION`. Only the opt-in [semantic recall](/semantic-recall/) layer runs `CREATE EXTENSION IF NOT EXISTS vector`, when `[embedding].enabled = true`.
 
 ## Failure behavior
 
-Because Postgres is an **explicit** choice, an open/connect/auth failure with
-`backend = postgres` is **fatal** for the **history-read and explicit optional
-store paths**: a typed `store.unavailable` error (exit 1, safe to retry): the
-`miucr history` command, the MCP `serve` paths, and the PR-thread store (when
-`MIUCR_PR_STORE` is set). Those never silently degrade to a no-op store the way the
-implicit, opt-in SQLite PR-thread path can; a user who selected Postgres is told it
-failed (with a redacted message).
+With `backend = postgres`, a connect or auth failure is fatal for these paths, with a typed `store.unavailable` error (exit `1`, safe to retry, redacted message):
 
-The one carve-out is the **per-run history save** on `miucr review`: it is
-**best-effort on every backend**. If the store can't be opened (a bad Postgres DSN
-included), the review still runs and emits its findings; the save is skipped with
-a redacted warning and an empty `review_id`, rather than failing the review.
+- `miucr history`
+- the MCP and serve paths that read the store
+- the PR-thread store, when `MIUCR_PR_STORE` is set
+
+They never degrade to a no-op store, so a user who chose Postgres is told it failed.
+
+The exception is the per-run history save in `miucr review`. It is best-effort on every backend. If the store cannot be opened, including a bad Postgres DSN, the review still runs and emits findings. The save is skipped with a redacted warning and an empty `review_id`.
 
 ## Schema
 
-Both backends define the **same tables and columns** (a schema-parity test guards
-against drift; types differ only by dialect, e.g. SQLite `INTEGER` ↔ Postgres
-`BIGINT`). Timestamps are stored as `RFC3339Nano` TEXT in both backends for
-byte-for-byte row parity across a switch.
+Both backends have the same tables and columns. Types differ only by dialect (SQLite `INTEGER`, Postgres `BIGINT`), and timestamps are `RFC3339Nano` TEXT in both, so rows match across a switch.
 
-- `reviews`: persisted review records.
-- `pr_findings`: optional PR-thread dedupe/resolution state
-  (`owner, repo, number, fingerprint, path, status`).
+| Table | Holds |
+| ----- | ----- |
+| `reviews` | Saved review records. |
+| `pr_findings` | Optional PR-thread dedupe and resolution state (`owner, repo, number, fingerprint, path, status`). |
+| `oauth_credentials` | Postgres only. The `miucr login` record, sealed with AES-256-GCM under `MIUCR_OAUTH_KEY` (migration `0007_oauth_credentials`). See [Credentials](/credentials/#hosted-login-with-the-postgres-store). |
+| `finding_embeddings` | Postgres only, and only with `[embedding].enabled = true`. A `pgvector` column. See [Semantic code-recall](/semantic-recall/). |
 
-The Postgres backend also holds the `miucr login` record in a Postgres-only
-`oauth_credentials` table (migration `0007_oauth_credentials`), sealed with
-AES-256-GCM under `MIUCR_OAUTH_KEY`. See
-[Credentials](/credentials/#hosted-login-with-the-postgres-store).
+## Testing and the integration smoke
 
-The opt-in semantic-recall layer adds a separate, Postgres-only
-`finding_embeddings` table (a `pgvector` column), created conditionally and only
-when `[embedding].enabled = true`. The core `reviews`/`pr_findings` schema and its
-parity test are untouched by it. See
-[Semantic code-recall](/semantic-recall/) for the cost/privacy/retention model.
+- `go test ./...` needs no key or server. It runs the shared backend suite against SQLite only.
+- CI also runs that suite against real Postgres in a `pgvector/pgvector:pg17` container (`MIUCR_TEST_PG_DSN` set in that job), including the pgvector path.
+- To smoke-test your own Postgres (opt-in, never in required CI):
 
-## Testing & the integration smoke
-
-- The default test suite (`go test ./...`) is **keyless and serverless**: it runs
-  the shared backend-conformance suite against SQLite only.
-- CI additionally runs the **same conformance suite against real Postgres** via a
-  `pgvector/pgvector:pg17` service container (`MIUCR_TEST_PG_DSN` set in that job),
-  so the Postgres path (including the opt-in `pgvector` EmbeddingStore) is
-  exercised on every PR.
-- A manual, gated end-to-end smoke against your own Postgres:
-
-  ```bash
-  export MIUCR_TEST_PG_DSN='postgres://user:pass@host:5432/db?sslmode=disable'
-  go test -tags pg_integration ./internal/store/postgres -count=1
-  ```
-
-  This is opt-in (`//go:build pg_integration`) and never runs in the required CI.
+```sh
+export MIUCR_TEST_PG_DSN='postgres://user:pass@host:5432/db?sslmode=disable'
+go test -tags pg_integration ./internal/store/postgres -count=1
+```

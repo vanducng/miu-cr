@@ -1,199 +1,114 @@
 ---
 title: Serve daemon & GitHub Action
-description: Run miucr as an HMAC-verified webhook daemon, or drop the reusable composite GitHub Action into a workflow to self-review pull requests.
+description: Run PR review automatically with the miucr serve daemon (webhook, poll, or multi-repo host) or the GitHub Action.
 ---
 
-Two ways to run miu-cr's PR review automatically. Both reuse the exact same
-in-process review path as `miucr review --pr` ([GitHub PR review](/github-pr/)):
-there is no second engine and no shelling out.
+Two ways to run PR review without typing a command. Both use the same review path as `miucr review --pr` ([GitHub PR review](/github-pr/)).
 
-- **`miucr serve`**: a long-running daemon you host. The default mode handles
-  webhooks or lightweight polling from CLI flags. Host mode (`--host`) loads a
-  YAML file, uses Postgres, and watches multiple repositories from one process.
-- **The composite GitHub Action**: no daemon to host. A workflow in the target
-  repo installs the released binary and runs `miucr review --pr --post`.
-
-By default both are PAT + webhook-secret only. serve can also opt into a GitHub
-**App** installation-auth backend and an authenticated JSON **REST API** for
-queuing/reading reviews; see [REST API & GitHub App auth](/rest-api-and-github-app/).
-Those are opt-in; this page documents the default webhook + Action paths.
-
-## `miucr serve`
+| | Where it runs | Fork PRs |
+|---|---|---|
+| `miucr serve` | A daemon you host. Webhook, poll, or multi-repo host mode. | Yes |
+| GitHub Action | A workflow in the target repo. Installs the release binary, runs `miucr review --pr --post`. | No |
 
 ```sh
-WEBHOOK_SECRET=… GITHUB_TOKEN=… ANTHROPIC_API_KEY=… \
+WEBHOOK_SECRET=... GITHUB_TOKEN=... ANTHROPIC_API_KEY=... \
   miucr serve --addr :8080 --repos owner/repo,owner/other --gate high
 ```
 
+`serve` can also use GitHub App auth and a JSON REST API: see [REST API & GitHub App auth](/rest-api-and-github-app/). Both are opt-in.
+
+## `miucr serve`
+
 ### Endpoints
 
-| Method | Path        | Behaviour                                                    |
-|--------|-------------|-------------------------------------------------------------|
-| `POST` | `/webhook`  | HMAC-verified receiver for `pull_request` reviews and for `pull_request_review_comment` / pull-request `issue_comment` replies. |
-| `GET`  | `/healthz`  | `200 {"status":"ok"}` liveness probe (no auth).             |
+| Method | Path | Behavior |
+|--------|------|----------|
+| `POST` | `/webhook` | HMAC-verified receiver for `pull_request` events and for `pull_request_review_comment` / PR `issue_comment` replies. |
+| `GET` | `/healthz` | `200 {"status":"ok"}`, no auth. |
 
 ### Configuration
 
-| Source | Name              | Required | Notes                                                              |
-|--------|-------------------|----------|--------------------------------------------------------------------|
-| env    | `WEBHOOK_SECRET`  | **yes**  | Shared HMAC secret. Empty → fail-fast `serve.secret_required` (exit 2): an empty secret would accept forged webhooks. |
-| env    | `GITHUB_TOKEN` / `GH_TOKEN` | **yes** | PAT with `repo` scope to clone + post. Empty → `serve.token_required`. |
-| env    | `ANTHROPIC_API_KEY` (or compatible) | **yes** | LLM credential; see [Credentials](/credentials/). |
-| flag   | `--addr`          | no       | Listen address (default `:8080`).                                  |
-| flag   | `--repos`         | **yes**  | Owner/repo allowlist, comma-separated. Empty allowlist reviews nothing → `serve.repos_required`. |
-| flag   | `--gate`          | no       | **Publish-severity gate only**; controls which findings are posted. It never affects daemon liveness or exit code. |
+| Source | Name | Required | Notes |
+|--------|------|----------|-------|
+| env | `WEBHOOK_SECRET` | yes | Shared HMAC secret. Empty fails with `serve.secret_required` (exit `2`). |
+| env | `GITHUB_TOKEN` / `GH_TOKEN` | yes | PAT with `repo` scope, to clone and post. Empty fails with `serve.token_required`. |
+| env | `ANTHROPIC_API_KEY` (or compatible) | yes | See [Credentials](/credentials/). |
+| flag | `--repos` | yes | Comma-separated `owner/repo` allowlist. Empty fails with `serve.repos_required`. |
+| flag | `--addr` | no | Listen address. Default `:8080`. |
+| flag | `--gate` | no | Publish-severity gate only: which findings get posted. Never affects daemon liveness or exit code. Default `high`. |
 
-Secrets are resolved from the environment only. The webhook secret, GitHub token,
-and API key are **never logged, never put in the JSON envelope, and never
-persisted**. Every serve-side error is routed through `RedactString` before it
-reaches a log line, because the clone URL embeds the PAT.
+Secrets come from the environment only. The webhook secret, GitHub token, and API key are never logged, put in the JSON envelope, or persisted. Serve errors are redacted before logging because the clone URL embeds the PAT.
 
-### Request flow & semantics
+### How a webhook is handled
 
-1. **Body cap**: the request body is wrapped in a 5 MB `MaxBytesReader`
-   *before* HMAC validation; an oversized body is rejected `413`.
-2. **Event guard**: deliveries other than `pull_request`,
-   `pull_request_review_comment`, and `issue_comment` get a cheap `200` ignore
-   before HMAC (so unknown event types can't crash the parser).
-3. **HMAC**: a bad or missing `X-Hub-Signature-256` is rejected `401`; nothing
-   is dispatched.
-4. **Filter**: pull request actions `opened`, `synchronize`, `reopened`, and
-   `ready_for_review` start a review. Draft opens and closed PRs are ignored, and
-   host polling cancels unfinished jobs once the PR leaves the open set. A review
-   comment or issue comment starts a thread reply only when the action is
-   `created`, the body is a fix, deferral, or not-applicable reply, the body
-   is not one the bot wrote, and the commenter is the pull request author or an
-   owner, member, or collaborator. Issue comments must belong to a pull request. An
-   event for a repo outside `--repos` is `200`-ignored and logged.
-5. **Respond first**: serve returns `200` *before* dispatching, so GitHub's
-   ~10 s delivery budget is never spent on the LLM review.
-6. **Bounded async worker**: the review runs on a worker pool, never on the HTTP
-   goroutine. A panic in one review is recovered and can't kill a worker.
-7. **Per-PR coalesce**: two rapid review events for the same `{owner, repo, number}`
-   collapse to a single in-flight review. A thread reply is keyed by its comment
-   id, so it does not collapse into that review, and a repeated delivery of the
-   same comment collapses to one judgment. Re-runs are also safe at the publish
-   layer: the summary issue comment is upserted in place, and inline-comment
-   fingerprints prevent duplicates across commits. The reply itself is posted
-   once; a later delivery sees the reply marker and stops.
-8. **No silent drop**: if the queue is genuinely full, the drop is loud-logged
-   and counted; it is never swallowed silently.
+1. Bodies over 5 MB get `413`. Events other than `pull_request`, `pull_request_review_comment`, and `issue_comment` get `200` and are ignored.
+2. A missing or bad `X-Hub-Signature-256` gets `401`. Nothing is dispatched.
+3. `opened`, `synchronize`, `reopened`, and `ready_for_review` start a review. Drafts and closed PRs are ignored. Events for repos outside `--repos` get `200`, are ignored, and are logged.
+4. A review comment or PR issue comment starts a thread reply only when all of these hold: the action is `created`, the body is a fix, deferral, or not-applicable reply, the bot did not write it, and the commenter is the PR author or an owner, member, or collaborator.
+5. Serve returns `200` before dispatching, so GitHub's delivery timeout (about 10 s) is never spent on the review. Reviews run on a bounded worker pool; a panic in one review does not kill a worker.
+6. Two review events for the same `{owner, repo, number}` collapse into one in-flight review. A thread reply is keyed by its comment id, so repeated deliveries of one comment collapse into one judgment and the reply is posted once.
+7. Re-runs are safe at publish time: the summary comment is upserted and inline-comment fingerprints prevent duplicates across commits.
+8. If the queue is full, the drop is logged and counted, not silent.
+
+`SIGINT` / `SIGTERM` shuts the HTTP server down gracefully and drains the pool, so in-flight reviews finish.
 
 ### GitHub webhook setup
 
-In the target repo: **Settings → Webhooks → Add webhook**.
+In the target repo, go to Settings, Webhooks, Add webhook:
 
-- **Payload URL:** `https://your-host/webhook`
-- **Content type:** `application/json`
-- **Secret:** the same value as `WEBHOOK_SECRET`
-- **Events:** *Let me select individual events* → **Pull requests**, **Pull request review comments**, and **Issue comments**. Review comments and issue comments are judged only when the action is `created` and the body is a fix, deferral, or not-applicable reply. The bot ignores its own comments.
+- Payload URL: `https://your-host/webhook`
+- Content type: `application/json`
+- Secret: the value of `WEBHOOK_SECRET`
+- Events: select individual events: Pull requests, Pull request review comments, Issue comments
 
-### Shutdown
+## Poll mode
 
-`SIGINT` / `SIGTERM` triggers a graceful HTTP shutdown followed by a pool drain,
-so in-flight reviews finish before the process exits.
-
-## Poll mode (opt-in)
-
-The webhook is the **default**. For environments that can't receive an inbound
-webhook (a laptop behind NAT, a private runner, a bot PAT), `--poll` turns serve
-into a **trigger** that periodically *asks* GitHub which PRs need review and
-dispatches each one onto the **same** review path. It is a trigger only; there
-is no second review engine, no change to fork handling or publish.
+For hosts that cannot receive webhooks (a laptop behind NAT, a private runner), `--poll` asks GitHub which PRs need review and dispatches them to the same review path.
 
 ```sh
-# Poll-only (no webhook secret needed):
-GITHUB_TOKEN=… ANTHROPIC_API_KEY=… \
+# Poll only, no webhook secret needed
+GITHUB_TOKEN=... ANTHROPIC_API_KEY=... \
   miucr serve --poll --repos owner/repo,owner/other --poll-interval 60s
 
-# Webhook AND poll together (both share one ctx; a secret is still required for
-# the webhook half):
-WEBHOOK_SECRET=… GITHUB_TOKEN=… ANTHROPIC_API_KEY=… \
+# Webhook and poll together (the secret is still required)
+WEBHOOK_SECRET=... GITHUB_TOKEN=... ANTHROPIC_API_KEY=... \
   miucr serve --poll --repos owner/repo --addr :8080
 ```
 
-| Flag              | Default         | Notes                                                                 |
-|-------------------|-----------------|-----------------------------------------------------------------------|
-| `--poll`          | off             | Opt-in. Without it serve is webhook-only (the default).               |
-| `--poll-interval` | `60s`           | Poll **floor**. Effective interval = `max(this, X-Poll-Interval)`.    |
-| `--poll-source`   | `notifications` | Candidate source: `notifications` (default) or `pulls`.               |
-| `--repos`         | **required**    | The same owner/repo allowlist; bounds the PAT + LLM blast radius.    |
+| Flag | Default | Notes |
+|------|---------|-------|
+| `--poll` | off | Without it, serve is webhook-only. |
+| `--poll-interval` | `60s` | Floor. Effective interval is `max(this, X-Poll-Interval)`. |
+| `--poll-source` | `notifications` | `notifications` or `pulls`. |
+| `--repos` | required | Allowlist; bounds the PAT and LLM spend. |
 
-> **Cost model: each new head SHA is one full LLM review.** Poll mode reviews a
-> PR once per distinct head commit. The poller keeps a local dedup cursor so the
-> *same* head is never reviewed twice, but a re-pushed head is a new SHA and gets
-> a fresh review. The allowlist and the per-head dedup are the only spend guards;
-> there is no budget cap, so keep `--repos` tight and the interval sane.
+:::caution[Each new head SHA is one full LLM review]
+A PR is reviewed once per distinct head commit. The same head is never reviewed twice, but a re-push is a new head. The allowlist and per-head dedup are the only spend guards; there is no budget cap. Keep `--repos` tight and the interval sane.
+:::
 
-### Candidate sources
+| Source | Sees | Cost |
+|--------|------|------|
+| `notifications` | Only PRs the PAT is subscribed to or requested on (`review_requested`, mentions). Misses PRs opened before the poller started. Good for a bot added as reviewer. | Light. |
+| `pulls` | Every open PR in each allowlisted repo, including cold start and PATs not subscribed to the repo. | One list call per repo per tick. |
 
-- **`notifications`** (default, lighter): reads your GitHub **notifications**
-  with a `Since` cursor and maps `review_requested` / mention notifications to the
-  PR. Only sees PRs the PAT is **subscribed to / requested on**, and **misses PRs
-  opened before** the poller started (cold start). Best for a bot that is added as
-  a reviewer.
-- **`pulls`** (full coverage): lists **open PRs per allowlisted repo**
-  (`Pulls.List(state=open)`). The only source that works for a PAT **not
-  subscribed** to a repo and the only **cold-start-complete** one. Costs one list
-  call per repo per tick; use it when you need every open PR reviewed regardless
-  of subscription.
+Each tick: list candidates filtered to `--repos`, skip a notification whose `updated_at` is unchanged, resolve the head SHA, skip if that head was already reviewed, otherwise dispatch. A head is recorded as reviewed only after the review succeeds, so a failed or dropped review is retried on the next tick. The `Since` cursor advances only after every candidate in the tick is handled.
 
-### How a tick works
+**Rate limits.** The poller never polls faster than the server's `X-Poll-Interval`. On a rate limit it sleeps until the reset time; on an abuse limit it honors `Retry-After`; other transient errors back off exponentially with jitter (cap about 15 min). On any error the cursor does not advance and no review is re-run.
 
-1. **Enumerate** candidates (per the source above), filtered to `--repos`;
-   non-`PullRequest` notification subjects are dropped.
-2. **Pre-`GetPR` dedup** (notifications only): if a notification's `updated_at`
-   is unchanged since last tick, the candidate is skipped with **no `GetPR`** (a
-   cheap cost guard before spending any API call to resolve the head).
-3. **Resolve the head SHA**: one `GetPR` for the notifications source; the
-   `pulls` source already carries `pr.Head.SHA` (no extra call).
-4. **Per-head dedup**: if the cursor already saw this `owner/repo#N` at this head
-   SHA, **skip** (no review). Otherwise dispatch onto the serve pool.
-5. **Record on success only**: the head SHA is recorded as reviewed **after the
-   review succeeds** (via an `OnDone` callback). A failed/dropped review stays
-   retryable next tick. The `Since` cursor advances to the tick start **only after
-   every candidate that tick is handled**, so no candidate is lost.
-
-### Rate limits & interval floor
-
-The poller never polls faster than the server's `X-Poll-Interval` header (read off
-each response): the effective wait is `max(--poll-interval, X-Poll-Interval)`. On
-a `*RateLimitError` it sleeps until the rate `Reset`; on an `*AbuseRateLimitError`
-it honors `Retry-After`; other transient errors back off exponentially with jitter
-(cap ~15 min). **On any error the cursor is never advanced and no review is
-re-run**: there is never a tight retry loop.
-
-### The cursor (restart-safe, never holds the token)
-
-Dedup state is a small JSON file under `~/.config/miu/cr/poll-cursor.json`:
+**Cursor.** Dedup state is `~/.config/miu/cr/poll-cursor.json`, written atomically with mode `0600`:
 
 ```json
-{ "since": "…", "seen": { "owner/repo#N": "<head-sha>" },
+{ "since": "...", "seen": { "owner/repo#N": "<head-sha>" },
   "notif_seen": { "owner/repo#N": "<updated_at>" } }
 ```
 
-- Written **atomically** (`MkdirAll(0700)` + temp file + rename, file mode `0600`).
-- The **GitHub token is never a field**: it is resolved per tick in memory only,
-  never persisted, never logged.
-- A **missing or corrupt** file is tolerated as an empty cursor (warn, never
-  fatal) so the poller always starts.
-- Entries are pruned by **staleness** (untouched ~14 days), not by absence from a
-  tick, so an open PR that drops out of one tick's candidate set keeps its
-  reviewed-head and is never re-reviewed.
+The GitHub token is never stored in it. A missing or corrupt file is treated as empty (warning, not fatal). Entries are pruned after about 14 days untouched, not when a PR drops out of one tick, so an open PR is not re-reviewed.
 
-### Poll-mode shutdown
+`SIGINT` / `SIGTERM` stops the ticker and drains the pool once; in-flight reviews finish.
 
-`SIGINT` / `SIGTERM` cancels the shared context: the ticker stops and the worker
-pool is drained **exactly once** (poll-only drains in `RunPoll`; in webhook+poll
-the HTTP server is the sole drainer and the poller never drains), so in-flight
-reviews finish and there is no goroutine leak.
+## Host mode
 
-## Host mode (Postgres multi-repo)
-
-`miucr serve --host` is the long-running, multi-repository form of serve. It is
-designed for a local server, VM, or small container deployment where one daemon
-watches several repositories, keeps durable state in Postgres, and dispatches
-each PR head as a separate review session.
+`miucr serve --host` is the multi-repo form: one daemon watches several repositories, keeps state in Postgres, and runs each PR head as a separate review session. It targets a local server, VM, or small container. It polls with `poll_source: pulls`; the classic webhook path above stays available for webhook-only setups.
 
 ```sh
 MIUCR_CONFIG=/etc/miu/cr/host.yaml \
@@ -201,21 +116,16 @@ MIUCR_STORE_BACKEND=postgres \
 MIUCR_PG_DSN='postgres://miucr:miucr@localhost:5432/miucr?sslmode=disable' \
   miucr serve --host
 
-# Validate YAML and print a redacted summary only.
+# Validate the YAML and print a redacted summary
 MIUCR_CONFIG=examples/review-host/config.example.yaml \
   miucr serve --host --dry-run-config -o json
 ```
 
-Host mode currently focuses on `poll_source: pulls` for full open-PR coverage.
-The classic `miucr serve` webhook path above remains available for webhook-only
-deployments; the host YAML reserves webhook fields for the multi-repo host path
-without changing the existing webhook contract.
+A runnable setup is in [`examples/review-host/`](https://github.com/vanducng/miu-cr/tree/main/examples/review-host). The Docker publish workflow pushes the runtime image as `ghcr.io/<owner>/miu-cr`.
 
-### Host YAML shape
+### Host YAML
 
-The host config lives at `~/.config/miu/cr/host.yaml` by default, or at
-`MIUCR_CONFIG` when set. It is YAML, not TOML, so shared blocks can use anchors
-and each repo can stay short:
+The config is YAML (so anchors work) at `~/.config/miu/cr/host.yaml`, or at `MIUCR_CONFIG` when set.
 
 ```yaml
 version: 1
@@ -227,7 +137,7 @@ providers:
     auth_env: ANTHROPIC_API_KEY
   chatgpt:
     kind: openai
-    auth: oauth             # credential comes from `miucr login` (oauth.json)
+    auth: oauth             # credential comes from `miucr login`
     model: gpt-5.5
 
 store:
@@ -245,30 +155,19 @@ github:
       installation_id_env: MIUCR_GITHUB_APP_INSTALLATION_ID
       private_key_path_env: MIUCR_GITHUB_APP_PRIVATE_KEY_PATH
 
-x:
-  review_defaults: &review_defaults
-    gate: high
-    filter_mode: diff_context
-    min_severity: low
-    format: full            # comment presentation: full (default) | minimal (drops the summary section + all badges)
-    timeout: 900s
-    stalled_timeout: 5m
-    provider_retry:
-      max_retries: 10
-      initial_backoff: 5s
-      max_backoff: 2m
-      max_elapsed: 10m
-    expand: 20
-    token_budget: 0
-    deep_context: true
-    conversation: true
-    tools:
-      max_retries: 2
-      max_turns: 24
-      retry_backoff: 250ms
-
 review:
-  <<: *review_defaults
+  gate: high
+  filter_mode: diff_context
+  min_severity: low
+  format: full              # full | minimal (drops the summary section and all badges)
+  timeout: 900s
+  stalled_timeout: 5m
+  provider_retry: { max_retries: 10, initial_backoff: 5s, max_backoff: 2m, max_elapsed: 10m }
+  expand: 20
+  token_budget: 0
+  deep_context: true
+  conversation: true
+  tools: { max_retries: 2, max_turns: 24, retry_backoff: 250ms }
 
 agent:
   system_prompt_file: prompts/default-reviewer.md
@@ -292,11 +191,8 @@ host:
     force: false
     suggest: true
     patch_repair: false
-    thread_resolution_sync:
-      mode: off
-      interval: 5m
-    approval:
-      mode: off
+    thread_resolution_sync: { mode: off, interval: 5m }
+    approval: { mode: off }
 
 repos:
   - name: service-api
@@ -317,145 +213,58 @@ repos:
     provider: chatgpt       # omit to use default_provider
 ```
 
-Layering is intentionally simple: built-in defaults -> top-level `review` and
-`agent` -> `host.review` -> `repos[].review` / `repos[].agent`. Repo-level
-settings are where risky write behavior belongs (`post`, `force`, `suggest`,
-`patch_repair`, `thread_resolution_sync`, `approval`) because they decide what
-the host may do for that repository. `review.tools` follows the same
-layering, but it is read-only and only controls scan/output limits plus bounded
-tool retry behavior.
+Layering, lowest to highest: built-in defaults, top-level `review` and `agent`, `host.review`, `repos[].review` and `repos[].agent`. Put write behavior (`post`, `force`, `suggest`, `patch_repair`, `thread_resolution_sync`, `approval`) at the repo level, since it decides what the host may do to that repo. The `provider_retry`, `tools`, and `subagents` keys are the same as in [Providers](/providers/#review-defaults-review) and follow the same layering. A required subagent failure marks the run degraded, so approval will not approve and checks mode will not report success.
 
-`repos[].provider` picks the model provider for one repo. It names an entry
-under `providers` (or a built-in `anthropic`/`openai`); empty means
-`default_provider`. One host process can mix providers, for example most repos
-on an Anthropic-compatible gateway and a few on a ChatGPT-plan `kind: openai`,
-`auth: oauth` provider. Everything that calls the model for that repo uses its
-provider: the review pass, subagents, anchor recovery, patch repair, and thread
-reply judging. Quota counters are per provider instance, so repos that share a
-provider share its quota. Each distinct provider's `auth_env`/`auth_command` is
-resolved once per config load, and only for enabled repos. An unknown `provider`
-or `default_provider` fails the config load with `config.invalid`. Changing a
-repo's provider does not re-review heads that were already reviewed.
+### Per-repo settings
 
-A provider's `auth` is authoritative on the host. With `auth: oauth` the repo
-uses only the `miucr login` session in `oauth.json` and never falls back to
-`OPENAI_API_KEY` or a `config.toml` profile key. Such a provider must be
-`kind: openai` and must not set `auth_env` or `auth_command`. Omit `model` or set
-a model the ChatGPT plan accepts, such as `gpt-5.5`. The host refreshes the
-token in place, so mount `oauth.json` writable.
+| Key | Default | Behavior |
+|-----|---------|----------|
+| `repos[].provider` | `default_provider` | Names an entry under `providers` or a built-in. An unknown name fails config load with `config.invalid`. Changing it does not re-review heads already reviewed. |
+| `timeout` | `900s` | Total review time. Also used for the job lease, so a timed-out review fails cleanly and is retried by the durable job policy. Raise it per repo, not globally. |
+| `stalled_timeout` | `5m` | No-progress watchdog. Any progress event resets it; silence longer than this fails the run as `review.stalled`. `0s` disables it (debugging only). |
+| `debounce` | `0s` (off) | Wait until the PR head has been stable this long, so a burst of pushes becomes one review. If the wait is over 2m and the head has no failed checks, the job is claimable after 2m; a failed check keeps the full wait. A later poll can move a queued job earlier, never later. It changes when a review runs, not what it does, and does not re-review reviewed heads. While queued, the summary comment shows a queued-until time, then a reviewing status with the previous result still visible. |
 
-`timeout` follows the same layering. The review default is `900s`; raise
-`repos[].review.timeout` for large or critical repos instead of making every
-host review wait longer. The host uses the resolved timeout for both the review
-context and the job lease, so a timed-out review fails cleanly and is retried by
-the normal durable job policy.
+**Mixing providers.** One host can run most repos on an Anthropic-compatible gateway and a few on a ChatGPT-plan `kind: openai`, `auth: oauth` provider. Everything that calls the model for a repo uses its provider: review, subagents, anchor recovery, patch repair, thread reply judging. Quota counters are per provider instance, so repos sharing a provider share its quota. Each provider's `auth_env` / `auth_command` is resolved once per config load, for enabled repos only.
 
-`stalled_timeout` is the no-progress watchdog. The default is `5m`: every
-review progress event resets it, and a run that stays silent longer than this
-fails as `review.stalled` instead of consuming the full total `timeout`. Use
-`0s` only to disable the watchdog for debugging; otherwise tune it per large
-repo alongside `timeout`.
+**OAuth providers.** `auth` is authoritative on the host. With `auth: oauth` the repo uses only the `miucr login` session and never falls back to `OPENAI_API_KEY` or a `config.toml` key. It must be `kind: openai` and must not set `auth_env` or `auth_command`. Omit `model` or use one the ChatGPT plan accepts, such as `gpt-5.5`. The host refreshes the token in place, so mount `oauth.json` writable (file backend). See [Credentials](/credentials/).
 
-`debounce` (default off / `0s`) delays a review until the PR head has been
-stable for that long, so a burst of pushes coalesces into one review on the
-settled head instead of each push superseding the prior in-flight review. It
-follows the same review/`repos[].review` layering. Raise it for repos whose
-PRs are pushed rapidly. When the configured wait is longer than 2m and the
-head has no failed checks, the job becomes claimable after 2m. A failed check
-keeps the full wait. A later poll can move a queued job earlier, and it does
-not push the start later. Debounce changes only *when* a review runs, never the
-review itself, so tuning it does not re-review already-reviewed heads. When a debounced
-host job is first queued, miucr upserts the summary with a queued-until timestamp;
-once the review starts, the same comment switches to a reviewing status while the
-previous completed result remains visible.
+### Approval
 
-`provider_retry` is the provider API retry policy. The default retries `429`,
-`5xx`/`529`, temporary transport failures, and a `400` whose message says the
-model provider is not registered yet or that the run failed internally,
-10 times with jittered exponential
-backoff (`5s` initial, `2m` max, `10m` elapsed) inside the same review timeout.
-Tune it per critical or flaky-provider repos; set `max_retries: 0` only when you
-need fail-fast debugging.
-
-`review.subagents` follows the same layering. Configure broad defaults at the
-top level, then override the scoped agents per repo when a project benefits from
-different prompts or globs. A required subagent failure marks the run degraded,
-so host approval will not approve and checks-mode will not report success.
-
-Approval is a nested policy, not a boolean. Keep it off at the host level unless
-all repos should share the same merge behavior, then enable it per repo:
+`review.approval` is a policy, not a boolean. Leave it off at the host level and enable it per repo:
 
 ```yaml
 repos:
   - name: low-risk-service
     slug: example-org/low-risk-service
     review:
-      approval:
-        mode: threshold
-        max_priority: P3
-        note: on_findings
-
+      approval: { mode: threshold, max_priority: P3, note: on_findings }
   - name: strict-infra
     slug: example-org/strict-infra
     review:
-      approval:
-        mode: clean
+      approval: { mode: clean }
 ```
 
-Symbol context bounds in host mode:
+| Key | Values | Behavior |
+|-----|--------|----------|
+| `mode` | `off`, `clean`, `threshold` | `clean` approves only when no blocking findings remain. `threshold` approves when the worst blocking finding is at or below `max_priority`. Accepted deferrals and irrelevant off-diff notes never block. |
+| `max_priority` | `P0` to `P4` | `threshold` only. `P3` allows P3/P4 and blocks on P0 to P2. |
+| `note` | `none`, `on_findings`, `always` | Default: a first approval gets a short LGTM body linking the summary, and clean re-approvals after a later push stay bodyless. `none` suppresses text. `on_findings` keeps clean approvals bodyless and adds text only when findings remain. |
 
-```yaml
-review:
-  provider_retry:
-    max_retries: 10
-    initial_backoff: 5s
-    max_backoff: 2m
-    max_elapsed: 10m
-  tools:
-    max_retries: 2
-    max_turns: 24
-    retry_backoff: 250ms
-    symbol_context:
-      max_bytes: 16000
-      max_files: 2000
-      max_parallel: 8
-```
+The old clean-approval key was removed; use `review.approval`.
 
-`max_retries` is capped at `5` and applies only to transient tool execution
-failures. `max_turns` caps model tool-use turns before miucr withdraws tools and
-forces the final JSON answer; `0` or unset keeps the default `24`, and the value
-is capped at `64`. Bad tool arguments, unknown tools, missing files, and canceled
-contexts are returned to the model immediately.
+### Thread resolution sync and reply judging
 
-`mode: clean` approves only when no blocking findings remain. Accepted deferrals
-and irrelevant off-diff notes do not block. `mode: threshold` approves
-when the worst blocking finding is at or below `max_priority`. For example,
-`max_priority: P3` allows P3/P4 findings and blocks approval for P0-P2. By
-default, a first approval body is short LGTM-style copy with a link to the code
-review summary. Clean re-approvals after a later push can stay bodyless. Set
-`note: none` to suppress approval text, or `note: on_findings` to keep clean
-approvals bodyless and add text only when findings remain. The old
-clean-approval key is removed; use `review.approval` in host and repo configs.
+`thread_resolution_sync.mode` is `off` (default), or `poll`. `webhook` is reserved and not supported yet. With `poll`, the host mirrors GitHub review-thread state into the summary table every `interval` (default `5m`, per PR):
 
-`thread_resolution_sync.mode` is `off` by default. Set `mode: poll` for repos
-where the host should periodically mirror GitHub review-thread state into the
-summary table. If a miucr inline conversation is manually resolved, the existing
-summary row moves to Resolved with `conversation resolved`; if that same
-conversation is later unresolved, only that conversation-resolved row reopens.
-`interval` controls the per-PR polling cadence and defaults to `5m`. Mirroring a manually resolved thread does not start a model review. A polled host judges developer replies (`Fixed in <sha>: ...`, `Deferred: ...`, `Not applicable: ...`) on each poll, with one short model call per reply. That does not require a webhook, thread sync, or an approval mode. A reply on a finding posted by a different miu-cr identity is left alone. A reply that is waiting on a summary is tried again after 15 minutes. A failed judgment waits an hour. Each pull request accepts at most 24 reply judgments per hour. When nothing open remains, including when only accepted deferrals remain, the same poll can approve the current head under the repo approval policy. A later reply that only confirms the finding was already handled can approve the same way. If CI or mergeability is not ready, the summary says approval is waiting. A review that already passed policy but waited on CI or unverified mergeability is retried on that poll too, even when thread sync is off, as long as approval is `clean` or `threshold`. The retry and the summary upsert both use the comment written by the authenticated user, including a GitHub App bot. Shutdown waits for that in-flight retry to finish.
+- A manually resolved miucr thread moves its summary row to Resolved (`conversation resolved`); unresolving it reopens that row. Mirroring does not start a model review.
+- Each poll also judges developer replies (`Fixed in <sha>: ...`, `Deferred: ...`, `Not applicable: ...`), one short model call per reply. This works without a webhook, thread sync, or an approval mode.
+- Limits: a reply on a finding posted by a different miu-cr identity is ignored; a reply waiting on a summary is retried after 15 minutes; a failed judgment waits an hour; each PR accepts at most 24 reply judgments per hour.
+- When nothing open remains (accepted deferrals do not count), the poll can approve the current head under the repo approval policy. If CI or mergeability is not ready, the summary says approval is waiting. A review that passed policy but waited on CI or unverified mergeability is retried on the poll even with thread sync off, when approval is `clean` or `threshold`.
+- The retry and summary upsert use the comment written by the authenticated user, including a GitHub App bot. Shutdown waits for an in-flight retry.
 
-GitHub also exposes
-[`pull_request_review_thread`](https://docs.github.com/en/webhooks/webhook-events-and-payloads#pull_request_review_thread)
-webhooks for resolved and unresolved conversations. The reserved future mode for
-event-driven sync is `mode: webhook`, but current host mode supports only `off`
-and `poll`.
+### PR filter
 
-`review.pr_filter` also layers top-level -> `host.review` -> `repos[].review`.
-Draft PRs are skipped unless `include_drafts: true`. `default_action` defaults
-to `include`, so normal configs review every ready PR except ones matched by an
-`exclude` rule. Set `default_action: exclude` for allowlist repos. Rules are
-evaluated in order and the last matching rule wins, so repo-level `include`
-rules can override global excludes:
+`review.pr_filter` layers like the rest. Drafts are skipped unless `include_drafts: true`. `default_action` is `include` (review every ready PR not matched by an `exclude` rule); use `exclude` for allowlist repos. Rules run in order and the last match wins. Matchers inside one rule are ANDed. Rules append across layers, so keep broad `include` rules out of the global block when a repo should be a strict allowlist.
 
 ```yaml
 review:
@@ -463,22 +272,12 @@ review:
     default_action: include
     include_drafts: false
     comment_trigger_regexes:
-      - '(^|\s)(/miucr review\b|@vanducng\b)'
+      - '(^|\s)(/miucr review\b|@review-bot\b)'
     rules:
       - action: exclude
         title_regexes: ['^chore\(deps\):']
 
 repos:
-  - name: example-infra
-    slug: example-org/infra
-    review:
-      pr_filter:
-        rules:
-          - action: exclude
-            title_regexes:
-              - '^chore\(deps\):'
-              - '^chore\(fluxcd\):'
-
   - name: example-dbt-project
     slug: example-org/example-dbt-project
     review:
@@ -486,96 +285,39 @@ repos:
         default_action: exclude
         rules:
           - action: include
-            authors: ["vanducng"]
+            authors: ["alice"]
           - action: include
-            requested_reviewers: ["vanducng"]
+            requested_reviewers: ["alice"]
 ```
 
-Matchers inside one rule are ANDed. Use title-only rules for generated PRs that
-may be opened by a human account, such as Renovate branches pushed by a
-maintainer token. Because rules append across layers, keep broad `include` rules
-out of the global block when a repo should be a strict allowlist.
+Matchers: `authors` (exact login), `author_types` (`Bot`, `User`, `Organization`), `author_associations` (`OWNER`, `MEMBER`, ...), `title_regexes`, `labels`, `requested_reviewers`, `base_branches`, `head_branches`. Use title-only rules for generated PRs a human account may open, such as Renovate branches pushed with a maintainer token.
 
-Supported matchers are `authors` (exact login), `author_types` (`Bot`, `User`,
-`Organization`), `author_associations` (`OWNER`, `MEMBER`, etc.),
-`title_regexes`, `labels`, `requested_reviewers`, `base_branches`, and
-`head_branches`. `comment_trigger_regexes` are used by the GitHub Action
-comment-trigger workflow, not by `serve --host poll_source: pulls`, because PR
-list polling does not include issue comment bodies. A PR excluded by the filter
-is treated as no longer tracked by the host poller, so any prior open session or
-pending job for that PR is closed/canceled on the next reconcile.
-
-At `MIUCR_LOG_LEVEL=debug`, filtered PRs log `host: PR ignored by filter` with
-structured fields for later debugging: `repo`, `pr`, `head_sha`, branches,
-author metadata, labels, requested reviewers, `reason_code`, a short `reason`,
-and matched rule fields such as `rule_index`, `rule_action`, and
-`rule_title_regexes`.
+`comment_trigger_regexes` is used by the Action comment-trigger workflow, not by `poll_source: pulls` (PR list polling does not include comment bodies). A PR excluded by the filter is no longer tracked, so its open session or pending job is canceled on the next reconcile. At `MIUCR_LOG_LEVEL=debug`, an excluded PR logs `host: PR ignored by filter` with `repo`, `pr`, `head_sha`, branches, author fields, labels, requested reviewers, `reason_code`, `reason`, and the matched `rule_index`, `rule_action`, `rule_title_regexes`.
 
 ### Accounts, prompts, and rules
 
-- `github.accounts` can mix PATs and GitHub App installations. PATs support
-  `auth_env`, `auth_file`, or `auth_command`. App private keys support
-  `private_key_path`, `private_key_path_env`, or `private_key_command`.
-- `providers.*` supports `auth_env` and `auth_command` too. Literal
-  `auth_token` exists for compatibility, but env or command indirection is
-  preferred.
-- `agent.system_prompt` and `agent.system_prompt_file` are mutually exclusive.
-  A repo prompt overrides the global prompt; absent repo prompts inherit it.
-- `repos[].rules` can reference Markdown files or a non-recursive directory of
-  `*.md` files. Host rules are trusted operator context, appended after the
-  system prompt. The built-in finding schema and severity contract remain in the
-  protected system prompt.
+- `github.accounts` can mix PATs and App installations. PATs accept `auth_env`, `auth_file`, or `auth_command`. App keys accept `private_key_path`, `private_key_path_env`, or `private_key_command`.
+- `providers.*` accepts `auth_env` and `auth_command`. A literal `auth_token` exists for compatibility; prefer indirection.
+- `agent.system_prompt` and `agent.system_prompt_file` are mutually exclusive. A repo prompt replaces the global one; without one, the repo inherits it.
+- `repos[].rules` takes Markdown files or a non-recursive directory of `*.md`. Host rules are trusted operator context, appended after the system prompt. The finding schema and severity contract stay in the protected system prompt.
 
 ### Storage and retention
 
-Host mode stores repo/session/job/cursor state in Postgres. Set
-`MIUCR_STORE_BACKEND=postgres` as well so review history and trace records use
-the same Postgres database instead of the default local SQLite store. The runner
-claims jobs with row locks so multiple workers or instances do not review the
-same PR head concurrently. Completed jobs, old attempts, closed sessions,
-inactive workspace records, and stale poll cursors are pruned by
-`host.retention`. Startup applies versioned Postgres migrations under an
-advisory lock and records them in `schema_migrations`, so multiple host
-instances can boot without racing schema changes.
+Repo, session, job, and cursor state live in Postgres. Also set `MIUCR_STORE_BACKEND=postgres` so review history and traces use the same database instead of local SQLite. Workers claim jobs with row locks, so several workers or instances never review the same PR head at once. `host.retention` prunes completed jobs, old attempts, closed sessions, inactive workspace records, and stale poll cursors. Startup applies versioned migrations under an advisory lock and records them in `schema_migrations`, so instances can boot together.
 
-The workspace-size fields are validated and reserved for the managed-workspace
-phase. V1 PR reviews still use the existing temp-clone path, so host mode does
-not delete arbitrary filesystem children under `workspace_dir`.
+The workspace-size fields (`max_workspace_bytes`, `max_workspaces`, `min_free_space`) are validated but reserved. PR reviews still use temp clones, and the host does not delete files under `workspace_dir`.
 
-### Host logging and trace payloads
+### Logging and traces
 
-`MIUCR_LOG_LEVEL` controls process logs (`debug`, `info`, `warn`, `error`;
-default `info`). The review-host compose example defaults it to `debug` so local
-dogfood shows poll activity, review progress, tool turns, and lifecycle events.
-
-Live trace payload logging is separate. Set `MIUCR_TRACE_LOG=true` to stream
-captured review trace steps into debug logs: system prompt, user prompt,
-selected files, injected rules, resolved model, tool calls, tool results, and
-final response. Tool results are bounded before they enter the trace. Each
-payload is redacted with the same free-text redactor used elsewhere and then
-truncated to `MIUCR_TRACE_LOG_MAX_BYTES` (minimum `256`). The review-host
-`.env.example` enables it for local dogfood with a `20000` byte cap per step,
-while the compose fallback remains off for deployments without an env file.
-Treat it as a local/debug switch because payloads can include prompt and diff
-context.
-
-Set `MIUCR_TRACE_REASONING=true` to add a `reasoning` trace step capturing what
-the model thought before answering: Claude and z.ai GLM 4.5+ return their
-thinking verbatim; OpenAI returns only a reasoning-token count plus a
-`[hidden by provider]` marker. It is off by default, redacted in storage like
-the other trace steps, and only produces output when `[review].thinking` is on
-(it reads the existing thinking, it does not add a separate reasoning budget).
-View it with `miucr trace <review-id>`.
-
-A complete runnable example is in
-[`examples/review-host/`](https://github.com/vanducng/miu-cr/tree/main/examples/review-host).
-The Docker publish workflow builds the same runtime image and pushes it as
-`ghcr.io/<owner>/miu-cr` for VPS or Kubernetes deploys.
+| Variable | Default | Effect |
+|----------|---------|--------|
+| `MIUCR_LOG_LEVEL` | `info` | `debug`, `info`, `warn`, `error`. The review-host compose example sets `debug`. |
+| `MIUCR_TRACE_LOG` | off | Streams trace steps into debug logs: prompts, selected files, injected rules, resolved model, tool calls and results, final response. Payloads are redacted and cut to `MIUCR_TRACE_LOG_MAX_BYTES` (minimum `256`). They can contain prompt and diff text, so use it for local debugging. The review-host `.env.example` sets a `20000` cap. |
+| `MIUCR_TRACE_REASONING` | off | Adds a `reasoning` trace step. Claude and z.ai GLM 4.5+ return thinking verbatim; OpenAI returns a reasoning-token count and `[hidden by provider]`. Needs `[review].thinking` on. View with `miucr trace <review-id>`. |
 
 ## GitHub Action
 
-A reusable **composite** action (the static binary makes a Docker action pure
-overhead). Drop it into any workflow in the repo you want self-reviewed:
+A reusable composite action. Add it to a workflow in the repo you want reviewed:
 
 ```yaml
 name: PR Review
@@ -591,7 +333,6 @@ concurrency:
 jobs:
   review:
     runs-on: ubuntu-latest
-    # Never run on fork code or release automation PRs.
     if: >-
       ${{
         github.event.pull_request.head.repo.fork != true &&
@@ -606,58 +347,39 @@ jobs:
         with:
           path: ~/.config/miu/cr
           key: miucr-${{ runner.os }}-${{ github.repository_id }}-${{ github.event.pull_request.number }}
-      - uses: vanducng/miu-cr@vX.Y.Z   # pin a released tag; see github.com/vanducng/miu-cr/releases
+      - uses: vanducng/miu-cr@vX.Y.Z   # pin a released tag
         with:
           api-key: ${{ secrets.ANTHROPIC_API_KEY }}
           gate: high
 ```
 
-The cache step is optional. It preserves the local `state.db` review history and
-trace records between workflow runs for the same PR. Same-head `--post` rerun
-skipping does not depend on the cache: miucr also writes a hidden completed-publish
-marker into the PR summary comment, and only reuses it when the head SHA and
-review-shape hash match.
+The cache step is optional. It keeps local review history and traces between runs of the same PR. Skipping a same-head `--post` rerun does not depend on it: miucr writes a hidden completed-publish marker in the summary comment and reuses it only when the head SHA and review-shape hash match.
 
-For on-demand reviews, use
-[`examples/workflows/miucr-review.yml`](https://github.com/vanducng/miu-cr/blob/main/examples/workflows/miucr-review.yml).
-It adds an `issue_comment` trigger. By default, a write collaborator can comment
-`/miucr review ...`, `@vanducng review ...`, or just `@vanducng` to run a
-review. Configure include regexes in `[review.pr_filter].comment_trigger_regexes`
-or `review.pr_filter.comment_trigger_regexes`; the workflow reads trusted
-base-branch config before matching. Repo variable `MIUCR_COMMENT_TRIGGER_PATTERN`
-is only an override.
+For on-demand reviews, use [`examples/workflows/miucr-review.yml`](https://github.com/vanducng/miu-cr/blob/main/examples/workflows/miucr-review.yml). It adds an `issue_comment` trigger: a write collaborator comments `/miucr review ...`. To also trigger on a mention such as `@review-bot review ...`, add it to the patterns. Set patterns in `[review.pr_filter].comment_trigger_regexes`; the workflow reads trusted base-branch config before matching. The repo variable `MIUCR_COMMENT_TRIGGER_PATTERN` overrides it.
 
 ### Inputs
 
-| Input          | Required | Default            | Notes                                                      |
-|----------------|----------|--------------------|------------------------------------------------------------|
-| `api-key`      | **yes**  | (none)             | Review-provider key (sent as `ANTHROPIC_API_KEY` / `ANTHROPIC_AUTH_TOKEN`). |
-| `github-token` | no       | `${{ github.token }}` | Token to read the PR and post comments.                 |
-| `gate`         | no       | `high`             | Fail the run if a finding reaches this severity (`none`…`critical`). Use `none` to never block CI. |
-| `version`      | no       | `latest`           | miucr release tag to install.                              |
-| `base-url`     | no       | `""`               | Optional Anthropic-compatible gateway base URL.            |
-| `model`        | no       | `""`               | Optional model override.                                   |
-| `sarif-file`   | no       | `""`               | When set, also write a SARIF 2.1.0 report to this path (see below). Unset keeps inline-review-only behavior. |
-| `filter-mode`  | no       | `diff_context`     | Inline-eligibility filter: `added`\|`diff_context`\|`file`\|`nofilter`. |
-| `suggest`      | no       | `true`             | Emit native GitHub one-click suggestions when a fix is proven. |
-| `patch-repair` | no       | `false`            | Repair near-miss suggestions with a focused second pass; requires `suggest`. |
-| `build-from-source` | no  | `false`            | Build the checked-out source instead of installing a release. Used for miu-cr dogfood. |
-| `pr-number`    | no       | event PR number    | Override the PR number to review.                          |
-| `instruction`  | no       | `""`               | Extra free-text steer passed to `miucr review --instruction`. |
+| Input | Required | Default | Notes |
+|-------|----------|---------|-------|
+| `api-key` | yes | | Provider key, sent as `ANTHROPIC_API_KEY` / `ANTHROPIC_AUTH_TOKEN`. |
+| `github-token` | no | `${{ github.token }}` | Reads the PR and posts comments. |
+| `gate` | no | `high` | Fail the run at this severity (`none` to `critical`). `none` never blocks CI. |
+| `version` | no | `latest` | miucr release tag to install. |
+| `base-url` | no | `""` | Anthropic-compatible gateway URL. |
+| `model` | no | `""` | Model override. |
+| `sarif-file` | no | `""` | Also write SARIF 2.1.0 to this path. |
+| `filter-mode` | no | `diff_context` | `added`, `diff_context`, `file`, or `nofilter`. |
+| `suggest` | no | `true` | Native one-click suggestions when a fix is proven. |
+| `patch-repair` | no | `false` | Repair near-miss suggestions with a second pass. Requires `suggest`. |
+| `build-from-source` | no | `false` | Build the checked-out source instead of installing a release (miu-cr dogfood). |
+| `pr-number` | no | event PR number | PR to review. |
+| `instruction` | no | `""` | Free-text steer passed to `miucr review --instruction`. |
 
-All credentials are passed to the binary **via environment variables, never on
-the command line**, so they don't appear in process listings or step logs.
+Credentials reach the binary through environment variables, never the command line, so they stay out of process listings and step logs.
 
 ### SARIF / code scanning
 
-Set `sarif-file` to also publish findings to the GitHub code-scanning **Security
-tab** (and as PR annotations on changed lines), alongside the inline review. The
-SAME single review run writes the report (the action passes `--sarif-out`), so
-there is **no second LLM pass**. miucr writes the file only on a successful
-review: a failed review leaves no file, so the `hashFiles`-guarded upload below
-is simply skipped. Upload the file yourself with
-`github/codeql-action/upload-sarif`, which needs the `security-events: write`
-permission:
+Set `sarif-file` to publish findings to the code-scanning Security tab and as PR annotations, alongside the inline review. The same review run writes the report (the action passes `--sarif-out`), with no second LLM pass. The file is written only on success, so a failed review leaves none and the guarded upload is skipped. Upload it yourself with `github/codeql-action/upload-sarif`, which needs `security-events: write`:
 
 ```yaml
 permissions:
@@ -677,16 +399,11 @@ steps:
       category: miucr
 ```
 
-A full copy-paste workflow is in
-[`examples/github-action/code-review-sarif.yml`](https://github.com/vanducng/miu-cr/blob/main/examples/github-action/code-review-sarif.yml).
-Locally, `miucr review --pr <ref> -o sarif > out.sarif` produces the same document.
+A full workflow is in [`examples/github-action/code-review-sarif.yml`](https://github.com/vanducng/miu-cr/blob/main/examples/github-action/code-review-sarif.yml). Locally, `miucr review --pr <ref> -o sarif > out.sarif` produces the same document.
 
 ### Required check (`--mode checks`)
 
-The composite action runs the **review** reporter (inline comments + summary).
-For a **required status check** (one that works on **fork PRs**, **survives
-force-push**, and can **block merge** via branch protection), run the **Check
-Run** reporter by invoking miucr directly in a workflow step:
+The action posts inline comments and a summary. For a required status check that works on fork PRs, survives force-push, and can block merge, run the Check Run reporter directly:
 
 ```yaml
 permissions:
@@ -694,37 +411,17 @@ permissions:
   checks: write            # required to create the Check Run
 steps:
   - run: curl -fsSL https://cr.miu.sh/install.sh | sh
-  - run: |
-      miucr review --pr "${GITHUB_REPOSITORY}#${PR_NUMBER}" --post --mode checks --gate high
+  - run: miucr review --pr "${GITHUB_REPOSITORY}#${PR_NUMBER}" --post --mode checks --gate high
     env:
       GITHUB_TOKEN:      ${{ secrets.GITHUB_TOKEN }}
       ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
       PR_NUMBER:         ${{ github.event.pull_request.number }}
 ```
 
-Then mark the resulting `miu-cr` check **required** in *Settings → Branches →
-Branch protection*. See the [Check Run reporter](/github-pr/#check-run-reporter)
-for the full reporter semantics.
+Then mark the `miu-cr` check required in Settings, Branches, Branch protection. See the [Check Run reporter](/github-pr/#check-run-reporter).
 
-### `permissions`
+### Permissions and forks
 
-The workflow must grant `pull-requests: write` so the action can post inline
-comments and the summary. `contents: read` is enough for the checkout.
+The workflow needs `pull-requests: write` to post comments and `contents: read` for checkout.
 
-### Fork limitation
-
-The action uses the `pull_request` trigger and is guarded by
-`head.repo.fork != true`, so it **does not run on pull requests from forks**.
-This is deliberate: `pull_request_target` would carry repo secrets while checking
-out untrusted PR code, which is a well-known token-exfiltration vector. Fork-safe
-automated review is the job of the `serve` path (which never runs PR code), not
-the action. Same-repo PRs (including from branches in the repo) are reviewed
-normally.
-
-## One review path
-
-Both modes funnel into the same `cli.PRReviewer.ReviewPR` pipeline that backs
-`miucr review --pr` - same diff fetch, same engine, same upserted summary issue
-comment + head-SHA-anchored inline review comments. serve adds only the HTTP front,
-security guards, and the async worker; the action adds only install + invocation.
-Neither duplicates review logic.
+The action does not run on fork PRs: it uses the `pull_request` trigger and is guarded by `head.repo.fork != true`. This is deliberate. `pull_request_target` would expose repo secrets while checking out untrusted PR code. For fork-safe automated review, use `serve`, which never runs PR code. Same-repo branch PRs are reviewed normally.

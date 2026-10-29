@@ -39,3 +39,4 @@ __pycache__/
 
 # CI stages the canonical root install.sh here at docs build time
 docs/public/install.sh
+docs/public/skill.md

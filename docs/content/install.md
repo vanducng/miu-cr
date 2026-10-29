@@ -64,7 +64,17 @@ Expand-Archive $asset -DestinationPath ".\miucr" -Force
 .\miucr\miucr.exe version
 ```
 
-A Scoop manifest is planned.
+
+## Agent skill
+
+```sh
+# Claude Code
+curl -fsSL https://cr.miu.sh/skill.md --create-dirs -o ~/.claude/skills/miucr/SKILL.md
+# Codex, Cursor, others
+curl -fsSL https://cr.miu.sh/skill.md --create-dirs -o ~/.agents/skills/miucr/SKILL.md
+```
+
+Re-run the same command to update it.
 
 ## Update
 

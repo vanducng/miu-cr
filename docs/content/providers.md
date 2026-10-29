@@ -1,139 +1,119 @@
 ---
 title: Providers
-description: Config-driven providers; two first-class kinds (Anthropic, OpenAI) and any vendor as a named profile.
+description: Pick an LLM provider and configure profiles, quotas, and review defaults.
 ---
 
-The review pass runs against one LLM provider. Providers are **config-driven**: there are two first-class _kinds_ (`anthropic` and `openai`) and any specific vendor (GLM via z.ai, DeepSeek, Moonshot, a self-hosted gateway, any Anthropic- or OpenAI-compatible endpoint) is just a **named profile** of one of those kinds. New vendors are added by config alone, no rebuild.
+A review runs against one LLM provider. There are two kinds, `anthropic` and `openai`. Any vendor (GLM via z.ai, DeepSeek, Moonshot, a self-hosted gateway) is a named profile of one of them, added by config with no rebuild.
 
-Nothing here is persisted; see [Credentials](/credentials/).
-
-## Layering
-
-Settings resolve in this order, highest wins:
-
-```
-CLI flags  >  environment  >  config file  >  built-in defaults
+```sh
+export ANTHROPIC_API_KEY=...
+miucr review --staged
 ```
 
-The optional config file lives at `~/.config/miu/cr/config.toml` (same on macOS and Linux), alongside the SQLite state DB at `~/.config/miu/cr/state.db`, matching the miu family convention.
+Credentials are never persisted: see [Credentials](/credentials/).
 
-It is entirely optional; miu-cr works with zero config. A fully commented starter is in [`config.example.toml`](https://github.com/vanducng/miu-cr/blob/main/config.example.toml).
+## Layering and choosing
 
-## Choosing a provider
+Settings resolve highest first: CLI flags, environment, config file, built-in defaults. The config file is optional (`~/.config/miu/cr/config.toml`, same on macOS and Linux, next to `state.db`). A commented starter is in [`config.example.toml`](https://github.com/vanducng/miu-cr/blob/main/config.example.toml).
 
-`--provider` takes a **profile name**: a built-in (`anthropic`, `openai`), any name you defined in the config file, or `auto` (the default).
-
-With `auto`, miu-cr picks **OpenAI** when `OPENAI_API_KEY` is set **and** no Anthropic credential is present (`--api-key`, `--auth-token`, `ANTHROPIC_API_KEY`, or `ANTHROPIC_AUTH_TOKEN`); otherwise it uses `default_provider` from the config file (Anthropic by default). Anthropic is the default because it backs both the native API and Anthropic-compatible gateways.
+`--provider` takes a built-in (`anthropic`, `openai`), a profile name from the config file, or `auto` (default). With `auto`, miu-cr uses OpenAI when `OPENAI_API_KEY` is set and no Anthropic credential is present (`--api-key`, `--auth-token`, `ANTHROPIC_API_KEY`, `ANTHROPIC_AUTH_TOKEN`). Otherwise it uses `default_provider` (Anthropic by default).
 
 ## Config schema
 
 ```toml
-default_provider = "anthropic"   # profile to use when --provider is omitted
+default_provider = "anthropic"   # used when --provider is omitted
 
 [providers.<name>]
-kind       = "anthropic"         # or "openai"; the first-class family
-base_url   = "https://…"         # optional; gateway/endpoint override
-model      = "…"                 # optional; default model for this profile
-auth_env   = "MY_TOKEN"          # RECOMMENDED; NAME of an env var holding the credential
-auth_command = ["gopass", "show", "-o", "ai/provider"] # argv only; stdout is the token
-auth_token = "…"                 # discouraged literal credential; plaintext on disk
-auth       = "bearer"            # "bearer" | "api_key" | "oauth" | omit for legacy auto
+kind         = "anthropic"       # or "openai"
+base_url     = "https://..."     # optional endpoint override
+model        = "..."             # optional default model
+auth_env     = "MY_TOKEN"        # recommended: NAME of an env var holding the credential
+auth_command = ["gopass", "show", "-o", "ai/provider"]   # argv, stdout is the token
+auth_token   = "..."             # discouraged: plaintext on disk
+auth         = "bearer"          # bearer | api_key | oauth | omit for legacy auto
 ```
 
-The two built-in profiles `anthropic` and `openai` always exist; you only declare a `[providers.<name>]` block to add a vendor or override a built-in's `model`/`base_url`. Standard env vars and CLI flags still override profile credentials.
-Profile credential precedence is `auth_token` > non-empty `auth_env` > `auth_command`.
-`auth_command` executes the argv directly, not through a shell; stdout is trimmed
-as the token and stderr is omitted from errors because it may contain secrets.
+The `anthropic` and `openai` profiles always exist. Declare a `[providers.<name>]` block to add a vendor or override a built-in's `model` / `base_url`. Standard env vars and flags still override profile credentials.
 
-`kind` selects the protocol family. `auth` selects the credential mechanism:
+`kind` is the protocol family; `auth` is the credential mechanism:
 
-| `auth` | Valid kind | Meaning |
-| ------ | ---------- | ------- |
-| `bearer` | `anthropic` | Profile credential is sent as `Authorization: Bearer ...`; use for Anthropic-compatible gateways. |
-| `api_key` | `anthropic`, `openai` | Profile credential is sent as the provider API key (`x-api-key` for Anthropic, OpenAI API-key slot for OpenAI-compatible). |
-| `oauth` | `openai` | Use `miucr login` / ChatGPT-plan OAuth; profile static credentials are rejected. |
-| omitted | both | Legacy auto: Anthropic profile credentials are Bearer; OpenAI uses profile key > OAuth > ambient `OPENAI_API_KEY`. |
+| `auth` | Kinds | Meaning |
+|--------|-------|---------|
+| `bearer` | `anthropic` | Sent as `Authorization: Bearer ...`. For Anthropic-compatible gateways. |
+| `api_key` | `anthropic`, `openai` | Sent as the API key (`x-api-key` for Anthropic). |
+| `oauth` | `openai` | Use the `miucr login` ChatGPT-plan session. Static profile credentials are rejected. |
+| omitted | both | Anthropic profile credentials are Bearer. OpenAI uses profile key, then OAuth, then ambient `OPENAI_API_KEY`. |
 
-Credential source precedence is `auth_token` > non-empty `auth_env` > `auth_command`. `auth_command` is an argv array executed directly, never through a shell; it must print exactly one credential line to stdout. If a selected `auth_command` fails, resolution fails instead of silently falling through to OAuth or ambient env keys; stderr is omitted from the error because secret helpers may print credentials there.
+Credential source precedence is `auth_token` > non-empty `auth_env` > `auth_command`. `auth_command` runs the argv directly (no shell) and must print one credential line. If it fails, resolution fails; it does not fall through to OAuth or ambient keys. Its stderr is left out of errors because secret helpers may print there.
 
 :::caution[Prefer `auth_env` or `auth_command` over `auth_token`]
-`auth_env` names an env var; `auth_command` reads from a local secret helper such as `gopass` or `op`. Neither writes the token to the config file. `auth_token` stores the literal token **in plaintext on disk**; use it only when an env var or secret helper isn't practical. miu-cr prints a one-time warning whenever a plaintext `auth_token` is used.
+`auth_token` stores the token in plaintext in `config.toml`, and miu-cr prints a one-time warning whenever it is used. `auth_env` and `auth_command` keep it out of the file.
 :::
 
-### Per-provider usage quota: `[providers.<name>.quota]`
+### Usage quota: `[providers.<name>.quota]`
 
-Optionally cap how much a provider instance may be used over a recurring window. **There is no quota by default** (a provider with no `quota` block is uncapped). The cap is per **instance** and aggregates across every review/repo that uses it, so one block limits, say, the pricier OAuth provider everywhere at once.
+Optional cap on a provider instance over a recurring window. No quota by default. The cap is per instance and sums every review and repo using it.
 
 ```toml
 [providers.openai.quota]
-dimension = "tokens"   # tokens (default; input incl. cache + output) | requests (one per review)
-limit     = 2_000_000  # cap in the chosen dimension; must be > 0
-window    = "5h"       # a Go duration (1h, 5h, 24h, 168h) OR "monthly" (calendar month, UTC)
+dimension = "tokens"   # tokens (default) | requests (one per review)
+limit     = 2_000_000  # must be > 0
+window    = "5h"       # a Go duration (1h, 5h, 24h, 168h) or "monthly" (calendar month, UTC)
 ```
 
-- **Dimension** — `tokens` meters **all tokens processed** — uncached input + cache-read + cache-creation + output (so cached input is not undercounted); `requests` counts reviews. (`cost`/$ is not yet supported.)
-- **Window** — a fixed window: a Go duration bucketed off the epoch (so `5h` resets every 5 hours on fixed boundaries, `24h` daily), or `monthly` for a calendar month. Hourly and 5-hourly windows are first-class. Changing the window starts a fresh bucket.
-- **Enforcement** — **fail-closed and hard**: before each review the accumulated usage for the current window is checked; at/over the limit the review is **blocked** with a typed `quota.exceeded` error (and a one-shot warning at ≥80%). A counter that can't be read/opened also blocks, but as a **retryable** `store.unavailable` (not `quota.exceeded`) so a transient DB outage is retried, not mistaken for a hit. On the [serve host](/serve-and-action/), a genuine quota-blocked PR is **skipped and logged** (the poller keeps running); a later push or comment re-triggers a fresh job that re-checks the window.
-- **State** — usage counters persist in the same store as history (`state.db` for the CLI, Postgres for the host), surviving one-shot CLI invocations. A bad `dimension`/`window`/`limit` is a typed `config.invalid` (exit `2`).
-- **Metering scope** — the counter records **every LLM call** in a review — the main pass, parallel subagents, and the optional `--patch-repair` second pass — summed. Usage is captured **with its cache breakdown**: uncached input, cache-read, and cache-creation are all metered (Anthropic/z.ai report cache as separate buckets; OpenAI reports cached tokens as a sub-count of prompt tokens, normalized so cached input is counted exactly once). Review stats expose `input_tokens`, `output_tokens`, `cache_read_tokens`, `cache_creation_tokens`, `total_input_tokens`, and `cache_hit_ratio` for usage optimization. (Codex/ChatGPT-plan reviews report no usage and meter as zero.)
+- `tokens` counts all tokens processed: uncached input, cache-read, cache-creation, and output. `requests` counts reviews. Cost in dollars is not supported.
+- Durations are fixed buckets from the epoch (`5h` resets every 5 hours, `24h` daily). Changing the window starts a fresh bucket.
+- Enforcement fails closed. At or over the limit, the review is blocked with `quota.exceeded`, with a one-time warning at 80%. If the counter cannot be read, the review is blocked with a retryable `store.unavailable` instead, so an outage is not mistaken for a hit.
+- On the [serve host](/serve-and-action/), a quota-blocked PR is skipped and logged and the poller keeps running. A later push or comment re-checks the window.
+- Counters live in the same store as history (`state.db` for the CLI, Postgres for the host). A bad `dimension`, `window`, or `limit` is `config.invalid` (exit `2`).
+- Every LLM call in a review counts: main pass, subagents, and the `--patch-repair` pass. Review stats expose `input_tokens`, `output_tokens`, `cache_read_tokens`, `cache_creation_tokens`, `total_input_tokens`, and `cache_hit_ratio`. Codex/ChatGPT-plan reviews report no usage and meter as zero, so cap an `auth: oauth` provider with `dimension = "requests"`.
 
-The host config (`host.yaml`) takes the same block under each `providers.<name>`. A host repo selects its provider with `repos[].provider` (empty means `default_provider`), and the quota counter is keyed by that provider name, so repos on different providers are metered separately. Codex/ChatGPT-plan reviews meter zero tokens, so cap an `auth: oauth` provider with `dimension: requests`.
+`host.yaml` takes the same block under each `providers.<name>`. Counters are keyed by provider name, so repos on different providers are metered separately.
 
 ### Review defaults: `[review]`
 
-The optional `[review]` table sets defaults for `miucr review` flags. An **explicit flag always wins**; a `[review]` value only fills a flag you did not pass. A bad enum or timeout is a typed `config.invalid` error (exit `2`).
+Sets defaults for `miucr review` flags. An explicit flag always wins. A bad enum or timeout is `config.invalid` (exit `2`).
 
 ```toml
 [review]
-gate         = "high"          # CLI default --gate: none|info|low|medium|high|critical
-filter_mode  = "diff_context"  # CLI default --filter-mode (--pr): added|diff_context|file|nofilter
-min_severity = "low"           # optional --min-severity inline floor; unset means no floor
-format       = "full"          # CLI default --format: full|minimal
-timeout      = "900s"          # review timeout (a Go duration; CLI review default is 900s)
-stalled_timeout = "5m"         # no-progress watchdog; "0s" disables it
-expand       = 5               # CLI default --expand; --deep-context raises it to 20
-token_budget = 0               # CLI default --token-budget; 0 = no cap
-deep_context = false           # CLI default --deep-context
-# context_hops = 3             # optional override; omit to let deep_context choose automatically
-conversation = false           # CLI default --conversation on --pr
-thinking     = "auto"          # auto|off|low|medium|high. auto = extended thinking/reasoning
-                               # ON when the model supports it (Claude, gpt-5/o-series, codex) —
-                               # deeper analysis. Off (or unsupported model) falls back to
-                               # temperature. Thinking omits temperature (it forces temp 1).
-temperature  = 0               # LLM sampling temperature (0–2), used when thinking is OFF.
-                               # Default 0 = deterministic: re-reviews of the same diff stay
-                               # stable instead of churning findings. Applies to anthropic +
-                               # openai chat models; reasoning models (which need temp 1) ignore it.
-suggest      = false           # CLI default --suggest (Action input defaults true)
-patch_repair = false           # CLI default --patch-repair; requires suggest=true
+gate         = "high"          # --gate: none|info|low|medium|high|critical
+filter_mode  = "diff_context"  # --filter-mode (--pr): added|diff_context|file|nofilter
+min_severity = "low"           # --min-severity inline floor; unset = no floor
+format       = "full"          # --format: full|minimal
+timeout      = "900s"          # review timeout (Go duration)
+stalled_timeout = "5m"         # no-progress watchdog; "0s" disables
+expand       = 5               # --expand; --deep-context raises it to 20
+token_budget = 0               # --token-budget; 0 = no cap
+deep_context = false           # --deep-context
+# context_hops = 3             # optional; omit to let deep_context choose
+conversation = false           # --conversation on --pr
+thinking     = "auto"          # auto|off|low|medium|high
+temperature  = 0               # 0-2, used when thinking is off
+suggest      = false           # --suggest (the Action input defaults to true)
+patch_repair = false           # --patch-repair; requires suggest = true
 
-[review.provider_retry]        # provider API retry behavior
-max_retries = 10               # retries after the first failed provider request; 0 disables
-initial_backoff = "5s"         # jittered exponential backoff starts here
-max_backoff = "2m"             # cap each provider retry sleep
-max_elapsed = "10m"            # cap total retry sleep budget inside the review timeout
+[review.provider_retry]
+max_retries = 10               # retries after the first failure; 0 disables
+initial_backoff = "5s"
+max_backoff = "2m"
+max_elapsed = "10m"            # total retry sleep, inside the review timeout
 
-[review.tools]                 # built-in reviewer tool behavior
-max_retries = 2                # transient tool execution retries; 0 disables
-max_turns = 24                 # max model tool turns before forced finalization; 0 uses default, capped at 64
-retry_backoff = "250ms"        # initial retry delay, doubled per retry and capped
+[review.tools]
+max_retries = 2                # transient tool failures; 0 disables, capped at 5
+max_turns = 24                 # model tool turns before forced final answer; 0 = default, capped at 64
+retry_backoff = "250ms"        # doubled per retry
 
-[review.tools.symbol_context]  # internal symbol_context tool limits
-max_bytes = 16000              # cap returned text before it reaches the model
-max_files = 2000               # cap repo-wide files scanned per tool call
-max_parallel = 8               # bounded workers for large repo-wide scans
+[review.tools.symbol_context]
+max_bytes = 16000              # cap on text returned to the model
+max_files = 2000               # files scanned per call
+max_parallel = 8               # workers for large scans
 
-[review.subagents]             # optional scoped fanout inside one review
+[review.subagents]             # optional scoped fan-out inside one review
 mode = "auto"                  # off|auto|always
 max_parallel = 2               # default 2, capped at 8
-min_files = 8                  # auto threshold; 0 uses default
-min_context_bytes = 60000      # auto threshold; 0 uses default
-require_all = true             # failed subagent prevents approval/check success
-
-[review.approval]              # optional default for --approval on PR --post
-mode = "off"                   # off|clean|threshold
-max_priority = "P4"            # threshold mode only; P0|P1|P2|P3|P4
-note = "on_findings"           # none|on_findings|always
+min_files = 8                  # auto threshold; 0 = default
+min_context_bytes = 60000      # auto threshold; 0 = default
+require_all = true             # a failed subagent blocks approval and check success
 
 [[review.subagents.agents]]
 name = "go"
@@ -141,86 +121,60 @@ include = ["**/*.go"]
 exclude = ["**/*_test.go"]
 system_prompt = "Focus on correctness, concurrency, error handling, and API compatibility."
 
-[review.category_urls]         # map a finding Category → a docs URL (clickable link + SARIF helpUri)
+[review.approval]              # default for --approval on PR --post
+mode = "off"                   # off|clean|threshold
+max_priority = "P4"            # threshold only: P0..P4
+note = "on_findings"           # none|on_findings|always
+
+[review.category_urls]         # finding category -> docs URL (link and SARIF helpUri)
 "security" = "https://example.com/docs/security"
 ```
 
-`timeout` caps total review wall clock. `stalled_timeout` cancels a run that
-stops emitting progress, which catches stuck provider/tool turns sooner in host
-mode; set it to `"0s"` only when debugging. `[review.provider_retry]` retries
-transient provider failures (`429`, `5xx`, `529`, temporary transport
-errors, a `400` that says the model provider is not registered yet, and a `400`
-whose message is an opaque internal run failure) with
-bounded jittered exponential backoff. It does not retry auth, a real invalid
-request, content-policy, or context cancellation errors. `[review.tools]`
-sets the agent tool-loop budget and retries transient tool execution failures
-such as temporary filesystem/process errors, but does not retry malformed tool
-calls, unknown tools, missing files, or context cancellation.
+Notes on specific keys:
 
-A tools-less turn (the forced final answer, or a JSON repair round) is sent as the
-whole transcript. Some agent gateways flatten that transcript into one prompt and
-reject it past about 80k characters. Before those sends, miu-cr drops the oldest
-tool output, then shortens the oldest text, until the turn fits. Tool-using turns
-are left intact.
+- `thinking = "auto"` turns on extended thinking when the model supports it (Claude, gpt-5 and o-series, codex). Off, or an unsupported model, falls back to `temperature`. Thinking omits temperature because it forces 1. Default `temperature = 0` keeps re-reviews of the same diff stable; reasoning models ignore it.
+- `provider_retry` retries `429`, `5xx`, `529`, temporary transport errors, and a `400` saying the model provider is not registered yet or the run failed internally. It does not retry auth errors, genuinely invalid requests, content-policy errors, or cancellation.
+- `[review.tools]` retries transient tool failures such as temporary filesystem or process errors. Malformed calls, unknown tools, missing files, and cancellation are returned to the model immediately.
+- `symbol_context` is a read-only tool alongside `file_read` and `grep`. It answers code-intelligence lookups (symbols, definitions, references, call hierarchy, implementations, dependencies, Astro/Vue/Svelte components) from the reviewed git revision, so PR and staged reviews never read the live worktree.
+- Tools-less turns (the forced final answer, JSON repair) send the whole transcript. Some agent gateways flatten it into one prompt and reject it past about 80k characters, so miu-cr drops the oldest tool output, then shortens the oldest text, until it fits.
+- Only these attributes can be defaulted. There is deliberately no `post` or `force` config, because write and repeat-spend defaults are footguns.
 
-`symbol_context` is part of the core read-only reviewer toolset, alongside
-`file_read` and `grep`. `[review.tools.symbol_context]` tunes its bounds. The
-internal revision-pinned scanner can fetch bounded `document_symbols`,
-`definition`, `references`, `incoming_calls`, `outgoing_calls`,
-`implementations`, `dependencies`, and lightweight Astro/Vue/Svelte component
-symbols. It also supplies a compact changed-symbol prelude before the model
-turn, capped separately to a small first-pass slice of changed files. Large
-repo-wide scans use up to `max_parallel` bounded readers while preserving
-deterministic output order. It reads the same reviewed git revision as the other
-tools, so PR and staged reviews do not inspect the live worktree. The tool is
-intended for code-intelligence lookups first; use `grep` for raw text and
-`file_read` for exact lines after a target is located.
-
-Only these review attributes can be defaulted from config; there is intentionally **no** `post` or `force` config because write-action and repeat-spend defaults are footguns. Approval remains explicit as a policy object so host configs can choose strict clean approval or a priority threshold per repo.
-
-### Viewing and editing config (`config show` / `set` / `edit`)
-
-`miucr config show` prints the **effective** configuration with every credential masked (`auth_token`, the store `dsn`) by structural redaction, so a token can never reach stdout. By default it shows only your user-set values; `--all` includes the built-in defaults.
+### Viewing and editing config
 
 ```sh
-miucr config show          # user-set values only (secrets redacted)
-miucr config show --all    # full effective config incl. built-in defaults
-miucr config show -o pretty  # TOML view for humans
+miucr config show            # user-set values, credentials masked
+miucr config show --all      # include built-in defaults
+miucr config show -o pretty  # TOML view
 ```
 
-`config set <key> <value>` merges one dotted, **non-secret** scalar key (e.g. `default_provider`, `review.gate`, `providers.zai.model`, `providers.zai.auth`) into the existing config without re-running `init`; secret keys (`auth_token`, `store.dsn`) are rejected to avoid a plaintext-secret footgun. Use `config edit` or edit the file directly for array fields like `auth_command`. `config edit` opens `~/.config/miu/cr/config.toml` in `$VISUAL`/`$EDITOR` (it needs an interactive terminal; in CI use `config set`).
+`config show` masks `auth_token` and the store `dsn` structurally, so a token cannot reach stdout.
+
+`config set <key> <value>` merges one dotted, non-secret scalar (for example `default_provider`, `review.gate`, `providers.zai.model`, `providers.zai.auth`) without re-running `init`. Secret keys (`auth_token`, `store.dsn`) are rejected. Array fields such as `auth_command` need `config edit` or a direct file edit. `config edit` opens the file in `$VISUAL` / `$EDITOR` and needs an interactive terminal; in CI use `config set`.
 
 ## Anthropic
 
-```sh
-export ANTHROPIC_API_KEY=...
-miucr review --staged
-```
-
-Resolution order (first non-empty wins):
+First non-empty wins:
 
 | Setting | Flag | Env | Profile | Default |
-| ------- | ---- | --- | ------- | ------- |
-| API key (x-api-key) | `--api-key` | `ANTHROPIC_API_KEY` | - | required unless an auth token is set |
-| Auth token (Bearer) | `--auth-token` | `ANTHROPIC_AUTH_TOKEN` | `auth_token` / `auth_env` / `auth_command` with `auth = "bearer"` | - |
+|---------|------|-----|---------|---------|
+| API key (`x-api-key`) | `--api-key` | `ANTHROPIC_API_KEY` | | required unless an auth token is set |
+| Auth token (Bearer) | `--auth-token` | `ANTHROPIC_AUTH_TOKEN` | `auth_token` / `auth_env` / `auth_command` with `auth = "bearer"` | |
 | Base URL | `--base-url` | `ANTHROPIC_BASE_URL` | `base_url` | SDK default |
 | Model | `--model` | `ANTHROPIC_MODEL` | `model` | `claude-sonnet-4-5-20250929` |
 
-The API key is sent as `x-api-key`. An **auth token** is sent as a `Bearer` `Authorization` header instead, what Anthropic-compatible gateways expect.
+An auth token is what Anthropic-compatible gateways expect.
 
-## GLM via z.ai (Anthropic-compatible): example profile
+### GLM via z.ai (example profile)
 
-z.ai exposes an **Anthropic-compatible** gateway, so it's an `anthropic`-kind profile with a base URL + bearer token. There is **no z.ai-specific code**; it is purely configuration.
+z.ai has an Anthropic-compatible gateway, so it is an `anthropic` profile with a base URL and bearer token. No z.ai-specific code exists.
 
 ```toml
-# ~/.config/miu/cr/config.toml
 [providers.zai]
 kind     = "anthropic"
 base_url = "https://api.z.ai/api/anthropic"
 model    = "glm-5.2"
 auth     = "bearer"
 auth_env = "ZAI_API_KEY"
-# auth_command = ["gopass", "show", "-o", "ai/zai"]
 ```
 
 ```sh
@@ -228,7 +182,7 @@ export ZAI_API_KEY=...
 miucr review --staged --provider zai
 ```
 
-Equivalent without a config file, using the generic Anthropic env vars:
+Without a config file:
 
 ```sh
 export ANTHROPIC_BASE_URL=https://api.z.ai/api/anthropic
@@ -236,57 +190,46 @@ export ANTHROPIC_AUTH_TOKEN=$ZAI_API_KEY
 miucr review --staged --model glm-5.2
 ```
 
-…or entirely via flags:
-
-```sh
-miucr review --staged \
-  --base-url https://api.z.ai/api/anthropic \
-  --auth-token "$ZAI_API_KEY" \
-  --model glm-5.2
-```
-
 :::tip
-Set `model` (or `--model` / `ANTHROPIC_MODEL`) to a GLM model; the pinned default is an Anthropic model and won't exist on the gateway.
+Set `model` (or `--model` / `ANTHROPIC_MODEL`) to a GLM model. The default is an Anthropic model that does not exist on the gateway.
 :::
 
 :::note[Thinking on GLM]
-GLM 4.5+ (e.g. `glm-5.2`) and xAI Grok (e.g. `grok-4.7`) return extended-thinking blocks over an Anthropic-compatible endpoint, so they honor `[review].thinking` like Claude (default `auto` = on). Set `thinking = "off"` to disable, or `MIUCR_TRACE_REASONING=true` to capture the thinking into the review trace.
+GLM 4.5+ (`glm-5.2`) and xAI Grok (`grok-4.7`) return thinking blocks over an Anthropic-compatible endpoint, so they honor `[review].thinking` like Claude. Set `thinking = "off"` to disable, or `MIUCR_TRACE_REASONING=true` to capture it in the trace.
 :::
 
 :::note[Migrating from `ZAI_API_KEY`]
-Earlier builds special-cased a bare `ZAI_API_KEY`. That hardcoding is gone. Use a config profile (above) with `auth_env = "ZAI_API_KEY"` or `auth_command = [...]`, or set `ANTHROPIC_BASE_URL` + `ANTHROPIC_AUTH_TOKEN`.
+Earlier builds special-cased a bare `ZAI_API_KEY`. That is gone. Use a profile with `auth_env = "ZAI_API_KEY"` or `auth_command`, or set `ANTHROPIC_BASE_URL` and `ANTHROPIC_AUTH_TOKEN`.
 :::
 
-## OpenAI (and OpenAI-compatible)
+## OpenAI and OpenAI-compatible
 
 ```sh
 export OPENAI_API_KEY=...
 miucr review --staged --provider openai
 ```
 
-Resolution order:
-
 | Setting | Flag | Env | Profile | Default |
-| ------- | ---- | --- | ------- | ------- |
+|---------|------|-----|---------|---------|
 | API key | `--api-key` | `OPENAI_API_KEY` | `auth_token` / `auth_env` / `auth_command` with `auth = "api_key"` | required |
 | Base URL | `--base-url` | `OPENAI_BASE_URL` | `base_url` | `https://api.openai.com/v1` |
 | Model | `--model` | `OPENAI_MODEL` | `model` | `gpt-4o` |
 
-Requests send `max_tokens` (not `max_completion_tokens`) for the broadest compatibility with OpenAI-compatible gateways. `--auth-token` is **Anthropic-only**; passing it with an OpenAI provider is a typed error.
+Requests send `max_tokens` (not `max_completion_tokens`) for the widest gateway compatibility. `--auth-token` is Anthropic-only; with an OpenAI provider it is a typed error.
 
-### OAuth / your ChatGPT plan
+### ChatGPT plan (OAuth)
 
-The OpenAI provider can also authenticate **without an API key** by reviewing on your ChatGPT plan. `miucr login` caches an OAuth token and subsequent OpenAI reviews talk to the **codex backend** (the ChatGPT-plan Responses protocol). On that path the model defaults to `gpt-5.5`; precedence is `--model` > `MIUCR_CODEX_MODEL` > an explicit `model` in your `[providers.openai]` profile > `gpt-5.5`. `miucr init` writes `model = "gpt-5.5"` for you on the OAuth path so the codex model is visible and editable. The pinned `gpt-4o`/`OPENAI_MODEL` default never applies here: the codex backend rejects api.openai.com models, so a config `model = "gpt-4o"` is ignored and falls through to `gpt-5.5`.
+`miucr login` caches an OAuth token, and later OpenAI reviews use the codex backend and your plan instead of an API key. The model defaults to `gpt-5.5`. Precedence: `--model`, then `MIUCR_CODEX_MODEL`, then an explicit `model` in `[providers.openai]`, then `gpt-5.5`. `miucr init` writes `model = "gpt-5.5"` on this path. The `gpt-4o` / `OPENAI_MODEL` default never applies, because the codex backend rejects api.openai.com models: a config `model = "gpt-4o"` is ignored.
 
-When `auth` is unset, the OpenAI credential resolves **intent-ordered** so an ambient `OPENAI_API_KEY` (often set for other tools) never silently overrides a deliberate choice:
+When `auth` is unset, the credential resolves in this order, so an ambient `OPENAI_API_KEY` set for other tools never overrides a deliberate choice:
 
-1. a profile-configured key (`auth_env` / `auth_command` / `auth_token`) or `--api-key`;
-2. a cached `miucr login` (OAuth → codex / ChatGPT-plan backend);
-3. an ambient `OPENAI_API_KEY` env var.
+1. A profile key (`auth_env` / `auth_command` / `auth_token`) or `--api-key`.
+2. A cached `miucr login`.
+3. An ambient `OPENAI_API_KEY`.
 
-Pin the method with `auth = "oauth"` or `auth = "api_key"` to skip the auto order. With `auth = "oauth"`, remove `auth_env`, `auth_command`, and `auth_token` from the profile. See [Credentials → Using your ChatGPT plan](/credentials/#using-openai--your-chatgpt-plan-miucr-login).
+Set `auth = "oauth"` or `auth = "api_key"` to pin the method. With `oauth`, remove `auth_env`, `auth_command`, and `auth_token` from the profile. See [Credentials](/credentials/#using-your-chatgpt-plan-miucr-login).
 
-### Generic OpenAI-compatible gateway: example profile
+### Generic gateway (example profile)
 
 ```toml
 [providers.my-gateway]
@@ -295,7 +238,6 @@ base_url = "https://gateway.example.com/v1"
 model    = "your-model-id"
 auth     = "api_key"
 auth_env = "MY_GATEWAY_TOKEN"
-# auth_command = ["op", "read", "op://vault/item/token"]
 ```
 
 ```sh
@@ -305,7 +247,7 @@ miucr review --staged --provider my-gateway
 
 ## Missing credentials
 
-If no credential is found for the resolved provider, the review fails with a typed error (exit `1`) and a hint, e.g.:
+With no credential for the resolved provider, the review fails with a typed error (exit `1`) and a hint:
 
 ```text
 no Anthropic credentials: set ANTHROPIC_API_KEY or ANTHROPIC_AUTH_TOKEN, configure a provider in <config path>, or pass --api-key / --auth-token

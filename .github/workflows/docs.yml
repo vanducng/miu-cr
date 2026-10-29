@@ -22,11 +22,11 @@ jobs:
         uses: actions/checkout@v6
         with:
           fetch-depth: 0
-      - name: Resolve version
-        run: echo "PUBLIC_MIUCR_VERSION=$(git describe --tags --abbrev=0 2>/dev/null || echo dev)" >> "$GITHUB_ENV"
-      # Serve the canonical installer at cr.miu.sh/install.sh (single source: root install.sh).
-      - name: Stage installer at site root
-        run: cp install.sh docs/public/install.sh
+      # Serve the canonical installer and agent skill at the site root (single sources in the repo).
+      - name: Stage installer and skill at site root
+        run: |
+          cp install.sh docs/public/install.sh
+          cp .agents/skills/miucr/SKILL.md docs/public/skill.md
       - name: Build with Astro
         uses: withastro/action@b7d53628f8b666036b0238aadb0b984a2a489f26 # v6
         with:
