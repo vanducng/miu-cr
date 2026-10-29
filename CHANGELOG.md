@@ -55,6 +55,13 @@ comment with a new marker); subsequent re-runs dedupe normally. On a
 first M5 review **manually** (or off-hours) to absorb the one-time re-post before
 the next scheduled run.
 
+## [0.92.3](https://github.com/vanducng/miu-cr/compare/v0.92.2...v0.92.3) (2026-10-29)
+
+
+### Bug Fixes
+
+* **docs:** focus the search input when the dialog itself holds focus ([#361](https://github.com/vanducng/miu-cr/issues/361)) ([4daca78](https://github.com/vanducng/miu-cr/commit/4daca78d76f32c9303dfc406e2be1eac72a01b3a))
+
 ## [0.92.2](https://github.com/vanducng/miu-cr/compare/v0.92.1...v0.92.2) (2026-10-29)
 
 
