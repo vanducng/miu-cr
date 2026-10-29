@@ -10,7 +10,7 @@ gating, and dedupe. The model only finds bugs and proposes fixes.
 <a href="/diagrams/architecture.html"><img class="dark:sl-hidden" src="/diagrams/architecture-light.png" alt="miucr architecture: miucr mcp and local miucr review call the review engine directly; miucr review --pr, the GitHub Action, and miucr serve go through the PR review path, which fetches from and publishes to GitHub, records PR threads in the store, and calls the engine. The engine loads project rules, calls the LLM provider, and saves history to the store." width="1600" height="835" />
 <img class="light:sl-hidden" src="/diagrams/architecture-dark.png" alt="" width="1600" height="835" /></a>
 
-Click the diagram for the interactive version. Source: [`docs/diagrams/architecture.archify.json`](https://github.com/vanducng/miu-cr/blob/main/docs/diagrams/architecture.archify.json), rendered with Archify.
+Click the diagram for the interactive version.
 
 ## Layers
 
