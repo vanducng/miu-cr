@@ -43,8 +43,9 @@ For the conversational `/miucr review <prompt>` comment flow, copy
 `workflows/miucr-review.yml` instead. It adds an `issue_comment` trigger that a
 write-collaborator uses to steer a re-review with free text. Configure trigger
 regexes in `[review.pr_filter].comment_trigger_regexes` or
-`review.pr_filter.comment_trigger_regexes`; the default matches `/miucr review`
-and `@vanducng`. The job self-gates (write|admin via API, not
+`review.pr_filter.comment_trigger_regexes`; the default matches `/miucr review`.
+Add a mention such as `@review-bot` there, or in the `MIUCR_COMMENT_TRIGGER_PATTERN`
+repo variable. The job self-gates (write|admin via API, not
 `author_association` alone), acks with an `eyes` reaction, guards against
 bot/echo loops, and never interpolates the comment body into a shell line.
 

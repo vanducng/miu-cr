@@ -1,102 +1,112 @@
 ---
 title: Usage
-description: Review modes, flags, the severity gate, output formats, and exit codes.
+description: Review modes, the severity gate, output formats, exit codes, and review flags.
 ---
 
-`miucr` has these commands: `init`, `login`, `whoami`, `logout`, `review`, `config`, `mcp`, `serve`, `rules`, `history`, `eval`, `upgrade`, and `version`. This page covers `review`, the day-to-day loop. See the dedicated pages for [serve & action](/serve-and-action/), [rules](/rules/), [history](/history/), [evaluation](/evaluation/), [providers](/providers/) (`config show` + the `[review]` defaults table), and [credentials](/credentials/); for the MCP server see [MCP integration](/mcp/).
+`miucr review` is the daily command. It reviews local changes or a GitHub PR and prints a JSON envelope by default. This page covers its flags.
 
-:::tip[Looking for copy-paste workflows?]
-[Use cases & recipes](/use-cases/) collects the flags below into concrete local review recipes: pre-commit gate, pre-PR branch check, agent fix-loop, SARIF in your editor, and a Makefile quality gate.
+```sh
+miucr review --staged --gate high
+```
+
+Other commands: `init`, `login`, `whoami`, `logout`, `review`, `trace`, `history`, `config`, `rules`, `eval`, `mcp`, `serve`, `upgrade`, `version`. See [Serve & action](/serve-and-action/), [Rules](/rules/), [History](/history/), [Evaluation](/evaluation/), [Providers & config](/providers/), [Credentials](/credentials/), and [MCP](/mcp/).
+
+:::tip[Copy-paste recipes]
+[Use cases & recipes](/use-cases/) shows these flags in local workflows: pre-commit gate, pre-PR check, agent fix loop, SARIF, and a Makefile target.
 :::
 
 ## Review modes
 
-Pick **exactly one** mode per run. The same contract is enforced by the CLI and the MCP `review_run` tool, so an ambiguous invocation always fails loudly.
+Pick exactly one mode per run. The CLI and the MCP `review_run` tool enforce the same rule.
 
 ```sh
-miucr review --staged                 # staged changes vs the index
-miucr review --from main --to HEAD    # a ref range (--from and --to are required together)
-miucr review --commit HEAD~1          # a single commit vs its parent
+miucr review --staged                 # staged changes
+miucr review --from main --to HEAD    # ref range (--from and --to go together)
+miucr review --commit HEAD~1          # one commit
 ```
 
-- **`--staged`** reviews staged changes, diffed against `HEAD` (`git diff --cached`) with the new-side content read from the index blob, i.e. exactly what you are about to commit (not your unstaged working tree).
-- **`--from` / `--to`** review `<to>` against the **merge-base** of the two refs (`merge-base(from,to)..to`), matching what a PR introduces.
-- **`--commit`** reviews one commit against its first parent.
+| Mode | Diff reviewed |
+|------|---------------|
+| `--staged` | `git diff --cached`, with the new side read from the index. What you are about to commit, not your unstaged tree. |
+| `--from` / `--to` | `<to>` against `merge-base(from, to)`. The changes a PR from `from` would introduce. |
+| `--commit` | One commit against its first parent. |
 
 ## The severity gate
 
-`--gate` makes `review` CI-friendly: when a finding's severity reaches the gate, the process exits non-zero (exit code `2`).
+`--gate` makes `review` fail CI when a finding reaches a severity.
 
-```sh
-miucr review --from main --to HEAD --gate high
-```
+- Severities, low to high: `info`, `low`, `medium`, `high`, `critical`.
+- `--gate none` reports findings and never fails. Default: `high`.
+- An unknown gate is rejected before the run starts, so a typo never disables gating.
 
-- Severities, low → high: `info`, `low`, `medium`, `high`, `critical`.
-- `--gate` accepts those plus `none`. Default is `high`.
-- `--gate none` reports findings but never fails the build.
-- An unrecognized gate is rejected up front; a typo can never silently disable gating.
+## Exit codes
+
+| Code | Meaning |
+|------|---------|
+| `0` | Success. No finding reached the gate. |
+| `1` | Operational error, such as missing credentials or an internal failure. |
+| `2` | A finding reached `--gate`, or the invocation was invalid (bad gate, conflicting modes, bad `--output`, bad format or config value). |
+| `130` | Interrupted with Ctrl-C (`review.canceled`). |
 
 ## Output formats
 
 `-o` / `--output` is a global flag: `json` (default), `pretty`, or `sarif`.
 
-```sh
-miucr review --staged                 # JSON envelope (default)
-miucr review --staged -o pretty       # local reporter: jumpable file:line, excerpt, patch (color on a TTY)
-miucr review --staged -o sarif        # SARIF 2.1.0 document for code-scanning / IDEs
-```
-
-`pretty` is a real local reporter: each finding shows an editor-jumpable `file:line` (or `file:start-end`), a severity glyph + severity/category, the rationale, a quoted-code excerpt, and a suggested-patch preview. ANSI color is emitted only when stdout is a terminal; piped/CI output is plain.
-
-`sarif` emits a schema-pinned **SARIF 2.1.0** document (stdlib JSON; tool driver `miucr`, `ruleId` = category, `level` from severity, `region` from the anchored line range, `snippet` = quoted code, `fixes` from the suggested patch). Paths are repo-relative only, never absolute or secret. It is review-only (other commands keep the JSON envelope). Upload it to the GitHub code-scanning Security tab with `github/codeql-action/upload-sarif`; see [Action: SARIF](/serve-and-action/#sarif--code-scanning).
+| Format | Use | Notes |
+|--------|-----|-------|
+| `json` | Agents and scripts | The `miucr.cli/v1` envelope. |
+| `pretty` | Humans | Each finding shows a jumpable `file:line` (or `file:start-end`), severity and category, rationale, quoted-code excerpt, and a suggested-patch preview. Color only on a TTY. On non-review commands it indents the JSON. |
+| `sarif` | Code scanning, IDEs | SARIF 2.1.0. Tool `miucr`, `ruleId` = category, `level` from severity, `region` from the anchored lines, `snippet` = quoted code, `fixes` from the suggested patch. Paths are repo-relative. Review only. |
 
 ### `--sarif-out <file>`
 
-`-o sarif` makes SARIF the **only** output. To get SARIF *alongside* the normal JSON envelope (or a posted PR review), pass `--sarif-out <file>` instead; the **same single review run** also writes a SARIF 2.1.0 document to that path, with no second LLM pass.
+`--sarif-out` writes SARIF next to the normal output (JSON or a posted PR review) from the same run. No second LLM pass. The file is written only on success (temp file plus rename), so a failed run leaves no stale file.
 
 ```sh
-miucr review --staged --sarif-out miucr.sarif          # JSON on stdout + SARIF file
+miucr review --staged --sarif-out miucr.sarif
 miucr review --pr owner/repo#123 --post --sarif-out miucr.sarif
 ```
 
-It is written **only on a successful review** (atomically: temp file + rename), so a failed run leaves no file. This is what the GitHub Action uses to publish to the Security tab; see [Action: SARIF](/serve-and-action/#sarif--code-scanning).
+The GitHub Action uses this for the Security tab. See [Action: SARIF](/serve-and-action/#sarif--code-scanning).
 
-### `--filter-mode`
+### `--filter-mode` (PR only)
 
-`--filter-mode` (default `diff_context`) selects which findings are eligible for **inline** PR comments on `--pr`:
+Which findings may be posted inline on `--pr`. Default `diff_context`.
 
 | Mode | Inline-eligible findings |
 |------|--------------------------|
-| `added` | only findings on added (`+`) diff lines |
-| `diff_context` (default) | findings on any added or context diff line |
-| `file` | findings on any file present in the diff |
-| `nofilter` | every finding |
+| `added` | Added (`+`) lines only. |
+| `diff_context` | Added or context lines. Default. |
+| `file` | Any file in the diff. |
+| `nofilter` | Every finding. |
 
-`file` and `nofilter` never put a finding on a line GitHub will reject. A finding that cannot sit on its own changed line shares one thread on the nearest changed line, or one pull request comment. Info notes in files the pull request does not change are marked irrelevant and are not blocking. They still appear in the summary, SARIF, and local output.
+`file` and `nofilter` never place a comment on a line GitHub would reject. A finding that cannot sit on its own changed line shares one thread on the nearest changed line, or becomes one PR comment. Info notes in files the PR does not touch are marked irrelevant and do not block. They still appear in the summary, SARIF, and local output.
 
-### `--format`
+### `--format` (PR only)
 
-`--format` (default `full`) selects the **presentation** of the posted review comment on `--pr`. It is render-only — it never changes which findings are produced or posted, only how the comment looks.
+How the posted comment looks. Render-only: it never changes which findings are produced or posted.
 
-| Format | Comment shape |
-|--------|---------------|
-| `full` (default) | The complete output: the `## Code Review Summary` section (result line, "What changed" walkthrough, changed-files table, review reference) plus severity/priority **badges** — the result chips and the per-finding `P3 · bug` badge on each inline comment. |
-| `minimal` | Drops the `## Code Review Summary` section and **all** shields badges (both the summary chips and the inline `P3 · bug` badge). Inline findings, the footer, and the hidden tracking markers are kept, so re-runs still upsert the same comment. |
+| Format | Comment |
+|--------|---------|
+| `full` (default) | Full summary (result line, What changed, tables, review reference) plus severity and priority badges. |
+| `minimal` | No summary section and no badges. Inline findings, footer, and hidden markers stay, so re-runs still update the same comment. |
 
-Set it per-invocation (`--format minimal`) or as a default in `[review].format` (CLI config) / the host `review.format` (serve config). An out-of-set value is rejected with `flags.invalid_format` / `config.invalid` (exit 2). The set is extensible: new named formats are added to the renderer's format registry.
+Set per run with `--format`, or as a default with `[review].format` (CLI) or `review.format` (host). Other values fail with `flags.invalid_format` or `config.invalid` (exit `2`).
 
 ### `--prompt-format`
 
-`--prompt-format` (default `xml`) selects the **structure of the prompt sent to the model** — orthogonal to `--format`, which is the posted-comment presentation. It does not change which findings surface.
+Structure of the prompt sent to the model. Orthogonal to `--format`.
 
-| Prompt format | Structure |
+| Format | Structure |
 |--------|-----------|
-| `xml` (default) | Untrusted payloads (diffs, new-content, project-context files, repo rules, conversation) are wrapped in entity-escaped XML tags (`<file path="…"><diff>…</diff>…`). A planted `</file>` or `=== File: ===` inside a diff is escaped to inert text, so attacker-controlled content in a fork PR cannot forge a file boundary or smuggle instructions. |
-| `markdown` | The prior fenced form: `=== File: <path> ===` / `--- Diff ---` / `--- New content ---` delimiters with triple-backtick fences around untrusted blocks. Byte-identical to releases ≤ 0.65; available as opt-out. |
+| `xml` (default) | Untrusted content (diffs, file contents, project context, rules, conversation) is wrapped in entity-escaped XML tags. A forged `</file>` inside a diff is inert text, so a fork PR cannot fake a file boundary. |
+| `markdown` | The earlier fenced form (`=== File: ===` delimiters). Byte-identical to releases up to 0.65. Opt-out only. |
 
-`xml` is the default for **injection-hardening**: on the labeled eval suite it holds parity with `markdown` (no quality regression), and a unit test proves a forged delimiter stays inert. Pin the prior form with `--prompt-format markdown` or `[review].prompt_format = markdown` (also `review.prompt_format` on the host). An out-of-set value is rejected with `flags.invalid_prompt_format` / `config.invalid` (exit 2).
+`xml` is the default for injection hardening. On the labeled eval suite it matches `markdown` on recall. Pin the old form with `--prompt-format markdown` or `[review].prompt_format = "markdown"`. Other values fail with `flags.invalid_prompt_format` or `config.invalid` (exit `2`).
 
-The default JSON is a **stable v1 envelope** (`api_version: "miucr.cli/v1"`) so a host agent can branch without parsing prose:
+## JSON envelope
+
+Stable `api_version: "miucr.cli/v1"`, so a host agent can branch without parsing prose.
 
 ```json
 {
@@ -114,9 +124,9 @@ The default JSON is a **stable v1 envelope** (`api_version: "miucr.cli/v1"`) so 
         "end_line": 42,
         "severity": "high",
         "category": "bug",
-        "rationale": "…why this is a problem (may cite a convention the model can see, e.g. \"differs from mapWriteError\")…",
-        "suggested_patch": "…optional minimal fix…",
-        "quoted_code": "…verbatim source the finding anchors to…"
+        "rationale": "...",
+        "suggested_patch": "...optional minimal fix...",
+        "quoted_code": "...verbatim source the finding anchors to..."
       }
     ],
     "stats": {
@@ -128,201 +138,111 @@ The default JSON is a **stable v1 envelope** (`api_version: "miucr.cli/v1"`) so 
       "gate": "high",
       "truncation_level": "full"
     },
-    "review_id": "rev_…"
+    "review_id": "rev_..."
   }
 }
 ```
 
-`findings_dropped` counts findings rejected by line-anchoring drift (see [How it works](/how-it-works/)). `truncation_level` is `full`, `hunks_only`, or `filenames_only` depending on how much context fit the token budget. `review_id` is the id of the saved review in the local [history store](/history/) (every review is saved by default; opt out with `--no-save`).
+| Field | Meaning |
+|-------|---------|
+| `data.findings[]` | `file`, `line`, `end_line`, `severity`, `category`, `rationale`, `suggested_patch`, `quoted_code`. |
+| `stats.findings_dropped` | Findings whose quoted code no longer matches the reviewed revision. See [How it works](/how-it-works/). |
+| `stats.truncation_level` | `full`, `hunks_only`, or `filenames_only`, depending on how much context fit `--token-budget`. |
+| `data.review_id` | Id of the saved record for [History](/history/). Empty with `--no-save`. |
 
-Errors use the same envelope with `ok: false` and an `error` object carrying a stable `code`, a redacted `message`, and a `hint`.
+Failures use the same envelope with `ok: false` and an `error` object: a stable `code`, a redacted `message`, and a `hint`.
 
-The day-1 provider/auth/timeout failures classify into a **stable taxonomy** (the same `code` regardless of backend, anthropic/openai/codex), each with an actionable `hint` and a correct `retryable`:
+### Error codes
 
 | `error.code` | When | `retryable` |
-| ------------ | ---- | ----------- |
-| `agent.auth_failed` | bad/invalid API key (401/403) | `false` |
-| `agent.auth_expired` | expired OAuth token (401/403, incl. codex still-401-after-refresh) | `false` |
-| `provider.rate_limited` | provider returned 429 | `true` |
-| `agent.unavailable` | provider returned 5xx / 529 | `true` |
-| `review.timeout` | the review exceeded `--timeout` | `true` |
-| `review.stalled` | the review emitted no progress for `[review].stalled_timeout` | `true` |
-| `review.canceled` | interrupted (Ctrl-C / SIGINT), exit `130` | `false` |
-| `config.invalid` | malformed `config.toml`, a bad enum/`auth` value, or an `openai`-kind gateway profile with an api key but no `base_url` (which would leak the key to api.openai.com); exit `2`, consistent across review/history/serve | `false` |
-| `internal.error` | any unclassified failure (the conservative default) | `false` |
+|--------------|------|-------------|
+| `agent.auth_failed` | Invalid API key (401/403). | `false` |
+| `agent.auth_expired` | Expired OAuth token (401/403, including codex still-401 after refresh). | `false` |
+| `provider.rate_limited` | Provider returned 429. | `true` |
+| `agent.unavailable` | Provider returned 5xx or 529. | `true` |
+| `review.timeout` | The review exceeded its timeout. | `true` |
+| `review.stalled` | No progress for `[review].stalled_timeout`. | `true` |
+| `review.canceled` | Interrupted (Ctrl-C / SIGINT), exit `130`. | `false` |
+| `config.invalid` | Malformed config, bad enum or `auth` value, or an `openai` gateway profile with a key but no `base_url`. Exit `2`. | `false` |
+| `internal.error` | Anything unclassified. Never marked retryable. | `false` |
 
-An unrecognized failure stays `internal.error`; it is never mislabeled as `retryable`. Classified messages are redacted: no token fragment ever appears.
+Messages are redacted. No token fragment appears in any error.
 
-On `miucr review --pr --post`, these failures also update the PR summary comment:
-operational/provider/infrastructure errors render as GitHub `[!WARNING]`
-alerts, while unknown `internal.error` failures render as `[!CAUTION]`. The
-alert keeps the stable `error.code` and hint so a later agent can decide whether
-to retry, wait, or inspect host logs.
+Provider calls retry `429`, `5xx`/`529`, and transient transport errors before they fail. Tuning lives in `[review.provider_retry]` (see [Providers](/providers/)). Auth and invalid-request errors are never retried. The codex backend also retries `response.failed` events and honors `Retry-After`. On a codex usage cap, `provider.rate_limited` carries `error.details.resets_in_seconds` (or `retry_after_seconds`) and a hint such as `usage cap reached, resets in ~2h`.
 
-Provider calls retry transient overload/rate-limit failures before surfacing an error: Anthropic/OpenAI-compatible backends retry `429`, any `5xx` including `529`, and temporary transport failures; the codex backend also retries `response.failed` stream events and honors `Retry-After`/`resets_in_seconds`. The retry loop uses `[review.provider_retry]`, aborts promptly on cancel/timeout, and never retries auth or invalid-request failures. On a persistent codex usage cap, `provider.rate_limited` carries `error.details.resets_in_seconds` (or `retry_after_seconds`) with a hint like `usage cap reached, resets in ~2h`.
-
-## Exit codes
-
-| Code | Meaning |
-| ---- | ------- |
-| `0`  | Success; no finding reached the gate. |
-| `1`  | Operational error (missing credentials, internal failure). |
-| `2`  | Gate failed (a finding reached `--gate`) **or** an invalid invocation (bad gate, conflicting modes, bad `--output`). |
+On `--pr --post`, failures are also written to the PR summary. See [GitHub PR review](/github-pr/#what-gets-posted).
 
 ## Selection flags
 
-Narrow what gets reviewed:
-
 ```sh
-miucr review --staged --ext go,ts                       # only these extensions
-miucr review --staged --include 'internal/**'           # doublestar globs a path must match
-miucr review --staged --exclude '**/*_test.go'          # doublestar globs to drop
+miucr review --staged --ext go,ts
+miucr review --staged --include 'internal/**' --exclude '**/*_test.go'
 ```
 
-- `--repo <dir>`: repository directory (default `.`).
-- `--ext`: restrict to a comma-separated list of file extensions.
-- `--include` / `--exclude`: repeatable doublestar globs.
+| Flag | Default | Meaning |
+|------|---------|---------|
+| `--repo <dir>` | `.` | Repository directory. |
+| `--ext` | all | Comma-separated file extensions. |
+| `--include` / `--exclude` | none | Repeatable doublestar globs. |
 
-## Context & budget flags
+## Context and budget flags
 
-All of these can also be set under `[review]` in `~/.config/miu/cr/config.toml`;
-an explicit CLI flag still wins.
+These can also be set under `[review]` in `~/.config/miu/cr/config.toml`. An explicit flag wins. Keys are listed in [Providers & config](/providers/).
 
-- `--expand <n>`: context lines added above/below each changed hunk in the new-content window (default `5`; `0` disables).
-- `--token-budget <n>`: approximate token budget; over budget, context degrades through the truncation ladder (default `0`, no budget cap).
-- `--timeout <dur>`: operation timeout. The root default is `30s`, but `review`
-  uses `900s` by default unless you set `--timeout` or `[review].timeout`.
-- `[review].stalled_timeout`: no-progress watchdog for review runs. Default
-  `5m`; set `"0s"` only to disable while debugging.
-- `[review.provider_retry]`: provider API retry policy. Defaults to 10 retries,
-  `5s` initial backoff, `2m` max backoff, and `10m` max retry elapsed time inside
-  the review timeout.
-- `--deep-context`: heavier defaults for large reviews (`--expand 20`,
-  auto related-file hop depth, and root `AGENTS.md` / `CLAUDE.md` context from
-  the reviewed revision when present). Token budget and timeout are already
-  capability-first by default.
-- `--context-hops <n>`: include related-file context up to `n` hops from the
-  changed files (`0` disables, max `5`). This overrides the `--deep-context`
-  auto depth. The hop walker reads the reviewed revision, follows Go package
-  imports/reverse imports and basic relative JS/TS/Python imports, and caps
-  files/bytes before the prompt. On fork PRs, root project context and
-  related-file hop context are skipped.
-- `--instruction <text>`: extra free-text steer for THIS review (e.g. "focus on the auth changes"); injected fenced, context-only, and length-capped, so it never redefines the finding schema.
+| Flag | Default | Meaning |
+|------|---------|---------|
+| `--expand <n>` | `5` | Context lines above and below each hunk. `0` disables. |
+| `--token-budget <n>` | `0` (no cap) | Approximate budget. Over budget, context degrades down the truncation ladder. |
+| `--timeout <dur>` | see note | Whole-review timeout. |
+| `--deep-context` | off | Heavier defaults for large reviews: `--expand 20`, automatic related-file hops, and root `AGENTS.md` / `CLAUDE.md` from the reviewed revision. Explicit flags still win. |
+| `--context-hops <n>` | auto | Related-file depth from changed files. `0` disables, max `5`. Overrides the automatic depth from `--deep-context`. |
+| `--instruction <text>` | none | Extra steer for this review, e.g. `"focus on the auth changes"`. Fenced, context-only, length-capped. It cannot change the finding schema. |
 
-## Symbol Context
+- `--timeout`: the review default is `30m` unless `--timeout` or `[review].timeout` is set. `--deep-context` keeps that default.
+- Stalled-run watchdog: `[review].stalled_timeout`, default `8m`. `"0s"` disables it for debugging.
+- Hops follow Go package imports, reverse imports, and basic relative JS/TS/Python imports. They are capped by file count and bytes. Fork PRs skip root project context and hop context.
 
-`symbol_context` is a core read-only reviewer tool. It runs inside miucr against
-the reviewed git revision; `[review.tools.symbol_context]` tunes its bounds:
+## Subagents and symbol context
 
-```toml
-[review.tools]
-max_retries = 2
-max_turns = 24
-retry_backoff = "250ms"
+- `[review.subagents]` splits a large review into scoped passes by glob. It is still one review: candidate findings are merged, re-anchored, deduped, and gated as usual. A failed required subagent marks the run degraded, so `--approval` will not approve and checks will not report success.
+- `symbol_context` is a built-in read-only tool, next to `file_read` and `grep`. It answers cross-file questions: definitions, references, callers, implementations, and dependencies. Languages: Go, TypeScript/JavaScript, Python, PHP, SQL, Rust, Java/C#, C/C++, and Astro/Vue/Svelte components.
 
-[review.tools.symbol_context]
-max_bytes = 16000
-max_files = 2000
-max_parallel = 8
-```
-
-`max_retries` applies to transient tool execution failures only and is capped at
-`5`; invalid tool arguments and missing files are returned to the model without
-retry. `max_turns` caps the number of model tool turns before miucr withdraws
-tools and forces a final JSON answer; `0` or unset uses the default `24`, and the
-config value is capped at `64`.
-
-Use `symbol_context` for concrete cross-file questions such as
-`document_symbols`, `definition`, `references`, `incoming_calls`,
-`outgoing_calls`, `implementations`, or `dependencies`. It covers common Go,
-TypeScript/JavaScript, Python, PHP, SQL, Rust, Java/C#, C/C++, and lightweight
-Astro/Vue/Svelte component symbols. The scanner is best-effort, bounded, and
-read-only; failures stay local to that tool call.
-
-Recommended reviewer flow:
-
-1. Use `document_symbols` on a changed file to map functions, classes,
-   components, models, and blocks before reading full files.
-2. Use `definition` to jump from a changed call site to the declaration that
-   defines the contract.
-3. Use `references`, `incoming_calls`, and `outgoing_calls` when a changed
-   symbol may affect incoming callers, outgoing calls, or implementations
-   outside the diff.
-4. Use `dependencies` for dbt/SQL model lineage and table-like references.
-5. Use `file_read` only after `symbol_context` or `grep` narrows the exact
-   implementation lines needed for a finding.
-
-Every review also gets a compact changed-symbol prelude before the LLM turn.
-It summarizes detected symbols in selected changed files first, then leaves the
-model-initiated `symbol_context` tool available for deeper targeted lookup. The
-automatic prelude is capped to a small first-pass slice of changed files and at
-most the configured `max_bytes` value, so it cannot replace targeted tool use on
-large PRs. Repo-wide `definition`, `implementations`, and `dependencies` scans
-use up to `max_parallel` bounded file readers when the file set is large enough;
-set `max_parallel = 1` to force serial reads.
-
-## Configurable subagents
-
-`[review.subagents]` can split large reviews into scoped in-process LLM passes by
-glob. This is still one miu-cr review from the outside: each subagent returns
-candidate findings, then the normal engine re-anchors quoted code, drops drift,
-dedupes, gates, saves history, and posts. Use `mode = "auto"` to fan out only
-when a review crosses the configured file or context-byte threshold, or
-`mode = "always"` for repos where scoped prompts are always useful.
-
-```toml
-[review.subagents]
-mode = "auto"
-max_parallel = 2
-require_all = true
-
-[[review.subagents.agents]]
-name = "go"
-include = ["**/*.go"]
-system_prompt = "Focus on correctness, concurrency, error handling, and API compatibility."
-```
-
-When `require_all = true`, a failed subagent marks the run as degraded, so
-`--approval` will not approve and checks-mode will not report success.
+Config keys (`[review.subagents]`, `[review.tools]`, `[review.tools.symbol_context]`) are in [Providers & config](/providers/). Runtime behavior is in [How it works](/how-it-works/).
 
 ## Provider flags
 
-`review` resolves a provider from flags or the environment. See [Providers](/providers/) for the full matrix.
-
-- `--provider anthropic|openai|auto` (default `auto`).
-- `--api-key`, `--base-url`, `--auth-token`, `--model`: all optional overrides, **never persisted**.
+- `--provider anthropic|openai|auto` (default `auto`), or any profile name from config. See [Providers](/providers/).
+- `--api-key`, `--base-url`, `--auth-token`, `--model`: per-run overrides. Never persisted. `--auth-token` is Anthropic only.
 
 ## Project rules
 
-Every review gets a built-in baseline plus any project rules under `.miu/cr/rules/*.md` (and `~/.config/miu/cr/rules/*.md`) that match the changed files. Rules are review **context only**; they never gate. Scaffold one with `miucr rules init` and inspect selection with `miucr rules check <path>`. See the [Project rules](/rules/) guide for the format, trust model, and how rules flow through local / `--pr` / serve.
+Each review gets the built-in rules plus any `.miu/cr/rules/*.md` (repo) and `~/.config/miu/cr/rules/*.md` (user) that match the changed files. Rules are context only and never gate. Scaffold with `miucr rules init`, and check selection with `miucr rules check <path>`. See [Project rules](/rules/).
 
-## PR review
+## PR review (`--pr`)
 
-`review` can review a GitHub pull request directly and (with `--post`) publish results back to it:
+Details and examples are in [GitHub PR review](/github-pr/).
 
-- `--pr <url|owner/repo#N>`: review a GitHub PR (no PAT needed for public repos in dry-run).
-- `--post` / `--no-post`: publish inline comments + a summary, or dry-run (`--no-post` is the default for `--pr`). Review-mode posting reacts 👀 and creates a `Review running` summary only when no prior summary exists; later commits keep the prior result visible with a temporary reviewing status until the new result replaces it.
-- `--token <pat>`: GitHub PAT, required only for `--post`.
-- `--mode review|checks`: inline review comments (default) or a GitHub CheckRun (survives force-push, works on fork PRs).
-- `--suggest`: emit one-click GitHub suggestions for proven fixes: single-line replacements and wrap/guard/insert fixes (a multi-line patch on a QuotedCode-proven single-line anchor).
-- `--approval off|clean|threshold`: submit `APPROVE` by policy. `clean` requires
-  zero blocking findings. Accepted deferrals and irrelevant off-diff notes do not
-  block. `threshold` allows blocking findings at or below `--approval-max-priority`
-  (default `P4`: only P4 findings allowed, P0-P3 blocked). Approval reviews include
-  short LGTM-style text with a link to the summary by default. Approval is
-  head-SHA scoped, so a later push can be approved again. Clean re-approvals can
-  stay bodyless; threshold re-approvals include the threshold note. Tune body text
-  with `--approval-note`.
-- `--conversation`: on `--pr`, also fetch the prior PR conversation (the miucr summary, review overviews, finding threads, and developer replies) and inject it fenced/context-only as Untrusted context (dropped on fork PRs); one extra read pass, no extra LLM call (default OFF).
-- `--force`: re-review even when the head SHA is unchanged since the last saved review. By default an unchanged head SHA short-circuits (`skipped_unchanged`, no LLM pass); a new commit always re-reviews. See [GitHub PR review](/github-pr/).
+| Flag | Default | Meaning |
+|------|---------|---------|
+| `--pr <url or owner/repo#N>` | none | Review a GitHub PR. A public PR dry run needs no token. |
+| `--post` / `--no-post` | `--no-post` | Publish, or dry run. Mutually exclusive. |
+| `--token <pat>` | `GITHUB_TOKEN`, then `GH_TOKEN` | PAT with `repo` scope. Needed only for `--post`. Never persisted. |
+| `--mode review\|checks` | `review` | Inline comments and summary, or a GitHub Check Run named `miu-cr`. |
+| `--min-severity` | no floor | `none` to `critical`. Floor for inline comments only. Lower findings still appear in the summary and SARIF. |
+| `--suggest` | off | One-click suggestions for proven fixes. Requires `--post`. |
+| `--approval off\|clean\|threshold` | `off` | Submit `APPROVE` by policy. Requires `--post`. |
+| `--approval-max-priority` | `P4` | Threshold mode: approve when the worst blocking finding is at or below this priority (`P0` to `P4`). |
+| `--approval-note` | `always` | Approval body: `none`, `on_findings`, or `always`. |
+| `--conversation` | off | Inject the prior PR conversation as untrusted context. One extra read, no extra LLM call. Dropped on fork PRs. |
+| `--force` | off | Re-review even when the head SHA was already reviewed. |
+| `--walkthrough` | on | "What changed" bullets in the summary. |
+| `--walkthrough-diagram` | off | Optional Mermaid change diagram in the summary. |
+| `--file-change-summary` | off | "Important Files Changed" table in the summary. |
 
-These (and `--filter-mode` above) only apply on `--pr`. See [GitHub PR review](/github-pr/) and [Serve & action](/serve-and-action/) for the full workflow.
+Serve and the GitHub Action have their own defaults for suggest and approval. See [Serve & action](/serve-and-action/).
 
 ## version
 
 ```sh
 miucr version            # {"ok":true,"data":{"version":"v0.x.y"}, ...}
-miucr version -o pretty   # the same JSON envelope, indented (not a different format)
 ```
-
-For non-`review` commands, `-o pretty` simply indents the JSON envelope rather than producing a distinct human layout.

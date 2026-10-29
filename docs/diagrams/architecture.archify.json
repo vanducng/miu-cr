@@ -1,0 +1,228 @@
+{
+  "schema_version": 1,
+  "diagram_type": "architecture",
+  "meta": {
+    "title": "miu-cr architecture",
+    "quality_profile": "showcase"
+  },
+  "components": [
+    {
+      "id": "mcp",
+      "type": "frontend",
+      "label": "miucr mcp",
+      "sublabel": "review_run / review_get",
+      "pos": [
+        40,
+        33
+      ],
+      "size": [
+        180,
+        50
+      ]
+    },
+    {
+      "id": "cli",
+      "type": "frontend",
+      "label": "miucr review",
+      "sublabel": "local diff, or --pr",
+      "pos": [
+        40,
+        172
+      ],
+      "size": [
+        180,
+        50
+      ]
+    },
+    {
+      "id": "action",
+      "type": "frontend",
+      "label": "GitHub Action",
+      "sublabel": "review --pr --post",
+      "pos": [
+        40,
+        410
+      ],
+      "size": [
+        180,
+        60
+      ]
+    },
+    {
+      "id": "serve",
+      "type": "frontend",
+      "label": "miucr serve",
+      "sublabel": "webhook / poll / REST",
+      "pos": [
+        40,
+        525
+      ],
+      "size": [
+        180,
+        60
+      ]
+    },
+    {
+      "id": "prpath",
+      "type": "backend",
+      "label": "PR review path",
+      "sublabel": "fetch / publish / dedupe",
+      "pos": [
+        340,
+        410
+      ],
+      "size": [
+        190,
+        60
+      ]
+    },
+    {
+      "id": "github",
+      "type": "external",
+      "label": "GitHub",
+      "sublabel": "diff, comments, checks",
+      "pos": [
+        340,
+        558
+      ],
+      "size": [
+        190,
+        60
+      ]
+    },
+    {
+      "id": "rules",
+      "type": "backend",
+      "label": "Project rules",
+      "sublabel": "defaults / user / repo",
+      "pos": [
+        960,
+        33
+      ],
+      "size": [
+        210,
+        60
+      ]
+    },
+    {
+      "id": "engine",
+      "type": "backend",
+      "label": "Review engine",
+      "sublabel": "select / anchor / gate",
+      "pos": [
+        640,
+        148
+      ],
+      "size": [
+        190,
+        110
+      ]
+    },
+    {
+      "id": "llm",
+      "type": "external",
+      "label": "LLM provider",
+      "sublabel": "Anthropic / OpenAI / gateway",
+      "pos": [
+        960,
+        168
+      ],
+      "size": [
+        210,
+        60
+      ]
+    },
+    {
+      "id": "store",
+      "type": "database",
+      "label": "Store",
+      "sublabel": "SQLite / Postgres",
+      "pos": [
+        960,
+        410
+      ],
+      "size": [
+        210,
+        60
+      ]
+    }
+  ],
+  "connections": [
+    {
+      "id": "mcp-engine",
+      "from": "mcp",
+      "to": "engine",
+      "fromSide": "right",
+      "toSide": "top"
+    },
+    {
+      "id": "cli-engine",
+      "from": "cli",
+      "to": "engine",
+      "label": "local"
+    },
+    {
+      "id": "cli-pr",
+      "from": "cli",
+      "to": "prpath",
+      "label": "--pr",
+      "fromSide": "bottom",
+      "toSide": "left"
+    },
+    {
+      "id": "action-pr",
+      "from": "action",
+      "to": "prpath"
+    },
+    {
+      "id": "serve-pr",
+      "from": "serve",
+      "to": "prpath"
+    },
+    {
+      "id": "pr-engine",
+      "from": "prpath",
+      "to": "engine",
+      "label": "review",
+      "variant": "emphasis",
+      "fromSide": "top",
+      "toSide": "bottom"
+    },
+    {
+      "id": "pr-github",
+      "from": "prpath",
+      "to": "github",
+      "label": "fetch / publish",
+      "labelDy": 24
+    },
+    {
+      "id": "pr-store",
+      "from": "prpath",
+      "to": "store",
+      "label": "PR threads"
+    },
+    {
+      "id": "rules-engine",
+      "from": "rules",
+      "to": "engine",
+      "label": "repo rules fenced",
+      "variant": "dashed",
+      "fromSide": "left",
+      "toSide": "top",
+      "labelSegment": 0
+    },
+    {
+      "id": "engine-llm",
+      "from": "engine",
+      "to": "llm",
+      "label": "review calls",
+      "variant": "emphasis"
+    },
+    {
+      "id": "engine-store",
+      "from": "engine",
+      "to": "store",
+      "label": "history"
+    }
+  ]
+}

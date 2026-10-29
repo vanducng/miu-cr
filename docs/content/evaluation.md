@@ -1,16 +1,21 @@
 ---
 title: Evaluation
-description: "Run repeatable finding-recall tests against miu-cr and other reviewer commands."
+description: Run repeatable finding-recall tests against miucr and other reviewer commands.
 ---
 
-`miucr eval` runs a JSON suite against one or more reviewer commands and scores
-their findings against expected issues. Use it for local regression checks and
-side-by-side comparisons with other review tools.
+`miucr eval` runs a JSON suite against one or more reviewer commands and scores their findings against expected issues. Use it for regression checks and side-by-side comparisons with other review tools.
+
+```sh
+miucr eval --cases eval.json \
+  --tool 'miucr=miucr review --repo "$MIUCR_EVAL_REPO" --from "$MIUCR_EVAL_FROM" --to "$MIUCR_EVAL_TO" --gate none --no-save -o json' \
+  --timeout 10m
+```
+
+`--timeout` is per case, per tool. It defaults to `30m`, so pass a shorter value for quick smoke runs.
 
 ## Case file
 
-Each case points at a repo/ref pair and lists the issues a reviewer should find.
-Use synthetic or intentionally public fixtures only.
+Each case names a repo and ref pair and lists the issues a reviewer should find. Use synthetic or intentionally public fixtures only.
 
 ```json
 {
@@ -34,26 +39,25 @@ Use synthetic or intentionally public fixtures only.
 }
 ```
 
-Matching is file + line-range overlap. Duplicate findings count as false
-positives, so noisy tools are penalized.
-For unlabeled public-PR smoke suites, omit `expected`. The report still shows
-finding counts and runtime, but skips recall/false-positive scoring for those
-cases.
+- A finding matches an expected issue by file and line-range overlap.
+- Duplicate findings count as false positives, so noisy tools are penalized.
+- For unlabeled public-PR smoke suites, omit `expected`. The report still shows finding counts and runtime but skips recall and false-positive scoring for those cases.
+
+Start with a tiny synthetic suite for the bug classes you care about. Grow it when a real miss or noisy finding appears.
 
 ## Tool command
 
-Each `--tool` is `name=command`. The command runs once per case with these env
-vars:
+Each `--tool` is `name=command`. The command runs once per case, with the case repo as its working directory, and gets these env vars:
 
 | Env var | Meaning |
 | --- | --- |
-| `MIUCR_EVAL_CASE_ID` | case id |
-| `MIUCR_EVAL_REPO` | case repo |
-| `MIUCR_EVAL_FROM` | base ref |
-| `MIUCR_EVAL_TO` | head ref |
-| `MIUCR_EVAL_COMMIT` | commit ref, when used |
+| `MIUCR_EVAL_CASE_ID` | Case id. |
+| `MIUCR_EVAL_REPO` | Case repo. |
+| `MIUCR_EVAL_FROM` | Base ref. |
+| `MIUCR_EVAL_TO` | Head ref. |
+| `MIUCR_EVAL_COMMIT` | Commit ref, when used. |
 
-The command must print either a normal `miucr` review envelope or:
+Stdout must be only a normal `miucr` review envelope or this payload. Send logs and diagnostics to stderr.
 
 ```json
 {
@@ -63,21 +67,7 @@ The command must print either a normal `miucr` review envelope or:
 }
 ```
 
-Stdout must contain only that JSON payload. Put logs, progress, and diagnostics
-on stderr so parsing stays deterministic.
-
-Run `miucr` against the suite:
-
-```sh
-miucr eval --cases eval.json \
-  --tool 'miucr=miucr review --repo "$MIUCR_EVAL_REPO" --from "$MIUCR_EVAL_FROM" --to "$MIUCR_EVAL_TO" --gate none --no-save -o json' \
-  --timeout 10m
-```
-
-`eval` defaults to a 30m per-case per-tool timeout when `--timeout` is omitted;
-pass a shorter timeout for quick smoke runs.
-
-Compare another tool by wrapping it into the same finding JSON:
+To compare another tool, wrap it into that payload and repeat `--tool`:
 
 ```sh
 miucr eval --cases eval.json \
@@ -85,21 +75,20 @@ miucr eval --cases eval.json \
   --tool 'other=./scripts/run-other-reviewer-json "$MIUCR_EVAL_REPO" "$MIUCR_EVAL_FROM" "$MIUCR_EVAL_TO"'
 ```
 
-Tool commands run with the case repo as their working directory. Use a command on
-`PATH` or an absolute script/binary path when the tool lives in the miu-cr repo.
+Because the working directory is the case repo, use a command on `PATH` or an absolute path when the tool lives in the miu-cr repo.
 
-## Reusable benchmark scripts
+## Benchmark scripts
 
 The repo ships scripts for repeatable local comparisons:
 
 ```sh
-# Synthetic fixture suite: materialize base/head git repos from testdata.
+# Synthetic suite: materialize base/head git repos from testdata.
 scripts/eval/materialize-fixtures.sh \
   --cases testdata/eval/miucr-quality.json \
   --out .workbench/features/miucr-eval/fixtures
 
-# Public PR suite: clone/fetch PR refs, run miu-cr and open-code-review, write Markdown.
-# The checked-in public suite is unlabeled; use it for runtime/finding-volume review.
+# Public PR suite: clone PR refs, run miucr and open-code-review, write Markdown.
+# The checked-in suite is unlabeled: use it for runtime and finding volume.
 MIUCR_BIN=/absolute/path/to/miucr \
   scripts/eval/run-public-pr-benchmark.sh \
   --cases testdata/eval/public-prs.json \
@@ -108,42 +97,20 @@ MIUCR_BIN=/absolute/path/to/miucr \
   --timeout 30m
 ```
 
-`scripts/eval/open-code-review-json.sh` adapts `ocr review --format json` into the
-finding JSON shape. `scripts/eval/benchmark-report.py` renders `result.json` into
-a Markdown summary with quality scores plus any captured `context_ms` and
-`provider_ms` stats from miu-cr.
+- `scripts/eval/open-code-review-json.sh` adapts `ocr review --format json` into the finding payload.
+- `scripts/eval/benchmark-report.py` renders `result.json` as a Markdown summary with quality scores and any captured `context_ms` and `provider_ms` stats.
 
 ## Metrics
 
-The result is a `miucr.cli/v1` envelope with per-tool and per-case scores:
+The result is a `miucr.cli/v1` envelope with per-tool and per-case scores.
 
-- `expected`: expected issues in the suite; omitted means unlabeled.
-- `found`: findings emitted by the tool.
-- `matched`: expected issues matched by file/line.
-- `missed`: expected issues not found.
-- `false_positives`: findings that did not match an expected issue on labeled cases.
-- `precision`, `recall`, `f1`: aggregate quality scores.
-- `duration_ms`, `failed_cases`: runtime and command failures.
-- Per-case `stats`: optional reviewer runtime/context stats, when the tool output
-  is a `miucr review` envelope.
-
-## RSI
-
-The finding-recall suite above does not score comment wording. RSI (recurring
-review iteration) is the other loop: every 20 minutes, read recent pull-request
-reviews and check three things.
-
-- The author is @mentioned once, on the notice, when a finding needs an answer.
-  An inline question does not @mention them again.
-- A rationale is two sentences: what breaks, then why. A question is a separate
-  line, and only when the code cannot answer it.
-- A correct fix reply is one sentence: the verdict, a short file link, and the commit. It does not restate the author's reply.
-- A clear ledger on the reviewed head approves. A later reply that finds the
-  finding already handled still approves. If CI is still running, the summary
-  says approval is waiting.
-
-Open findings from that pass go back into a fix. The suite here stays for
-recall. Grow it when a miss or a noisy finding shows up, not for wording.
-
-Start with a tiny synthetic suite that covers the bug classes you care about,
-then grow it only when a real miss or noisy finding appears.
+| Field | Meaning |
+| --- | --- |
+| `expected` | Expected issues in the suite. Omitted means unlabeled. |
+| `found` | Findings the tool emitted. |
+| `matched` | Expected issues matched by file and line. |
+| `missed` | Expected issues not found. |
+| `false_positives` | Findings that matched no expected issue, on labeled cases. |
+| `precision`, `recall`, `f1` | Aggregate quality scores. |
+| `duration_ms`, `failed_cases` | Runtime and command failures. |
+| `stats` (per case) | Optional runtime and context stats, when the tool output is a `miucr review` envelope. |

@@ -1,64 +1,61 @@
 ---
 title: MCP integration
-description: Drive miu-cr reviews as first-class tools from any MCP host over stdio.
+description: Give a coding agent miucr reviews as tools, through the agent skill or an MCP server over stdio.
 ---
 
-`miucr mcp` exposes the review engine to MCP clients over standard input/output, so a coding agent (Claude Code, Codex, …) can run reviews as a first-class tool instead of shelling out and parsing text.
+Two ways to let an agent (Claude Code, Codex, Cursor) run reviews. Install the skill if you want the simplest path. Run the MCP server if your host wants a tool protocol instead of shelling out and parsing text.
 
-## Command
+## Option 1: agent skill
+
+The skill teaches the agent to call `miucr review` and read the JSON envelope. Install it once:
+
+```sh
+curl -fsSL https://cr.miu.sh/skill.md --create-dirs -o ~/.claude/skills/miucr/SKILL.md
+```
+
+For Codex, Cursor, or other agents that read `~/.agents/skills/`, use `-o ~/.agents/skills/miucr/SKILL.md`.
+
+## Option 2: MCP server
 
 ```sh
 miucr mcp                       # stdio MCP server (default transport)
 miucr mcp --transport stdio
 ```
 
-The server reviews the repository in its **current working directory**, so launch it from (or point the host at) the repo you want reviewed.
+The server reviews the repository in its current working directory, so launch it from the repo you want reviewed, or point the host at that directory.
 
-:::note[Important]
-Stdout is reserved for MCP protocol frames. Startup errors, SDK logs, and diagnostics go to stderr, keeping the JSON-RPC stream clean.
+:::note[Stdout is protocol only]
+Stdout carries MCP frames. Startup errors, SDK logs, and diagnostics go to stderr.
 :::
 
-The global `--timeout` flag applies to each call. Tool outputs are byte-bounded (default 1 MiB); an oversized result fails with `review.output_too_large` rather than flooding the host.
+- Each tool call uses the review timeout: `[review].timeout` in config, default 30m. Pass `--timeout` to `miucr mcp` to override it.
+- Tool output is capped at 1 MiB. A larger result fails with `review.output_too_large`.
+- The server needs a provider key in its environment, like the CLI. Set it in the host's `env` block (below) or export it before the host launches `miucr`. See [Credentials](/credentials/).
 
-## Tools
+### Tools
 
-### `review_run`
-
-Review local git changes (staged, a range, or a single commit) and return gated findings, anchored to line numbers from the reviewed revision.
+`review_run` reviews local git changes and returns gated findings anchored to line numbers from the reviewed revision. Pick exactly one mode (`staged`, `from` with `to`, or `commit`), the same rule as the CLI. Returns `{ id, findings, stats }`. The `id` is the saved review id.
 
 | Argument | Type | Notes |
 | -------- | ---- | ----- |
 | `staged` | bool | Review staged changes against the index. |
-| `from` | string | Range mode: base ref (use with `to`). |
-| `to` | string | Range mode: target ref (use with `from`). |
-| `commit` | string | Review a single commit against its parent. |
-| `gate` | string | `none\|info\|low\|medium\|high\|critical`. Defaults to `high`. |
-| `expand` | int | Context lines above/below each hunk. Defaults to `5`; `0` disables. |
-| `token_budget` | int | Approximate token budget; over budget degrades context. `0` disables. |
+| `from` | string | Range mode: base ref. Use with `to`. |
+| `to` | string | Range mode: target ref. Use with `from`. |
+| `commit` | string | Review one commit against its parent. |
+| `gate` | string | `none`, `info`, `low`, `medium`, `high`, or `critical`. Default `high`. |
+| `expand` | int | Context lines above and below each hunk. Default `5`, `0` disables. |
+| `token_budget` | int | Approximate token budget. Over budget, context degrades. `0` disables. |
+| `instruction` | string | Extra steer for this review. Fenced, context-only, cannot change the finding schema. |
 
-Select **exactly one** mode (`staged`, `from`+`to`, or `commit`); the same validation as the CLI. Returns `{ id, findings, stats }`; `id` is the persisted review id (use it with `review_get`).
-
-### `review_get`
-
-Fetch a persisted review by id, as returned from a prior `review_run`.
-
-| Argument | Type | Notes |
-| -------- | ---- | ----- |
-| `id` | string | The review id returned by a prior `review_run`. |
-
-Returns `{ id, repo_dir, mode, head_sha, created_at, findings, stats }`.
-
-## Host setup
+`review_get` fetches a saved review by `id` from a prior `review_run`. Returns `{ id, repo_dir, mode, head_sha, created_at, findings, stats }`.
 
 ### Claude Code
-
-Use the CLI:
 
 ```sh
 claude mcp add --transport stdio miucr -- miucr mcp --transport stdio
 ```
 
-Or add a project-scoped `.mcp.json`:
+Or a project-scoped `.mcp.json`:
 
 ```json
 {
@@ -73,32 +70,48 @@ Or add a project-scoped `.mcp.json`:
 }
 ```
 
-Reference: [Claude Code MCP documentation](https://code.claude.com/docs/en/mcp).
+See the [Claude Code MCP docs](https://code.claude.com/docs/en/mcp).
+
+### Cursor
+
+Put this in `.cursor/mcp.json` (project) or `~/.cursor/mcp.json` (all projects):
+
+```json
+{
+  "mcpServers": {
+    "miucr": {
+      "command": "miucr",
+      "args": ["mcp"],
+      "env": { "ANTHROPIC_API_KEY": "..." }
+    }
+  }
+}
+```
+
+Invoke it from the composer with `@miucr review_run {"staged": true}`.
 
 ### Codex
 
-Codex reads MCP server entries from `~/.codex/config.toml` under `mcp_servers.<id>`:
+Add to `~/.codex/config.toml` (global) or `.codex/config.toml` (project, trusted projects only). Codex supports stdio only.
 
 ```toml
 [mcp_servers.miucr]
 command = "miucr"
 args = ["mcp", "--transport", "stdio"]
 startup_timeout_sec = 10
-tool_timeout_sec = 120
+tool_timeout_sec = 1800
 
 [mcp_servers.miucr.env]
 ANTHROPIC_API_KEY = "..."
 ```
 
-Reference: [OpenAI Codex configuration reference](https://developers.openai.com/codex/config-reference).
-
-:::tip
-The MCP server needs a provider key in its environment just like the CLI. Pass it through the host's `env` block (above) or export it before the host launches `miucr`. See [Credentials](/credentials/).
-:::
+Check with `codex mcp list`. See the [Codex configuration reference](https://developers.openai.com/codex/config-reference).
 
 ## Troubleshooting
 
-- If the host cannot start the server, use a full path from `which miucr`.
-- If no tools appear, restart the host and check its MCP panel.
-- If a review returns no findings, confirm the server's working directory is the repo and that the selected mode actually has changes.
-- If output fails with `review.output_too_large`, narrow the review (fewer files, a smaller range).
+| Symptom | Fix |
+| ------- | --- |
+| Host cannot start the server | Use the full path from `which miucr`. |
+| No tools appear | Restart the host and check its MCP panel. |
+| No findings returned | Confirm the working directory is the repo and the chosen mode has changes. |
+| `review.output_too_large` | Narrow the review: fewer files or a smaller range. |

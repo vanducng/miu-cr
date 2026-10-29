@@ -1,113 +1,94 @@
 ---
 title: Review history
-description: Every review is auto-saved to a local store as a full record (findings, stats, per-turn transcript, and the raw prompt/response). Browse it with `miucr history` (list / show / prune).
+description: Every review is saved locally as a full record. Browse it with miucr history (list, show, prune) and miucr trace.
 ---
 
-Every `miucr review` (local **and** `--pr`) auto-saves a **full record** to a
-local store: the findings + stats, the PR/repo context, the provider/model, a
-per-turn **transcript** of the reviewer's tool calls/results, and the **raw
-prompt and raw final response**. That makes a review auditable and replayable
-after the fact: `miucr history show <id>` reconstructs exactly what the reviewer
-saw and said.
+Every `miucr review`, local and `--pr`, saves a full record to a local store, so you can audit a review later: what the reviewer saw and what it said.
 
-Auto-save is **on by default**. Nothing leaves your machine: the store is the
-same local SQLite DB at `~/.config/miu/cr/state.db` (or your configured Postgres
-backend), and it is gitignored. **No credentials are ever persisted**: tokens
-never enter the prompt, the diff, or the record.
+```sh
+miucr history                  # recent reviews, newest first
+miucr history show <id>        # one full record
+```
+
+Saving is on by default. The store is the local SQLite DB at `~/.config/miu/cr/state.db` (or your configured Postgres backend, see [Store backends](/store-backends/)). Nothing leaves your machine, the DB is gitignored, and no credentials are persisted: tokens never enter the prompt, the diff, or the record.
 
 ## What is saved
 
 | Field | Meaning |
 | --- | --- |
-| `id`, `created_at` | Record identity + timestamp |
-| `target` | `owner/repo#N` for a PR, else the local repo dir |
-| `mode` | `staged` / `range` / `commit` (a `--pr` review is stored as `range`; it is identified by `target`, not a distinct `pr` mode) |
-| `provider`, `model` | The LLM profile used |
-| `status`, `max_severity` | Terminal status + worst finding severity |
-| `findings`, `stats` | The full review result |
-| `transcript` | Per-turn tool calls/results the reviewer made |
-| `raw_prompt`, `raw_response` | The verbatim LLM I/O (audit trail) |
-| `trace` | The full redacted trace (system prompt, diff meta, selected files, injected rules, prompts, response, tool results); view with `miucr trace <id>` |
+| `id`, `created_at` | Record identity and timestamp. |
+| `target` | `owner/repo#N` for a PR, else the local repo dir. |
+| `mode` | `staged`, `range`, or `commit`. A `--pr` review is stored as `range` and identified by `target`. |
+| `provider`, `model` | The LLM profile used. |
+| `status`, `max_severity` | Terminal status and worst finding severity. |
+| `findings`, `stats` | The full review result. `stats` includes prompt and response bytes, provider duration, context size, and tool-call and tool-turn counts (total and per tool). |
+| `transcript` | Per-turn tool calls and results from the reviewer. |
+| `raw_prompt`, `raw_response` | The verbatim LLM input and output. |
+| `trace` | The redacted trace. View with `miucr trace <id>`. |
 
-`stats` includes run-shape counters useful for review tuning: prompt and final
-response bytes, provider duration, selected context size, tool-call count,
-tool-turn count, and per-tool call counts.
-
-## Opting out per run
+The envelope of a review gains an additive `review_id` field: the saved record id, or empty with `--no-save`.
 
 ```sh
-miucr review --staged --no-save     # review, but persist nothing
+miucr review --staged --no-save     # review, persist nothing
 ```
 
-The stdout envelope is unchanged either way; it gains an **additive** `review_id`
-field (the saved record id, or empty with `--no-save`).
-
-## Browsing history
+## Browse
 
 ```sh
-miucr history                                   # recent reviews, newest first
-miucr history --repo owner/repo                 # filter by repo (PR) or repo dir (local)
-miucr history --pr owner/repo#7                 # filter to one PR
-miucr history --since 7d                        # 7d / 24h / 2026-06-01
-miucr history --limit 50                        # cap rows (default 20; 0 = no limit)
-miucr history -o pretty                          # human table
+miucr history --repo owner/repo      # filter by repo (PR) or repo dir (local)
+miucr history --pr owner/repo#7      # one PR
+miucr history --since 7d             # 7d, 24h, or 2026-06-01
+miucr history --limit 50             # default 20; 0 = no limit
+miucr history -o pretty              # human table
 
-miucr history show <id>                          # one full record (findings + stats + transcript + raw I/O)
-miucr history show <id> -o pretty --raw          # pretty, with the raw prompt/response inline
+miucr history show <id> -o pretty --raw   # pretty, with raw prompt/response inline
 ```
 
-`history` emits the `history.list` envelope kind; `show` emits `history.record`
-(404s with a typed `history.not_found` on an unknown id).
+`history` returns kind `history.list`. `show` returns `history.record`, or a typed `history.not_found` for an unknown id.
 
 ## Inspecting the trace
 
-Alongside the record, every review keeps a **redacted trace**: the ordered steps
-of the pipeline: the **system prompt**, the **diff identification** (base/head +
-how it was computed), the **selected files**, the **injected rules** (stem +
-provenance), the **user prompt**, the **model/provider**, the **raw response**,
-and the **tool calls/results**. Tool results are bounded per call and redacted
-before persistence. View any past review's trace:
+Each review also keeps a redacted trace, the ordered steps of the run:
+
+- system prompt
+- diff identification (base, head, how it was computed)
+- selected files
+- injected rules (stem and provenance)
+- user prompt
+- model and provider
+- raw response
+- tool calls and results, bounded per call
 
 ```sh
-miucr trace <id>                 # ordered steps (kind: trace.show)
-miucr trace <id> -o pretty       # a readable per-step view
+miucr trace <id>                 # kind: trace.show
+miucr trace <id> -o pretty       # readable per-step view
 ```
 
-`trace.show` data is `{id, steps:[{step, payload}]}`. An unknown id returns a
-typed `trace.not_found`; an old review with no trace renders empty.
+`trace.show` data is `{id, steps:[{step, payload}]}`. An unknown id returns `trace.not_found`. An old review with no trace renders empty.
 
-For a **live** trace, pass `--trace` to `review`: each capture seam streams one
-NDJSON line (`{"step":...,"payload":...}`) to **stderr** as the run proceeds,
-distinct from `--verbose` progress. The stdout result envelope is unchanged.
+For a live trace, pass `--trace` to `review`. Each step streams as one NDJSON line (`{"step":...,"payload":...}`) to stderr, separate from `--verbose` progress. The stdout envelope is unchanged.
 
 ```sh
-miucr review --staged --trace 2> trace.ndjson    # live steps on stderr; envelope on stdout
+miucr review --staged --trace 2> trace.ndjson
 ```
 
-The trace holds the prompt (your own code), so it is **local only**: read from
-the local store, never re-fetched from a provider, never posted, and never in the
-`review.result` envelope. Secrets (tokens, DSNs) are redacted at persist and in
-the live stream.
+The trace contains your code, so it is local only: read from the local store, never re-fetched from a provider, never posted, never in the `review.result` envelope. Secrets (tokens, DSNs) are redacted when saved and in the live stream.
 
 ## Pruning
 
-History grows unbounded by default. Trim it explicitly:
+History grows unbounded by default.
 
 ```sh
-miucr history prune --keep 200 --yes             # keep the newest 200, delete the rest
+miucr history prune --keep 200 --yes             # keep the newest 200
 miucr history prune --older-than 30d --yes       # delete records older than 30 days
 ```
 
-At least one of `--keep` / `--older-than` is required, and `--yes` confirms the
-destructive delete. `prune` emits the `history.prune` kind with the deleted count.
+At least one of `--keep` or `--older-than` is required. `--yes` confirms the delete. `prune` returns kind `history.prune` with the deleted count.
 
-## Auto-prune cap
-
-Set an optional retention cap in `config.toml` to auto-trim the oldest records
-after every save:
+To trim automatically after every save, set a cap in `config.toml`:
 
 ```toml
 [history]
-enabled = true      # default; set false to disable auto-save globally
-max_records = 500    # 0 (default) = no cap
+enabled = true      # default; false disables auto-save globally
+max_records = 500   # 0 (default) = no cap
 ```

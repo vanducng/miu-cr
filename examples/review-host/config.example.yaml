@@ -97,7 +97,7 @@ review:
     default_action: include
     include_drafts: false
     comment_trigger_regexes:
-      - '(^|\s)(/miucr review\b|@vanducng\b)'
+      - '(^|\s)(/miucr review\b|@review-bot\b)'
     rules:
       - action: exclude
         title_regexes:
@@ -178,9 +178,9 @@ repos:
         default_action: exclude   # allowlist mode: review only what matches below
         rules:
           - action: include
-            authors: ["vanducng"]
+            authors: ["alice"]
           - action: include
-            requested_reviewers: ["vanducng"]
+            requested_reviewers: ["review-bot"]
 
   # Use case: auto-approve when the review is clean enough — threshold approval
   # submits APPROVE when only P4 (or no) findings remain, with a note listing

@@ -8,55 +8,37 @@
 
 # miu-cr
 
-AI code review for the CLI, CI, and MCP hosts. Review staged changes locally, gate PRs in CI, or drive the engine from any MCP-capable agent (Claude Code, Codex, and others). Deterministic engine + LLM, stable JSON envelope on stdout.
+AI code review for your terminal, CI, and coding agents. Deterministic engine, the model only for judgment, stable JSON on stdout.
 
-**Docs:** [cr.miu.sh](https://cr.miu.sh)
+**Docs:** [cr.miu.sh](https://cr.miu.sh) · agents: append `.md` to any docs URL, or read [`llms.txt`](https://cr.miu.sh/llms.txt)
 
-## Install
+## Get started
+
+![miucr demo: init, a gated local review, history, and the PR flags](docs/public/demo/miucr.gif)
 
 ```sh
-# macOS / Linux — detects OS/arch, verifies checksum:
 curl -fsSL https://cr.miu.sh/install.sh | sh
-
-# Homebrew:
-brew install vanducng/tap/miucr
-
-# From source (Go 1.25+):
-go install github.com/vanducng/miu-cr/cmd/miucr@latest
+curl -fsSL https://cr.miu.sh/skill.md --create-dirs \
+  -o ~/.claude/skills/miucr/SKILL.md
 ```
 
-Windows: download `miucr_windows_x86_64.zip` from [Releases](https://github.com/vanducng/miu-cr/releases).
+Then ask your agent:
 
-## Quickstart
+```text
+/miucr set up miucr for this repo: check my provider login, add a starter rule
+for this stack, then review my staged changes and summarize the findings.
+```
 
-No API key? Use your ChatGPT plan:
+Or by hand:
 
 ```sh
-miucr login --provider openai   # browser login, caches a token
-miucr review --staged
+miucr init                                   # provider, auth, starter rule
+miucr review --staged -o pretty              # review what you are about to commit
+miucr review --from main --to HEAD --gate high   # branch check, exit 2 on high+
+miucr review --pr owner/repo#123 --post      # inline comments on a GitHub PR
 ```
 
-Bring your own key:
-
-```sh
-export ANTHROPIC_API_KEY=...    # or OPENAI_API_KEY
-miucr review --staged           # review staged changes
-miucr review --from main --to HEAD --gate high   # range; exit 2 on high+ finding
-miucr review --pr owner/repo#123 --post          # GitHub PR with inline comments
-```
-
-Full guide: [Getting started](https://cr.miu.sh/onboarding/)
-
-## Features
-
-- **Local review** — staged changes, commit range, or a single commit
-- **GitHub PR review** — inline comments, one upserted summary, head-SHA anchoring, fork-safe
-- **CI / GitHub Action** — drop-in reusable action; see [`examples/workflows/`](examples/workflows/)
-- **Project rules** — `.miu/cr/rules/*.md` glob-scoped context injected per file
-- **Evaluation** — `miucr eval` compares reviewer commands against expected findings
-- **MCP server** — `miucr mcp` exposes `review_run` / `review_get` over stdio
-
-Full reference: [cr.miu.sh](https://cr.miu.sh)
+Other installs (Homebrew, Windows, `go install`): [Install](https://cr.miu.sh/install/). More commands: [Getting started](https://cr.miu.sh/onboarding/).
 
 ## Develop
 
@@ -65,7 +47,7 @@ go build ./cmd/miucr   # single static binary (CGO_ENABLED=0)
 go test ./...          # table tests + fakes, no live network or LLM
 ```
 
-**Agent skill:** [`.agents/skills/miucr/SKILL.md`](.agents/skills/miucr/SKILL.md) — agent-agnostic; `.claude/skills/miucr` is a symlink to it.
+**Agent skill:** [`.agents/skills/miucr/SKILL.md`](.agents/skills/miucr/SKILL.md) (agent-agnostic); `.claude/skills/miucr` is a symlink to it.
 
 ## License
 

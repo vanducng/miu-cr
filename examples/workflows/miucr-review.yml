@@ -63,7 +63,7 @@ jobs:
         with:
           script: |
             const body = context.payload.comment.body || '';
-            const defaultPatterns = [String.raw`(^|\s)(/miucr review\b|@vanducng\b)`];
+            const defaultPatterns = [String.raw`(^|\s)/miucr review\b`];
             const configPaths = [
               '.miu/cr/config.toml',
               'miucr.toml',
@@ -155,7 +155,7 @@ jobs:
             }
             const first = body.split(/\r?\n/)[0].trim();
             const slash = first.match(/(?:^|\s)\/miucr\s+review\b\s*(.*)$/i);
-            const mention = first.match(/(?:^|\s)@vanducng\s+review\b\s*(.*)$/i);
+            const mention = first.match(/(?:^|\s)@[\w-]+\s+review\b\s*(.*)$/i);
             core.setOutput('instruction', ((slash && slash[1]) || (mention && mention[1]) || '').trim());
             core.setOutput('head_sha', pr.data.head.sha);
             core.setOutput('should_run', 'true');
