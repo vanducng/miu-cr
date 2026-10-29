@@ -55,6 +55,13 @@ comment with a new marker); subsequent re-runs dedupe normally. On a
 first M5 review **manually** (or off-hours) to absorb the one-time re-post before
 the next scheduled run.
 
+## [0.92.2](https://github.com/vanducng/miu-cr/compare/v0.92.1...v0.92.2) (2026-10-29)
+
+
+### Bug Fixes
+
+* **docs:** focus the search input even when Pagefind mounts late ([#359](https://github.com/vanducng/miu-cr/issues/359)) ([670c60f](https://github.com/vanducng/miu-cr/commit/670c60fea835a4ae771bfa19451650bc861d5a7e))
+
 ## [0.92.1](https://github.com/vanducng/miu-cr/compare/v0.92.0...v0.92.1) (2026-10-29)
 
 
