@@ -34,7 +34,7 @@ and review my staged changes.
 
 ## 3. Or do it by hand
 
-![miucr demo: init, local review with a gate, history, and a PR dry-run](/demo/miucr.gif)
+![miucr demo: init, a gated local review, history, and the PR flags](/demo/miucr.gif)
 
 ```sh
 miucr init                       # pick provider + auth, scaffold a rule

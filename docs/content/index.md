@@ -17,7 +17,7 @@ curl -fsSL https://cr.miu.sh/install.sh | sh
 miucr review --staged -o pretty
 ```
 
-![miucr demo: init, local review with a gate, history, and a PR dry-run](/demo/miucr.gif)
+![miucr demo: init, a gated local review, history, and the PR flags](/demo/miucr.gif)
 
 New here? [Getting started](/onboarding/) takes five minutes.
 

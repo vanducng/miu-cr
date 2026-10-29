@@ -198,8 +198,8 @@ These can also be set under `[review]` in `~/.config/miu/cr/config.toml`. An exp
 | `--context-hops <n>` | auto | Related-file depth from changed files. `0` disables, max `5`. Overrides the automatic depth from `--deep-context`. |
 | `--instruction <text>` | none | Extra steer for this review, e.g. `"focus on the auth changes"`. Fenced, context-only, length-capped. It cannot change the finding schema. |
 
-- `--timeout`: the review default is `900s` unless `--timeout` or `[review].timeout` is set. `--deep-context` also sets `900s`.
-- Stalled-run watchdog: `[review].stalled_timeout`, default `5m`. `"0s"` disables it for debugging.
+- `--timeout`: the review default is `30m` unless `--timeout` or `[review].timeout` is set. `--deep-context` keeps that default.
+- Stalled-run watchdog: `[review].stalled_timeout`, default `8m`. `"0s"` disables it for debugging.
 - Hops follow Go package imports, reverse imports, and basic relative JS/TS/Python imports. They are capped by file count and bytes. Fork PRs skip root project context and hop context.
 
 ## Subagents and symbol context

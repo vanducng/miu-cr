@@ -61,8 +61,8 @@ clear
 note "3. every review is saved"
 run "miucr history | jq -r '.data.reviews[] | [.id, .mode, .max_severity, .findings] | @tsv'" 3
 clear
-note "4. dry-run a GitHub PR review (public repo, no token needed)"
-run "miucr review --pr vanducng/miu-cr#330 --model glm-5.2 -o pretty" 6
-note "add --post with GITHUB_TOKEN to publish inline comments and one summary" 2.5
+note "4. review a GitHub PR: dry-run by default, --post publishes inline comments and one summary"
+run "miucr review --help | grep -E '^ +--(pr|post|suggest) '" 3.5
+note "e.g. miucr review --pr owner/repo#123 --post   (needs GITHUB_TOKEN)" 2.5
 clear
 note "docs: cr.miu.sh  (append .md to any page for agents)" 2.5

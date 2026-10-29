@@ -14,7 +14,7 @@ AI code review for your terminal, CI, and coding agents. Deterministic engine, t
 
 ## Get started
 
-![miucr demo: init, local review with a gate, history, and a PR dry-run](docs/public/demo/miucr.gif)
+![miucr demo: init, a gated local review, history, and the PR flags](docs/public/demo/miucr.gif)
 
 ```sh
 curl -fsSL https://cr.miu.sh/install.sh | sh

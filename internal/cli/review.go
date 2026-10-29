@@ -695,7 +695,7 @@ func reviewCommand(opts *options) *cobra.Command {
 	f.StringVar(&model, "model", "", "Override the review model (else ANTHROPIC_MODEL/OPENAI_MODEL or pinned default)")
 	f.IntVar(&expand, "expand", 5, "Context lines added above/below each hunk in the new-content window (0 disables)")
 	f.IntVar(&tokenBudget, "token-budget", defaultTokenBudget, "Approximate token budget; over budget degrades context (0 disables)")
-	f.BoolVar(&deepContext, "deep-context", false, "Use heavier context defaults for large reviews: --expand 20, --token-budget 0, --timeout 900s, auto --context-hops unless those flags are set")
+	f.BoolVar(&deepContext, "deep-context", false, "Use heavier context defaults for large reviews: --expand 20, --token-budget 0, --timeout 30m, auto --context-hops unless those flags are set")
 	f.IntVar(&contextHops, "context-hops", 0, "Related-file context hop depth from changed files (0 disables, max 5)")
 	f.StringVar(&filterMode, "filter-mode", "diff_context", "Inline-eligibility filter on --pr: added|diff_context|file|nofilter (default diff_context; file/nofilter route off-diff findings to the summary/SARIF/local output, never inline)")
 	f.StringVar(&minSeverity, "min-severity", "", "Minimum severity posted INLINE on --pr: none|info|low|medium|high|critical (default keeps current behavior; below-threshold findings still appear in the summary histogram + SARIF, never inline)")
