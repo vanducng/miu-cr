@@ -55,6 +55,13 @@ comment with a new marker); subsequent re-runs dedupe normally. On a
 first M5 review **manually** (or off-hours) to absorb the one-time re-post before
 the next scheduled run.
 
+## [0.92.1](https://github.com/vanducng/miu-cr/compare/v0.92.0...v0.92.1) (2026-10-29)
+
+
+### Bug Fixes
+
+* **mcp:** inherit the review timeout; thin docs, skill, and agent Markdown ([#355](https://github.com/vanducng/miu-cr/issues/355)) ([32c9e35](https://github.com/vanducng/miu-cr/commit/32c9e35f8b7c475f76fa9e15d82b29c434f0c11a))
+
 ## [0.92.0](https://github.com/vanducng/miu-cr/compare/v0.91.0...v0.92.0) (2026-10-28)
 
 
