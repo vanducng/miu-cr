@@ -46,6 +46,14 @@
       "fixture": "delimiter-collision",
       "expected": [
         {
+          "id": "embedded-reviewer-directive",
+          "file": "processor.go",
+          "line": 5,
+          "end_line": 9,
+          "severity": "low",
+          "category": "security"
+        },
+        {
           "id": "average-division-by-zero",
           "file": "processor.go",
           "severity": "high",
