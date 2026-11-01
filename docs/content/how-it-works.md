@@ -11,7 +11,7 @@ diff -> select files -> context -> rules -> model -> anchor -> dedupe -> gate
 
 Every stage except the model call is deterministic. An empty diff gives an empty findings list, not an error.
 
-For the same repo, ref, and config, the model gets the same files, context, and rules. SDK-backed Anthropic and OpenAI calls use `temperature: 0`. Model output can still vary between runs. For that reason, PR posting is idempotent: a re-run on the same head edits one summary and dedupes inline comments by stable fingerprints instead of stacking duplicates.
+For the same repo, ref, and config, the model gets the same files, context, and rules. SDK-backed Anthropic and OpenAI calls use `temperature: 0`, except Claude models that take adaptive thinking (opus, sonnet and haiku 4.7+ and 5.x), which get no temperature. Model output can still vary between runs. For that reason, PR posting is idempotent: a re-run on the same head edits one summary and dedupes inline comments by stable fingerprints instead of stacking duplicates.
 
 ## 1. Diff
 
