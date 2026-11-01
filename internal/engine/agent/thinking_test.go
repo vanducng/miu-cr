@@ -46,6 +46,35 @@ func TestSupportsAnthropicThinking(t *testing.T) {
 	}
 }
 
+func TestAnthropicAdaptiveOnly(t *testing.T) {
+	for m, want := range map[string]bool{
+		"claude-opus-5-5":              true,
+		"claude-sonnet-5-5":            true,
+		"claude-haiku-5-5":             true,
+		"claude-opus-5":                true,
+		"claude-opus-4-8":              true,
+		"claude-opus-4-7":              true,
+		"anthropic.claude-opus-4-8-v1": true,
+		"claude-opus-4-6":              false,
+		"claude-sonnet-4-5":            false,
+		"claude-opus-4-5-20251101":     false,
+		"claude-sonnet-4-20250514":     false,
+		"claude-3-7-sonnet-latest":     false,
+		"claude-3-7-sonnet-20250219":   false,
+		"claude-3-5-haiku-20241022":    false,
+		"claude-3-opus-20240229":       false,
+		"glm-5.3":                      false,
+		"grok-5":                       false,
+	} {
+		if got := anthropicAdaptiveOnly(m); got != want {
+			t.Errorf("anthropicAdaptiveOnly(%q) = %v, want %v", m, got, want)
+		}
+	}
+	if !supportsAnthropicThinking("claude-opus-5-5") {
+		t.Error("adaptive-only Claude must support thinking")
+	}
+}
+
 func TestIsOpenAIReasoningModel(t *testing.T) {
 	for _, m := range []string{"o1", "o3-mini", "o4-mini", "gpt-5", "gpt-5.5"} {
 		if !isOpenAIReasoningModel(m) {

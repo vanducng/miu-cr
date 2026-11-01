@@ -119,15 +119,16 @@ func (a *anthropicAgent) JudgeReply(ctx stdctx.Context, rr ReplyJudgeRequest) (R
 		defer cancel()
 	}
 	msg, err := retryProviderCall(ctx, rr.ProviderRetry, nil, "anthropic.reply_judge", func() (*anthropic.Message, error) {
-		return a.client.newMessage(ctx, anthropic.MessageNewParams{
-			MaxTokens:   replyJudgeMaxTokens,
-			Temperature: anthropic.Float(a.temperature),
-			Model:       anthropic.Model(a.model),
-			System:      []anthropic.TextBlockParam{{Text: replyJudgeSystemPrompt}},
+		params := anthropic.MessageNewParams{
+			MaxTokens: replyJudgeMaxTokens,
+			Model:     anthropic.Model(a.model),
+			System:    []anthropic.TextBlockParam{{Text: replyJudgeSystemPrompt}},
 			Messages: []anthropic.MessageParam{
 				anthropic.NewUserMessage(anthropic.NewTextBlock(BuildReplyJudgePrompt(rr))),
 			},
-		})
+		}
+		a.applySampling(&params, false)
+		return a.client.newMessage(ctx, params)
 	}, classifyAnthropicErr, anthropicProviderRetryable)
 	if err != nil {
 		return ReplyVerdict{}, err
