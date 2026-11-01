@@ -7,7 +7,7 @@ import (
 )
 
 // Asserts on the JSON the SDK would send, per model family x thinking setting,
-// at all three anthropic request sites (review loop, repair, relocate).
+// at all four anthropic request sites (review loop, repair, relocate, reply judge).
 func TestAnthropicRequestShape(t *testing.T) {
 	const (
 		adaptive = `{"type":"adaptive"}`
@@ -41,9 +41,10 @@ func TestAnthropicRequestShape(t *testing.T) {
 			off := reviewShape(t, tt.model, "off")
 			assertShape(t, "review/off", off, "", "", tt.wantAuxTemp)
 
-			repair, relocate := auxShapes(t, tt.model)
+			repair, relocate, judge := auxShapes(t, tt.model)
 			assertShape(t, "repair", repair, "", "", tt.wantAuxTemp)
 			assertShape(t, "relocate", relocate, "", "", tt.wantAuxTemp)
+			assertShape(t, "reply_judge", judge, "", "", tt.wantAuxTemp)
 		})
 	}
 }
@@ -58,9 +59,9 @@ func reviewShape(t *testing.T, model, thinking string) map[string]json.RawMessag
 	return marshalShape(t, fc.seen[0])
 }
 
-func auxShapes(t *testing.T, model string) (repair, relocate map[string]json.RawMessage) {
+func auxShapes(t *testing.T, model string) (repair, relocate, judge map[string]json.RawMessage) {
 	t.Helper()
-	fc := &fakeAnthropic{responses: []string{textMessage("x"), textMessage("x")}}
+	fc := &fakeAnthropic{responses: []string{textMessage("x"), textMessage("x"), textMessage("x")}}
 	a := &anthropicAgent{client: fc, model: model, thinking: "medium"}
 	if _, _, err := a.RepairPatch(stdctx.Background(), RepairRequest{Span: "s", Rationale: "r", Category: "bug", Severity: "high"}); err != nil {
 		t.Fatalf("RepairPatch: %v", err)
@@ -68,7 +69,12 @@ func auxShapes(t *testing.T, model string) (repair, relocate map[string]json.Raw
 	if _, _, err := a.RelocateQuote(stdctx.Background(), RelocateRequest{File: "f.go", Rationale: "r", QuotedCode: "q", Excerpt: "e", Category: "bug", Severity: "high"}); err != nil {
 		t.Fatalf("RelocateQuote: %v", err)
 	}
-	return marshalShape(t, fc.seen[0]), marshalShape(t, fc.seen[1])
+	// The verdict parse of the stub reply is irrelevant; only the request is asserted.
+	_, _ = a.JudgeReply(stdctx.Background(), ReplyJudgeRequest{Intent: "fix", Path: "a.go", Reply: "Fixed in abcdef1: done"})
+	if len(fc.seen) != 3 {
+		t.Fatalf("expected 3 aux requests, got %d", len(fc.seen))
+	}
+	return marshalShape(t, fc.seen[0]), marshalShape(t, fc.seen[1]), marshalShape(t, fc.seen[2])
 }
 
 func marshalShape(t *testing.T, params any) map[string]json.RawMessage {
