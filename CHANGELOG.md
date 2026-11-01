@@ -55,6 +55,13 @@ comment with a new marker); subsequent re-runs dedupe normally. On a
 first M5 review **manually** (or off-hours) to absorb the one-time re-post before
 the next scheduled run.
 
+## [0.92.4](https://github.com/vanducng/miu-cr/compare/v0.92.3...v0.92.4) (2026-11-01)
+
+
+### Bug Fixes
+
+* **agent:** use adaptive thinking and no temperature for current Claude models ([#365](https://github.com/vanducng/miu-cr/issues/365)) ([7ad982a](https://github.com/vanducng/miu-cr/commit/7ad982a0d415b0accdca377860ca72461755398f))
+
 ## [0.92.3](https://github.com/vanducng/miu-cr/compare/v0.92.2...v0.92.3) (2026-10-29)
 
 
