@@ -30,6 +30,9 @@ func TestAnthropicRequestShape(t *testing.T) {
 		{"claude-sonnet-4-5", enabled, "", false, true},
 		{"claude-sonnet-4-20250514", enabled, "", false, true},
 		{"claude-opus-4-1", enabled, "", false, true},
+		{"claude-3-7-sonnet-20250219", enabled, "", false, true},
+		{"claude-3-5-haiku-20241022", "", "", true, true},
+		{"claude-3-opus-20240229", "", "", true, true},
 		{"glm-5.3", enabled, "", false, true},
 		{"grok-4.7", enabled, "", false, true},
 	}

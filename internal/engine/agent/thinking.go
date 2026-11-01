@@ -59,12 +59,13 @@ func supportsAnthropicThinking(model string) bool {
 	return false
 }
 
-var claudeVersionRE = regexp.MustCompile(`(?:opus|sonnet|haiku)-(\d+)(?:[-.](\d{1,2}))?(?:[^0-9]|$)`)
+var claudeVersionRE = regexp.MustCompile(`(?:opus|sonnet|haiku)-(\d{1,2})(?:[-.](\d{1,2}))?(?:[^0-9]|$)`)
 
 // anthropicAdaptiveOnly reports whether a Claude model (opus/sonnet/haiku 4.7+
 // and the 5.x line) rejects thinking.type=enabled and temperature: it takes
-// thinking.type=adaptive plus output_config.effort instead. A dated id such as
-// claude-sonnet-4-20250514 has no minor version and stays on the older shape.
+// thinking.type=adaptive plus output_config.effort instead. A release date
+// (claude-sonnet-4-20250514, claude-3-7-sonnet-20250219) is not a version and
+// stays on the older shape.
 func anthropicAdaptiveOnly(model string) bool {
 	m := strings.ToLower(model)
 	if !strings.Contains(m, "claude") {

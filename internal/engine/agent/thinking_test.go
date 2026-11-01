@@ -60,6 +60,9 @@ func TestAnthropicAdaptiveOnly(t *testing.T) {
 		"claude-opus-4-5-20251101":     false,
 		"claude-sonnet-4-20250514":     false,
 		"claude-3-7-sonnet-latest":     false,
+		"claude-3-7-sonnet-20250219":   false,
+		"claude-3-5-haiku-20241022":    false,
+		"claude-3-opus-20240229":       false,
 		"glm-5.3":                      false,
 		"grok-5":                       false,
 	} {
