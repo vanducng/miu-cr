@@ -198,6 +198,28 @@ func reviewTools() []anthropic.ToolUnionParam {
 	return out
 }
 
+// applySampling sets thinking and temperature for every request site. Thinking
+// (review loop only) requires temperature unset and max_tokens above the budget;
+// adaptive-only Claude models take thinking.type=adaptive + output_config.effort
+// and reject temperature outright.
+func (a *anthropicAgent) applySampling(p *anthropic.MessageNewParams, think bool) {
+	adaptive := anthropicAdaptiveOnly(a.model)
+	if wantOn, effort := thinkingSetting(a.thinking); think && wantOn && supportsAnthropicThinking(a.model) {
+		budget := anthropicThinkingBudget(effort)
+		if adaptive {
+			p.Thinking = anthropic.ThinkingConfigParamUnion{OfAdaptive: &anthropic.ThinkingConfigAdaptiveParam{}}
+			p.OutputConfig = anthropic.OutputConfigParam{Effort: anthropic.OutputConfigEffort(effort)}
+		} else {
+			p.Thinking = anthropic.ThinkingConfigParamOfEnabled(budget)
+		}
+		p.MaxTokens = budget + p.MaxTokens
+		return
+	}
+	if !adaptive {
+		p.Temperature = anthropic.Float(a.temperature)
+	}
+}
+
 func (a *anthropicAgent) Review(ctx stdctx.Context, rc Context) (engine.ReviewOutput, error) {
 	// The ctx deadline (below) owns the wall clock; each turn checks ctx.Err()
 	// rather than tracking a parallel manual deadline.
@@ -224,16 +246,7 @@ func (a *anthropicAgent) Review(ctx stdctx.Context, rc Context) (engine.ReviewOu
 			anthropic.NewUserMessage(anthropic.NewTextBlock(userPrompt)),
 		},
 	}
-	// Extended thinking (when the model supports it) deepens analysis but REQUIRES
-	// temperature unset (Claude rejects temperature with thinking), and max_tokens
-	// must exceed the thinking budget. Otherwise apply the configured temperature.
-	if wantOn, effort := thinkingSetting(a.thinking); wantOn && supportsAnthropicThinking(a.model) {
-		budget := anthropicThinkingBudget(effort)
-		params.Thinking = anthropic.ThinkingConfigParamOfEnabled(budget)
-		params.MaxTokens = budget + maxTokens
-	} else {
-		params.Temperature = anthropic.Float(a.temperature)
-	}
+	a.applySampling(&params, true)
 
 	emptyRounds := 0
 	var usage engine.Usage
@@ -308,15 +321,16 @@ func (a *anthropicAgent) RepairPatch(ctx stdctx.Context, rr RepairRequest) (stri
 		defer cancel()
 	}
 	msg, err := retryProviderCall(ctx, rr.ProviderRetry, nil, "anthropic.repair", func() (*anthropic.Message, error) {
-		return a.client.newMessage(ctx, anthropic.MessageNewParams{
-			MaxTokens:   repairMaxTokens,
-			Temperature: anthropic.Float(a.temperature),
-			Model:       anthropic.Model(a.model),
-			System:      []anthropic.TextBlockParam{{Text: repairSystemPrompt}},
+		params := anthropic.MessageNewParams{
+			MaxTokens: repairMaxTokens,
+			Model:     anthropic.Model(a.model),
+			System:    []anthropic.TextBlockParam{{Text: repairSystemPrompt}},
 			Messages: []anthropic.MessageParam{
 				anthropic.NewUserMessage(anthropic.NewTextBlock(BuildRepairPrompt(rr))),
 			},
-		})
+		}
+		a.applySampling(&params, false)
+		return a.client.newMessage(ctx, params)
 	}, classifyAnthropicErr, anthropicProviderRetryable)
 	if err != nil {
 		return "", engine.Usage{}, err
@@ -347,15 +361,16 @@ func (a *anthropicAgent) RelocateQuote(ctx stdctx.Context, rr RelocateRequest) (
 		defer cancel()
 	}
 	msg, err := retryProviderCall(ctx, rr.ProviderRetry, nil, "anthropic.relocate", func() (*anthropic.Message, error) {
-		return a.client.newMessage(ctx, anthropic.MessageNewParams{
-			MaxTokens:   relocateMaxTokens,
-			Temperature: anthropic.Float(a.temperature),
-			Model:       anthropic.Model(a.model),
-			System:      []anthropic.TextBlockParam{{Text: relocateSystemPrompt}},
+		params := anthropic.MessageNewParams{
+			MaxTokens: relocateMaxTokens,
+			Model:     anthropic.Model(a.model),
+			System:    []anthropic.TextBlockParam{{Text: relocateSystemPrompt}},
 			Messages: []anthropic.MessageParam{
 				anthropic.NewUserMessage(anthropic.NewTextBlock(BuildRelocatePrompt(rr))),
 			},
-		})
+		}
+		a.applySampling(&params, false)
+		return a.client.newMessage(ctx, params)
 	}, classifyAnthropicErr, anthropicProviderRetryable)
 	if err != nil {
 		return "", engine.Usage{}, err

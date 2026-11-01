@@ -1,6 +1,10 @@
 package agent
 
-import "strings"
+import (
+	"regexp"
+	"strconv"
+	"strings"
+)
 
 // thinkingSetting parses the [review].thinking value into (wantOn, effort).
 // "off" disables; "low"/"medium"/"high" force a level; "" or "auto" means
@@ -44,12 +48,35 @@ func supportsAnthropicThinking(model string) bool {
 	if !strings.Contains(m, "claude") {
 		return false
 	}
+	if anthropicAdaptiveOnly(m) {
+		return true
+	}
 	for _, fam := range []string{"sonnet-4", "opus-4", "haiku-4", "3-7-sonnet", "claude-3-7"} {
 		if strings.Contains(m, fam) {
 			return true
 		}
 	}
 	return false
+}
+
+var claudeVersionRE = regexp.MustCompile(`(?:opus|sonnet|haiku)-(\d+)(?:[-.](\d{1,2}))?(?:[^0-9]|$)`)
+
+// anthropicAdaptiveOnly reports whether a Claude model (opus/sonnet/haiku 4.7+
+// and the 5.x line) rejects thinking.type=enabled and temperature: it takes
+// thinking.type=adaptive plus output_config.effort instead. A dated id such as
+// claude-sonnet-4-20250514 has no minor version and stays on the older shape.
+func anthropicAdaptiveOnly(model string) bool {
+	m := strings.ToLower(model)
+	if !strings.Contains(m, "claude") {
+		return false
+	}
+	v := claudeVersionRE.FindStringSubmatch(m)
+	if v == nil {
+		return false
+	}
+	major, _ := strconv.Atoi(v[1])
+	minor, _ := strconv.Atoi(v[2])
+	return major >= 5 || (major == 4 && minor >= 7)
 }
 
 // isOpenAIReasoningModel reports whether an openai-kind model is a reasoning
