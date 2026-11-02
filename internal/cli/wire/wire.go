@@ -380,6 +380,7 @@ func (prReviewer) ReviewPR(ctx stdctx.Context, req cli.PRReviewRequest) (cli.Rev
 		slog.Warn("config load failed, using built-in defaults: " + config.RedactString(lerr.Error()))
 	}
 	applyRequestConfigOverrides(&cfg, req)
+	info.ReRunComment = reRunComment(os.Getenv("GITHUB_ACTIONS") == "true", os.Getenv("MIUCR_COMMENT_TRIGGER_PATTERN"), cfg.Review.PRFilter.CommentTriggerRegexes)
 	hist, closeHist := openHistoryStore(ctx, cfg, req.NoSave)
 	if closeHist != nil {
 		defer closeHist()

@@ -357,6 +357,8 @@ The cache step is optional. It keeps local review history and traces between run
 
 For on-demand reviews, use [`examples/workflows/miucr-review.yml`](https://github.com/vanducng/miu-cr/blob/main/examples/workflows/miucr-review.yml). It adds an `issue_comment` trigger: a write collaborator comments `/miucr review ...`. To also trigger on a mention such as `@review-bot review ...`, add it to the patterns. Set patterns in `[review.pr_filter].comment_trigger_regexes`; the workflow reads trusted base-branch config before matching. The repo variable `MIUCR_COMMENT_TRIGGER_PATTERN` overrides it.
 
+The posted summary's **Run again** block and the failed-run notice show a literal re-run comment derived from the active pattern. miucr reads `MIUCR_COMMENT_TRIGGER_PATTERN` (pass it as `env` on the action step, as the example does), then the machine config's `comment_trigger_regexes`, then falls back to `/miucr review`. If the pattern has no literal example (for example `.+`), the hint is left out. The hint appears only under GitHub Actions; `miucr serve` has no comment trigger.
+
 ### Inputs
 
 | Input | Required | Default | Notes |

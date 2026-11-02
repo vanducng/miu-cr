@@ -78,7 +78,7 @@ Full presentation, top to bottom:
 - **Open and Resolved tables.** One row per finding, keyed by fingerprint. Columns: priority (with before and after on change), location (links to the inline thread), and origin commit. Resolved rows also show the resolving commit.
 - **Important Files Changed.** Collapsible per-file table. Opt-in with `--file-change-summary`.
 - **Optional diagram.** A Mermaid diagram with `--walkthrough-diagram`. A malformed diagram becomes a short plain note.
-- **Review reference.** A collapsed block with a copy-paste local re-run command, the `review_run` MCP pointer, and metrics badges (Files, Churn, Effort, Context).
+- **Review reference.** A collapsed block with a copy-paste local re-run command, the `review_run` MCP pointer, and metrics badges (Files, Churn, Effort, Context). Under GitHub Actions it also shows the PR comment that re-triggers the review (see [comment trigger](serve-and-action.md)); a failed-run notice repeats that hint.
 - **Footer.** Last reviewed commit (7-character SHA), `Review attempts: N`, and the miu-cr version link.
 
 The `review_id` is not shown. It only resolves on the machine and store that ran the review. It stays in the JSON envelope. Model-supplied text is escaped at render time. `--format minimal` drops the summary section and all badges (see [Usage](/usage/#--format-pr-only)).

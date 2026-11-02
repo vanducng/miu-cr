@@ -187,6 +187,9 @@ jobs:
 
       - uses: vanducng/miu-cr@vX.Y.Z   # pin to a real release tag or an exact SHA
         if: github.event_name != 'issue_comment' || steps.gate.outputs.should_run == 'true'
+        env:
+          # Lets the posted summary show the configured re-run comment.
+          MIUCR_COMMENT_TRIGGER_PATTERN: ${{ vars.MIUCR_COMMENT_TRIGGER_PATTERN }}
         with:
           api-key: ${{ secrets.ANTHROPIC_API_KEY }}
           gate: high

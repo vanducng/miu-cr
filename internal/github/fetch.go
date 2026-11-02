@@ -77,6 +77,11 @@ type PRInfo struct {
 	// StableLines is the new path and line of a shifted StableFPs anchor. The
 	// preserved row stores them so the next review compares that anchor.
 	StableLines map[string]AnchorShift
+	// ReRunComment is the literal PR comment that re-triggers the CI review
+	// (derived from the configured comment-trigger pattern by the wire layer).
+	// Empty when this run has no comment trigger (local CLI, `miucr serve`) or
+	// the configured pattern yields no literal; the re-run hint is then omitted.
+	ReRunComment string
 }
 
 // blobURL builds a repo-relative blob permalink at info.HeadSHA for path/line.

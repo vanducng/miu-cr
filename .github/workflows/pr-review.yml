@@ -178,6 +178,9 @@ jobs:
           go-version-file: go.mod
       - uses: ./
         if: github.event_name != 'issue_comment' || steps.gate.outputs.should_run == 'true'
+        env:
+          # Lets the posted summary show the configured re-run comment.
+          MIUCR_COMMENT_TRIGGER_PATTERN: ${{ vars.MIUCR_COMMENT_TRIGGER_PATTERN }}
         with:
           # Reuse the z.ai token already in repo secrets (Bearer via base-url).
           api-key: ${{ secrets.OCR_LLM_AUTH_TOKEN }}

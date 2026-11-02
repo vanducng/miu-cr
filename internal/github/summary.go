@@ -464,6 +464,9 @@ func renderReviewReference(b *strings.Builder, info *PRInfo, stats map[string]an
 	// actionable, so it is never emitted.
 	if url := prURL(info); url != "" {
 		b.WriteString("**Run again**\n\n")
+		if hint := reRunCommentInstruction(info); hint != "" {
+			fmt.Fprintf(b, "- Re-run in CI: %s\n", hint)
+		}
 		fmt.Fprintf(b, "- Run locally: `miucr review --pr %s -o pretty`\n\n", strings.ReplaceAll(url, "`", "'"))
 	}
 
@@ -718,6 +721,9 @@ func RenderErrorNotice(info *PRInfo, notice ErrorNotice, version string) string 
 		b.WriteString("This looks like an internal miu-cr failure. Re-run after the issue is fixed; a later successful review replaces this notice with findings.")
 	} else {
 		b.WriteString("This is an operational review issue, not a problem with your changes. Re-run the job to retry; a later successful review replaces this notice with findings.")
+	}
+	if hint := reRunCommentInstruction(info); hint != "" {
+		b.WriteString("\n\nTo re-run the review, " + hint + ".")
 	}
 	if strings.TrimSpace(version) != "" {
 		b.WriteString("\n\n<sub>miucr " + mdInline(version) + "</sub>")
