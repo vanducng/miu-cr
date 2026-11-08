@@ -23,6 +23,7 @@ import (
 
 	"github.com/vanducng/miu-cr/internal/config"
 	"github.com/vanducng/miu-cr/internal/engine"
+	"github.com/vanducng/miu-cr/internal/engine/agent"
 	ghub "github.com/vanducng/miu-cr/internal/github"
 	"github.com/vanducng/miu-cr/internal/serve"
 	"github.com/vanducng/miu-cr/internal/store"
@@ -1380,6 +1381,7 @@ func buildServeReviewFn(log *slog.Logger, gate string, st serve.ReviewStore, tra
 			}
 			jobCtx, cancel := stdctx.WithTimeout(parentCtx, timeout)
 			defer cancel()
+			jobCtx = agent.WithLogger(jobCtx, log.With(serveJobLogAttrs(j)...))
 			err := serveThreadReply(jobCtx, j)
 			if err != nil {
 				wait := time.Hour
@@ -1424,6 +1426,7 @@ func buildServeReviewFn(log *slog.Logger, gate string, st serve.ReviewStore, tra
 		}
 		jobCtx, cancel := stdctx.WithTimeout(parentCtx, timeout)
 		defer cancel()
+		jobCtx = agent.WithLogger(jobCtx, log.With(serveJobLogAttrs(j)...))
 		progress := func(stage string) {
 			log.Debug("review progress", serveJobLogAttrs(j, "stage", config.RedactString(stage))...)
 		}

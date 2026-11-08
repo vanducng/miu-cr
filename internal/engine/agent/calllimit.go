@@ -7,9 +7,29 @@ import (
 	"io"
 	"log/slog"
 	"net/http"
+	"sync"
 	"sync/atomic"
 	"time"
 )
+
+// slowCallLogAfter logs a completed call that outlived the SDK's former hidden 10
+// minute limit, as evidence the budget let it finish. Var so tests can shorten it.
+var slowCallLogAfter = 10 * time.Minute
+
+type loggerKey struct{}
+
+// WithLogger makes provider-call log lines use l, so the serve layer can attach
+// the job identifiers (repo, PR, head, job id) to them.
+func WithLogger(ctx stdctx.Context, l *slog.Logger) stdctx.Context {
+	return stdctx.WithValue(ctx, loggerKey{}, l)
+}
+
+func loggerFrom(ctx stdctx.Context) *slog.Logger {
+	if l, ok := ctx.Value(loggerKey{}).(*slog.Logger); ok {
+		return l
+	}
+	return slog.Default()
+}
 
 // TimeoutLimit names which deadline cut a provider call.
 type TimeoutLimit string
@@ -24,9 +44,6 @@ const (
 	// defaultCallTimeout bounds a call when neither a job deadline (--timeout=0)
 	// nor [review].call_timeout exists. It matches the review default.
 	defaultCallTimeout = 30 * time.Minute
-	// slowCallLogAfter logs a completed call that outlived the SDK's former
-	// hidden 10 minute limit, as evidence the budget let it finish.
-	slowCallLogAfter = 10 * time.Minute
 
 	phaseHeaders = "waiting for response headers"
 	phaseBody    = "reading the response body"
@@ -179,7 +196,7 @@ func boundedCall[T any](ctx stdctx.Context, lim callLimits, label string, call f
 	elapsed := time.Since(start)
 	if err == nil {
 		if elapsed >= slowCallLogAfter {
-			slog.Info("slow provider call completed", "call", label, "budget", budget.String(), "elapsed", roundElapsed(elapsed).String())
+			loggerFrom(ctx).Info("slow provider call completed", "call", label, "budget", budget.String(), "elapsed", roundElapsed(elapsed).String())
 		}
 		return out, nil
 	}
@@ -195,18 +212,22 @@ func boundedCall[T any](ctx stdctx.Context, lim callLimits, label string, call f
 	default:
 		cte.Limit, cte.Budget = LimitNested, budget
 	}
-	slog.Warn("provider call timed out", "reason_code", "provider_call_timeout", "limit", string(cte.Limit), "call", label,
+	loggerFrom(ctx).Warn("provider call timed out", "reason_code", "provider_call_timeout", "limit", string(cte.Limit), "call", label,
 		"budget", cte.Budget.String(), "elapsed", roundElapsed(elapsed).String(), "phase", cte.Phase)
 	return zero, cte
 }
 
-// providerHTTPClient is the SDK default client minus its 10 minute
-// ResponseHeaderTimeout: the per-call budget bounds the header wait instead.
-func providerHTTPClient() *http.Client {
+// providerHTTPClient is the one shared client for every agent: the SDK default
+// transport minus its 10 minute ResponseHeaderTimeout (the per-call budget bounds
+// the header wait instead). Sharing keeps connection pooling on a long-running
+// host; the tracking wrapper keeps its state per call, in the request context.
+func providerHTTPClient() *http.Client { return sharedProviderHTTP() }
+
+var sharedProviderHTTP = sync.OnceValue(func() *http.Client {
 	if t, ok := http.DefaultTransport.(*http.Transport); ok {
 		t = t.Clone()
 		t.ResponseHeaderTimeout = 0
 		return &http.Client{Transport: withPhaseTracking(t)}
 	}
 	return &http.Client{Transport: withPhaseTracking(http.DefaultTransport)}
-}
+})
