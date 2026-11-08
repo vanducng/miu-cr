@@ -142,6 +142,7 @@ type Review struct {
 	PromptFormat   string            `toml:"prompt_format,omitempty"` // xml (default) | markdown
 	Timeout        string            `toml:"timeout,omitempty"`
 	StalledTimeout string            `toml:"stalled_timeout,omitempty"`
+	CallTimeout    string            `toml:"call_timeout,omitempty"` // per provider call cap; "" or 0 = the time left on the review timeout
 	ProviderRetry  ProviderRetry     `toml:"provider_retry,omitempty"`
 	Temperature    *float64          `toml:"temperature,omitempty"` // nil → 0 (deterministic); see [review].temperature in providers.md
 	Thinking       string            `toml:"thinking,omitempty"`    // auto|off|low|medium|high; "" → auto (on when the model supports it). Thinking omits temperature.

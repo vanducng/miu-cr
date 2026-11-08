@@ -142,6 +142,9 @@ func mergeReview(base, file Review) Review {
 	if file.StalledTimeout != "" {
 		out.StalledTimeout = file.StalledTimeout
 	}
+	if file.CallTimeout != "" {
+		out.CallTimeout = file.CallTimeout
+	}
 	out.ProviderRetry = MergeProviderRetry(base.ProviderRetry, file.ProviderRetry)
 	if file.Temperature != nil {
 		out.Temperature = file.Temperature

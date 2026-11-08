@@ -425,6 +425,7 @@ func (prReviewer) ReviewPR(ctx stdctx.Context, req cli.PRReviewRequest) (cli.Rev
 		AuthToken:     req.AuthToken,
 		Auth:          req.Auth,
 		Model:         req.Model,
+		CallTimeout:   req.CallTimeout,
 		OAuthResolver: oauthResolver(),
 	})
 	if err != nil {

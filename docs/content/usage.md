@@ -160,7 +160,7 @@ Failures use the same envelope with `ok: false` and an `error` object: a stable 
 | `agent.auth_expired` | Expired OAuth token (401/403, including codex still-401 after refresh). | `false` |
 | `provider.rate_limited` | Provider returned 429. | `true` |
 | `agent.unavailable` | Provider returned 5xx or 529. | `true` |
-| `review.timeout` | The review exceeded its timeout. | `true` |
+| `review.timeout` | The review hit a deadline: the job deadline (`--timeout`), the per-call `[review].call_timeout`, or a nested deadline of unknown origin. The message says which, with its budget and elapsed time. | `true` |
 | `review.stalled` | No progress for `[review].stalled_timeout`. | `true` |
 | `review.canceled` | Interrupted (Ctrl-C / SIGINT), exit `130`. | `false` |
 | `config.invalid` | Malformed config, bad enum or `auth` value, or an `openai` gateway profile with a key but no `base_url`. Exit `2`. | `false` |
@@ -200,6 +200,7 @@ These can also be set under `[review]` in `~/.config/miu/cr/config.toml`. An exp
 
 - `--timeout`: the review default is `30m` unless `--timeout` or `[review].timeout` is set. `--deep-context` keeps that default.
 - Stalled-run watchdog: `[review].stalled_timeout`, default `8m`. `"0s"` disables it for debugging.
+- Per-call cap: `[review].call_timeout`, unset by default (a call may use the time left on `--timeout`). See [Providers](/providers/#review-defaults-review).
 - Hops follow Go package imports, reverse imports, and basic relative JS/TS/Python imports. They are capped by file count and bytes. Fork PRs skip root project context and hop context.
 
 ## Subagents and symbol context

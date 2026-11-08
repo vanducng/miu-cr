@@ -684,6 +684,7 @@ type hostReviewAnalysisFields struct {
 	PromptFormat   string
 	Timeout        string
 	StalledTimeout string
+	CallTimeout    string
 	ProviderRetry  config.ProviderRetry
 	Expand         *int
 	TokenBudget    *int
@@ -706,6 +707,7 @@ func hostReviewAnalysisShape(review config.HostReview) any {
 		MinSeverity:    review.MinSeverity,
 		Timeout:        review.Timeout,
 		StalledTimeout: review.StalledTimeout,
+		CallTimeout:    review.CallTimeout,
 		ProviderRetry:  review.ProviderRetry,
 		Expand:         review.Expand,
 		TokenBudget:    review.TokenBudget,
@@ -745,6 +747,7 @@ func hostReviewOptions(providerName string, provider config.HostProvider, secret
 		Auth:                provider.Auth,
 		Model:               provider.Model,
 		StalledTimeout:      durationOrDefaultAllowZero(review.StalledTimeout, defaultReviewStalledTimeout),
+		CallTimeout:         review.CallTimeout,
 		ProviderRetry:       review.ProviderRetry,
 		DeepContext:         boolValue(review.DeepContext),
 		Subagents:           review.Subagents,
@@ -1182,6 +1185,9 @@ func mergeHostReview(base, over config.HostReview) config.HostReview {
 	if over.StalledTimeout != "" {
 		out.StalledTimeout = over.StalledTimeout
 	}
+	if over.CallTimeout != "" {
+		out.CallTimeout = over.CallTimeout
+	}
 	if over.Debounce != "" {
 		out.Debounce = over.Debounce
 	}
@@ -1445,6 +1451,7 @@ func buildServeReviewFn(log *slog.Logger, gate string, st serve.ReviewStore, tra
 			DeepContext:         review.DeepContext,
 			ContextHops:         review.ContextHops,
 			Subagents:           review.Subagents,
+			CallTimeout:         review.CallTimeout,
 			ProviderRetry:       review.ProviderRetry,
 			Tools:               review.Tools,
 			SymbolContext:       review.SymbolContext,

@@ -119,6 +119,7 @@ default_provider = "anthropic"
 # min_severity = "low"           # --pr inline floor: none|info|low|medium|high|critical
 # timeout      = "300s"          # review timeout (a Go duration: 300s, 5m, …)
 # stalled_timeout = "5m"         # no-progress watchdog; "0s" disables
+# call_timeout = "25m"           # cap per provider call (and per SDK retry attempt); unset or "0s" = the time left on `timeout`
 # suggest      = false           # emit GitHub one-click suggestions on --post (default off)
 # patch_repair = false           # 2nd-pass recovery of one-click suggestions; only effective with suggest=true (default off)
 # anchor_recovery = true         # 2nd-pass rescue of findings whose quoted code failed line-anchoring; max 3 LLM calls per review, severity >= medium, recovered quotes must still anchor exactly (default on)
