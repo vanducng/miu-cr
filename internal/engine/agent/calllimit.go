@@ -4,9 +4,9 @@ import (
 	stdctx "context"
 	"errors"
 	"fmt"
+	"io"
 	"log/slog"
 	"net/http"
-	"net/http/httptrace"
 	"sync/atomic"
 	"time"
 )
@@ -101,22 +101,65 @@ func (l callLimits) budget(ctx stdctx.Context) (time.Duration, error) {
 	return budget, nil
 }
 
-// phaseTracker records whether the current HTTP attempt has seen response bytes,
-// so a deadline can say if the provider was silent or slow to finish the body.
-type phaseTracker struct{ gotResponse atomic.Bool }
-
-func (p *phaseTracker) attach(ctx stdctx.Context) stdctx.Context {
-	return httptrace.WithClientTrace(ctx, &httptrace.ClientTrace{
-		WroteRequest:         func(httptrace.WroteRequestInfo) { p.gotResponse.Store(false) },
-		GotFirstResponseByte: func() { p.gotResponse.Store(true) },
-	})
+// callState is what the HTTP transport saw during one boundedCall. It is carried
+// in the request context so the transport can update it for every SDK attempt.
+type callState struct {
+	headersDone    atomic.Bool // the current attempt received complete response headers
+	attemptExpired atomic.Bool // the current attempt's own context hit its deadline
 }
 
-func (p *phaseTracker) phase() string {
-	if p.gotResponse.Load() {
+type callStateKey struct{}
+
+func (s *callState) phase() string {
+	if s.headersDone.Load() {
 		return phaseBody
 	}
 	return phaseHeaders
+}
+
+func (s *callState) note(attemptCtx stdctx.Context) {
+	if errors.Is(attemptCtx.Err(), stdctx.DeadlineExceeded) {
+		s.attemptExpired.Store(true)
+	}
+}
+
+// trackingTransport resets the call state at the start of every HTTP attempt,
+// treats a returned response as "headers complete", and records whether the
+// attempt's own context expired, so a later attempt never inherits an earlier
+// attempt's phase or expiry.
+type trackingTransport struct{ base http.RoundTripper }
+
+func withPhaseTracking(base http.RoundTripper) http.RoundTripper { return trackingTransport{base} }
+
+func (t trackingTransport) RoundTrip(req *http.Request) (*http.Response, error) {
+	s, _ := req.Context().Value(callStateKey{}).(*callState)
+	if s == nil {
+		return t.base.RoundTrip(req)
+	}
+	s.headersDone.Store(false)
+	s.attemptExpired.Store(false)
+	resp, err := t.base.RoundTrip(req)
+	if err != nil {
+		s.note(req.Context())
+		return resp, err
+	}
+	s.headersDone.Store(true)
+	resp.Body = &trackedBody{ReadCloser: resp.Body, state: s, ctx: req.Context()}
+	return resp, nil
+}
+
+type trackedBody struct {
+	io.ReadCloser
+	state *callState
+	ctx   stdctx.Context
+}
+
+func (b *trackedBody) Read(p []byte) (int, error) {
+	n, err := b.ReadCloser.Read(p)
+	if err != nil && err != io.EOF {
+		b.state.note(b.ctx)
+	}
+	return n, err
 }
 
 // boundedCall runs one provider call under its effective budget, which call
@@ -128,9 +171,9 @@ func boundedCall[T any](ctx stdctx.Context, lim callLimits, label string, call f
 	if err != nil {
 		return zero, err
 	}
-	var tracker phaseTracker
+	var state callState
 	start := time.Now()
-	out, err := call(tracker.attach(ctx), budget)
+	out, err := call(stdctx.WithValue(ctx, callStateKey{}, &state), budget)
 	elapsed := time.Since(start)
 	if err == nil {
 		if elapsed >= slowCallLogAfter {
@@ -141,11 +184,11 @@ func boundedCall[T any](ctx stdctx.Context, lim callLimits, label string, call f
 	if !errors.Is(err, stdctx.DeadlineExceeded) || errors.Is(ctx.Err(), stdctx.Canceled) {
 		return zero, err
 	}
-	cte := &CallTimeoutError{Label: label, Elapsed: elapsed, Phase: tracker.phase(), cause: err}
+	cte := &CallTimeoutError{Label: label, Elapsed: elapsed, Phase: state.phase(), cause: err}
 	switch {
 	case ctx.Err() != nil:
 		cte.Limit, cte.Budget = LimitJobDeadline, lim.job
-	case elapsed >= budget:
+	case state.attemptExpired.Load():
 		cte.Limit, cte.Budget = LimitCallTimeout, budget
 	default:
 		cte.Limit, cte.Budget = LimitNested, budget
@@ -161,7 +204,7 @@ func providerHTTPClient() *http.Client {
 	if t, ok := http.DefaultTransport.(*http.Transport); ok {
 		t = t.Clone()
 		t.ResponseHeaderTimeout = 0
-		return &http.Client{Transport: t}
+		return &http.Client{Transport: withPhaseTracking(t)}
 	}
-	return &http.Client{Transport: http.DefaultTransport}
+	return &http.Client{Transport: withPhaseTracking(http.DefaultTransport)}
 }

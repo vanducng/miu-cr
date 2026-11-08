@@ -294,7 +294,7 @@ func TestCallLimitOpenAIGetsJobRemainder(t *testing.T) {
 // The SDK default transport caps response headers at a hidden 10 minutes; the
 // per-call budget replaces it, so the transport itself must not add a cap.
 func TestProviderHTTPClientHasNoHiddenHeaderTimeout(t *testing.T) {
-	tr, ok := providerHTTPClient().Transport.(*http.Transport)
+	tr, ok := providerHTTPClient().Transport.(trackingTransport).base.(*http.Transport)
 	if !ok {
 		t.Skip("default transport is wrapped")
 	}
