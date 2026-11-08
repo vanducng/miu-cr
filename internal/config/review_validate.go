@@ -62,6 +62,12 @@ func ValidateReview(r Review) error {
 			return invalidReview("stalled_timeout", r.StalledTimeout, "a non-negative Go duration like 0s, 180s, or 5m")
 		}
 	}
+	if r.CallTimeout != "" {
+		d, err := time.ParseDuration(r.CallTimeout)
+		if err != nil || d < 0 {
+			return invalidReview("call_timeout", r.CallTimeout, "a non-negative Go duration like 0s, 10m, or 25m")
+		}
+	}
 	if err := validateProviderRetry("provider_retry", r.ProviderRetry, invalidReview); err != nil {
 		return err
 	}

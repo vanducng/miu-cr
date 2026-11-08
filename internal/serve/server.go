@@ -113,6 +113,7 @@ type JobReviewOptions struct {
 	Auth                string
 	Model               string
 	StalledTimeout      time.Duration
+	CallTimeout         string
 	ProviderRetry       config.ProviderRetry
 	OperatorPrompt      string
 	ExpandWindow        int

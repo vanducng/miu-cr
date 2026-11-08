@@ -38,10 +38,15 @@ type openaiClient interface {
 	create(ctx stdctx.Context, params openai.ChatCompletionNewParams) (*openai.ChatCompletion, error)
 }
 
-type sdkOpenAIClient struct{ sdk openai.Client }
+type sdkOpenAIClient struct {
+	sdk    openai.Client
+	limits callLimits
+}
 
 func (c sdkOpenAIClient) create(ctx stdctx.Context, params openai.ChatCompletionNewParams) (*openai.ChatCompletion, error) {
-	return c.sdk.Chat.Completions.New(ctx, params)
+	return boundedCall(ctx, c.limits, "openai.chat", func(ctx stdctx.Context, budget time.Duration) (*openai.ChatCompletion, error) {
+		return c.sdk.Chat.Completions.New(ctx, params, openaiopt.WithRequestTimeout(budget))
+	})
 }
 
 // openaiAgent is an OpenAI-compatible (chat-completions + tool-use) Agent.
@@ -58,16 +63,16 @@ func newOpenAIAgent(creds Credentials, timeout time.Duration) *openaiAgent {
 	if baseURL == "" {
 		baseURL = config.DefaultOpenAIBaseURL
 	}
-	// Total wall clock is owned by the ctx deadline (WithTimeout in Review),
-	// matching the Anthropic path; no per-request timeout so retries don't get
-	// the full --timeout each and inflate the budget past --timeout.
+	// The job deadline (WithTimeout in Review) owns the total wall clock; each call
+	// gets min(call_timeout, time left) from boundedCall, never more than the job.
 	opts := []openaiopt.RequestOption{
+		openaiopt.WithHTTPClient(providerHTTPClient()),
 		openaiopt.WithAPIKey(creds.APIKey),
 		openaiopt.WithBaseURL(baseURL),
 		openaiopt.WithMaxRetries(0),
 	}
 	sdk := openai.NewClient(opts...)
-	return &openaiAgent{client: sdkOpenAIClient{sdk: sdk}, model: creds.Model, timeout: timeout, temperature: creds.Temperature, thinking: creds.Thinking}
+	return &openaiAgent{client: sdkOpenAIClient{sdk: sdk, limits: callLimits{cap: creds.CallTimeout, job: timeout}}, model: creds.Model, timeout: timeout, temperature: creds.Temperature, thinking: creds.Thinking}
 }
 
 // openAIReasoningEffort maps an effort level to the SDK constant (default medium).

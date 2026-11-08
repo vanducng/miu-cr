@@ -142,10 +142,15 @@ type anthropicClient interface {
 	newMessage(ctx stdctx.Context, params anthropic.MessageNewParams) (*anthropic.Message, error)
 }
 
-type sdkAnthropicClient struct{ sdk anthropic.Client }
+type sdkAnthropicClient struct {
+	sdk    anthropic.Client
+	limits callLimits
+}
 
 func (c sdkAnthropicClient) newMessage(ctx stdctx.Context, params anthropic.MessageNewParams) (*anthropic.Message, error) {
-	return c.sdk.Messages.New(ctx, params)
+	return boundedCall(ctx, c.limits, "anthropic.messages", func(ctx stdctx.Context, budget time.Duration) (*anthropic.Message, error) {
+		return c.sdk.Messages.New(ctx, params, option.WithRequestTimeout(budget))
+	})
 }
 
 // anthropicAgent is the production Agent backed by the Anthropic Messages API.
@@ -161,7 +166,7 @@ type anthropicAgent struct {
 // config.KindAnthropic; see registry.go for the dispatch).
 func newAnthropicAgent(creds Credentials, timeout time.Duration) *anthropicAgent {
 	return &anthropicAgent{
-		client:      sdkAnthropicClient{sdk: anthropic.NewClient(anthropicOptions(creds)...)},
+		client:      sdkAnthropicClient{sdk: anthropic.NewClient(anthropicOptions(creds)...), limits: callLimits{cap: creds.CallTimeout, job: timeout}},
 		model:       creds.Model,
 		timeout:     timeout,
 		temperature: creds.Temperature,
@@ -174,7 +179,7 @@ func newAnthropicAgent(creds Credentials, timeout time.Duration) *anthropicAgent
 // When AuthToken is set it is sent as Authorization (and x-api-key is dropped);
 // otherwise APIKey goes via x-api-key.
 func anthropicOptions(creds Credentials) []option.RequestOption {
-	var opts []option.RequestOption
+	opts := []option.RequestOption{option.WithHTTPClient(providerHTTPClient())}
 	if creds.BaseURL != "" {
 		opts = append(opts, option.WithBaseURL(creds.BaseURL))
 	}

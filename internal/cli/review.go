@@ -15,6 +15,7 @@ import (
 
 	"github.com/vanducng/miu-cr/internal/config"
 	"github.com/vanducng/miu-cr/internal/engine"
+	"github.com/vanducng/miu-cr/internal/engine/agent"
 	ghub "github.com/vanducng/miu-cr/internal/github"
 	"github.com/vanducng/miu-cr/internal/sarif"
 )
@@ -52,18 +53,7 @@ func classifyReviewErr(err error, timeout time.Duration, ctxs ...stdctx.Context)
 	}
 	switch {
 	case errors.Is(err, stdctx.DeadlineExceeded):
-		msg := "review timed out"
-		if timeout > 0 { // only the CLI-owned deadline knows the budget; a 0 means the deadline came from elsewhere
-			msg = fmt.Sprintf("review timed out after %s", timeout)
-		}
-		return &CLIError{
-			Code:    "review.timeout",
-			Message: msg,
-			Hint:    "raise --timeout (e.g. 1800s) or narrow the diff",
-			Exit:    1,
-			Retry:   true,
-			Cause:   err,
-		}
+		return reviewTimeoutErr(err, timeout)
 	case errors.Is(err, stdctx.Canceled):
 		return &CLIError{
 			Code:    "review.canceled",
@@ -74,6 +64,36 @@ func classifyReviewErr(err error, timeout time.Duration, ctxs ...stdctx.Context)
 	default:
 		return err
 	}
+}
+
+const reviewRequeueNote = "the host requeues an open PR head while it is still current; a one-shot CLI review is not retried"
+
+// reviewTimeoutErr names the deadline that fired. A provider call reports its own
+// limit (*agent.CallTimeoutError); a bare DeadlineExceeded can only be the job
+// deadline, which the CLI-owned timeout describes.
+func reviewTimeoutErr(err error, timeout time.Duration) *CLIError {
+	out := &CLIError{Code: "review.timeout", Exit: 1, Retry: true, Cause: err}
+	jobMsg := "review timed out"
+	if timeout > 0 { // only the CLI-owned deadline knows the budget; a 0 means the deadline came from elsewhere
+		jobMsg = fmt.Sprintf("review timed out after %s", timeout)
+	}
+	out.Message = jobMsg
+	out.Hint = "raise --timeout (e.g. 1800s) or narrow the diff; " + reviewRequeueNote
+	var cte *agent.CallTimeoutError
+	if !errors.As(err, &cte) {
+		return out
+	}
+	switch cte.Limit {
+	case agent.LimitJobDeadline:
+		out.Message = jobMsg + ": " + cte.Error()
+	case agent.LimitCallTimeout:
+		out.Message = "review stopped: " + cte.Error()
+		out.Hint = "raise [review].call_timeout / repos[].review.call_timeout or narrow the diff; the job deadline had not been reached; " + reviewRequeueNote
+	default:
+		out.Message = "review stopped: " + cte.Error()
+		out.Hint = "check the provider gateway and the host log (reason_code=provider_call_timeout); " + reviewRequeueNote
+	}
+	return out
 }
 
 var errReviewStalled = errors.New("review stalled")
@@ -291,6 +311,7 @@ type PRReviewRequest struct {
 	Model          string
 	Timeout        time.Duration
 	StalledTimeout time.Duration
+	CallTimeout    string // per provider call cap ("" → cfg.Review.CallTimeout; host path sets it per-repo)
 	ProviderRetry  config.ProviderRetry
 
 	// Quota is the resolved provider's usage quota (nil = none). Threaded by the

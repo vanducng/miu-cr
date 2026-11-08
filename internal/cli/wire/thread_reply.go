@@ -63,6 +63,7 @@ func applyServeThreadReply(ctx stdctx.Context, job serve.Job) (err error) {
 		AuthToken:     review.AuthToken,
 		Auth:          review.Auth,
 		Model:         review.Model,
+		CallTimeout:   review.CallTimeout,
 		OAuthResolver: oauthResolver(),
 	})
 	if err != nil {

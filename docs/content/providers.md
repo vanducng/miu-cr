@@ -82,6 +82,7 @@ min_severity = "low"           # --min-severity inline floor; unset = no floor
 format       = "full"          # --format: full|minimal
 timeout      = "900s"          # review timeout (Go duration)
 stalled_timeout = "5m"         # no-progress watchdog; "0s" disables
+# call_timeout = "25m"         # cap per provider call; unset = the time left on timeout
 expand       = 5               # --expand; --deep-context raises it to 20
 token_budget = 0               # --token-budget; 0 = no cap
 deep_context = false           # --deep-context
@@ -133,6 +134,8 @@ note = "on_findings"           # none|on_findings|always
 Notes on specific keys:
 
 - `thinking = "auto"` turns on extended thinking when the model supports it (Claude, gpt-5 and o-series, codex). Off, or an unsupported model, falls back to `temperature`. Thinking omits temperature because it forces 1. Claude opus, sonnet and haiku 4.7+ and 5.x take adaptive thinking with `output_config.effort` set from `[review].thinking` (`auto` is `medium`) and never send `temperature`; `off` sends neither. Default `temperature = 0` keeps re-reviews of the same diff stable; reasoning models ignore it.
+- `call_timeout` caps one provider call, and each SDK retry attempt inside it, for the `anthropic` and `openai` kinds (not the codex login backend). A call gets the smaller of `call_timeout` and the time left on `timeout`, so a later turn only gets what the earlier ones left. Unset or `0s` means the call may use all the time left; with no `timeout` either (`--timeout 0`), a call is capped at 30m. The same budget bounds the wait for response headers, so a provider that accepts the request and never answers is cut at the budget, not at a hidden 10 minutes. It can be set per repo as `repos[].review.call_timeout` in the host config. A bad value is `config.invalid`.
+- A provider call that hits a deadline names the limit that fired, its budget, the time spent, and whether it was waiting for response headers or reading the body. All of them are `review.timeout`: `review timed out after <timeout>: ... cut by the job deadline` (raise `timeout`), `review stopped: provider call ... hit the call timeout (<budget>) after <elapsed>` (raise `call_timeout`), and `... hit a nested deadline of unknown origin` (a deadline from the gateway or transport that is neither of yours; check the host log for `reason_code=provider_call_timeout`, which carries the job's `ref`, `job_id` and `head_sha`). The host requeues an open PR head while it is still current; a one-shot CLI review is not retried.
 - `provider_retry` retries `429`, `5xx`, `529`, temporary transport errors, and a `400` saying the model provider is not registered yet or the run failed internally. It does not retry auth errors, genuinely invalid requests, content-policy errors, or cancellation.
 - `[review.tools]` retries transient tool failures such as temporary filesystem or process errors. Malformed calls, unknown tools, missing files, and cancellation are returned to the model immediately.
 - `symbol_context` is a read-only tool alongside `file_read` and `grep`. It answers code-intelligence lookups (symbols, definitions, references, call hierarchy, implementations, dependencies, Astro/Vue/Svelte components) from the reviewed git revision, so PR and staged reviews never read the live worktree.

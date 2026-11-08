@@ -111,6 +111,7 @@ type HostReview struct {
 	PromptFormat   string      `yaml:"prompt_format" json:"prompt_format,omitempty"`
 	Timeout        string      `yaml:"timeout" json:"timeout,omitempty"`
 	StalledTimeout string      `yaml:"stalled_timeout" json:"stalled_timeout,omitempty"`
+	CallTimeout    string      `yaml:"call_timeout" json:"call_timeout,omitempty"`
 	// Debounce delays a review until the PR head has been stable for this long, so a
 	// burst of pushes coalesces into one review on the settled head instead of each
 	// push superseding the prior in-flight review. Empty/0 = off (review immediately).
@@ -506,6 +507,12 @@ func validateHostReview(path, field string, r HostReview) error {
 		d, err := time.ParseDuration(r.StalledTimeout)
 		if err != nil || d < 0 {
 			return invalidHost(path, field+".stalled_timeout", r.StalledTimeout, "a non-negative Go duration like 0s, 180s, or 5m")
+		}
+	}
+	if r.CallTimeout != "" {
+		d, err := time.ParseDuration(r.CallTimeout)
+		if err != nil || d < 0 {
+			return invalidHost(path, field+".call_timeout", r.CallTimeout, "a non-negative Go duration like 0s, 10m, or 25m")
 		}
 	}
 	if r.Debounce != "" {

@@ -30,6 +30,9 @@ type Credentials struct {
 	// Each backend decides if its model SUPPORTS thinking; when on it sends the
 	// provider's extended-thinking/reasoning params and omits temperature.
 	Thinking string
+	// CallTimeout caps one provider call (and each SDK retry attempt). 0 means no
+	// configured cap: the call gets the time left on the job.
+	CallTimeout time.Duration
 	// BaseURL overrides the provider endpoint. For Anthropic this routes the
 	// official SDK at an Anthropic-compatible gateway. Empty means the
 	// SDK/provider default.
@@ -68,6 +71,9 @@ type ResolveInput struct {
 	// Auth, when set, replaces the profile's auth mode and drops its credential
 	// sources: the serve host resolves its own provider secret into APIKey/AuthToken.
 	Auth string
+
+	// CallTimeout, when set, overrides [review].call_timeout (the host sets it per repo).
+	CallTimeout string
 
 	// OAuthResolver, when set, supplies the cached `miucr login` credential for
 	// the OpenAI path. It is injected by the cli/config layer so this package
@@ -140,6 +146,22 @@ func resolveWith(cfg config.Config, in ResolveInput) (Credentials, error) {
 		creds.Temperature = *cfg.Review.Temperature
 	}
 	creds.Thinking = cfg.Review.Thinking
+	callTimeout := cfg.Review.CallTimeout
+	if strings.TrimSpace(in.CallTimeout) != "" {
+		callTimeout = in.CallTimeout
+	}
+	if callTimeout != "" {
+		d, err := time.ParseDuration(callTimeout)
+		if err != nil || d < 0 {
+			return Credentials{}, &clierr.CLIError{
+				Code:    "config.invalid",
+				Message: fmt.Sprintf("[review].call_timeout %q is invalid: want a non-negative Go duration like 0s, 10m, or 25m", config.RedactString(callTimeout)),
+				Hint:    "fix [review].call_timeout (or repos[].review.call_timeout in the host config)",
+				Exit:    2,
+			}
+		}
+		creds.CallTimeout = d
+	}
 	return creds, nil
 }
 
