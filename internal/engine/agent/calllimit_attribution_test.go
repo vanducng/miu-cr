@@ -2,6 +2,7 @@ package agent
 
 import (
 	stdctx "context"
+	"errors"
 	"net"
 	"net/http"
 	"strings"
@@ -37,18 +38,19 @@ func busy503(w http.ResponseWriter, delay time.Duration) {
 
 // S07-R1-01: expiry is decided by the attempt's own context, never by aggregate
 // elapsed time. Attempt 2 fails with an injected DeadlineExceeded while its own
-// context is live, at 231ms of total time against a 200ms per-attempt cap.
+// context is live, at ~1.15s of total time against a 1s per-attempt cap (each
+// attempt alone stays well under the cap so a loaded machine cannot expire it).
 func TestCallLimitNestedDeadlineOnLaterAttemptIsNotACallTimeout(t *testing.T) {
 	var attempts atomic.Int32
-	srv := anthropicTestServer(t, func(w http.ResponseWriter, r *http.Request) { busy503(w, 130*time.Millisecond) })
+	srv := anthropicTestServer(t, func(w http.ResponseWriter, r *http.Request) { busy503(w, 650*time.Millisecond) })
 	inject := option.WithMiddleware(func(req *http.Request, next option.MiddlewareNext) (*http.Response, error) {
 		if attempts.Add(1) == 1 {
 			return next(req)
 		}
-		time.Sleep(100 * time.Millisecond)
+		time.Sleep(500 * time.Millisecond)
 		return nil, stdctx.DeadlineExceeded
 	})
-	a := trackedAgent(srv.URL, nil, 1, 200*time.Millisecond, 5*time.Second, inject)
+	a := trackedAgent(srv.URL, nil, 1, time.Second, 10*time.Second, inject)
 	err := repairOnce(a, stdctx.Background())
 	cte := asCallTimeout(t, err)
 	if cte.Limit != LimitNested {
@@ -68,16 +70,23 @@ func TestCallLimitPartialHeadersAreStillAHeaderWait(t *testing.T) {
 	}
 	t.Cleanup(func() { _ = ln.Close() })
 	go func() {
-		conn, err := ln.Accept()
-		if err != nil {
-			return
+		for {
+			conn, err := ln.Accept()
+			if err != nil {
+				return
+			}
+			go func() {
+				defer conn.Close()
+				buf := make([]byte, 8192)
+				n, _ := conn.Read(buf)
+				if !strings.HasPrefix(string(buf[:n]), "POST ") { // ignore stray probes of this port
+					return
+				}
+				_, _ = conn.Write([]byte("HTTP/1.1 200 OK\r\nContent-Type: appl"))
+				_ = conn.SetReadDeadline(time.Now().Add(3 * time.Second))
+				_, _ = conn.Read(buf)
+			}()
 		}
-		defer conn.Close()
-		buf := make([]byte, 8192)
-		_, _ = conn.Read(buf)
-		_, _ = conn.Write([]byte("HTTP/1.1 200 OK\r\nContent-Type: appl"))
-		_ = conn.SetReadDeadline(time.Now().Add(3 * time.Second))
-		_, _ = conn.Read(buf)
 	}()
 	a := trackedAgent("http://"+ln.Addr().String(), nil, 0, 200*time.Millisecond, 5*time.Second)
 	cte := asCallTimeout(t, repairOnce(a, stdctx.Background()))
@@ -108,5 +117,26 @@ func TestCallLimitRetryStallingBeforeWriteIsNotABodyRead(t *testing.T) {
 	}
 	if !strings.Contains(err.Error(), "response headers") || dials.Load() != 2 {
 		t.Fatalf("unexpected: dials=%d err=%v", dials.Load(), err)
+	}
+}
+
+type roundTripFunc func(*http.Request) (*http.Response, error)
+
+func (f roundTripFunc) RoundTrip(r *http.Request) (*http.Response, error) { return f(r) }
+
+// S07-R2-01: a RoundTripper may return a nil Body for an empty response; net/http
+// fills it in, so the tracking wrapper must not hide the nil behind its own body.
+func TestCallLimitTrackingTransportToleratesNilResponseBody(t *testing.T) {
+	base := roundTripFunc(func(r *http.Request) (*http.Response, error) {
+		return &http.Response{StatusCode: http.StatusOK, ContentLength: 0, Header: make(http.Header), Request: r}, nil
+	})
+	a := trackedAgent("http://provider.invalid", base, 0, time.Second, 5*time.Second)
+	err := repairOnce(a, stdctx.Background())
+	if err == nil {
+		t.Fatal("an empty 200 is not a valid message; want the SDK decode error")
+	}
+	var cte *CallTimeoutError
+	if errors.As(err, &cte) {
+		t.Fatalf("an empty response is not a timeout: %v", err)
 	}
 }

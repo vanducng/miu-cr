@@ -144,7 +144,9 @@ func (t trackingTransport) RoundTrip(req *http.Request) (*http.Response, error) 
 		return resp, err
 	}
 	s.headersDone.Store(true)
-	resp.Body = &trackedBody{ReadCloser: resp.Body, state: s, ctx: req.Context()}
+	if resp.Body != nil { // net/http fills in a nil body itself; do not hide it
+		resp.Body = &trackedBody{ReadCloser: resp.Body, state: s, ctx: req.Context()}
+	}
 	return resp, nil
 }
 

@@ -50,7 +50,15 @@ func (rr *recordedRequests) all() []int {
 
 func anthropicTestServer(t *testing.T, h http.HandlerFunc) *httptest.Server {
 	t.Helper()
-	srv := httptest.NewServer(h)
+	// Other processes on a shared host probe ephemeral localhost ports; only the
+	// provider POST may reach a test handler, or stray requests skew its counters.
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodPost {
+			http.NotFound(w, r)
+			return
+		}
+		h(w, r)
+	}))
 	t.Cleanup(srv.Close)
 	return srv
 }
